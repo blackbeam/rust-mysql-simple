@@ -36,10 +36,10 @@ struct OkPacket {
 
 impl OkPacket {
     #[inline]
-    fn from_payload(pld: &[u8]) -> ~OkPacket {
+    fn from_payload(pld: &[u8]) -> OkPacket {
         let mut reader = BufReader::new(pld);
         let _ = reader.read_byte();
-        ~OkPacket{
+        OkPacket{
             affected_rows: reader.read_lenenc_int(),
             last_insert_id: reader.read_lenenc_int(),
             status_flags: reader.read_le_u16(),
@@ -71,12 +71,12 @@ struct ErrPacket {
 
 impl ErrPacket {
     #[inline]
-    fn from_payload(pld: &[u8]) -> ~ErrPacket {
+    fn from_payload(pld: &[u8]) -> ErrPacket {
         let mut reader = BufReader::new(pld);
         let _ = reader.read_byte();
         let error_code = reader.read_le_u16();
         let _ = reader.read_byte();
-        ~ErrPacket{
+        ErrPacket{
             error_code: error_code,
             sql_state: reader.read_bytes(5),
             error_message: reader.read_to_end()
@@ -115,10 +115,10 @@ struct EOFPacket {
 
 impl EOFPacket {
     #[inline]
-    fn from_payload(pld: &[u8]) -> ~EOFPacket {
+    fn from_payload(pld: &[u8]) -> EOFPacket {
         let mut reader = BufReader::new(pld);
         let _ = reader.read_byte();
-        ~EOFPacket{
+        EOFPacket{
             warnings: reader.read_le_u16(),
             status_flags: reader.read_le_u16()
         }
@@ -151,7 +151,7 @@ struct HandshakePacket {
 
 impl HandshakePacket {
     #[inline]
-    fn from_payload(pld: &[u8]) -> ~HandshakePacket {
+    fn from_payload(pld: &[u8]) -> HandshakePacket {
         let mut length_of_auth_plugin_data = 0i16;
         let mut auth_plugin_data: ~[u8] = vec::with_capacity(32);
         let mut auth_plugin_name: ~[u8] = vec::with_capacity(32);
@@ -195,7 +195,7 @@ impl HandshakePacket {
                 }
             }
         }
-        ~HandshakePacket{protocol_version: protocol_version, connection_id: connection_id,
+        HandshakePacket{protocol_version: protocol_version, connection_id: connection_id,
                          auth_plugin_data: auth_plugin_data,
                          capability_flags: capability_flags, character_set: character_set,
                          status_flags: status_flags, auth_plugin_name: auth_plugin_name}
@@ -217,8 +217,8 @@ impl HandshakePacket {
  */
 
 struct Stmt {
-    params: Option<~[~Column]>,
-    columns: Option<~[~Column]>,
+    params: Option<~[Column]>,
+    columns: Option<~[Column]>,
     statement_id: u32,
     num_columns: u16,
     num_params: u16,
@@ -227,14 +227,14 @@ struct Stmt {
 
 impl Stmt {
     #[inline]
-    fn from_payload(pld: &[u8]) -> ~Stmt {
+    fn from_payload(pld: &[u8]) -> Stmt {
         let mut reader = BufReader::new(pld);
         let _ = reader.read_byte();
         let statement_id = reader.read_le_u32();
         let num_columns = reader.read_le_u16();
         let num_params = reader.read_le_u16();
         let warning_count = reader.read_le_u16();
-        ~Stmt{statement_id: statement_id,
+        Stmt{statement_id: statement_id,
               num_columns: num_columns,
               num_params: num_params,
               warning_count: warning_count,
@@ -275,7 +275,7 @@ struct Column {
 
 impl Column {
     #[inline]
-    fn from_payload(command: u8, pld: &[u8]) -> ~Column {
+    fn from_payload(command: u8, pld: &[u8]) -> Column {
         let mut reader = BufReader::new(pld);
         let catalog = reader.read_lenenc_bytes();
         let schema = reader.read_lenenc_bytes();
@@ -297,7 +297,7 @@ impl Column {
             let len = reader.read_lenenc_int();
             default_values = reader.read_bytes(len as uint);
         }
-        ~Column{catalog: catalog,
+        Column{catalog: catalog,
                 schema: schema,
                 table: table,
                 org_table: org_table,
@@ -575,7 +575,7 @@ impl Value {
         output
     }
     #[inline]
-    fn from_bin_payload(pld: &[u8], columns: &[~Column]) -> ~[Value] {
+    fn from_bin_payload(pld: &[u8], columns: &[Column]) -> ~[Value] {
         let bit_offset = 2; // http://dev.mysql.com/doc/internals/en/null-bitmap.html
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
         let mut bitmap: ~[u8] = vec::with_capacity(bitmap_len);
@@ -587,7 +587,7 @@ impl Value {
         let mut offset = 1 + bitmap_len;
         while {i += 1; i < columns.len()} {
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
-                let (val, len) = Value::from_bin(columns[i], pld.slice_from(offset));
+                let (val, len) = Value::from_bin(&columns[i], pld.slice_from(offset));
                 values.push(val);
                 offset += len;
             } else {
@@ -597,7 +597,7 @@ impl Value {
         values
     }
     // (NULL-bitmap, values, ids of fields to send throwgh send_long_data)
-    fn to_bin_payload(params: &[~Column], values: &[Value], max_allowed_packet: uint) -> (~[u8], ~[u8], Option<~[u16]>) {
+    fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: uint) -> (~[u8], ~[u8], Option<~[u16]>) {
         let bitmap_len = (params.len() + 7) / 8;
         let mut large_ids: ~[u16] = ~[];
         let mut writer = MemWriter::new();
@@ -705,11 +705,11 @@ pub struct MyConn {
 }
 
 impl MyConn {
-    pub fn new(opts: MyOpts) -> Result<~MyConn, ~str> {
+    pub fn new(opts: MyOpts) -> Result<MyConn, ~str> {
         if opts.unix_addr.is_some() {
             let unix_stream = UnixStream::connect(opts.unix_addr.get_ref());
             if unix_stream.is_some() {
-                return Ok(~MyConn{
+                return Ok(MyConn{
                     stream: ~(unix_stream.unwrap()) as ~Stream,
                     seq_id: 0u8,
                     capability_flags: 0,
@@ -729,7 +729,7 @@ impl MyConn {
         if opts.tcp_addr.is_some() {
             let tcp_stream = TcpStream::connect(opts.tcp_addr.unwrap());
             if tcp_stream.is_some() {
-                return Ok(~MyConn{
+                return Ok(MyConn{
                     stream: ~(tcp_stream.unwrap()) as ~Stream,
                     seq_id: 0u8,
                     capability_flags: 0,
@@ -922,10 +922,10 @@ pub trait MyStream: MyReader + MyWriter {
     fn write_command(&mut self, cmd: u8) -> Result<(), ~str>;
     fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> Result<(), ~str>;
     fn send_local_infile(&mut self, file_name: &[u8]) -> Result<(), ~str>;
-    fn query<'a>(&'a mut self, query: &str) -> Result<Option<~MyResult<'a>>, ~str>;
-    fn prepare(&mut self, query: &str) -> Result<~Stmt, ~str>;
+    fn query<'a>(&'a mut self, query: &str) -> Result<Option<MyResult<'a>>, ~str>;
+    fn prepare(&mut self, query: &str) -> Result<Stmt, ~str>;
     fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: ~[u16]);
-    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> Result<Option<~MyResult<'a>>, ~str>;
+    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> Result<Option<MyResult<'a>>, ~str>;
     fn connect(&mut self) -> Result<(), ~str>;
 }
 
@@ -1015,20 +1015,20 @@ impl MyStream for MyConn {
         if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41) == 0 {
             return Err(~"Server must set CLIENT_PROTOCOL_41 flag");
         }
-        self.handle_handshake(handshake);
-        self.do_handshake_response(handshake);
+        self.handle_handshake(&handshake);
+        self.do_handshake_response(&handshake);
         match self.read_packet() {
             Err(error) => return Err(error),
             Ok(pld) => {
                 match pld[0] {
                     0u8 => {
                         let ok = OkPacket::from_payload(pld);
-                        self.handle_ok(ok);
+                        self.handle_ok(&ok);
                         return Ok(());
                     }
                     0xffu8 => {
                         let err = ErrPacket::from_payload(pld);
-                        return Err(format!("{}", *err));
+                        return Err(format!("{}", err));
                     },
                     _ => return Err(~"Unexpected packet")
                 }
@@ -1092,7 +1092,7 @@ impl MyStream for MyConn {
             }
         }
     }
-    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> Result<Option<~MyResult<'a>>, ~str> {
+    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> Result<Option<MyResult<'a>>, ~str> {
         if stmt.num_params != params.len() as u16 {
             return Err(format!("Statement takes {:u} parameters but {:u} was supplied", stmt.num_params, params.len()));
         }
@@ -1132,17 +1132,17 @@ impl MyStream for MyConn {
         match pld[0] {
             0u8 => {
                 let ok = OkPacket::from_payload(pld);
-                self.handle_ok(ok);
+                self.handle_ok(&ok);
                 return Ok(None);
             },
             0xffu8 => {
                 let err = ErrPacket::from_payload(pld);
-                return Err(format!("{}", *err));
+                return Err(format!("{}", err));
             },
             _ => {
                 let mut reader = BufReader::new(pld);
                 let column_count = reader.read_lenenc_int();
-                let mut columns: ~[~Column] = vec::with_capacity(column_count as uint);
+                let mut columns: ~[Column] = vec::with_capacity(column_count as uint);
                 let mut i = -1;
                 while { i += 1; i < column_count } {
                     let pld = match self.read_packet() {
@@ -1153,10 +1153,10 @@ impl MyStream for MyConn {
                 }
                 // TODO http://dev.mysql.com/doc/internals/en/binary-protocol-resultset.html
                 let _ = self.read_packet();
-                return Ok(Some(~MyResult{conn: self,
-                                         columns: columns,
-                                         eof: false,
-                                         is_bin: true}))
+                return Ok(Some(MyResult{conn: self,
+                                        columns: columns,
+                                        eof: false,
+                                        is_bin: true}))
             }
         }
     }
@@ -1178,11 +1178,11 @@ impl MyStream for MyConn {
             Err(error) => return Err(error)
         };
         if pld[0] == 0u8 {
-            self.handle_ok(OkPacket::from_payload(pld));
+            self.handle_ok(&OkPacket::from_payload(pld));
         }
         Ok(())
     }
-    fn query<'a>(&'a mut self, query: &str) -> Result<Option<~MyResult<'a>>, ~str> {
+    fn query<'a>(&'a mut self, query: &str) -> Result<Option<MyResult<'a>>, ~str> {
         match self.write_command_data(consts::COM_QUERY, query.as_bytes()) {
             Err(err) => return Err(err),
             Ok(_) => {
@@ -1193,7 +1193,7 @@ impl MyStream for MyConn {
                 match pld[0] {
                     0u8 => {
                         let ok = OkPacket::from_payload(pld);
-                        self.handle_ok(ok);
+                        self.handle_ok(&ok);
                         return Ok(None);
                     },
                     0xfb_u8 => {
@@ -1207,12 +1207,12 @@ impl MyStream for MyConn {
                     },
                     0xff_u8 => {
                         let err = ErrPacket::from_payload(pld);
-                        return Err(format!("{}", *err));
+                        return Err(format!("{}", err));
                     },
                     _ => {
                         let mut reader = BufReader::new(pld);
                         let column_count = reader.read_lenenc_int();
-                        let mut columns: ~[~Column] = vec::with_capacity(column_count as uint);
+                        let mut columns: ~[Column] = vec::with_capacity(column_count as uint);
                         let mut i = -1;
                         while { i += 1; i < column_count } {
                             let pld = match self.read_packet() {
@@ -1223,7 +1223,7 @@ impl MyStream for MyConn {
                         }
                         // skip eof packet
                         let _ = self.read_packet();
-                        return Ok(Some(~MyResult{conn: self,
+                        return Ok(Some(MyResult{conn: self,
                                                  columns: columns,
                                                  eof: false,
                                                  is_bin: false}))
@@ -1232,7 +1232,7 @@ impl MyStream for MyConn {
             }
         }
     }
-    fn prepare(&mut self, query: &str) -> Result<~Stmt, ~str> {
+    fn prepare(&mut self, query: &str) -> Result<Stmt, ~str> {
         match self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()) {
             Err(err) => return Err(err),
             Ok(_) => {
@@ -1243,12 +1243,12 @@ impl MyStream for MyConn {
                 match pld[0] {
                     0xff => {
                         let err = ErrPacket::from_payload(pld);
-                        return Err(format!("{}", *err));
+                        return Err(format!("{}", err));
                     },
                     _ => {
                         let mut stmt = Stmt::from_payload(pld);
                         if stmt.num_params > 0 {
-                            let mut params: ~[~Column] = vec::with_capacity(stmt.num_params as uint);
+                            let mut params: ~[Column] = vec::with_capacity(stmt.num_params as uint);
                             let mut i = -1;
                             while { i += 1; i < stmt.num_params } {
                                 let pld = match self.read_packet() {
@@ -1261,7 +1261,7 @@ impl MyStream for MyConn {
                             let _ = self.read_packet();
                         }
                         if stmt.num_columns > 0 {
-                            let mut columns: ~[~Column] = vec::with_capacity(stmt.num_columns as uint);
+                            let mut columns: ~[Column] = vec::with_capacity(stmt.num_columns as uint);
                             let mut i = -1;
                             while { i += 1; i < stmt.num_columns } {
                                 let pld = match self.read_packet() {
@@ -1332,7 +1332,7 @@ impl MyStream for MyConn {
 
 pub struct MyResult<'a> {
     conn: &'a mut MyConn,
-    columns: ~[~Column],
+    columns: ~[Column],
     eof: bool,
     is_bin: bool
 }
@@ -1352,8 +1352,7 @@ impl<'a> MyResult<'a> {
         if self.is_bin {
             if pld[0] == 0xfe && pld.len() < 0xfe {
                 self.eof = true;
-                let eof = EOFPacket::from_payload(pld);
-                self.conn.handle_eof(eof);
+                self.conn.handle_eof(&EOFPacket::from_payload(pld));
                 return None;
             }
             Some(Ok(Value::from_bin_payload(pld, self.columns)))
@@ -1361,11 +1360,10 @@ impl<'a> MyResult<'a> {
             if (pld[0] == 0xfe_u8 || pld[0] == 0xff_u8) && pld.len() < 0xfe {
                 self.eof = true;
                 if pld[0] == 0xfe_u8 {
-                    let eof = EOFPacket::from_payload(pld);
-                    self.conn.handle_eof(eof);
+                    self.conn.handle_eof(&EOFPacket::from_payload(pld));
                     return None;
                 } else if pld[0] == 0xff_u8 {
-                    return Some(Err(format!("{}", *ErrPacket::from_payload(pld))));
+                    return Some(Err(format!("{}", ErrPacket::from_payload(pld))));
                 }
             }
             Some(Ok(Value::from_payload(pld, self.columns.len())))
@@ -1380,7 +1378,7 @@ impl<'a> Drop for MyResult<'a> {
     }
 }
 
-impl<'a> Iterator<Result<~[Value], ~str>> for &'a mut Result<Option<~MyResult<'a>>, ~str> {
+impl<'a> Iterator<Result<~[Value], ~str>> for &'a mut Result<Option<MyResult<'a>>, ~str> {
     fn next(&mut self) -> Option<Result<~[Value], ~str>> {
         if self.is_ok() {
             let result_opt = self.as_mut().unwrap();
@@ -1564,13 +1562,13 @@ mod test {
         let stmt = conn.prepare("INSERT INTO tbl(a, b, c, d, e) VALUES (?, ?, ?, ?, ?)");
         assert!(stmt.is_ok());
         let stmt = stmt.unwrap();
-        assert!(conn.execute(stmt, [Bytes((~"hello").into_bytes()), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
-        assert!(conn.execute(stmt, [Bytes((~"world").into_bytes()), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
+        assert!(conn.execute(&stmt, [Bytes((~"hello").into_bytes()), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
+        assert!(conn.execute(&stmt, [Bytes((~"world").into_bytes()), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
         let stmt = conn.prepare("SELECT * FROM tbl");
         assert!(stmt.is_ok());
         let stmt = stmt.unwrap();
         let mut i = 0;
-        for x in &mut conn.execute(stmt, []) {
+        for x in &mut conn.execute(&stmt, []) {
             assert!(x.is_ok());
             let xv = x.unwrap();
             if i == 0 {
@@ -1590,7 +1588,7 @@ mod test {
         }
         let stmt = conn.prepare("SELECT REPEAT('A', 20000000);");
         let stmt = stmt.unwrap();
-        for x in &mut conn.execute(stmt, []) {
+        for x in &mut conn.execute(&stmt, []) {
             assert!(x.is_ok());
             let v: ~[u8] = x.unwrap()[0].unwrap_bytes();
             assert!(v.len() == 20000000);
@@ -1636,7 +1634,7 @@ mod test {
         assert!(stmt.is_ok());
         let stmt = stmt.unwrap();
         let val = vec::from_elem(20000000, 65u8);
-        assert!(conn.execute(stmt, [Bytes(val)]).is_ok());
+        assert!(conn.execute(&stmt, [Bytes(val)]).is_ok());
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
         let v: ~[u8] = x.unwrap()[0].unwrap_bytes();
@@ -1694,7 +1692,7 @@ mod test {
                                           ..Default::default()}).unwrap();
         assert!(conn.connect().is_ok());
         let stmt = conn.prepare("DO 1").unwrap();
-        bench.iter(|| { conn.execute(stmt, []); })
+        bench.iter(|| { conn.execute(&stmt, []); })
     }
 
     #[bench]
@@ -1711,7 +1709,7 @@ mod test {
                                           ..Default::default()}).unwrap();
         assert!(conn.connect().is_ok());
         let stmt = conn.prepare("SELECT 1").unwrap();
-        bench.iter(|| { conn.execute(stmt, []); })
+        bench.iter(|| { conn.execute(&stmt, []); })
     }
 
     #[bench]
@@ -1721,7 +1719,7 @@ mod test {
         assert!(conn.connect().is_ok());
         let stmt = conn.prepare("SELECT ?").unwrap();
         let mut i = 0;
-        bench.iter(|| { conn.execute(stmt, [Int(i)]); i += 1; })
+        bench.iter(|| { conn.execute(&stmt, [Int(i)]); i += 1; })
     }
 
     #[bench]
@@ -1731,7 +1729,7 @@ mod test {
         assert!(conn.connect().is_ok());
         let stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params = ~[Int(42), Bytes(~[104u8, 101u8, 108u8, 108u8, 111u8, 111u8]), Float(1.618), NULL, Int(1)];
-        bench.iter(|| { conn.execute(stmt, params); })
+        bench.iter(|| { conn.execute(&stmt, params); })
     }
 
     #[bench]
@@ -1748,6 +1746,6 @@ mod test {
                                           ..Default::default()}).unwrap();
         assert!(conn.connect().is_ok());
         let stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
-        bench.iter(|| { conn.execute(stmt, []); })
+        bench.iter(|| { conn.execute(&stmt, []); })
     }
 }
