@@ -64,9 +64,9 @@ impl OkPacket {
  */
 
 struct ErrPacket {
-    error_code: u16,
     sql_state: ~[u8],
-    error_message: ~[u8]
+    error_message: ~[u8],
+    error_code: u16
 }
 
 impl ErrPacket {
@@ -140,13 +140,13 @@ impl EOFPacket {
  */
 
 struct HandshakePacket {
-    protocol_version: u8,
-    connection_id: u32,
     auth_plugin_data: ~[u8],
+    auth_plugin_name: ~[u8],
+    connection_id: u32,
     capability_flags: u32,
-    character_set: u8,
     status_flags: u16,
-    auth_plugin_name: ~[u8]
+    protocol_version: u8,
+    character_set: u8,
 }
 
 impl HandshakePacket {
@@ -217,12 +217,12 @@ impl HandshakePacket {
  */
 
 struct Stmt {
+    params: Option<~[~Column]>,
+    columns: Option<~[~Column]>,
     statement_id: u32,
     num_columns: u16,
     num_params: u16,
     warning_count: u16,
-    params: Option<~[~Column]>,
-    columns: Option<~[~Column]>
 }
 
 impl Stmt {
@@ -265,12 +265,12 @@ struct Column {
     org_table: ~[u8],
     name: ~[u8],
     org_name: ~[u8],
-    character_set: u16,
+    default_values: ~[u8],
     column_length: u32,
-    column_type: u8,
+    character_set: u16,
     flags: u16,
-    decimals: u8,
-    default_values: ~[u8]
+    column_type: u8,
+    decimals: u8
 }
 
 impl Column {
@@ -691,17 +691,17 @@ impl Default for MyOpts {
  */
 
 pub struct MyConn {
+    opts: MyOpts,
     stream: ~Stream,
-    seq_id: u8,
-    capability_flags: u32,
-    status_flags: u16,
-    connection_id: u32,
-    character_set: u8,
     affected_rows: u64,
     last_insert_id: u64,
-    last_command: u8,
     max_allowed_packet: uint,
-    opts: MyOpts
+    capability_flags: u32,
+    connection_id: u32,
+    status_flags: u16,
+    seq_id: u8,
+    character_set: u8,
+    last_command: u8
 }
 
 impl MyConn {
