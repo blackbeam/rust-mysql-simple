@@ -778,7 +778,7 @@ impl Value {
  *                  Y8b d88P             888                      
  *                   "Y88P"              888                      
  */
-
+#[deriving(Clone, Eq)]
 pub struct MyOpts {
     tcp_addr: Option<SocketAddr>,
     unix_addr: Option<Path>,
@@ -843,7 +843,8 @@ pub struct MyConn {
     status_flags: u16,
     seq_id: u8,
     character_set: u8,
-    last_command: u8
+    last_command: u8,
+    connected: bool
 }
 
 impl MyConn {
@@ -851,7 +852,7 @@ impl MyConn {
         if opts.unix_addr.is_some() {
             let unix_stream = UnixStream::connect(opts.unix_addr.get_ref());
             if unix_stream.is_some() {
-                return Ok(MyConn{
+                let mut conn = MyConn{
                     stream: ~(unix_stream.unwrap()) as ~Stream,
                     seq_id: 0u8,
                     capability_flags: 0,
@@ -862,8 +863,10 @@ impl MyConn {
                     last_insert_id: 0u64,
                     last_command: 0u8,
                     max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-                    opts: opts
-                });
+                    opts: opts,
+                    connected: false
+                };
+                return conn.connect().and(Ok(conn));
             } else {
                 return Err(format!("Could not connect to address: {:?}", opts.unix_addr));
             }
@@ -871,7 +874,7 @@ impl MyConn {
         if opts.tcp_addr.is_some() {
             let tcp_stream = TcpStream::connect(opts.tcp_addr.unwrap());
             if tcp_stream.is_some() {
-                return Ok(MyConn{
+                let mut conn = MyConn{
                     stream: ~(tcp_stream.unwrap()) as ~Stream,
                     seq_id: 0u8,
                     capability_flags: 0,
@@ -882,8 +885,10 @@ impl MyConn {
                     last_insert_id: 0u64,
                     last_command: 0u8,
                     max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-                    opts: opts
-                });
+                    opts: opts,
+                    connected: false
+                };
+                return conn.connect().and(Ok(conn));
             } else {
                 return Err(format!("Could not connect to address: {:?}", opts.tcp_addr));
             }
@@ -1422,6 +1427,9 @@ impl MyStream for MyConn {
         }
     }
     fn connect(&mut self) -> Result<(), ~str> {
+        if self.connected {
+            return Ok(());
+        }
         let mut max_allowed_packet = 0;
         match self.do_handshake() {
             Err(err) => {
@@ -1453,6 +1461,7 @@ impl MyStream for MyConn {
             Err(~"Can't get max_allowed_packet value")
         } else {
             self.max_allowed_packet = max_allowed_packet;
+            self.connected = true;
             Ok(())
         }
     }
@@ -1654,10 +1663,10 @@ mod test {
 
     #[test]
     fn test_connect() {
-        let mut conn = MyConn::new(MyOpts{user: Some(~"root"),
+        let conn = MyConn::new(MyOpts{user: Some(~"root"),
                                           pass: Some(~"password"),
-                                          ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
+                                          ..Default::default()});
+        assert!(conn.is_ok());
     }
 
     #[test]
@@ -1666,7 +1675,6 @@ mod test {
                                           pass: Some(~"password"),
                                           db_name: Some(~"mysql"),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         for x in &mut conn.query("SELECT DATABASE()") {
             assert!(x.unwrap()[0].unwrap_bytes() == (~"mysql").into_bytes());
         }
@@ -1677,7 +1685,6 @@ mod test {
         let mut conn = MyConn::new(MyOpts{user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1729,7 +1736,6 @@ mod test {
         let mut conn = MyConn::new(MyOpts{user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1779,7 +1785,6 @@ mod test {
         let mut conn = MyConn::new(MyOpts{user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1801,7 +1806,6 @@ mod test {
         let mut conn = MyConn::new(MyOpts{user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1826,7 +1830,6 @@ mod test {
         let mut conn = MyConn::new(MyOpts{user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1861,7 +1864,6 @@ mod test {
     fn bench_simple_exec(bench: &mut extra::test::BenchHarness) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         bench.iter(|| { conn.query("DO 1"); })
     }
 
@@ -1869,7 +1871,6 @@ mod test {
     fn bench_prepared_exec(bench: &mut extra::test::BenchHarness) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         let stmt = conn.prepare("DO 1").unwrap();
         bench.iter(|| { conn.execute(&stmt, []); })
     }
@@ -1878,7 +1879,6 @@ mod test {
     fn bench_simple_query_row(bench: &mut extra::test::BenchHarness) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         bench.iter(|| { (&mut conn.query("SELECT 1")).next(); })
     }
 
@@ -1886,7 +1886,6 @@ mod test {
     fn bench_simple_prepared_query_row(bench: &mut extra::test::BenchHarness) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         let stmt = conn.prepare("SELECT 1").unwrap();
         bench.iter(|| { conn.execute(&stmt, []); })
     }
@@ -1895,7 +1894,6 @@ mod test {
     fn bench_simple_prepared_query_row_param(bench: &mut extra::test::BenchHarness) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         let stmt = conn.prepare("SELECT ?").unwrap();
         let mut i = 0;
         bench.iter(|| { conn.execute(&stmt, [Int(i)]); i += 1; })
@@ -1905,7 +1903,6 @@ mod test {
     fn bench_prepared_query_row_5param(bench: &mut extra::test::BenchHarness) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         let stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params = ~[Int(42), Bytes(~[104u8, 101u8, 108u8, 108u8, 111u8, 111u8]), Float(1.618), NULL, Int(1)];
         bench.iter(|| { conn.execute(&stmt, params); })
@@ -1915,7 +1912,6 @@ mod test {
     fn bench_select_large_string(bench: &mut extra::test::BenchHarness) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         bench.iter(|| { for _ in &mut conn.query("SELECT REPEAT('A', 10000)") {} })
     }
 
@@ -1923,7 +1919,6 @@ mod test {
     fn bench_select_prepared_large_string(bench: &mut extra::test::BenchHarness) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           ..Default::default()}).unwrap();
-        assert!(conn.connect().is_ok());
         let stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
         bench.iter(|| { conn.execute(&stmt, []); })
     }
