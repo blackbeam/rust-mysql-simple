@@ -1074,6 +1074,7 @@ pub trait MyStream: MyReader + MyWriter {
     fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: ~[u16]);
     fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> Result<Option<MyResult<'a>>, ~str>;
     fn connect(&mut self) -> Result<(), ~str>;
+    fn get_system_var(&mut self, name: &str) -> Option<Value>;
 }
 
 impl MyStream for MyConn {
@@ -1436,24 +1437,10 @@ impl MyStream for MyConn {
                 return Err(err)
             },
             Ok(_) => {
-                let mut query_result = &mut self.query("SELECT @@max_allowed_packet");
-                if query_result.is_ok() {;
-                    let next_opt = query_result.next();
-                    if next_opt.is_some() {
-                        let next_result = next_opt.unwrap();
-                        if next_result.is_ok() {
-                            let next = next_result.unwrap();
-                            match next[0] {
-                                Bytes(ref val) => {
-                                    max_allowed_packet = uint::parse_bytes(*val, 10).unwrap_or(0);
-                                    if max_allowed_packet > consts::MAX_PAYLOAD_LEN {
-                                        max_allowed_packet = consts::MAX_PAYLOAD_LEN
-                                    }
-                                },
-                                _ => ()
-                            }
-                        }
-                    }
+                let map = self.get_system_var("max_allowed_packet");
+                if map.is_some() {
+                    let map = map.unwrap().unwrap_bytes();
+                    max_allowed_packet = uint::parse_bytes(map, 10).unwrap_or(0);
                 }
             }
         }
@@ -1464,6 +1451,17 @@ impl MyStream for MyConn {
             self.connected = true;
             Ok(())
         }
+    }
+    fn get_system_var(&mut self, name: &str) -> Option<Value> {
+        for row in &mut self.query(format!("SELECT @@{:s};", name)) {
+            if row.is_ok() {
+                let row = row.unwrap();
+                return Some(row[0]);
+            } else {
+                return None;
+            }
+        }
+        return None;
     }
 }
 
