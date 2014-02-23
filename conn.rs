@@ -326,7 +326,7 @@ impl Column {
  *                                               
  */
 
-#[deriving(Eq)]
+#[deriving(Clone, DeepClone, Eq, Ord, ToStr)]
 pub enum Value {
     NULL,
     Bytes(~[u8]),
@@ -340,16 +340,69 @@ pub enum Value {
 }
 
 impl Value {
+    /// Get correct string representation of a mysql value
+    pub fn into_str(&self) -> ~str {
+        match *self {
+            NULL => ~"NULL",
+            Bytes(ref x) => {
+                if ! str::is_utf8(*x) {
+                    let mut s = ~"0x";
+                    for c in x.iter() {
+                        s.push_str(format!("{:02X}", *c));
+                    }
+                    s
+                } else {
+                    let mut s = str::from_utf8_owned(x.clone());
+                    s = str::replace(s, "'", "\'");
+                    format!("'{:s}'", s)
+                }
+            },
+            Int(x) => format!("{:d}", x),
+            UInt(x) => format!("{:u}", x),
+            Float(x) => format!("{:f}", x),
+            Date(0, 0, 0, 0, 0, 0, 0) => ~"''",
+            Date(y, m, d, 0, 0, 0, 0) => format!("'{:04u}-{:02u}-{:02u}'", y, m, d),
+            Date(y, m, d, h, i, s, 0) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}'", y, m, d, h, i, s),
+            Date(y, m, d, h, i, s, u) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}.{:06u}'", y, m, d, h, i, s, u),
+            Time(_, 0, 0, 0, 0, 0) => ~"''",
+            Time(neg, d, h, i, s, 0) => {
+                if neg {
+                    format!("'-{:u} {:03u}:{:02u}:{:02u}'", d, h, i, s)
+                } else {
+                    format!("'{:u} {:03u}:{:02u}:{:02u}'", d, h, i, s)
+                }
+            },
+            Time(neg, d, h, i, s, u) => {
+                if neg {
+                    format!("'-{:u} {:03u}:{:02u}:{:02u}.{:06u}'", d, h, i, s, u)
+                } else {
+                    format!("'{:u} {:03u}:{:02u}:{:02u}.{:06u}'", d, h, i, s, u)
+                }
+            }
+        }
+    }
     pub fn is_bytes(&self) -> bool {
         match *self {
             Bytes(..) => true,
             _ => false
         }
     }
+    pub fn bytes_ref<'a>(&'a self) -> &'a [u8] {
+        match *self {
+            Bytes(ref x) => x.as_slice(),
+            _ => fail!("Called `Value::bytes_ref()` on non `Bytes` value")
+        }
+    }
     pub fn unwrap_bytes(self) -> ~[u8] {
         match self {
             Bytes(x) => x,
-            _ => fail!("Could not unwrap Value as Bytes")
+            _ => fail!("Called `Value::unwrap_bytes()` on non `Bytes` value")
+        }
+    }
+    pub fn unwrap_bytes_or(self, y: ~[u8]) -> ~[u8] {
+        match self {
+            Bytes(x) => x,
+            _ => y
         }
     }
     pub fn is_int(&self) -> bool {
@@ -358,10 +411,16 @@ impl Value {
             _ => false
         }
     }
-    pub fn unwrap_int(&self) -> i64 {
+    pub fn get_int(&self) -> i64 {
         match *self {
             Int(x) => x,
-            _ => fail!("Could not unwrap Value as Int")
+            _ => fail!("Called `Value::get_int()` on non `Int` value")
+        }
+    }
+    pub fn get_int_or(&self, y: i64) -> i64 {
+        match *self {
+            Int(x) => x,
+            _ => y
         }
     }
     pub fn is_uint(&self) -> bool {
@@ -370,10 +429,16 @@ impl Value {
             _ => false
         }
     }
-    pub fn unwrap_uint(&self) -> u64 {
+    pub fn get_uint(&self) -> u64 {
         match *self {
             UInt(x) => x,
-            _ => fail!("Could not unwrap Value as UInt")
+            _ => fail!("Called `Value::get_uint()` on non `UInt` value")
+        }
+    }
+    pub fn get_uint_or(&self, y: u64) -> u64 {
+        match *self {
+            UInt(x) => x,
+            _ => y
         }
     }
     pub fn is_float(&self) -> bool {
@@ -382,10 +447,87 @@ impl Value {
             _ => false
         }
     }
-    pub fn unwrap_float(&self) -> f64 {
+    pub fn get_float(&self) -> f64 {
         match *self {
             Float(x) => x,
-            _ => fail!("Could not unwrap Value as Float")
+            _ => fail!("Called `Value::get_float()` on non `Float` value")
+        }
+    }
+    pub fn get_float_or(&self, y: f64) -> f64 {
+        match *self {
+            Float(x) => x,
+            _ => y
+        }
+    }
+    pub fn is_date(&self) -> bool {
+        match *self {
+            Date(..) => true,
+            _ => false
+        }
+    }
+    pub fn get_year(&self) -> u16 {
+        match *self {
+            Date(y, _, _, _, _, _, _) => y,
+            _ => fail!("Called `Value::get_year()` on non `Date` value")
+        }
+    }
+    pub fn get_month(&self) -> u8 {
+        match *self {
+            Date(_, m, _, _, _, _, _) => m,
+            _ => fail!("Called `Value::get_month()` on non `Date` value")
+        }
+    }
+    pub fn get_day(&self) -> u8 {
+        match *self {
+            Date(_, _, d, _, _, _, _) => d,
+            _ => fail!("Called `Value::get_day()` on non `Date` value")
+        }
+    }
+    pub fn is_time(&self) -> bool {
+        match *self {
+            Time(..) => true,
+            _ => false
+        }
+    }
+    pub fn is_neg(&self) -> bool {
+        match *self {
+            Time(false, _, _, _, _, _) => false,
+            Time(true, _, _, _, _, _) => true,
+            _ => fail!("Called `Value::is_neg()` on non `Time` value")
+        }
+    }
+    pub fn get_days(&self) -> u32 {
+        match *self {
+            Time(_, d, _, _, _, _) => d,
+            _ => fail!("Called `Value::get_days()` on non `Time` value")
+        }
+    }
+    pub fn get_hour(&self) -> u8 {
+        match *self {
+            Date(_, _, _, h, _, _, _) => h,
+            Time(_, _, h, _, _, _) => h,
+            _ => fail!("Called `Value::get_hour()` on non `Date` nor `Time` value")
+        }
+    }
+    pub fn get_min(&self) -> u8 {
+        match *self {
+            Date(_, _, _, _, i, _, _) => i,
+            Time(_, _, _, i, _, _) => i,
+            _ => fail!("Called `Value::get_min()` on non `Date` nor `Time` value")
+        }
+    }
+    pub fn get_sec(&self) -> u8 {
+        match *self {
+            Date(_, _, _, _, _, s, _) => s,
+            Time(_, _, _, _, s, _) => s,
+            _ => fail!("Called `Value::get_sec()` on non `Date` nor `Time` value")
+        }
+    }
+    pub fn get_usec(&self) -> u32 {
+        match *self {
+            Date(_, _, _, _, _, _, u) => u,
+            Time(_, _, _, _, _, u) => u,
+            _ => fail!("Called `Value::get_usec()` on non `Date` nor `Time` value")
         }
     }
     // -> (~value, consumed_buf_len)
@@ -1415,7 +1557,7 @@ mod test {
     use std::path::posix::{Path};
     use conn::{OkPacket, ErrPacket, EOFPacket, HandshakePacket,
                MyConn, MyStream, MyOpts,
-               Bytes, Int, UInt, Date, Float, NULL};
+               Bytes, Int, UInt, Date, Time, Float, NULL};
 
     #[test]
     fn test_ok_packet() {
@@ -1479,6 +1621,38 @@ mod test {
     }
 
     #[test]
+    fn test_value_into_str() {
+        let v = NULL;
+        assert!(v.into_str() == ~"NULL");
+        let v = Bytes((~"hello").into_bytes());
+        assert!(v.into_str() == ~"'hello'");
+        let v = Bytes((~"h'e'l'l'o").into_bytes());
+        assert!(v.into_str() == ~"'h\'e\'l\'l\'o'");
+        let v = Bytes(~[0, 1, 2, 3, 4, 255]);
+        assert!(v.into_str() == ~"0x0001020304FF");
+        let v = Int(-65536);
+        assert!(v.into_str() == ~"-65536");
+        let v = UInt(4294967296);
+        assert!(v.into_str() == ~"4294967296");
+        let v = Float(686.868);
+        assert!(v.into_str() == ~"686.868");
+        let v = Date(0, 0, 0, 0, 0, 0, 0);
+        assert!(v.into_str() == ~"''");
+        let v = Date(2014, 2, 20, 0, 0, 0, 0);
+        assert!(v.into_str() == ~"'2014-02-20'");
+        let v = Date(2014, 2, 20, 22, 0, 0, 0);
+        assert!(v.into_str() == ~"'2014-02-20 22:00:00'");
+        let v = Date(2014, 2, 20, 22, 0, 0, 1);
+        assert!(v.into_str() == ~"'2014-02-20 22:00:00.000001'");
+        let v = Time(false, 0, 0, 0, 0, 0);
+        assert!(v.into_str() == ~"''");
+        let v = Time(true, 34, 3, 2, 1, 0);
+        assert!(v.into_str() == ~"'-34 003:02:01'");
+        let v = Time(false, 10, 100, 20, 30, 40);
+        assert!(v.into_str() == ~"'10 100:20:30.000040'");
+    }
+
+    #[test]
     fn test_connect() {
         let mut conn = MyConn::new(MyOpts{user: Some(~"root"),
                                           pass: Some(~"password"),
@@ -1520,30 +1694,31 @@ mod test {
             assert!(false);
         }
         let mut count = 0;
-        for x in &mut conn.query("SELECT * FROM tbl") {
-            assert!(x.is_ok());
-            let xv = x.unwrap();
+        for row in &mut conn.query("SELECT * FROM tbl") {
+            assert!(row.is_ok());
+            let row = row.unwrap();
             if count == 0 {
-                assert!(xv[0] == Bytes((~"foo").into_bytes()));
-                assert!(xv[1] == Bytes((~"-123").into_bytes()));
-                assert!(xv[2] == Bytes((~"123").into_bytes()));
-                assert!(xv[3] == Bytes((~"2014-05-05").into_bytes()));
-                assert!(xv[4] == Bytes((~"123.123").into_bytes()));
+                assert!(row[0] == Bytes((~"foo").into_bytes()));
+                assert!(row[1] == Bytes((~"-123").into_bytes()));
+                assert!(row[2] == Bytes((~"123").into_bytes()));
+                assert!(row[3] == Bytes((~"2014-05-05").into_bytes()));
+                assert!(row[4] == Bytes((~"123.123").into_bytes()));
             } else {
-                assert!(xv[0] == Bytes((~"foo").into_bytes()));
-                assert!(xv[1] == Bytes((~"-321").into_bytes()));
-                assert!(xv[2] == Bytes((~"321").into_bytes()));
-                assert!(xv[3] == Bytes((~"2014-06-06").into_bytes()));
-                assert!(xv[4] == Bytes((~"321.321").into_bytes()));
+                assert!(row[0] == Bytes((~"foo").into_bytes()));
+                assert!(row[1] == Bytes((~"-321").into_bytes()));
+                assert!(row[2] == Bytes((~"321").into_bytes()));
+                assert!(row[3] == Bytes((~"2014-06-06").into_bytes()));
+                assert!(row[4] == Bytes((~"321.321").into_bytes()));
             }
             count += 1;
         }
         assert!(count == 2);
-        for x in &mut conn.query("SELECT REPEAT('A', 20000000)") {
-            assert!(x.is_ok());
-            let v: ~[u8] = x.unwrap()[0].unwrap_bytes();
-            assert!(v.len() == 20000000);
-            for y in v.iter() {
+        for row in &mut conn.query("SELECT REPEAT('A', 20000000)") {
+            assert!(row.is_ok());
+            let row = row.unwrap();
+            let val = row[0].bytes_ref();
+            assert!(val.len() == 20000000);
+            for y in val.iter() {
                 assert!(y == &65u8);
             }
         }
@@ -1568,29 +1743,30 @@ mod test {
         assert!(stmt.is_ok());
         let stmt = stmt.unwrap();
         let mut i = 0;
-        for x in &mut conn.execute(&stmt, []) {
-            assert!(x.is_ok());
-            let xv = x.unwrap();
+        for row in &mut conn.execute(&stmt, []) {
+            assert!(row.is_ok());
+            let row = row.unwrap();
             if i == 0 {
-                assert!(xv[0] == Bytes(~[104u8, 101u8, 108u8, 108u8, 111u8]));
-                assert!(xv[1] == Int(-123i64));
-                assert!(xv[2] == Int(123i64));
-                assert!(xv[3] == Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                assert!(xv[4].unwrap_float().approx_eq(&123.123));
+                assert!(row[0] == Bytes(~[104u8, 101u8, 108u8, 108u8, 111u8]));
+                assert!(row[1] == Int(-123i64));
+                assert!(row[2] == Int(123i64));
+                assert!(row[3] == Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
+                assert!(row[4].get_float().approx_eq(&123.123));
             } else {
-                assert!(xv[0] == Bytes(~[119u8, 111u8, 114u8, 108u8, 100u8]));
-                assert!(xv[1] == NULL);
-                assert!(xv[2] == NULL);
-                assert!(xv[3] == NULL);
-                assert!(xv[4].unwrap_float().approx_eq(&321.321));
+                assert!(row[0] == Bytes(~[119u8, 111u8, 114u8, 108u8, 100u8]));
+                assert!(row[1] == NULL);
+                assert!(row[2] == NULL);
+                assert!(row[3] == NULL);
+                assert!(row[4].get_float().approx_eq(&321.321));
             }
             i += 1;
         }
         let stmt = conn.prepare("SELECT REPEAT('A', 20000000);");
         let stmt = stmt.unwrap();
-        for x in &mut conn.execute(&stmt, []) {
-            assert!(x.is_ok());
-            let v: ~[u8] = x.unwrap()[0].unwrap_bytes();
+        for row in &mut conn.execute(&stmt, []) {
+            assert!(row.is_ok());
+            let row = row.unwrap();
+            let v: &[u8] = row[0].bytes_ref();
             assert!(v.len() == 20000000);
             for y in v.iter() {
                 assert!(y == &65u8);
@@ -1635,9 +1811,10 @@ mod test {
         let stmt = stmt.unwrap();
         let val = vec::from_elem(20000000, 65u8);
         assert!(conn.execute(&stmt, [Bytes(val)]).is_ok());
-        let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
-        assert!(x.is_ok());
-        let v: ~[u8] = x.unwrap()[0].unwrap_bytes();
+        let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
+        assert!(row.is_ok());
+        let row = row.unwrap();
+        let v = row[0].bytes_ref();
         assert!(v.len() == 20000000);
         for y in v.iter() {
             assert!(y == &65u8);
@@ -1665,11 +1842,13 @@ mod test {
         let query = format!("LOAD DATA LOCAL INFILE '{:s}' INTO TABLE tbl", str::from_utf8_owned(path.clone().into_vec()));
         assert!(conn.query(query).is_ok());
         let mut count = 0;
-        for x in &mut conn.query("SELECT * FROM tbl") {
+        for row in &mut conn.query("SELECT * FROM tbl") {
+            assert!(row.is_ok());
+            let row = row.unwrap();
             match count {
-                0 => assert!(x == Ok(~[Bytes(~[65u8, 65u8, 65u8, 65u8, 65u8, 65u8])])),
-                1 => assert!(x == Ok(~[Bytes(~[66u8, 66u8, 66u8, 66u8, 66u8, 66u8])])),
-                2 => assert!(x == Ok(~[Bytes(~[67u8, 67u8, 67u8, 67u8, 67u8, 67u8])])),
+                0 => assert!(row == ~[Bytes(~[65u8, 65u8, 65u8, 65u8, 65u8, 65u8])]),
+                1 => assert!(row == ~[Bytes(~[66u8, 66u8, 66u8, 66u8, 66u8, 66u8])]),
+                2 => assert!(row == ~[Bytes(~[67u8, 67u8, 67u8, 67u8, 67u8, 67u8])]),
                 _ => assert!(false)
             }
             count += 1;
