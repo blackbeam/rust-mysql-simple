@@ -1,7 +1,7 @@
 extern mod extra;
 use std::io::{Decorator, Stream, Reader};
 use std::io::mem::{BufReader, MemWriter};
-use std::io::net::ip::{SocketAddr, Ipv4Addr};
+use std::io::net::ip::{SocketAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
 use std::vec;
@@ -784,7 +784,8 @@ pub struct MyOpts {
     unix_addr: Option<Path>,
     user: Option<~str>,
     pass: Option<~str>,
-    db_name: Option<~str>
+    db_name: Option<~str>,
+    prefer_socket: bool,
 }
 
 impl MyOpts {
@@ -814,7 +815,8 @@ impl Default for MyOpts {
                unix_addr: None,
                user: None,
                pass: None,
-               db_name: None}
+               db_name: None,
+               prefer_socket: true}
     }
 }
 
@@ -888,7 +890,30 @@ impl MyConn {
                     opts: opts,
                     connected: false
                 };
-                return conn.connect().and(Ok(conn));
+                let res = conn.connect();
+                match res {
+                    Err(err) => return Err(err),
+                    _ => {
+                        if conn.opts.prefer_socket &&
+                           (conn.opts.tcp_addr.get_ref().ip == Ipv4Addr(127, 0, 0, 1) ||
+                            conn.opts.tcp_addr.get_ref().ip == Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1))
+                        {
+                            let path = conn.get_system_var("socket");
+                            if !path.is_some() {
+                                return Ok(conn);
+                            } else {
+                                let path = path.unwrap().unwrap_bytes();
+                                let opts = MyOpts{
+                                    unix_addr: Some(Path::new(path)),
+                                    ..conn.opts.clone()
+                                };
+                                return MyConn::new(opts).or(Ok(conn));
+                            }
+                        } else {
+                            return Ok(conn);
+                        }
+                    }
+                }
             } else {
                 return Err(format!("Could not connect to address: {:?}", opts.tcp_addr));
             }
