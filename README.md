@@ -1,6 +1,6 @@
 rust-mysql-simple
 =================
-Mysql client library implemented in rust. Feel free to open a new issues and pull requests.
+Mysql client library implemented in rust **(v0.9.0)**. Feel free to open a new issues and pull requests.
 
 ### Documentation
 It have no documentation at the moment, but will have after some api stabilization.
