@@ -530,121 +530,6 @@ impl Value {
             _ => fail!("Called `Value::get_usec()` on non `Date` nor `Time` value")
         }
     }
-    // -> (~value, consumed_buf_len)
-    fn from_bin(column: &Column, buf: &[u8]) -> (Value, uint) {
-        let mut reader = BufReader::new(buf);
-        match column.column_type {
-            consts::MYSQL_TYPE_TINY => {
-                if (column.flags & consts::UNSIGNED_FLAG) == 0 {
-                    (Int(reader.read_i8() as i64), 1)
-                } else {
-                    (Int(reader.read_u8() as i64), 1)
-                }
-            },
-            consts::MYSQL_TYPE_SHORT |
-            consts::MYSQL_TYPE_YEAR => {
-                if (column.flags & consts::UNSIGNED_FLAG) == 0 {
-                    (Int(reader.read_le_i16() as i64), 2)
-                } else {
-                    (Int(reader.read_le_u16() as i64), 2)
-                }
-            },
-            consts::MYSQL_TYPE_LONG |
-            consts::MYSQL_TYPE_INT24 => {
-                if (column.flags & consts::UNSIGNED_FLAG) == 0 {
-                    (Int(reader.read_le_i32() as i64), 4)
-                } else {
-                    (Int(reader.read_le_u32() as i64), 4)
-                }
-            },
-            consts::MYSQL_TYPE_LONGLONG => {
-                if (column.flags & consts::UNSIGNED_FLAG) == 0 {
-                    (Int(reader.read_le_i64() as i64), 8)
-                } else {
-                    (UInt(reader.read_le_u64()), 8)
-                }
-            },
-            consts::MYSQL_TYPE_FLOAT => {
-                (Float(reader.read_le_f32() as f64), 4)
-            },
-            consts::MYSQL_TYPE_DOUBLE => {
-                (Float(reader.read_le_f64()), 8)
-            },
-            consts::MYSQL_TYPE_DECIMAL |
-            consts::MYSQL_TYPE_VARCHAR |
-            consts::MYSQL_TYPE_BIT |
-            consts::MYSQL_TYPE_NEWDECIMAL |
-            consts::MYSQL_TYPE_ENUM |
-            consts::MYSQL_TYPE_SET |
-            consts::MYSQL_TYPE_TINY_BLOB |
-            consts::MYSQL_TYPE_MEDIUM_BLOB |
-            consts::MYSQL_TYPE_LONG_BLOB |
-            consts::MYSQL_TYPE_BLOB |
-            consts::MYSQL_TYPE_VAR_STRING |
-            consts::MYSQL_TYPE_STRING |
-            consts::MYSQL_TYPE_GEOMETRY => {
-                let bytes = reader.read_lenenc_bytes();
-                let bytes_len = bytes.len();
-                let lenenc_int_len = if bytes_len < 255 {
-                    1
-                } else if bytes_len < 65536 {
-                    3
-                } else if bytes_len < 16777216 {
-                    4
-                } else {
-                    9
-                };
-                (Bytes(bytes), lenenc_int_len + bytes_len)
-            },
-            consts::MYSQL_TYPE_TIMESTAMP |
-            consts::MYSQL_TYPE_DATE |
-            consts::MYSQL_TYPE_DATETIME => {
-                let len = reader.read_u8();
-                let mut year = 0u16;
-                let mut month = 0u8;
-                let mut day = 0u8;
-                let mut hour = 0u8;
-                let mut minute = 0u8;
-                let mut second = 0u8;
-                let mut micro_second = 0u32;
-                if len >= 4u8 {
-                    year = reader.read_le_u16();
-                    month = reader.read_u8();
-                    day = reader.read_u8();
-                }
-                if len >= 7u8 {
-                    hour = reader.read_u8();
-                    minute = reader.read_u8();
-                    second = reader.read_u8();
-                }
-                if len == 11u8 {
-                    micro_second = reader.read_le_u32();
-                }
-                (Date(year, month, day, hour, minute, second, micro_second), (len + 1) as uint)
-            },
-            consts::MYSQL_TYPE_TIME => {
-                let len = reader.read_u8();
-                let mut is_negative = false;
-                let mut days = 0u32;
-                let mut hours = 0u8;
-                let mut minutes = 0u8;
-                let mut seconds = 0u8;
-                let mut micro_seconds = 0u32;
-                if len >= 8u8 {
-                    is_negative = reader.read_u8() == 1u8;
-                    days = reader.read_le_u32();
-                    hours = reader.read_u8();
-                    minutes = reader.read_u8();
-                    seconds = reader.read_u8();
-                }
-                if len == 12u8 {
-                    micro_seconds = reader.read_le_u32();
-                }
-                (Time(is_negative, days, hours, minutes, seconds, micro_seconds), (len + 1) as uint)
-            }
-            _ => (NULL, 0)
-        }
-    }
     fn to_bin(&self) -> ~[u8] {
         let mut writer = MemWriter::with_capacity(256);
         match *self {
@@ -722,16 +607,16 @@ impl Value {
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
         let mut bitmap: ~[u8] = vec::with_capacity(bitmap_len);
         let mut values: ~[Value] = vec::with_capacity(columns.len());
-        let mut reader = BufReader::new(pld);
-        let _ = reader.read_byte();
-        reader.push_bytes(&mut bitmap, bitmap_len);
         let mut i = -1;
-        let mut offset = 1 + bitmap_len;
+        while {i += 1; i < bitmap_len} {
+            bitmap.push(pld[i+1]);
+        }
+        let mut reader = BufReader::new(pld.slice_from(1 + bitmap_len));
+        let mut i = -1;
         while {i += 1; i < columns.len()} {
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
-                let (val, len) = Value::from_bin(&columns[i], pld.slice_from(offset));
-                values.push(val);
-                offset += len;
+                values.push(reader.read_bin_value(columns[i].column_type,
+                                                  (columns[i].flags & consts::UNSIGNED_FLAG) != 0));
             } else {
                 values.push(NULL);
             }
@@ -1016,6 +901,109 @@ pub trait MyReader: Reader {
             buf.push(x);
         }
         buf
+    }
+    #[inline]
+    fn read_bin_value(&mut self, column_type: u8, unsigned: bool) -> Value {
+        match column_type {
+            consts::MYSQL_TYPE_STRING |
+            consts::MYSQL_TYPE_VAR_STRING |
+            consts::MYSQL_TYPE_BLOB |
+            consts::MYSQL_TYPE_TINY_BLOB |
+            consts::MYSQL_TYPE_MEDIUM_BLOB |
+            consts::MYSQL_TYPE_LONG_BLOB |
+            consts::MYSQL_TYPE_SET |
+            consts::MYSQL_TYPE_ENUM |
+            consts::MYSQL_TYPE_DECIMAL |
+            consts::MYSQL_TYPE_VARCHAR |
+            consts::MYSQL_TYPE_BIT |
+            consts::MYSQL_TYPE_NEWDECIMAL |
+            consts::MYSQL_TYPE_GEOMETRY => {
+                Bytes(self.read_lenenc_bytes())
+            },
+            consts::MYSQL_TYPE_TINY => {
+                if unsigned {
+                    Int(self.read_u8() as i64)
+                } else {
+                    Int(self.read_i8() as i64)
+                }
+            },
+            consts::MYSQL_TYPE_SHORT |
+            consts::MYSQL_TYPE_YEAR => {
+                if unsigned {
+                    Int(self.read_le_u16() as i64)
+                } else {
+                    Int(self.read_le_i16() as i64)
+                }
+            },
+            consts::MYSQL_TYPE_LONG |
+            consts::MYSQL_TYPE_INT24 => {
+                if unsigned {
+                    Int(self.read_le_u32() as i64)
+                } else {
+                    Int(self.read_le_i32() as i64)
+                }
+            },
+            consts::MYSQL_TYPE_LONGLONG => {
+                if unsigned {
+                    UInt(self.read_le_u64())
+                } else {
+                    Int(self.read_le_i64() as i64)
+                }
+            },
+            consts::MYSQL_TYPE_FLOAT => {
+                Float(self.read_le_f32() as f64)
+            },
+            consts::MYSQL_TYPE_DOUBLE => {
+                Float(self.read_le_f64())
+            },
+            consts::MYSQL_TYPE_TIMESTAMP |
+            consts::MYSQL_TYPE_DATE |
+            consts::MYSQL_TYPE_DATETIME => {
+                let len = self.read_u8();
+                let mut year = 0u16;
+                let mut month = 0u8;
+                let mut day = 0u8;
+                let mut hour = 0u8;
+                let mut minute = 0u8;
+                let mut second = 0u8;
+                let mut micro_second = 0u32;
+                if len >= 4u8 {
+                    year = self.read_le_u16();
+                    month = self.read_u8();
+                    day = self.read_u8();
+                }
+                if len >= 7u8 {
+                    hour = self.read_u8();
+                    minute = self.read_u8();
+                    second = self.read_u8();
+                }
+                if len == 11u8 {
+                    micro_second = self.read_le_u32();
+                }
+                Date(year, month, day, hour, minute, second, micro_second)
+            },
+            consts::MYSQL_TYPE_TIME => {
+                let len = self.read_u8();
+                let mut is_negative = false;
+                let mut days = 0u32;
+                let mut hours = 0u8;
+                let mut minutes = 0u8;
+                let mut seconds = 0u8;
+                let mut micro_seconds = 0u32;
+                if len >= 8u8 {
+                    is_negative = self.read_u8() == 1u8;
+                    days = self.read_le_u32();
+                    hours = self.read_u8();
+                    minutes = self.read_u8();
+                    seconds = self.read_u8();
+                }
+                if len == 12u8 {
+                    micro_seconds = self.read_le_u32();
+                }
+                Time(is_negative, days, hours, minutes, seconds, micro_seconds)
+            }
+            _ => NULL
+        }
     }
 }
 
