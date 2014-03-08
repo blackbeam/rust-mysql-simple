@@ -896,9 +896,10 @@ pub trait MyReader: Reader {
     #[inline]
     fn read_to_nul(&mut self) -> ~[u8] {
         let mut buf = ~[];
-        let mut x = 0u8;
-        while { x = self.read_u8(); x != 0u8 } {
+        let mut x = self.read_u8();
+        while x != 0u8 {
             buf.push(x);
+            x = self.read_u8();
         }
         buf
     }
@@ -1329,10 +1330,10 @@ impl MyStream for MyConn {
         }
         let mut file = file.unwrap();
         let mut chunk = vec::from_elem(self.max_allowed_packet, 0u8);
-        let mut count: Option<uint> = None;
-        while { count = file.read(chunk); count.is_some() && *count.get_ref() > 0 } {
-            self.write_packet(chunk.slice_to(count.unwrap()));
-        }
+        file.read(chunk).while_some(|cnt| {
+            self.write_packet(chunk.slice_to(cnt));
+            file.read(chunk)
+        });
         self.write_packet([]);
         let pld = match self.read_packet() {
             Ok(pld) => pld,
