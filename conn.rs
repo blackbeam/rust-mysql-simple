@@ -1258,7 +1258,6 @@ impl MyStream for MyConn {
         if stmt.num_params != params.len() as u16 {
             return Err(format!("Statement takes {:u} parameters but {:u} was supplied", stmt.num_params, params.len()));
         }
-        self.seq_id = 0u8;
         let mut writer = MemWriter::new();
         writer.write_le_u32(stmt.statement_id);
         writer.write_u8(0u8);
