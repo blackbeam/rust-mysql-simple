@@ -629,18 +629,23 @@ impl Value {
         let mut large_ids: ~[u16] = ~[];
         let mut writer = MemWriter::new();
         let mut bitmap = vec::from_elem(bitmap_len, 0u8);
-        let mut i = -1;
-        while {i += 1; i < params.len()} {
-            let val = values[i].to_bin();
-            if val.len() == 0 {
-                bitmap[i / 8] |= 1 << (i % 8);
-            } else {
-                if val.len() < max_allowed_packet - writer.tell() as uint - bitmap_len - values.len()*2*32 - 11 {
-                    writer.write(val);
-                } else {
-                    large_ids.push(i as u16);
+        let mut i = 0;
+        let mut written = 0;
+        let cap = max_allowed_packet - bitmap_len - values.len() * 8;
+        for value in values.iter() {
+            match *value {
+                NULL => bitmap[i / 8] |= 1 << (i % 8),
+                _ => {
+                    let val = value.to_bin();
+                    if val.len() < cap - written {
+                        written += val.len();
+                        writer.write(val);
+                    } else {
+                        large_ids.push(i);
+                    }
                 }
             }
+            i += 1;
         }
         if large_ids.len() == 0 {
             (bitmap, writer.inner(), None)
@@ -1166,36 +1171,31 @@ impl MyStream for MyConn {
         self.status_flags = eof.status_flags;
     }
     fn do_handshake(&mut self) -> Result<(), ~str> {
-        let pld = match self.read_packet() {
-            Ok(pld) => pld,
-            Err(error) => return Err(error)
-        };
-        let handshake = HandshakePacket::from_payload(pld);
-        if handshake.protocol_version != 10u8 {
-            return Err(format!("Unsupported protocol version {:u}", handshake.protocol_version));
-        }
-        if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41) == 0 {
-            return Err(~"Server must set CLIENT_PROTOCOL_41 flag");
-        }
-        self.handle_handshake(&handshake);
-        self.do_handshake_response(&handshake);
-        match self.read_packet() {
-            Err(error) => return Err(error),
-            Ok(pld) => {
-                match pld[0] {
-                    0u8 => {
-                        let ok = OkPacket::from_payload(pld);
-                        self.handle_ok(&ok);
-                        return Ok(());
-                    }
-                    0xffu8 => {
-                        let err = ErrPacket::from_payload(pld);
-                        return Err(format!("{}", err));
-                    },
-                    _ => return Err(~"Unexpected packet")
-                }
+        self.read_packet().and_then(|pld| {
+            let handshake = HandshakePacket::from_payload(pld);
+            if handshake.protocol_version != 10u8 {
+                return Err(format!("Unsupported protocol version {:u}", handshake.protocol_version));
             }
-        };
+            if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41) == 0 {
+                return Err(~"Server must set CLIENT_PROTOCOL_41 flag");
+            }
+            self.handle_handshake(&handshake);
+            self.do_handshake_response(&handshake);
+            self.read_packet()
+        }).and_then(|pld| {
+            match pld[0] {
+                0u8 => {
+                    let ok = OkPacket::from_payload(pld);
+                    self.handle_ok(&ok);
+                    return Ok(());
+                },
+                0xffu8 => {
+                    let err = ErrPacket::from_payload(pld);
+                    return Err(format!("{}", err));
+                },
+                _ => return Err(~"Unexpected packet")
+            }
+        })
     }
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> Result<(), ~str> {
         let mut client_flags = consts::CLIENT_PROTOCOL_41 |
@@ -1285,41 +1285,39 @@ impl MyStream for MyConn {
             }
             writer.write(values);
         }
-        self.write_command_data(consts::COM_STMT_EXECUTE, writer.inner());
-        let pld = match self.read_packet() {
-            Ok(pld) => pld,
-            Err(error) => return Err(error)
-        };
-        match pld[0] {
-            0u8 => {
-                let ok = OkPacket::from_payload(pld);
-                self.handle_ok(&ok);
-                return Ok(None);
-            },
-            0xffu8 => {
-                let err = ErrPacket::from_payload(pld);
-                return Err(format!("{}", err));
-            },
-            _ => {
-                let mut reader = BufReader::new(pld);
-                let column_count = reader.read_lenenc_int();
-                let mut columns: ~[Column] = vec::with_capacity(column_count as uint);
-                let mut i = -1;
-                while { i += 1; i < column_count } {
-                    let pld = match self.read_packet() {
-                        Ok(pld) => pld,
-                        Err(error) => return Err(error)
-                    };
-                    columns.push(Column::from_payload(self.last_command, pld));
+        self.write_command_data(consts::COM_STMT_EXECUTE, writer.inner()).and_then(|_| {
+            self.read_packet()
+        }).and_then(|pld| {
+            match pld[0] {
+                0u8 => {
+                    let ok = OkPacket::from_payload(pld);
+                    self.handle_ok(&ok);
+                    Ok(None)
+                },
+                0xffu8 => {
+                    let err = ErrPacket::from_payload(pld);
+                    Err(format!("{}", err))
+                },
+                _ => {
+                    let mut reader = BufReader::new(pld);
+                    let column_count = reader.read_lenenc_int();
+                    let mut columns: ~[Column] = vec::with_capacity(column_count as uint);
+                    let mut i = -1;
+                    while { i += 1; i < column_count } {
+                        let pld = match self.read_packet() {
+                            Ok(pld) => pld,
+                            Err(error) => return Err(error)
+                        };
+                        columns.push(Column::from_payload(self.last_command, pld));
+                    }
+                    let _ = self.read_packet();
+                    return Ok(Some(MyResult{conn: self,
+                                     columns: columns,
+                                     eof: false,
+                                     is_bin: true}));
                 }
-                // TODO http://dev.mysql.com/doc/internals/en/binary-protocol-resultset.html
-                let _ = self.read_packet();
-                return Ok(Some(MyResult{conn: self,
-                                        columns: columns,
-                                        eof: false,
-                                        is_bin: true}))
             }
-        }
+        })
     }
     fn send_local_infile(&mut self, file_name: &[u8]) -> Result<(), ~str> {
         let path = Path::new(file_name);
@@ -1344,54 +1342,49 @@ impl MyStream for MyConn {
         Ok(())
     }
     fn query<'a>(&'a mut self, query: &str) -> Result<Option<MyResult<'a>>, ~str> {
-        match self.write_command_data(consts::COM_QUERY, query.as_bytes()) {
-            Err(err) => return Err(err),
-            Ok(_) => {
-                let pld = match self.read_packet() {
-                    Ok(pld) => pld,
-                    Err(error) => return Err(error)
-                };
-                match pld[0] {
-                    0u8 => {
-                        let ok = OkPacket::from_payload(pld);
-                        self.handle_ok(&ok);
-                        return Ok(None);
-                    },
-                    0xfb_u8 => {
-                        let mut reader = BufReader::new(pld);
-                        let _ = reader.read_u8();
-                        let file_name = reader.read_to_end();
-                        return match self.send_local_infile(file_name) {
-                            Ok(..) => Ok(None),
-                            Err(err) => Err(err)
+        self.write_command_data(consts::COM_QUERY, query.as_bytes()).and_then(|_| {
+            self.read_packet()
+        }).and_then(|pld| {
+            match pld[0] {
+                0u8 => {
+                    let ok = OkPacket::from_payload(pld);
+                    self.handle_ok(&ok);
+                    return Ok(None);
+                },
+                0xfb_u8 => {
+                    let mut reader = BufReader::new(pld);
+                    let _ = reader.read_u8();
+                    let file_name = reader.read_to_end();
+                    return match self.send_local_infile(file_name) {
+                        Ok(..) => Ok(None),
+                        Err(err) => Err(err)
+                    };
+                },
+                0xff_u8 => {
+                    let err = ErrPacket::from_payload(pld);
+                    return Err(format!("{}", err));
+                },
+                _ => {
+                    let mut reader = BufReader::new(pld);
+                    let column_count = reader.read_lenenc_int();
+                    let mut columns: ~[Column] = vec::with_capacity(column_count as uint);
+                    let mut i = -1;
+                    while { i += 1; i < column_count } {
+                        let pld = match self.read_packet() {
+                            Ok(pld) => pld,
+                            Err(error) => return Err(error)
                         };
-                    },
-                    0xff_u8 => {
-                        let err = ErrPacket::from_payload(pld);
-                        return Err(format!("{}", err));
-                    },
-                    _ => {
-                        let mut reader = BufReader::new(pld);
-                        let column_count = reader.read_lenenc_int();
-                        let mut columns: ~[Column] = vec::with_capacity(column_count as uint);
-                        let mut i = -1;
-                        while { i += 1; i < column_count } {
-                            let pld = match self.read_packet() {
-                                Ok(pld) => pld,
-                                Err(error) => return Err(error)
-                            };
-                            columns.push(Column::from_payload(self.last_command, pld));
-                        }
-                        // skip eof packet
-                        let _ = self.read_packet();
-                        return Ok(Some(MyResult{conn: self,
-                                                 columns: columns,
-                                                 eof: false,
-                                                 is_bin: false}))
+                        columns.push(Column::from_payload(self.last_command, pld));
                     }
+                    // skip eof packet
+                    let _ = self.read_packet();
+                    return Ok(Some(MyResult{conn: self,
+                                            columns: columns,
+                                            eof: false,
+                                            is_bin: false}));
                 }
             }
-        }
+        })
     }
     fn prepare(&mut self, query: &str) -> Result<Stmt, ~str> {
         match self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()) {
@@ -1444,26 +1437,20 @@ impl MyStream for MyConn {
         if self.connected {
             return Ok(());
         }
-        let mut max_allowed_packet = 0;
-        match self.do_handshake() {
-            Err(err) => {
-                return Err(err)
-            },
-            Ok(_) => {
-                let map = self.get_system_var("max_allowed_packet");
-                if map.is_some() {
-                    let map = map.unwrap().unwrap_bytes();
-                    max_allowed_packet = uint::parse_bytes(map, 10).unwrap_or(0);
-                }
+        self.do_handshake().and_then(|_| {
+            let max_allowed_packet = self.get_system_var("max_allowed_packet")
+                                         .unwrap_or(NULL)
+                                         .unwrap_bytes_or(~[]);
+            Ok(uint::parse_bytes(max_allowed_packet, 10).unwrap_or(0))
+        }).and_then(|max_allowed_packet| {
+            if max_allowed_packet == 0 {
+                Err(~"Can't get max_allowed_packet value")
+            } else {
+                self.max_allowed_packet = max_allowed_packet;
+                self.connected = true;
+                Ok(())
             }
-        }
-        if max_allowed_packet == 0 {
-            Err(~"Can't get max_allowed_packet value")
-        } else {
-            self.max_allowed_packet = max_allowed_packet;
-            self.connected = true;
-            Ok(())
-        }
+        })
     }
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
         for row in &mut self.query(format!("SELECT @@{:s};", name)) {
