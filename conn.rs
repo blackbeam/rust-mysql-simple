@@ -1,16 +1,11 @@
-extern mod extra;
-use std::io::{Decorator, Stream, Reader};
+use std::{vec, slice, fmt, str, uint, default};
+use std::io::{Stream, Reader, File};
 use std::io::mem::{BufReader, MemWriter};
 use std::io::net::ip::{SocketAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
-use std::vec;
 use consts;
 use scramble::{scramble};
-use std::fmt;
-use std::str;
-use std::uint;
-use std::io::File;
 
 /***
  *     .d88888b.  888      8888888b.                    888               888    
@@ -84,13 +79,13 @@ impl ErrPacket {
     }
 }
 
-impl fmt::Default for ErrPacket {
-    fn fmt(obj: &ErrPacket, f: &mut fmt::Formatter) {
+impl fmt::Show for ErrPacket {
+    fn fmt(&self, f: &mut fmt::Formatter) {
         write!(f.buf,
                "ERROR {:u} ({:s}): {:s}",
-               obj.error_code,
-               str::from_utf8(obj.sql_state),
-               str::from_utf8(obj.error_message))
+               self.error_code,
+               str::from_utf8(self.sql_state),
+               str::from_utf8(self.error_message))
     }
 }
 
@@ -153,8 +148,8 @@ impl HandshakePacket {
     #[inline]
     fn from_payload(pld: &[u8]) -> HandshakePacket {
         let mut length_of_auth_plugin_data = 0i16;
-        let mut auth_plugin_data: ~[u8] = vec::with_capacity(32);
-        let mut auth_plugin_name: ~[u8] = vec::with_capacity(32);
+        let mut auth_plugin_data: ~[u8] = slice::with_capacity(32);
+        let mut auth_plugin_name: ~[u8] = slice::with_capacity(32);
         let mut character_set = 0u8;
         let mut status_flags = 0u16;
         let payload_len = pld.len();
@@ -326,7 +321,7 @@ impl Column {
  *                                               
  */
 
-#[deriving(Clone, DeepClone, Eq, Ord, ToStr)]
+#[deriving(Clone, Eq, Ord)]
 pub enum Value {
     NULL,
     Bytes(~[u8]),
@@ -583,11 +578,11 @@ impl Value {
                 writer.write_le_u32(u);
             }
         }
-        writer.inner()
+        writer.unwrap()
     }
     #[inline]
     fn from_payload(pld: &[u8], columns_count: uint) -> ~[Value] {
-        let mut output: ~[Value] = vec::with_capacity(columns_count);
+        let mut output: ~[Value] = slice::with_capacity(columns_count);
         let mut reader = BufReader::new(pld);
         loop {
             if reader.eof() {
@@ -605,8 +600,8 @@ impl Value {
     fn from_bin_payload(pld: &[u8], columns: &[Column]) -> ~[Value] {
         let bit_offset = 2; // http://dev.mysql.com/doc/internals/en/null-bitmap.html
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
-        let mut bitmap: ~[u8] = vec::with_capacity(bitmap_len);
-        let mut values: ~[Value] = vec::with_capacity(columns.len());
+        let mut bitmap: ~[u8] = slice::with_capacity(bitmap_len);
+        let mut values: ~[Value] = slice::with_capacity(columns.len());
         let mut i = -1;
         while {i += 1; i < bitmap_len} {
             bitmap.push(pld[i+1]);
@@ -628,7 +623,7 @@ impl Value {
         let bitmap_len = (params.len() + 7) / 8;
         let mut large_ids: ~[u16] = ~[];
         let mut writer = MemWriter::new();
-        let mut bitmap = vec::from_elem(bitmap_len, 0u8);
+        let mut bitmap = slice::from_elem(bitmap_len, 0u8);
         let mut i = 0;
         let mut written = 0;
         let cap = max_allowed_packet - bitmap_len - values.len() * 8;
@@ -648,9 +643,9 @@ impl Value {
             i += 1;
         }
         if large_ids.len() == 0 {
-            (bitmap, writer.inner(), None)
+            (bitmap, writer.unwrap(), None)
         } else {
-            (bitmap, writer.inner(), Some(large_ids))
+            (bitmap, writer.unwrap(), Some(large_ids))
         }
     }
 }
@@ -699,7 +694,7 @@ impl MyOpts {
     }
 }
 
-impl Default for MyOpts {
+impl default::Default for MyOpts {
     fn default() -> MyOpts {
         MyOpts{tcp_addr: Some(SocketAddr{ip: Ipv4Addr(127, 0, 0, 1), port: 3306}),
                unix_addr: None,
@@ -1032,7 +1027,7 @@ impl<T:Reader> MyReader for T {}
 pub trait MyWriter: Writer {
     #[inline]
     fn write_le_uint_n(&mut self, x: u64, len: uint) {
-        let mut buf = vec::from_elem(len, 0u8);
+        let mut buf = slice::from_elem(len, 0u8);
         let mut offset = -1;
         while { offset += 1; offset < len } {
             buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
@@ -1098,7 +1093,7 @@ pub trait MyStream: MyReader + MyWriter {
 
 impl MyStream for MyConn {
     fn read_packet(&mut self) -> Result<~[u8], ~str> {
-        let mut output = vec::with_capacity(256);
+        let mut output = slice::with_capacity(256);
         loop {
             let payload_len = self.read_le_uint_n(3);
             let seq_id = self.read_u8();
@@ -1130,7 +1125,7 @@ impl MyStream for MyConn {
         for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
             let chunk_len = chunk.len();
             let full_chunk_len = 4 + chunk_len;
-            let mut full_chunk: ~[u8] = vec::from_elem(full_chunk_len, 0u8);
+            let mut full_chunk: ~[u8] = slice::from_elem(full_chunk_len, 0u8);
             if chunk_len == consts::MAX_PAYLOAD_LEN {
                 last_was_max = true;
                 full_chunk[0] = 255u8;
@@ -1225,7 +1220,7 @@ impl MyStream for MyConn {
             writer.write_u8(0u8);
         }
 
-        self.write_packet(writer.inner())
+        self.write_packet(writer.unwrap())
     }
     fn write_command(&mut self, cmd: u8) -> Result<(), ~str> {
         self.seq_id = 0u8;
@@ -1235,7 +1230,7 @@ impl MyStream for MyConn {
     fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> Result<(), ~str> {
         self.seq_id = 0u8;
         self.last_command = cmd;
-        self.write_packet(vec::append(~[cmd], buf))
+        self.write_packet(slice::append(~[cmd], buf))
     }
     fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: ~[u16]) {
         for &id in ids.iter() {
@@ -1247,7 +1242,7 @@ impl MyStream for MyConn {
                         writer.write_le_u32(stmt.statement_id);
                         writer.write_le_u16(id);
                         writer.write(chunk);
-                        self.write_command_data(consts::COM_STMT_SEND_LONG_DATA, writer.inner());
+                        self.write_command_data(consts::COM_STMT_SEND_LONG_DATA, writer.unwrap());
                     }
                 },
                 _ => (/* quite strange so do nothing */)
@@ -1285,7 +1280,7 @@ impl MyStream for MyConn {
             }
             writer.write(values);
         }
-        self.write_command_data(consts::COM_STMT_EXECUTE, writer.inner()).and_then(|_| {
+        self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap()).and_then(|_| {
             self.read_packet()
         }).and_then(|pld| {
             match pld[0] {
@@ -1301,7 +1296,7 @@ impl MyStream for MyConn {
                 _ => {
                     let mut reader = BufReader::new(pld);
                     let column_count = reader.read_lenenc_int();
-                    let mut columns: ~[Column] = vec::with_capacity(column_count as uint);
+                    let mut columns: ~[Column] = slice::with_capacity(column_count as uint);
                     let mut i = -1;
                     while { i += 1; i < column_count } {
                         let pld = match self.read_packet() {
@@ -1326,7 +1321,7 @@ impl MyStream for MyConn {
             return Err(format!("Could not open local file {}", path.display()));
         }
         let mut file = file.unwrap();
-        let mut chunk = vec::from_elem(self.max_allowed_packet, 0u8);
+        let mut chunk = slice::from_elem(self.max_allowed_packet, 0u8);
         file.read(chunk).while_some(|cnt| {
             self.write_packet(chunk.slice_to(cnt));
             file.read(chunk)
@@ -1367,7 +1362,7 @@ impl MyStream for MyConn {
                 _ => {
                     let mut reader = BufReader::new(pld);
                     let column_count = reader.read_lenenc_int();
-                    let mut columns: ~[Column] = vec::with_capacity(column_count as uint);
+                    let mut columns: ~[Column] = slice::with_capacity(column_count as uint);
                     let mut i = -1;
                     while { i += 1; i < column_count } {
                         let pld = match self.read_packet() {
@@ -1402,7 +1397,7 @@ impl MyStream for MyConn {
                     _ => {
                         let mut stmt = Stmt::from_payload(pld);
                         if stmt.num_params > 0 {
-                            let mut params: ~[Column] = vec::with_capacity(stmt.num_params as uint);
+                            let mut params: ~[Column] = slice::with_capacity(stmt.num_params as uint);
                             let mut i = -1;
                             while { i += 1; i < stmt.num_params } {
                                 let pld = match self.read_packet() {
@@ -1415,7 +1410,7 @@ impl MyStream for MyConn {
                             let _ = self.read_packet();
                         }
                         if stmt.num_columns > 0 {
-                            let mut columns: ~[Column] = vec::with_capacity(stmt.num_columns as uint);
+                            let mut columns: ~[Column] = slice::with_capacity(stmt.num_columns as uint);
                             let mut i = -1;
                             while { i += 1; i < stmt.num_columns } {
                                 let pld = match self.read_packet() {
@@ -1556,9 +1551,7 @@ impl<'a> Iterator<Result<~[Value], ~str>> for &'a mut Result<Option<MyResult<'a>
 
 #[cfg(test)]
 mod test {
-    extern mod extra;
     use std::str;
-    use std::vec;
     use std::os::{getcwd};
     use std::io::fs::{File, unlink};
     use std::path::posix::{Path};
@@ -1611,7 +1604,7 @@ mod test {
         payload.push_all_move(~[4u8, 0u8]);
         payload.push_all_move(~[0x08_u8, 0u8]);
         payload.push_all_move(~[0x15_u8]);
-        payload.push_all_move(::std::vec::from_elem(10, 0u8));
+        payload.push_all_move(::std::slice::from_elem(10, 0u8));
         payload.push_all_move(~[0x26_u8, 0x3a_u8, 0x34_u8, 0x34_u8, 0x46_u8, 0x44_u8,
                                 0x63_u8, 0x44_u8, 0x69_u8, 0x63_u8, 0x39_u8, 0x30_u8, 0x00_u8]);
         payload.push_all_move(~[1u8, 2u8, 3u8, 4u8, 5u8, 0u8]);
@@ -1787,7 +1780,7 @@ mod test {
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a LONGBLOB)").is_ok());
-        let query = format!("INSERT INTO tbl(a) VALUES('{:s}')", str::from_chars(vec::from_elem(20000000, 'A')));
+        let query = format!("INSERT INTO tbl(a) VALUES('{:s}')", str::from_chars(slice::from_elem(20000000, 'A')));
         conn.query(query);
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
@@ -1811,7 +1804,7 @@ mod test {
         let stmt = conn.prepare("INSERT INTO tbl(a) values ( ? );");
         assert!(stmt.is_ok());
         let stmt = stmt.unwrap();
-        let val = vec::from_elem(20000000, 65u8);
+        let val = slice::from_elem(20000000, 65u8);
         assert!(conn.execute(&stmt, [Bytes(val)]).is_ok());
         let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(row.is_ok());
