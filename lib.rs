@@ -5,6 +5,10 @@
 #![crate_type="dylib"]
 
 #![allow(dead_code)]
+#![feature(macro_rules)]
+
+#![cfg(test)]
+extern crate test;
 
 pub mod consts;
 pub mod sha1;
