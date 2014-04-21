@@ -9,7 +9,9 @@
 
 #![cfg(test)]
 extern crate test;
+extern crate sync;
 
+pub mod pool;
 pub mod consts;
 pub mod sha1;
 pub mod scramble;
