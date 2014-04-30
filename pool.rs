@@ -36,7 +36,7 @@ impl MyInnerPool {
 
 #[deriving(Clone)]
 pub struct MyPool {
-    priv pool: Arc<Mutex<MyInnerPool>>
+    pool: Arc<Mutex<MyInnerPool>>
 }
 
 impl MyPool {

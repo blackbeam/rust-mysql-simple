@@ -42,11 +42,11 @@ pub fn sha1(message: &[u8]) -> [u8, ..20] {
         let part = msg.slice(i * 64, (i+1) * 64);
         {
             let mut reader = BufReader::new(part);
-            for j in range(0, 16) {
+            for j in range(0u, 16u) {
                 w[j] = reader.read_be_u32().unwrap();
             }
         }
-        for j in range(16, 80) {
+        for j in range(16u, 80u) {
             let val = w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16];
             w[j] = circular_shift(1, val);
         }
@@ -56,7 +56,7 @@ pub fn sha1(message: &[u8]) -> [u8, ..20] {
         let mut d = hash[3];
         let mut e = hash[4];
         let mut temp: u32;
-        for t in range(0, 20) {
+        for t in range(0u, 20u) {
             temp = circular_shift(5, a) + (b & c | !b & d) + e + w[t] + K1;
             e = d;
             d = c;
@@ -64,7 +64,7 @@ pub fn sha1(message: &[u8]) -> [u8, ..20] {
             b = a;
             a = temp;
         }
-        for t in range(20, 40) {
+        for t in range(20u, 40u) {
             temp = circular_shift(5, a) + (b ^ c ^ d) + e + w[t] + K2;
             e = d;
             d = c;
@@ -72,7 +72,7 @@ pub fn sha1(message: &[u8]) -> [u8, ..20] {
             b = a;
             a = temp;
         }
-        for t in range(40, 60) {
+        for t in range(40u, 60u) {
             temp = circular_shift(5, a) + (b & c | b & d | c & d) + e + w[t] + K3;
             e = d;
             d = c;
@@ -80,7 +80,7 @@ pub fn sha1(message: &[u8]) -> [u8, ..20] {
             b = a;
             a = temp;
         }
-        for t in range(60, 80) {
+        for t in range(60u, 80u) {
             temp = circular_shift(5, a) + (b ^ c ^ d) + e + w[t] + K4;
             e = d;
             d = c;

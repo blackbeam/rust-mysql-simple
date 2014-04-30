@@ -13,7 +13,7 @@ pub fn scramble(scr: &[u8], password: &[u8]) -> Option<[u8, ..20]> {
 
     let mut output = [0u8, ..20];
 
-    for i in range(0, 20) {
+    for i in range(0u, 20u) {
         output[i] = sha_pass[i] ^ hash[i];
     }
 

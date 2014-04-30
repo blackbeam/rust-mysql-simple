@@ -1,4 +1,4 @@
-use std::{slice, fmt, str, uint, default};
+use std::{fmt, str, uint, default};
 use std::io::{Stream, Reader, File, IoResult, IoError,
               Seek, SeekCur, EndOfFile, BufReader, MemWriter};
 use std::io::net::ip::{SocketAddr, Ipv4Addr, Ipv6Addr};
@@ -20,6 +20,12 @@ impl fmt::Show for MyError {
             MyIoError(ref e) => e.fmt(f),
             MyStrError(ref e) => write!(f.buf, "{}", e)
         }
+    }
+}
+
+impl<'a> fmt::Show for &'a mut MyError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        (**self).fmt(f)
     }
 }
 
@@ -51,7 +57,7 @@ pub struct OkPacket {
     last_insert_id: u64,
     status_flags: u16,
     warnings: u16,
-    info: ~[u8]
+    info: Vec<u8>
 }
 
 impl OkPacket {
@@ -84,8 +90,8 @@ impl OkPacket {
  */
 
 pub struct ErrPacket {
-    sql_state: ~[u8],
-    error_message: ~[u8],
+    sql_state: Vec<u8>,
+    error_message: Vec<u8>,
     error_code: u16
 }
 
@@ -109,8 +115,8 @@ impl fmt::Show for ErrPacket {
         write!(f.buf,
                "ERROR {:u} ({:s}): {:s}",
                self.error_code,
-               str::from_utf8(self.sql_state).unwrap(),
-               str::from_utf8(self.error_message).unwrap())
+               str::from_utf8(self.sql_state.as_slice()).unwrap(),
+               str::from_utf8(self.error_message.as_slice()).unwrap())
     }
 }
 
@@ -160,8 +166,8 @@ impl EOFPacket {
  */
 
 pub struct HandshakePacket {
-    auth_plugin_data: ~[u8],
-    auth_plugin_name: ~[u8],
+    auth_plugin_data: Vec<u8>,
+    auth_plugin_name: Vec<u8>,
     connection_id: u32,
     capability_flags: u32,
     status_flags: u16,
@@ -173,8 +179,8 @@ impl HandshakePacket {
     #[inline]
     fn from_payload(pld: &[u8]) -> IoResult<HandshakePacket> {
         let mut length_of_auth_plugin_data = 0i16;
-        let mut auth_plugin_data: ~[u8] = slice::with_capacity(32);
-        let mut auth_plugin_name: ~[u8] = slice::with_capacity(32);
+        let mut auth_plugin_data: Vec<u8> = Vec::with_capacity(32);
+        let mut auth_plugin_name: Vec<u8> = Vec::with_capacity(32);
         let mut character_set = 0u8;
         let mut status_flags = 0u16;
         let payload_len = pld.len();
@@ -201,13 +207,13 @@ impl HandshakePacket {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
                 try!(reader.push_exact(&mut auth_plugin_data, len as uint));
-                if auth_plugin_data[auth_plugin_data.len() - 1] == 0u8 {
+                if *auth_plugin_data.get(auth_plugin_data.len() - 1) == 0u8 {
                     auth_plugin_data.pop();
                 }
             }
             if (capability_flags & consts::CLIENT_PLUGIN_AUTH) > 0 {
                 auth_plugin_name = try!(reader.read_to_end());
-                if auth_plugin_name[auth_plugin_name.len() - 1] == 0u8 {
+                if *auth_plugin_name.get(auth_plugin_name.len() - 1) == 0u8 {
                     auth_plugin_name.pop();
                 }
             }
@@ -234,8 +240,8 @@ impl HandshakePacket {
  */
 
 pub struct Stmt {
-    params: Option<~[Column]>,
-    columns: Option<~[Column]>,
+    params: Option<Vec<Column>>,
+    columns: Option<Vec<Column>>,
     statement_id: u32,
     num_columns: u16,
     num_params: u16,
@@ -276,13 +282,13 @@ impl Stmt {
 
 #[deriving(Clone)]
 pub struct Column {
-    catalog: ~[u8],
-    schema: ~[u8],
-    table: ~[u8],
-    org_table: ~[u8],
-    name: ~[u8],
-    org_name: ~[u8],
-    default_values: ~[u8],
+    catalog: Vec<u8>,
+    schema: Vec<u8>,
+    table: Vec<u8>,
+    org_table: Vec<u8>,
+    name: Vec<u8>,
+    org_name: Vec<u8>,
+    default_values: Vec<u8>,
     column_length: u32,
     character_set: u16,
     flags: u16,
@@ -309,7 +315,7 @@ impl Column {
         let decimals = try!(reader.read_u8());
         // skip filler
         try!(reader.seek(2, SeekCur));
-        let mut default_values = ~[];
+        let mut default_values = Vec::with_capacity(0);
         if command == consts::COM_FIELD_LIST {
             let len = try!(reader.read_lenenc_int());
             default_values = try!(reader.read_exact(len as uint));
@@ -346,7 +352,7 @@ impl Column {
 #[deriving(Clone, Eq, Ord)]
 pub enum Value {
     NULL,
-    Bytes(~[u8]),
+    Bytes(Vec<u8>),
     Int(i64),
     UInt(u64),
     Float(f64),
@@ -362,15 +368,15 @@ impl Value {
         match *self {
             NULL => ~"NULL",
             Bytes(ref x) => {
-                match str::from_utf8_owned(x.clone()) {
-                    Some(mut s) => {
-                        s = str::replace(s, "'", "\'");
-                        format!("'{:s}'", s)
+                match str::from_utf8(x.as_slice()) {
+                    Some(s) => {
+                        let replaced = s.replace("'", "\'");
+                        format!("'{:s}'", replaced)
                     },
                     None => {
                         let mut s = ~"0x";
                         for c in x.iter() {
-                            s.push_str(format!("{:02X}", *c));
+                            s = s.append(format!("{:02X}", *c));
                         }
                         s
                     }
@@ -412,13 +418,13 @@ impl Value {
             _ => fail!("Called `Value::bytes_ref()` on non `Bytes` value")
         }
     }
-    pub fn unwrap_bytes(self) -> ~[u8] {
+    pub fn unwrap_bytes(self) -> Vec<u8> {
         match self {
             Bytes(x) => x,
             _ => fail!("Called `Value::unwrap_bytes()` on non `Bytes` value")
         }
     }
-    pub fn unwrap_bytes_or(self, y: ~[u8]) -> ~[u8] {
+    pub fn unwrap_bytes_or(self, y: Vec<u8>) -> Vec<u8> {
         match self {
             Bytes(x) => x,
             _ => y
@@ -549,12 +555,12 @@ impl Value {
             _ => fail!("Called `Value::get_usec()` on non `Date` nor `Time` value")
         }
     }
-    fn to_bin(&self) -> IoResult<~[u8]> {
+    fn to_bin(&self) -> IoResult<Vec<u8>> {
         let mut writer = MemWriter::with_capacity(256);
         match *self {
             NULL => (),
             Bytes(ref x) => {
-                try!(writer.write_lenenc_bytes(*x));
+                try!(writer.write_lenenc_bytes(x.as_slice()));
             },
             Int(x) => {
                 try!(writer.write_le_i64(x));
@@ -615,13 +621,13 @@ impl Value {
         Ok(writer.unwrap())
     }
     #[inline]
-    fn from_payload(pld: &[u8], columns_count: uint) -> IoResult<~[Value]> {
-        let mut output: ~[Value] = slice::with_capacity(columns_count);
+    fn from_payload(pld: &[u8], columns_count: uint) -> IoResult<Vec<Value>> {
+        let mut output: Vec<Value> = Vec::with_capacity(columns_count);
         let mut reader = BufReader::new(pld);
         loop {
             if reader.eof() {
                 break;
-            } else if { let pos = try!(reader.tell()); pld[pos] == 0xfb_u8 } {
+            } else if { let pos = try!(reader.tell()); pld[pos as uint] == 0xfb_u8 } {
                 try!(reader.seek(1, SeekCur));
                 output.push(NULL);
             } else {
@@ -631,11 +637,11 @@ impl Value {
         Ok(output)
     }
     #[inline]
-    fn from_bin_payload(pld: &[u8], columns: &[Column]) -> IoResult<~[Value]> {
+    fn from_bin_payload(pld: &[u8], columns: &[Column]) -> IoResult<Vec<Value>> {
         let bit_offset = 2; // http://dev.mysql.com/doc/internals/en/null-bitmap.html
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
-        let mut bitmap: ~[u8] = slice::with_capacity(bitmap_len);
-        let mut values: ~[Value] = slice::with_capacity(columns.len());
+        let mut bitmap: Vec<u8> = Vec::with_capacity(bitmap_len);
+        let mut values: Vec<Value> = Vec::with_capacity(columns.len());
         let mut i = -1;
         while {i += 1; i < bitmap_len} {
             bitmap.push(pld[i+1]);
@@ -643,7 +649,7 @@ impl Value {
         let mut reader = BufReader::new(pld.slice_from(1 + bitmap_len));
         let mut i = -1;
         while {i += 1; i < columns.len()} {
-            if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
+            if *bitmap.get((i + bit_offset) / 8) & (1 << ((i + bit_offset) % 8)) == 0 {
                 values.push(try!(reader.read_bin_value(columns[i].column_type,
                                                                   (columns[i].flags & consts::UNSIGNED_FLAG) != 0)));
             } else {
@@ -653,22 +659,22 @@ impl Value {
         Ok(values)
     }
     // (NULL-bitmap, values, ids of fields to send throwgh send_long_data)
-    fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: uint) -> IoResult<(~[u8], ~[u8], Option<~[u16]>)> {
+    fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: uint) -> IoResult<(Vec<u8>, Vec<u8>, Option<Vec<u16>>)> {
         let bitmap_len = (params.len() + 7) / 8;
-        let mut large_ids: ~[u16] = ~[];
+        let mut large_ids: Vec<u16> = Vec::new();
         let mut writer = MemWriter::new();
-        let mut bitmap = slice::from_elem(bitmap_len, 0u8);
-        let mut i = 0;
+        let mut bitmap = Vec::from_elem(bitmap_len, 0u8);
+        let mut i = 0u16;
         let mut written = 0;
         let cap = max_allowed_packet - bitmap_len - values.len() * 8;
         for value in values.iter() {
             match *value {
-                NULL => bitmap[i / 8] |= 1 << (i % 8),
+                NULL => *bitmap.get_mut(i as uint / 8) |= 1 << (i % 8u16),
                 _ => {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
                         written += val.len();
-                        try!(writer.write(val));
+                        try!(writer.write(val.as_slice()));
                     } else {
                         large_ids.push(i);
                     }
@@ -699,12 +705,12 @@ impl Value {
  */
 #[deriving(Clone, Eq)]
 pub struct MyOpts {
-    tcp_addr: Option<SocketAddr>,
-    unix_addr: Option<Path>,
-    user: Option<~str>,
-    pass: Option<~str>,
-    db_name: Option<~str>,
-    prefer_socket: bool,
+    pub tcp_addr: Option<SocketAddr>,
+    pub unix_addr: Option<Path>,
+    pub user: Option<~str>,
+    pub pass: Option<~str>,
+    pub db_name: Option<~str>,
+    pub prefer_socket: bool,
 }
 
 impl MyOpts {
@@ -924,17 +930,17 @@ pub trait MyReader: Reader {
         return self.read_le_uint_n(length);
     }
     #[inline]
-    fn read_lenenc_bytes(&mut self) -> IoResult<~[u8]> {
+    fn read_lenenc_bytes(&mut self) -> IoResult<Vec<u8>> {
         let len = try!(self.read_lenenc_int());
         if len > 0 {
             self.read_exact(len as uint)
         } else {
-            Ok(~[])
+            Ok(Vec::with_capacity(0))
         }
     }
     #[inline]
-    fn read_to_nul(&mut self) -> IoResult<~[u8]> {
-        let mut buf = ~[];
+    fn read_to_nul(&mut self) -> IoResult<Vec<u8>> {
+        let mut buf = Vec::new();
         let mut x = try!(self.read_u8());
         while x != 0u8 {
             buf.push(x);
@@ -1066,12 +1072,12 @@ impl<T:Reader> MyReader for T {}
 pub trait MyWriter: Writer {
     #[inline]
     fn write_le_uint_n(&mut self, x: u64, len: uint) -> IoResult<()> {
-        let mut buf = slice::from_elem(len, 0u8);
+        let mut buf = Vec::from_elem(len, 0u8);
         let mut offset = -1;
         while { offset += 1; offset < len } {
-            buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
+            *buf.get_mut(offset) = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
         }
-        self.write(buf)
+        self.write(buf.as_slice())
     }
     #[inline]
     fn write_lenenc_int(&mut self, x: u64) -> IoResult<()> {
@@ -1112,8 +1118,8 @@ impl<T: Writer> MyWriter for T {}
  */
 
 pub trait MyStream: MyReader + MyWriter {
-    fn read_packet(&mut self) -> MySqlResult<~[u8]>;
-    fn write_packet(&mut self, data: &[u8]) -> MySqlResult<()>;
+    fn read_packet(&mut self) -> MySqlResult<Vec<u8>>;
+    fn write_packet(&mut self, data: &Vec<u8>) -> MySqlResult<()>;
     fn handle_ok(&mut self, ok: &OkPacket);
     fn handle_eof(&mut self, eof: &EOFPacket);
     fn handle_handshake(&mut self, hp: &HandshakePacket);
@@ -1124,15 +1130,15 @@ pub trait MyStream: MyReader + MyWriter {
     fn send_local_infile(&mut self, file_name: &[u8]) -> MySqlResult<()>;
     fn query<'a>(&'a mut self, query: &str) -> MySqlResult<Option<MyResult<'a>>>;
     fn prepare(&mut self, query: &str) -> MySqlResult<Stmt>;
-    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: ~[u16]) -> MySqlResult<()>;
+    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MySqlResult<()>;
     fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MySqlResult<Option<MyResult<'a>>>;
     fn connect(&mut self) -> MySqlResult<()>;
     fn get_system_var(&mut self, name: &str) -> Option<Value>;
 }
 
 impl MyStream for MyConn {
-    fn read_packet(&mut self) -> MySqlResult<~[u8]> {
-        let mut output = slice::with_capacity(256);
+    fn read_packet(&mut self) -> MySqlResult<Vec<u8>> {
+        let mut output = Vec::new();
         loop {
             let payload_len = try_io!(self.read_le_uint_n(3));
             let seq_id = try_io!(self.read_u8());
@@ -1151,7 +1157,7 @@ impl MyStream for MyConn {
         }
         Ok(output)
     }
-    fn write_packet(&mut self, data: &[u8]) -> MySqlResult<()> {
+    fn write_packet(&mut self, data: &Vec<u8>) -> MySqlResult<()> {
         if data.len() > self.max_allowed_packet && self.max_allowed_packet < consts::MAX_PAYLOAD_LEN {
             return Err(MyStrError(~"Packet too large"));
         }
@@ -1161,28 +1167,28 @@ impl MyStream for MyConn {
             return Ok(());
         }
         let mut last_was_max = false;
-        for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
+        for chunk in data.as_slice().chunks(consts::MAX_PAYLOAD_LEN) {
             let chunk_len = chunk.len();
             let full_chunk_len = 4 + chunk_len;
-            let mut full_chunk: ~[u8] = slice::from_elem(full_chunk_len, 0u8);
+            let mut full_chunk: Vec<u8> = Vec::from_elem(full_chunk_len, 0u8);
             if chunk_len == consts::MAX_PAYLOAD_LEN {
                 last_was_max = true;
-                full_chunk[0] = 255u8;
-                full_chunk[1] = 255u8;
-                full_chunk[2] = 255u8;
+                *full_chunk.get_mut(0) = 255u8;
+                *full_chunk.get_mut(1) = 255u8;
+                *full_chunk.get_mut(2) = 255u8;
             } else {
                 last_was_max = false;
-                full_chunk[0] = (chunk_len & 255) as u8;
-                full_chunk[1] = ((chunk_len & (255 << 8)) >> 8) as u8;
-                full_chunk[2] = ((chunk_len & (255 << 16)) >> 16) as u8;
+                *full_chunk.get_mut(0) = (chunk_len & 255) as u8;
+                *full_chunk.get_mut(1) = ((chunk_len & (255 << 8)) >> 8) as u8;
+                *full_chunk.get_mut(2) = ((chunk_len & (255 << 16)) >> 16) as u8;
             }
-            full_chunk[3] = self.seq_id;
+            *full_chunk.get_mut(3) = self.seq_id;
             self.seq_id += 1;
             unsafe {
                 let payload_slice = full_chunk.mut_slice_from(4);
                 payload_slice.copy_memory(chunk);
             }
-            try_io!(self.write(full_chunk));
+            try_io!(self.write(full_chunk.as_slice()));
         }
         if last_was_max {
             try_io!(self.write([0u8, 0u8, 0u8, self.seq_id]));
@@ -1206,7 +1212,7 @@ impl MyStream for MyConn {
     }
     fn do_handshake(&mut self) -> MySqlResult<()> {
         self.read_packet().and_then(|pld| {
-            let handshake = try_io!(HandshakePacket::from_payload(pld));
+            let handshake = try_io!(HandshakePacket::from_payload(pld.as_slice()));
             if handshake.protocol_version != 10u8 {
                 return Err(MyStrError(format!("Unsupported protocol version {:u}", handshake.protocol_version)));
             }
@@ -1218,14 +1224,14 @@ impl MyStream for MyConn {
         }).and_then(|_| {
             self.read_packet()
         }).and_then(|pld| {
-            match pld[0] {
+            match *pld.get(0) {
                 0u8 => {
-                    let ok = try_io!(OkPacket::from_payload(pld));
+                    let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                     self.handle_ok(&ok);
                     return Ok(());
                 },
                 0xffu8 => {
-                    let err = try_io!(ErrPacket::from_payload(pld));
+                    let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
                     return Err(MyStrError(format!("{}", err)));
                 },
                 _ => return Err(MyStrError(~"Unexpected packet"))
@@ -1239,7 +1245,7 @@ impl MyStream for MyConn {
                            consts::CLIENT_TRANSACTIONS |
                            consts::CLIENT_LOCAL_FILES |
                            (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        let scramble_buf = scramble(hp.auth_plugin_data, self.opts.get_pass().into_bytes()).unwrap();
+        let scramble_buf = scramble(hp.auth_plugin_data.as_slice(), self.opts.get_pass().into_bytes()).unwrap();
         let scramble_buf_len = 20;
         let mut payload_len = 4 + 4 + 1 + 23 + self.opts.get_user().len() + 1 + 1 + scramble_buf_len;
         if self.opts.get_db_name().len() > 0 {
@@ -1261,29 +1267,29 @@ impl MyStream for MyConn {
             try_io!(writer.write_u8(0u8));
         }
 
-        self.write_packet(writer.unwrap())
+        self.write_packet(&writer.unwrap())
     }
     fn write_command(&mut self, cmd: u8) -> MySqlResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd;
-        self.write_packet([cmd])
+        self.write_packet(&vec!(cmd))
     }
     fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MySqlResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd;
-        self.write_packet(slice::append(~[cmd], buf))
+        self.write_packet(&vec!(cmd).append(buf))
     }
-    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: ~[u16]) -> MySqlResult<()> {
+    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MySqlResult<()> {
         for &id in ids.iter() {
-            match params[id] {
+            match params[id as uint] {
                 Bytes(ref x) => {
-                    for chunk in x.chunks(self.max_allowed_packet - 7) {
+                    for chunk in x.as_slice().chunks(self.max_allowed_packet - 7) {
                         let chunk_len = chunk.len() + 7;
                         let mut writer = MemWriter::with_capacity(chunk_len);
                         try_io!(writer.write_le_u32(stmt.statement_id));
                         try_io!(writer.write_le_u16(id));
                         try_io!(writer.write(chunk));
-                        try!(self.write_command_data(consts::COM_STMT_SEND_LONG_DATA, writer.unwrap()));
+                        try!(self.write_command_data(consts::COM_STMT_SEND_LONG_DATA, writer.unwrap().as_slice()));
                     }
                 },
                 _ => (/* quite strange so do nothing */)
@@ -1300,18 +1306,18 @@ impl MyStream for MyConn {
         try_io!(writer.write_u8(0u8));
         try_io!(writer.write_le_u32(1u32));
         if stmt.num_params > 0 {
-            let (bitmap, values, large_ids) = try_io!(Value::to_bin_payload(*stmt.params.get_ref(),
+            let (bitmap, values, large_ids) = try_io!(Value::to_bin_payload(stmt.params.get_ref().as_slice(),
                                                                     params,
                                                                     self.max_allowed_packet));
             if large_ids.is_some() {
                 try!(self.send_long_data(stmt, params, large_ids.unwrap()));
             }
-            try_io!(writer.write(bitmap));
+            try_io!(writer.write(bitmap.as_slice()));
             try_io!(writer.write_u8(1u8));
             let mut i = -1;
             while { i += 1; i < params.len() } {
                 let _ = match params[i] {
-                    NULL => try_io!(writer.write([stmt.params.get_ref()[i].column_type, 0u8])),
+                    NULL => try_io!(writer.write([stmt.params.get_ref().get(i).column_type, 0u8])),
                     Bytes(..) => try_io!(writer.write([consts::MYSQL_TYPE_VAR_STRING, 0u8])),
                     Int(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG, 0u8])),
                     UInt(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG, 128u8])),
@@ -1320,24 +1326,24 @@ impl MyStream for MyConn {
                     Time(..) => try_io!(writer.write([consts::MYSQL_TYPE_TIME, 0u8]))
                 };
             }
-            try_io!(writer.write(values));
+            try_io!(writer.write(values.as_slice()));
         }
-        try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap()));
+        try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
         let pld = try!(self.read_packet());
-        match pld[0] {
+        match *pld.get(0) {
             0u8 => {
-                let ok = try_io!(OkPacket::from_payload(pld));
+                let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
                 Ok(None)
             },
             0xffu8 => {
-                let err = try_io!(ErrPacket::from_payload(pld));
+                let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
                 Err(MyStrError(format!("{}", err)))
             },
             _ => {
-                let mut reader = BufReader::new(pld);
+                let mut reader = BufReader::new(pld.as_slice());
                 let column_count = try_io!(reader.read_lenenc_int());
-                let mut columns: ~[Column] = slice::with_capacity(column_count as uint);
+                let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
                 let mut i = -1;
                 while { i += 1; i < column_count } {
                     let pld = try!(self.read_packet());
@@ -1345,7 +1351,7 @@ impl MyStream for MyConn {
                     //    Ok(pld) => pld,
                     //    Err(error) => return Err(error)
                     //};
-                    columns.push(try_io!(Column::from_payload(self.last_command, pld)));
+                    columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
                 }
                 try!(self.read_packet());
                 return Ok(Some(MyResult{conn: self,
@@ -1358,12 +1364,12 @@ impl MyStream for MyConn {
     fn send_local_infile(&mut self, file_name: &[u8]) -> MySqlResult<()> {
         let path = Path::new(file_name);
         let mut file = try_io!(File::open(&path));
-        let mut chunk = slice::from_elem(self.max_allowed_packet, 0u8);
-        let mut r = file.read(chunk);
+        let mut chunk = Vec::from_elem(self.max_allowed_packet, 0u8);
+        let mut r = file.read(chunk.as_mut_slice());
         loop {
             match r {
                 Ok(cnt) => {
-                    try!(self.write_packet(chunk.slice_to(cnt)));
+                    try!(self.write_packet(&Vec::from_slice(chunk.slice_to(cnt))));
                 },
                 Err(e) => {
                     if e.kind == EndOfFile {
@@ -1373,45 +1379,45 @@ impl MyStream for MyConn {
                     }
                 }
             }
-            r = file.read(chunk);
+            r = file.read(chunk.as_mut_slice());
         }
-        try!(self.write_packet([]));
+        try!(self.write_packet(&Vec::with_capacity(0)));
         let pld = try!(self.read_packet());
-        if pld[0] == 0u8 {
-            self.handle_ok(&try_io!(OkPacket::from_payload(pld)));
+        if *pld.get(0) == 0u8 {
+            self.handle_ok(&try_io!(OkPacket::from_payload(pld.as_slice())));
         }
         Ok(())
     }
     fn query<'a>(&'a mut self, query: &str) -> MySqlResult<Option<MyResult<'a>>> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
-        match pld[0] {
+        match *pld.get(0) {
             0u8 => {
-                let ok = try_io!(OkPacket::from_payload(pld));
+                let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
                 return Ok(None);
             },
             0xfb_u8 => {
-                let mut reader = BufReader::new(pld);
+                let mut reader = BufReader::new(pld.as_slice());
                 try_io!(reader.seek(1, SeekCur));
                 let file_name = try_io!(reader.read_to_end());
-                return match self.send_local_infile(file_name) {
+                return match self.send_local_infile(file_name.as_slice()) {
                     Ok(..) => Ok(None),
                     Err(err) => Err(err)
                 };
             },
             0xff_u8 => {
-                let err = try_io!(ErrPacket::from_payload(pld));
+                let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
                 return Err(MyStrError(format!("{}", err)));
             },
             _ => {
-                let mut reader = BufReader::new(pld);
+                let mut reader = BufReader::new(pld.as_slice());
                 let column_count = try_io!(reader.read_lenenc_int());
-                let mut columns: ~[Column] = slice::with_capacity(column_count as uint);
+                let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
                 let mut i = -1;
                 while { i += 1; i < column_count } {
                     let pld = try!(self.read_packet());
-                    columns.push(try_io!(Column::from_payload(self.last_command, pld)));
+                    columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
                 }
                 // skip eof packet
                 try!(self.read_packet());
@@ -1425,29 +1431,29 @@ impl MyStream for MyConn {
     fn prepare(&mut self, query: &str) -> MySqlResult<Stmt> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
-        match pld[0] {
+        match *pld.get(0) {
             0xff => {
-                let err = try_io!(ErrPacket::from_payload(pld));
+                let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
                 return Err(MyStrError(format!("{}", err)));
             },
             _ => {
-                let mut stmt = try_io!(Stmt::from_payload(pld));
+                let mut stmt = try_io!(Stmt::from_payload(pld.as_slice()));
                 if stmt.num_params > 0 {
-                    let mut params: ~[Column] = slice::with_capacity(stmt.num_params as uint);
+                    let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as uint);
                     let mut i = -1;
                     while { i += 1; i < stmt.num_params } {
                         let pld = try!(self.read_packet());
-                        params.push(try_io!(Column::from_payload(self.last_command, pld)));
+                        params.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
                     }
                     stmt.params = Some(params);
                     try!(self.read_packet());
                 }
                 if stmt.num_columns > 0 {
-                    let mut columns: ~[Column] = slice::with_capacity(stmt.num_columns as uint);
+                    let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as uint);
                     let mut i = -1;
                     while { i += 1; i < stmt.num_columns } {
                         let pld = try!(self.read_packet());
-                        columns.push(try_io!(Column::from_payload(self.last_command, pld)));
+                        columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
                     }
                     stmt.columns = Some(columns);
                     try!(self.read_packet());
@@ -1463,8 +1469,8 @@ impl MyStream for MyConn {
         self.do_handshake().and_then(|_| {
             let max_allowed_packet = self.get_system_var("max_allowed_packet")
                                          .unwrap_or(NULL)
-                                         .unwrap_bytes_or(~[]);
-            Ok(uint::parse_bytes(max_allowed_packet, 10).unwrap_or(0))
+                                         .unwrap_bytes_or(Vec::with_capacity(0));
+            Ok(uint::parse_bytes(max_allowed_packet.as_slice(), 10).unwrap_or(0))
         }).and_then(|max_allowed_packet| {
             if max_allowed_packet == 0 {
                 Err(MyStrError(~"Can't get max_allowed_packet value"))
@@ -1478,8 +1484,8 @@ impl MyStream for MyConn {
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
         for row in &mut self.query(format!("SELECT @@{:s};", name)) {
             if row.is_ok() {
-                let row = row.unwrap();
-                return Some(row[0]);
+                let mut row = row.unwrap();
+                return row.shift();
             } else {
                 return None;
             }
@@ -1504,13 +1510,13 @@ impl MyStream for MyConn {
 
 pub struct MyResult<'a> {
     conn: &'a mut MyConn,
-    priv columns: ~[Column],
+    columns: Vec<Column>,
     eof: bool,
     is_bin: bool
 }
 
 impl<'a> MyResult<'a> {
-    pub fn next(&mut self) -> Option<MySqlResult<~[Value]>> {
+    pub fn next(&mut self) -> Option<MySqlResult<Vec<Value>>> {
         if self.eof {
             return None
         }
@@ -1522,9 +1528,9 @@ impl<'a> MyResult<'a> {
                 Ok(pld) => pld
         };
         if self.is_bin {
-            if pld[0] == 0xfe && pld.len() < 0xfe {
+            if *pld.get(0) == 0xfe && pld.len() < 0xfe {
                 self.eof = true;
-                let p = EOFPacket::from_payload(pld);
+                let p = EOFPacket::from_payload(pld.as_slice());
                 match p {
                     Ok(p) => {
                         self.conn.handle_eof(&p);
@@ -1533,7 +1539,7 @@ impl<'a> MyResult<'a> {
                 }
                 return None;
             }
-            let res = Value::from_bin_payload(pld, self.columns);
+            let res = Value::from_bin_payload(pld.as_slice(), self.columns.as_slice());
             match res {
                 Ok(p) => Some(Ok(p)),
                 Err(e) => {
@@ -1542,10 +1548,10 @@ impl<'a> MyResult<'a> {
                 }
             }
         } else {
-            if (pld[0] == 0xfe_u8 || pld[0] == 0xff_u8) && pld.len() < 0xfe {
+            if (*pld.get(0) == 0xfe_u8 || *pld.get(0) == 0xff_u8) && pld.len() < 0xfe {
                 self.eof = true;
-                if pld[0] == 0xfe_u8 {
-                    let p = EOFPacket::from_payload(pld);
+                if *pld.get(0) == 0xfe_u8 {
+                    let p = EOFPacket::from_payload(pld.as_slice());
                     match p {
                         Ok(p) => {
                             self.conn.handle_eof(&p);
@@ -1553,15 +1559,15 @@ impl<'a> MyResult<'a> {
                         Err(e) => return Some(Err(MyIoError(e)))
                     }
                     return None;
-                } else if pld[0] == 0xff_u8 {
-                    let p = ErrPacket::from_payload(pld);
+                } else if *pld.get(0) == 0xff_u8 {
+                    let p = ErrPacket::from_payload(pld.as_slice());
                     match p {
                         Ok(p) => return Some(Err(MyStrError(format!("{}", p)))),
                         Err(e) => return Some(Err(MyIoError(e)))
                     }
                 }
             }
-            let res = Value::from_payload(pld, self.columns.len());
+            let res = Value::from_payload(pld.as_slice(), self.columns.len());
             match res {
                 Ok(p) => Some(Ok(p)),
                 Err(e) => {
@@ -1580,8 +1586,8 @@ impl<'a> Drop for MyResult<'a> {
     }
 }
 
-impl<'a> Iterator<MySqlResult<~[Value]>> for &'a mut MySqlResult<Option<MyResult<'a>>> {
-    fn next(&mut self) -> Option<MySqlResult<~[Value]>> {
+impl<'a> Iterator<MySqlResult<Vec<Value>>> for &'a mut MySqlResult<Option<MyResult<'a>>> {
+    fn next(&mut self) -> Option<MySqlResult<Vec<Value>>> {
         if self.is_ok() {
             let result_opt = self.as_mut().unwrap();
             if result_opt.is_some() {
@@ -1609,9 +1615,9 @@ impl<'a> Iterator<MySqlResult<~[Value]>> for &'a mut MySqlResult<Option<MyResult
 
 #[cfg(test)]
 mod test {
-    use test::{BenchHarness};
+    use test::{Bencher};
     use std::default::{Default};
-    use std::{str, slice};
+    use std::{str};
     use std::os::{getcwd};
     use std::io::fs::{File, unlink};
     use std::path::posix::{Path};
@@ -1629,7 +1635,7 @@ mod test {
         assert!(ok_packet.last_insert_id == 2);
         assert!(ok_packet.status_flags == 3);
         assert!(ok_packet.warnings == 4);
-        assert!(ok_packet.info == ~[32u8]);
+        assert!(ok_packet.info == vec!(32u8));
     }
 
     #[test]
@@ -1639,8 +1645,8 @@ mod test {
         assert!(err_packet.is_ok());
         let err_packet = err_packet.unwrap();
         assert!(err_packet.error_code == 1);
-        assert!(err_packet.sql_state == ~[51u8, 68u8, 48u8, 48u8, 48u8]);
-        assert!(err_packet.error_message == ~[32u8, 32u8]);
+        assert!(err_packet.sql_state == vec!(51u8, 68u8, 48u8, 48u8, 48u8));
+        assert!(err_packet.error_message == vec!(32u8, 32u8));
     }
 
     #[test]
@@ -1655,7 +1661,7 @@ mod test {
 
     #[test]
     fn test_handshake_packet() {
-        let mut payload = ~[0x0a_u8,
+        let payload = ~[0x0a_u8,
                         32u8, 32u8, 32u8, 32u8, 0u8,
                         1u8, 0u8, 0u8, 0u8,
                         1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8,
@@ -1666,39 +1672,40 @@ mod test {
         let handshake_packet = handshake_packet.unwrap();
         assert!(handshake_packet.protocol_version == 0x0a);
         assert!(handshake_packet.connection_id == 1);
-        assert!(handshake_packet.auth_plugin_data == ~[1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8]);
+        assert!(handshake_packet.auth_plugin_data == vec!(1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8));
         assert!(handshake_packet.capability_flags == 0x00008003);
+        let mut payload = Vec::from_slice(payload);
         payload.push(33u8);
-        payload.push_all_move(~[4u8, 0u8]);
-        payload.push_all_move(~[0x08_u8, 0u8]);
-        payload.push_all_move(~[0x15_u8]);
-        payload.push_all_move(::std::slice::from_elem(10, 0u8));
-        payload.push_all_move(~[0x26_u8, 0x3a_u8, 0x34_u8, 0x34_u8, 0x46_u8, 0x44_u8,
-                                0x63_u8, 0x44_u8, 0x69_u8, 0x63_u8, 0x39_u8, 0x30_u8, 0x00_u8]);
-        payload.push_all_move(~[1u8, 2u8, 3u8, 4u8, 5u8, 0u8]);
-        let handshake_packet = HandshakePacket::from_payload(payload);
+        payload.push_all_move(vec!(4u8, 0u8));
+        payload.push_all_move(vec!(0x08_u8, 0u8));
+        payload.push_all_move(vec!(0x15_u8));
+        payload.push_all_move(::std::vec::Vec::from_elem(10, 0u8));
+        payload.push_all_move(vec!(0x26_u8, 0x3a_u8, 0x34_u8, 0x34_u8, 0x46_u8, 0x44_u8,
+                                0x63_u8, 0x44_u8, 0x69_u8, 0x63_u8, 0x39_u8, 0x30_u8, 0x00_u8));
+        payload.push_all_move(vec!(1u8, 2u8, 3u8, 4u8, 5u8, 0u8));
+        let handshake_packet = HandshakePacket::from_payload(payload.as_slice());
         assert!(handshake_packet.is_ok());
         let handshake_packet = handshake_packet.unwrap();
         assert!(handshake_packet.protocol_version == 0x0a);
         assert!(handshake_packet.connection_id == 1);
-        assert!(handshake_packet.auth_plugin_data == ~[1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8,
+        assert!(handshake_packet.auth_plugin_data == vec!(1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8,
                                                        0x26_u8, 0x3a_u8, 0x34_u8, 0x34_u8, 0x46_u8, 0x44_u8,
-                                                       0x63_u8, 0x44_u8, 0x69_u8, 0x63_u8, 0x39_u8, 0x30_u8]);
+                                                       0x63_u8, 0x44_u8, 0x69_u8, 0x63_u8, 0x39_u8, 0x30_u8));
         assert!(handshake_packet.capability_flags == 0x00088003);
         assert!(handshake_packet.character_set == 33);
         assert!(handshake_packet.status_flags == 4);
-        assert!(handshake_packet.auth_plugin_name == ~[1u8, 2u8, 3u8, 4u8, 5u8]);
+        assert!(handshake_packet.auth_plugin_name == vec!(1u8, 2u8, 3u8, 4u8, 5u8));
     }
 
     #[test]
     fn test_value_into_str() {
         let v = NULL;
         assert!(v.into_str() == ~"NULL");
-        let v = Bytes((~"hello").into_bytes());
+        let v = Bytes(Vec::from_slice((~"hello").into_bytes()));
         assert!(v.into_str() == ~"'hello'");
-        let v = Bytes((~"h'e'l'l'o").into_bytes());
+        let v = Bytes(Vec::from_slice((~"h'e'l'l'o").into_bytes()));
         assert!(v.into_str() == ~"'h\'e\'l\'l\'o'");
-        let v = Bytes(~[0, 1, 2, 3, 4, 255]);
+        let v = Bytes(vec!(0, 1, 2, 3, 4, 255));
         assert!(v.into_str() == ~"0x0001020304FF");
         let v = Int(-65536);
         assert!(v.into_str() == ~"-65536");
@@ -1737,7 +1744,7 @@ mod test {
                                           db_name: Some(~"mysql"),
                                           ..Default::default()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
-            assert!(x.unwrap()[0].unwrap_bytes() == (~"mysql").into_bytes());
+            assert!(x.unwrap().shift().unwrap().unwrap_bytes() == Vec::from_slice((~"mysql").into_bytes()));
         }
     }
 
@@ -1766,17 +1773,17 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             if count == 0 {
-                assert!(row[0] == Bytes((~"foo").into_bytes()));
-                assert!(row[1] == Bytes((~"-123").into_bytes()));
-                assert!(row[2] == Bytes((~"123").into_bytes()));
-                assert!(row[3] == Bytes((~"2014-05-05").into_bytes()));
-                assert!(row[4] == Bytes((~"123.123").into_bytes()));
+                assert!(*row.get(0) == Bytes(Vec::from_slice((~"foo").into_bytes())));
+                assert!(*row.get(1) == Bytes(Vec::from_slice((~"-123").into_bytes())));
+                assert!(*row.get(2) == Bytes(Vec::from_slice((~"123").into_bytes())));
+                assert!(*row.get(3) == Bytes(Vec::from_slice((~"2014-05-05").into_bytes())));
+                assert!(*row.get(4) == Bytes(Vec::from_slice((~"123.123").into_bytes())));
             } else {
-                assert!(row[0] == Bytes((~"foo").into_bytes()));
-                assert!(row[1] == Bytes((~"-321").into_bytes()));
-                assert!(row[2] == Bytes((~"321").into_bytes()));
-                assert!(row[3] == Bytes((~"2014-06-06").into_bytes()));
-                assert!(row[4] == Bytes((~"321.321").into_bytes()));
+                assert!(*row.get(0) == Bytes(Vec::from_slice((~"foo").into_bytes())));
+                assert!(*row.get(1) == Bytes(Vec::from_slice((~"-321").into_bytes())));
+                assert!(*row.get(2) == Bytes(Vec::from_slice((~"321").into_bytes())));
+                assert!(*row.get(3) == Bytes(Vec::from_slice((~"2014-06-06").into_bytes())));
+                assert!(*row.get(4) == Bytes(Vec::from_slice((~"321.321").into_bytes())));
             }
             count += 1;
         }
@@ -1784,7 +1791,7 @@ mod test {
         for row in &mut conn.query("SELECT REPEAT('A', 20000000)") {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let val = row[0].bytes_ref();
+            let val = row.get(0).bytes_ref();
             assert!(val.len() == 20000000);
             for y in val.iter() {
                 assert!(y == &65u8);
@@ -1804,8 +1811,8 @@ mod test {
         let stmt = conn.prepare("INSERT INTO tbl(a, b, c, d, e) VALUES (?, ?, ?, ?, ?)");
         assert!(stmt.is_ok());
         let stmt = stmt.unwrap();
-        assert!(conn.execute(&stmt, [Bytes((~"hello").into_bytes()), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
-        assert!(conn.execute(&stmt, [Bytes((~"world").into_bytes()), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
+        assert!(conn.execute(&stmt, [Bytes(Vec::from_slice((~"hello").into_bytes())), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
+        assert!(conn.execute(&stmt, [Bytes(Vec::from_slice((~"world").into_bytes())), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
         let stmt = conn.prepare("SELECT * FROM tbl");
         assert!(stmt.is_ok());
         let stmt = stmt.unwrap();
@@ -1814,17 +1821,17 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             if i == 0 {
-                assert!(row[0] == Bytes(~[104u8, 101u8, 108u8, 108u8, 111u8]));
-                assert!(row[1] == Int(-123i64));
-                assert!(row[2] == Int(123i64));
-                assert!(row[3] == Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                assert!(row[4].get_float() == 123.123);
+                assert!(*row.get(0) == Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8)));
+                assert!(*row.get(1) == Int(-123i64));
+                assert!(*row.get(2) == Int(123i64));
+                assert!(*row.get(3) == Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
+                assert!(row.get(4).get_float() == 123.123);
             } else {
-                assert!(row[0] == Bytes(~[119u8, 111u8, 114u8, 108u8, 100u8]));
-                assert!(row[1] == NULL);
-                assert!(row[2] == NULL);
-                assert!(row[3] == NULL);
-                assert!(row[4].get_float() == 321.321);
+                assert!(*row.get(0) == Bytes(vec!(119u8, 111u8, 114u8, 108u8, 100u8)));
+                assert!(*row.get(1) == NULL);
+                assert!(*row.get(2) == NULL);
+                assert!(*row.get(3) == NULL);
+                assert!(row.get(4).get_float() == 321.321);
             }
             i += 1;
         }
@@ -1833,7 +1840,7 @@ mod test {
         for row in &mut conn.execute(&stmt, []) {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let v: &[u8] = row[0].bytes_ref();
+            let v: &[u8] = row.get(0).bytes_ref();
             assert!(v.len() == 20000000);
             for y in v.iter() {
                 assert!(y == &65u8);
@@ -1850,11 +1857,11 @@ mod test {
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a LONGBLOB)").is_ok());
-        let query = format!("INSERT INTO tbl(a) VALUES('{:s}')", str::from_chars(slice::from_elem(20000000, 'A')));
+        let query = format!("INSERT INTO tbl(a) VALUES('{:s}')", str::from_chars(Vec::from_elem(20000000, 'A').as_slice()));
         assert!(conn.query(query).is_ok());
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
-        let v: ~[u8] = x.unwrap()[0].unwrap_bytes();
+        let v: Vec<u8> = x.unwrap().shift().unwrap().unwrap_bytes();
         assert!(v.len() == 20000000);
         for y in v.iter() {
             assert!(y == &65u8);
@@ -1874,12 +1881,12 @@ mod test {
         let stmt = conn.prepare("INSERT INTO tbl(a) values ( ? );");
         assert!(stmt.is_ok());
         let stmt = stmt.unwrap();
-        let val = slice::from_elem(20000000, 65u8);
+        let val = Vec::from_elem(20000000, 65u8);
         assert!(conn.execute(&stmt, [Bytes(val)]).is_ok());
         let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(row.is_ok());
         let row = row.unwrap();
-        let v = row[0].bytes_ref();
+        let v = row.get(0).bytes_ref();
         assert!(v.len() == 20000000);
         for y in v.iter() {
             assert!(y == &65u8);
@@ -1904,16 +1911,16 @@ mod test {
             file.write_line(&"BBBBBB");
             file.write_line(&"CCCCCC");
         }
-        let query = format!("LOAD DATA LOCAL INFILE '{:s}' INTO TABLE tbl", str::from_utf8_owned(path.clone().into_vec()).unwrap());
+        let query = format!("LOAD DATA LOCAL INFILE '{:s}' INTO TABLE tbl", str::from_utf8(path.clone().into_vec().as_slice()).unwrap());
         assert!(conn.query(query).is_ok());
         let mut count = 0;
         for row in &mut conn.query("SELECT * FROM tbl") {
             assert!(row.is_ok());
             let row = row.unwrap();
             match count {
-                0 => assert!(row == ~[Bytes(~[65u8, 65u8, 65u8, 65u8, 65u8, 65u8])]),
-                1 => assert!(row == ~[Bytes(~[66u8, 66u8, 66u8, 66u8, 66u8, 66u8])]),
-                2 => assert!(row == ~[Bytes(~[67u8, 67u8, 67u8, 67u8, 67u8, 67u8])]),
+                0 => assert!(row == vec!(Bytes(vec!(65u8, 65u8, 65u8, 65u8, 65u8, 65u8)))),
+                1 => assert!(row == vec!(Bytes(vec!(66u8, 66u8, 66u8, 66u8, 66u8, 66u8)))),
+                2 => assert!(row == vec!(Bytes(vec!(67u8, 67u8, 67u8, 67u8, 67u8, 67u8)))),
                 _ => assert!(false)
             }
             count += 1;
@@ -1924,7 +1931,7 @@ mod test {
 
     #[bench]
     #[allow(unused_must_use)]
-    fn bench_simple_exec(bench: &mut BenchHarness) {
+    fn bench_simple_exec(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
@@ -1934,7 +1941,7 @@ mod test {
 
     #[bench]
     #[allow(unused_must_use)]
-    fn bench_prepared_exec(bench: &mut BenchHarness) {
+    fn bench_prepared_exec(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
@@ -1945,7 +1952,7 @@ mod test {
 
     #[bench]
     #[allow(unused_must_use)]
-    fn bench_simple_query_row(bench: &mut BenchHarness) {
+    fn bench_simple_query_row(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
@@ -1955,7 +1962,7 @@ mod test {
 
     #[bench]
     #[allow(unused_must_use)]
-    fn bench_simple_prepared_query_row(bench: &mut BenchHarness) {
+    fn bench_simple_prepared_query_row(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
@@ -1966,7 +1973,7 @@ mod test {
 
     #[bench]
     #[allow(unused_must_use)]
-    fn bench_simple_prepared_query_row_param(bench: &mut BenchHarness) {
+    fn bench_simple_prepared_query_row_param(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
@@ -1978,19 +1985,19 @@ mod test {
 
     #[bench]
     #[allow(unused_must_use)]
-    fn bench_prepared_query_row_5param(bench: &mut BenchHarness) {
+    fn bench_prepared_query_row_5param(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
         let stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-        let params = ~[Int(42), Bytes(~[104u8, 101u8, 108u8, 108u8, 111u8, 111u8]), Float(1.618), NULL, Int(1)];
+        let params = ~[Int(42), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8, 111u8)), Float(1.618), NULL, Int(1)];
         bench.iter(|| { conn.execute(&stmt, params); })
     }
 
     #[bench]
     #[allow(unused_must_use)]
-    fn bench_select_large_string(bench: &mut BenchHarness) {
+    fn bench_select_large_string(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
@@ -2000,7 +2007,7 @@ mod test {
 
     #[bench]
     #[allow(unused_must_use)]
-    fn bench_select_prepared_large_string(bench: &mut BenchHarness) {
+    fn bench_select_prepared_large_string(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
