@@ -1,5 +1,5 @@
 use std::io::{IoResult};
-use super::conn::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
+use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
 
 pub trait MyReader: Reader {
