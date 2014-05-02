@@ -11,9 +11,10 @@
 extern crate test;
 extern crate sync;
 
-pub mod pool;
+mod scramble;
 pub mod consts;
 pub mod error;
-pub mod scramble;
+pub mod packet;
 pub mod io;
 pub mod conn;
+pub mod pool;

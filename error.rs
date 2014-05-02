@@ -2,7 +2,7 @@
 
 use std::fmt;
 use std::io::{IoError};
-use super::conn::{ErrPacket};
+use super::packet::{ErrPacket};
 
 pub enum MyError {
 	MyIoError(IoError),
