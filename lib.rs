@@ -13,6 +13,7 @@ extern crate sync;
 
 pub mod pool;
 pub mod consts;
+pub mod error;
 pub mod scramble;
 pub mod io;
 pub mod conn;

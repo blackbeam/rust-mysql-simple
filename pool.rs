@@ -1,6 +1,6 @@
 use std::cast;
 use sync::{Arc, Mutex};
-use conn::{MyConn, MyOpts, MySqlResult, MyResult, MyStream};
+use conn::{MyConn, MyOpts, MyResult, QueryResult, MyStream};
 
 struct MyInnerPool {
     opts: MyOpts,
@@ -23,7 +23,7 @@ impl Drop for MyInnerPool {
 }
 
 impl MyInnerPool {
-    fn new_conn(&mut self) -> MySqlResult<()> {
+    fn new_conn(&mut self) -> MyResult<()> {
         match MyConn::new(self.opts.clone()) {
             Ok(conn) => {
                 unsafe { self.pool.push(cast::transmute(~conn)) };
@@ -50,7 +50,7 @@ impl MyPool {
         MyPool{ pool: Arc::new(Mutex::new(pool)) }
     }
 
-    pub fn get_conn(&self) -> MySqlResult<MyPooledConn> {
+    pub fn get_conn(&self) -> MyResult<MyPooledConn> {
         let mut pool = self.pool.lock();
 
         while pool.pool.is_empty() {
@@ -90,7 +90,7 @@ impl Drop for MyPooledConn {
 }
 
 impl MyPooledConn {
-    fn query<'a>(&'a mut self, query: &str) -> MySqlResult<Option<MyResult<'a>>> {
+    fn query<'a>(&'a mut self, query: &str) -> MyResult<Option<QueryResult<'a>>> {
         self.conn.get_mut_ref().query(query)
     }
 }

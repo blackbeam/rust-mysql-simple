@@ -1,43 +1,15 @@
 use std::{fmt, str, uint, default};
-use std::io::{Stream, Reader, File, IoResult, IoError,
-              Seek, SeekCur, EndOfFile, BufReader, MemWriter};
+use std::io::{Stream, Reader, File, IoResult, Seek,
+              SeekCur, EndOfFile, BufReader, MemWriter};
 use std::io::net::ip::{SocketAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
 use super::consts;
 use super::scramble::{scramble};
 use super::io::{MyReader, MyWriter};
+use super::error::{MyError, MyIoError, MySqlError, MyStrError};
 
-pub enum MyError {
-    MyIoError(IoError),
-    MyStrError(~str)
-}
-
-pub type MySqlResult<T> = Result<T, MyError>;
-
-impl fmt::Show for MyError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            MyIoError(ref e) => e.fmt(f),
-            MyStrError(ref e) => write!(f.buf, "{}", e)
-        }
-    }
-}
-
-impl<'a> fmt::Show for &'a mut MyError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        (**self).fmt(f)
-    }
-}
-
-macro_rules! try_io(
-    ($code:expr) => (
-        match $code {
-            Ok(x) => x,
-            Err(e) => return Err(MyIoError(e))
-        }
-    )
-)
+pub type MyResult<T> = Result<T, MyError>;
 
 /***
  *     .d88888b.  888      8888888b.                    888               888    
@@ -776,7 +748,7 @@ pub struct MyConn {
 }
 
 impl MyConn {
-    pub fn new(opts: MyOpts) -> MySqlResult<MyConn> {
+    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
         if opts.unix_addr.is_some() {
             let unix_stream = UnixStream::connect(opts.unix_addr.get_ref());
             if unix_stream.is_ok() {
@@ -910,26 +882,26 @@ impl<'a> Writer for &'a MyConn {
  */
 
 pub trait MyStream: MyReader + MyWriter {
-    fn read_packet(&mut self) -> MySqlResult<Vec<u8>>;
-    fn write_packet(&mut self, data: &Vec<u8>) -> MySqlResult<()>;
+    fn read_packet(&mut self) -> MyResult<Vec<u8>>;
+    fn write_packet(&mut self, data: &Vec<u8>) -> MyResult<()>;
     fn handle_ok(&mut self, ok: &OkPacket);
     fn handle_eof(&mut self, eof: &EOFPacket);
     fn handle_handshake(&mut self, hp: &HandshakePacket);
-    fn do_handshake(&mut self) -> MySqlResult<()>;
-    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MySqlResult<()>;
-    fn write_command(&mut self, cmd: u8) -> MySqlResult<()>;
-    fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MySqlResult<()>;
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MySqlResult<()>;
-    fn query<'a>(&'a mut self, query: &str) -> MySqlResult<Option<MyResult<'a>>>;
-    fn prepare(&mut self, query: &str) -> MySqlResult<Stmt>;
-    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MySqlResult<()>;
-    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MySqlResult<Option<MyResult<'a>>>;
-    fn connect(&mut self) -> MySqlResult<()>;
+    fn do_handshake(&mut self) -> MyResult<()>;
+    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()>;
+    fn write_command(&mut self, cmd: u8) -> MyResult<()>;
+    fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MyResult<()>;
+    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()>;
+    fn query<'a>(&'a mut self, query: &str) -> MyResult<Option<QueryResult<'a>>>;
+    fn prepare(&mut self, query: &str) -> MyResult<Stmt>;
+    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MyResult<()>;
+    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MyResult<Option<QueryResult<'a>>>;
+    fn connect(&mut self) -> MyResult<()>;
     fn get_system_var(&mut self, name: &str) -> Option<Value>;
 }
 
 impl MyStream for MyConn {
-    fn read_packet(&mut self) -> MySqlResult<Vec<u8>> {
+    fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let mut output = Vec::new();
         loop {
             let payload_len = try_io!(self.read_le_uint_n(3));
@@ -949,7 +921,7 @@ impl MyStream for MyConn {
         }
         Ok(output)
     }
-    fn write_packet(&mut self, data: &Vec<u8>) -> MySqlResult<()> {
+    fn write_packet(&mut self, data: &Vec<u8>) -> MyResult<()> {
         if data.len() > self.max_allowed_packet && self.max_allowed_packet < consts::MAX_PAYLOAD_LEN {
             return Err(MyStrError(~"Packet too large"));
         }
@@ -1002,7 +974,7 @@ impl MyStream for MyConn {
     fn handle_eof(&mut self, eof: &EOFPacket) {
         self.status_flags = eof.status_flags;
     }
-    fn do_handshake(&mut self) -> MySqlResult<()> {
+    fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
             let handshake = try_io!(HandshakePacket::from_payload(pld.as_slice()));
             if handshake.protocol_version != 10u8 {
@@ -1024,13 +996,13 @@ impl MyStream for MyConn {
                 },
                 0xffu8 => {
                     let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
-                    return Err(MyStrError(format!("{}", err)));
+                    return Err(MySqlError(err));
                 },
                 _ => return Err(MyStrError(~"Unexpected packet"))
             }
         })
     }
-    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MySqlResult<()> {
+    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let mut client_flags = consts::CLIENT_PROTOCOL_41 |
                            consts::CLIENT_SECURE_CONNECTION |
                            consts::CLIENT_LONG_PASSWORD |
@@ -1061,17 +1033,17 @@ impl MyStream for MyConn {
 
         self.write_packet(&writer.unwrap())
     }
-    fn write_command(&mut self, cmd: u8) -> MySqlResult<()> {
+    fn write_command(&mut self, cmd: u8) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd;
         self.write_packet(&vec!(cmd))
     }
-    fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MySqlResult<()> {
+    fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd;
         self.write_packet(&vec!(cmd).append(buf))
     }
-    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MySqlResult<()> {
+    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
         for &id in ids.iter() {
             match params[id as uint] {
                 Bytes(ref x) => {
@@ -1089,7 +1061,7 @@ impl MyStream for MyConn {
         }
         Ok(())
     }
-    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MySqlResult<Option<MyResult<'a>>> {
+    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MyResult<Option<QueryResult<'a>>> {
         if stmt.num_params != params.len() as u16 {
             return Err(MyStrError(format!("Statement takes {:u} parameters but {:u} was supplied", stmt.num_params, params.len())));
         }
@@ -1130,7 +1102,7 @@ impl MyStream for MyConn {
             },
             0xffu8 => {
                 let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
-                Err(MyStrError(format!("{}", err)))
+                Err(MySqlError(err))
             },
             _ => {
                 let mut reader = BufReader::new(pld.as_slice());
@@ -1146,14 +1118,14 @@ impl MyStream for MyConn {
                     columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
                 }
                 try!(self.read_packet());
-                return Ok(Some(MyResult{conn: self,
+                return Ok(Some(QueryResult{conn: self,
                                  columns: columns,
                                  eof: false,
                                  is_bin: true}));
             }
         }
     }
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MySqlResult<()> {
+    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()> {
         let path = Path::new(file_name);
         let mut file = try_io!(File::open(&path));
         let mut chunk = Vec::from_elem(self.max_allowed_packet, 0u8);
@@ -1180,7 +1152,7 @@ impl MyStream for MyConn {
         }
         Ok(())
     }
-    fn query<'a>(&'a mut self, query: &str) -> MySqlResult<Option<MyResult<'a>>> {
+    fn query<'a>(&'a mut self, query: &str) -> MyResult<Option<QueryResult<'a>>> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
@@ -1200,7 +1172,7 @@ impl MyStream for MyConn {
             },
             0xff_u8 => {
                 let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
-                return Err(MyStrError(format!("{}", err)));
+                return Err(MySqlError(err));
             },
             _ => {
                 let mut reader = BufReader::new(pld.as_slice());
@@ -1213,20 +1185,20 @@ impl MyStream for MyConn {
                 }
                 // skip eof packet
                 try!(self.read_packet());
-                return Ok(Some(MyResult{conn: self,
+                return Ok(Some(QueryResult{conn: self,
                                         columns: columns,
                                         eof: false,
                                         is_bin: false}));
             }
         }
     }
-    fn prepare(&mut self, query: &str) -> MySqlResult<Stmt> {
+    fn prepare(&mut self, query: &str) -> MyResult<Stmt> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
             0xff => {
                 let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
-                return Err(MyStrError(format!("{}", err)));
+                return Err(MySqlError(err));
             },
             _ => {
                 let mut stmt = try_io!(Stmt::from_payload(pld.as_slice()));
@@ -1254,7 +1226,7 @@ impl MyStream for MyConn {
             }
         }
     }
-    fn connect(&mut self) -> MySqlResult<()> {
+    fn connect(&mut self) -> MyResult<()> {
         if self.connected {
             return Ok(());
         }
@@ -1300,15 +1272,15 @@ impl MyStream for MyConn {
  *                   "Y88P"                                                   
  */
 
-pub struct MyResult<'a> {
+pub struct QueryResult<'a> {
     conn: &'a mut MyConn,
     columns: Vec<Column>,
     eof: bool,
     is_bin: bool
 }
 
-impl<'a> MyResult<'a> {
-    pub fn next(&mut self) -> Option<MySqlResult<Vec<Value>>> {
+impl<'a> QueryResult<'a> {
+    pub fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.eof {
             return None
         }
@@ -1354,7 +1326,7 @@ impl<'a> MyResult<'a> {
                 } else if *pld.get(0) == 0xff_u8 {
                     let p = ErrPacket::from_payload(pld.as_slice());
                     match p {
-                        Ok(p) => return Some(Err(MyStrError(format!("{}", p)))),
+                        Ok(p) => return Some(Err(MySqlError(p))),
                         Err(e) => return Some(Err(MyIoError(e)))
                     }
                 }
@@ -1372,14 +1344,14 @@ impl<'a> MyResult<'a> {
 }
 
 #[unsafe_destructor]
-impl<'a> Drop for MyResult<'a> {
+impl<'a> Drop for QueryResult<'a> {
     fn drop(&mut self) {
         for _ in *self {}
     }
 }
 
-impl<'a> Iterator<MySqlResult<Vec<Value>>> for &'a mut MySqlResult<Option<MyResult<'a>>> {
-    fn next(&mut self) -> Option<MySqlResult<Vec<Value>>> {
+impl<'a> Iterator<MyResult<Vec<Value>>> for &'a mut MyResult<Option<QueryResult<'a>>> {
+    fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.is_ok() {
             let result_opt = self.as_mut().unwrap();
             if result_opt.is_some() {
