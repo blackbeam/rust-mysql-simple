@@ -107,7 +107,6 @@ mod test {
     #[test]
     fn test_query() {
         let pool = MyPool::new(3, MyOpts{user: Some("root".to_owned()),
-                                         pass: Some("password".to_owned()),
                                          ..Default::default()});
         for _ in range(0, 10) {
             let pool = pool.clone();
@@ -123,7 +122,6 @@ mod test {
     #[test]
     fn test_prepared_query() {
         let pool = MyPool::new(3, MyOpts{user: Some("root".to_owned()),
-                                         pass: Some("password".to_owned()),
                                          ..Default::default()});
         for _ in range(0, 10) {
             let pool = pool.clone();

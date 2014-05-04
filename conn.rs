@@ -846,7 +846,6 @@ mod test {
     #[test]
     fn test_connect() {
         let conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()});
         assert!(conn.is_ok());
     }
@@ -854,7 +853,6 @@ mod test {
     #[test]
     fn test_connect_with_db() {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           db_name: Some("mysql".to_owned()),
                                           ..Default::default()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
@@ -865,7 +863,6 @@ mod test {
     #[test]
     fn test_query() {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -916,7 +913,6 @@ mod test {
     #[test]
     fn test_prepared_statemenst() {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -969,7 +965,6 @@ mod test {
     #[test]
     fn test_large_insert() {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -990,7 +985,6 @@ mod test {
     #[test]
     fn test_large_insert_prepared() {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -1017,7 +1011,6 @@ mod test {
     #[allow(unused_must_use)]
     fn test_local_infile() {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
