@@ -1,6 +1,6 @@
 use std::cast;
 use sync::{Arc, Mutex};
-use conn::{MyConn, MyOpts, MyResult, Stmt, QueryResult, MyStream};
+use conn::{MyConn, MyOpts, MyResult, Stmt, QueryResult};
 
 struct MyInnerPool {
     opts: MyOpts,

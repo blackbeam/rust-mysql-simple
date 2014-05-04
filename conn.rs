@@ -5,7 +5,7 @@ use std::io::net::ip::{SocketAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
 use super::consts;
-use super::io::{MyReader, MyWriter};
+use super::io::{MyReader};
 use super::error::{MyError, MyIoError, MySqlError, MyStrError};
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
@@ -289,88 +289,6 @@ impl MyConn {
             return Err(MyStrError(~"Could not connect. Address not specified"));
         }
     }
-    fn handle_handshake(&mut self, hp: &HandshakePacket) {
-        self.capability_flags = hp.capability_flags;
-        self.status_flags = hp.status_flags;
-        self.connection_id = hp.connection_id;
-        self.character_set = hp.character_set;
-    }
-    fn handle_ok(&mut self, op: &OkPacket) {
-        self.affected_rows = op.affected_rows;
-        self.last_insert_id = op.last_insert_id;
-        self.status_flags = op.status_flags;
-    }
-    fn handle_eof(&mut self, eof: &EOFPacket) {
-        self.status_flags = eof.status_flags;
-    }
-}
-
-impl Reader for MyConn {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        self.stream.read(buf)
-    }
-}
-impl Reader for ~MyConn {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        self.read(buf)
-    }
-}
-impl<'a> Reader for &'a MyConn {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        self.read(buf)
-    }
-}
-
-impl Writer for MyConn {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.stream.write(buf)
-    }
-}
-impl Writer for ~MyConn {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.write(buf)
-    }
-}
-impl<'a> Writer for &'a MyConn {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.write(buf)
-    }
-}
-
-/***
- *    888b     d888           .d8888b.  888                                            
- *    8888b   d8888          d88P  Y88b 888                                            
- *    88888b.d88888          Y88b.      888                                            
- *    888Y88888P888 888  888  "Y888b.   888888 888d888  .d88b.   8888b.  88888b.d88b.  
- *    888 Y888P 888 888  888     "Y88b. 888    888P"   d8P  Y8b     "88b 888 "888 "88b 
- *    888  Y8P  888 888  888       "888 888    888     88888888 .d888888 888  888  888 
- *    888   "   888 Y88b 888 Y88b  d88P Y88b.  888     Y8b.     888  888 888  888  888 
- *    888       888  "Y88888  "Y8888P"   "Y888 888      "Y8888  "Y888888 888  888  888 
- *                       888                                                           
- *                  Y8b d88P                                                           
- *                   "Y88P"                                                            
- */
-
-pub trait MyStream: MyReader + MyWriter {
-    fn read_packet(&mut self) -> MyResult<Vec<u8>>;
-    fn write_packet(&mut self, data: &Vec<u8>) -> MyResult<()>;
-    fn handle_ok(&mut self, ok: &OkPacket);
-    fn handle_eof(&mut self, eof: &EOFPacket);
-    fn handle_handshake(&mut self, hp: &HandshakePacket);
-    fn do_handshake(&mut self) -> MyResult<()>;
-    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()>;
-    fn write_command(&mut self, cmd: u8) -> MyResult<()>;
-    fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MyResult<()>;
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>>;
-    fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>>;
-    fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>>;
-    fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()>;
-    fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<QueryResult<'a>>;
-    fn connect(&mut self) -> MyResult<()>;
-    fn get_system_var(&mut self, name: &str) -> Option<Value>;
-}
-
-impl MyStream for MyConn {
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let mut output = Vec::new();
         loop {
@@ -629,7 +547,7 @@ impl MyStream for MyConn {
         }
         Ok(None)
     }
-    fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
+    pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
@@ -678,7 +596,7 @@ impl MyStream for MyConn {
             }
         }
     }
-    fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+    pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
@@ -742,6 +660,38 @@ impl MyStream for MyConn {
             }
         }
         return None;
+    }
+}
+
+impl Reader for MyConn {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+        self.stream.read(buf)
+    }
+}
+impl Reader for ~MyConn {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+        self.read(buf)
+    }
+}
+impl<'a> Reader for &'a MyConn {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+        self.read(buf)
+    }
+}
+
+impl Writer for MyConn {
+    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+        self.stream.write(buf)
+    }
+}
+impl Writer for ~MyConn {
+    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+        self.write(buf)
+    }
+}
+impl<'a> Writer for &'a MyConn {
+    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+        self.write(buf)
     }
 }
 
@@ -890,7 +840,7 @@ mod test {
     use std::os::{getcwd};
     use std::io::fs::{File, unlink};
     use std::path::posix::{Path};
-    use super::{MyConn, MyStream, MyOpts};
+    use super::{MyConn, MyOpts};
     use super::super::value::{NULL, Int, UInt, Float, Bytes, Date};
 
     #[test]
