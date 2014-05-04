@@ -1,6 +1,6 @@
 use std::cast;
 use sync::{Arc, Mutex};
-use conn::{MyConn, MyOpts, MyResult, QueryResult, MyStream};
+use conn::{MyConn, MyOpts, MyResult, Stmt, QueryResult, MyStream};
 
 struct MyInnerPool {
     opts: MyOpts,
@@ -93,6 +93,9 @@ impl MyPooledConn {
     fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         self.conn.get_mut_ref().query(query)
     }
+    fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+        self.conn.get_mut_ref().prepare(query)
+    }
 }
 
 #[cfg(test)]
@@ -100,6 +103,7 @@ mod test {
     use conn::{MyOpts};
     use std::default::{Default};
     use super::{MyPool};
+
     #[test]
     fn test_query() {
         let pool = MyPool::new(3, MyOpts{user: Some(~"root"),
@@ -112,6 +116,25 @@ mod test {
                 assert!(conn.is_ok());
                 let mut conn = conn.unwrap();
                 assert!(conn.query("SELECT 1").is_ok());
+            });
+        }
+    }
+
+    #[test]
+    fn test_prepared_query() {
+        let pool = MyPool::new(3, MyOpts{user: Some(~"root"),
+                                         pass: Some(~"password"),
+                                         ..Default::default()});
+        for _ in range(0, 10) {
+            let pool = pool.clone();
+            spawn(proc() {
+                let conn = pool.get_conn();
+                assert!(conn.is_ok());
+                let mut conn = conn.unwrap();
+                let stmt = conn.prepare("SELECT 1");
+                assert!(stmt.is_ok());
+                let mut stmt = stmt.unwrap();
+                assert!(stmt.execute([]).is_ok());
             });
         }
     }

@@ -27,7 +27,7 @@ pub type MyResult<T> = Result<T, MyError>;
  *                                           
  */
 
-pub struct Stmt {
+struct InnerStmt {
     params: Option<Vec<Column>>,
     columns: Option<Vec<Column>>,
     statement_id: u32,
@@ -36,21 +36,31 @@ pub struct Stmt {
     warning_count: u16,
 }
 
-impl Stmt {
-    #[inline]
-    fn from_payload(pld: &[u8]) -> IoResult<Stmt> {
+impl InnerStmt {
+    fn from_payload(pld: &[u8]) -> IoResult<InnerStmt> {
         let mut reader = BufReader::new(pld);
         try!(reader.seek(1, SeekCur));
         let statement_id = try!(reader.read_le_u32());
         let num_columns = try!(reader.read_le_u16());
         let num_params = try!(reader.read_le_u16());
         let warning_count = try!(reader.read_le_u16());
-        Ok(Stmt{statement_id: statement_id,
+        Ok(InnerStmt{statement_id: statement_id,
               num_columns: num_columns,
               num_params: num_params,
               warning_count: warning_count,
               params: None,
               columns: None})
+    }
+}
+
+pub struct Stmt<'a> {
+    stmt: InnerStmt,
+    conn: &'a mut MyConn
+}
+
+impl<'a> Stmt<'a> {
+    pub fn execute<'a>(&'a mut self, params: &[Value]) -> MyResult<QueryResult<'a>> {
+        self.conn.execute(&self.stmt, params)
     }
 }
 
@@ -353,9 +363,9 @@ pub trait MyStream: MyReader + MyWriter {
     fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MyResult<()>;
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>>;
     fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>>;
-    fn prepare(&mut self, query: &str) -> MyResult<Stmt>;
-    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MyResult<()>;
-    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MyResult<QueryResult<'a>>;
+    fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>>;
+    fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()>;
+    fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<QueryResult<'a>>;
     fn connect(&mut self) -> MyResult<()>;
     fn get_system_var(&mut self, name: &str) -> Option<Value>;
 }
@@ -503,7 +513,7 @@ impl MyStream for MyConn {
         self.last_command = cmd;
         self.write_packet(&vec!(cmd).append(buf))
     }
-    fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
+    fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
         for &id in ids.iter() {
             match params[id as uint] {
                 Bytes(ref x) => {
@@ -521,7 +531,7 @@ impl MyStream for MyConn {
         }
         Ok(())
     }
-    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MyResult<QueryResult<'a>> {
+    fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<QueryResult<'a>> {
         if stmt.num_params != params.len() as u16 {
             return Err(MyStrError(format!("Statement takes {:u} parameters but {:u} was supplied", stmt.num_params, params.len())));
         }
@@ -668,7 +678,7 @@ impl MyStream for MyConn {
             }
         }
     }
-    fn prepare(&mut self, query: &str) -> MyResult<Stmt> {
+    fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
@@ -677,7 +687,7 @@ impl MyStream for MyConn {
                 return Err(MySqlError(err));
             },
             _ => {
-                let mut stmt = try_io!(Stmt::from_payload(pld.as_slice()));
+                let mut stmt = try_io!(InnerStmt::from_payload(pld.as_slice()));
                 if stmt.num_params > 0 {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as uint);
                     let mut i = -1;
@@ -698,7 +708,8 @@ impl MyStream for MyConn {
                     stmt.columns = Some(columns);
                     try!(self.read_packet());
                 }
-                return Ok(stmt);
+                return Ok(Stmt{conn: self,
+                               stmt: stmt});
             }
         }
     }
@@ -961,36 +972,40 @@ mod test {
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a TEXT, b INT, c INT UNSIGNED, d DATE, e DOUBLE)").is_ok());
-        let stmt = conn.prepare("INSERT INTO tbl(a, b, c, d, e) VALUES (?, ?, ?, ?, ?)");
-        assert!(stmt.is_ok());
-        let stmt = stmt.unwrap();
-        assert!(conn.execute(&stmt, [Bytes(Vec::from_slice((~"hello").into_bytes())), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
-        assert!(conn.execute(&stmt, [Bytes(Vec::from_slice((~"world").into_bytes())), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
-        let stmt = conn.prepare("SELECT * FROM tbl");
-        assert!(stmt.is_ok());
-        let stmt = stmt.unwrap();
-        let mut i = 0;
-        for row in &mut conn.execute(&stmt, []) {
-            assert!(row.is_ok());
-            let row = row.unwrap();
-            if i == 0 {
-                assert!(*row.get(0) == Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8)));
-                assert!(*row.get(1) == Int(-123i64));
-                assert!(*row.get(2) == Int(123i64));
-                assert!(*row.get(3) == Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                assert!(row.get(4).get_float() == 123.123);
-            } else {
-                assert!(*row.get(0) == Bytes(vec!(119u8, 111u8, 114u8, 108u8, 100u8)));
-                assert!(*row.get(1) == NULL);
-                assert!(*row.get(2) == NULL);
-                assert!(*row.get(3) == NULL);
-                assert!(row.get(4).get_float() == 321.321);
+        {
+            let stmt = conn.prepare("INSERT INTO tbl(a, b, c, d, e) VALUES (?, ?, ?, ?, ?)");
+            assert!(stmt.is_ok());
+            let mut stmt = stmt.unwrap();
+            assert!(stmt.execute([Bytes(Vec::from_slice((~"hello").into_bytes())), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
+            assert!(stmt.execute([Bytes(Vec::from_slice((~"world").into_bytes())), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
+        }
+        {
+            let stmt = conn.prepare("SELECT * FROM tbl");
+            assert!(stmt.is_ok());
+            let mut stmt = stmt.unwrap();
+            let mut i = 0;
+            for row in &mut stmt.execute([]) {
+                assert!(row.is_ok());
+                let row = row.unwrap();
+                if i == 0 {
+                    assert!(*row.get(0) == Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8)));
+                    assert!(*row.get(1) == Int(-123i64));
+                    assert!(*row.get(2) == Int(123i64));
+                    assert!(*row.get(3) == Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
+                    assert!(row.get(4).get_float() == 123.123);
+                } else {
+                    assert!(*row.get(0) == Bytes(vec!(119u8, 111u8, 114u8, 108u8, 100u8)));
+                    assert!(*row.get(1) == NULL);
+                    assert!(*row.get(2) == NULL);
+                    assert!(*row.get(3) == NULL);
+                    assert!(row.get(4).get_float() == 321.321);
+                }
+                i += 1;
             }
-            i += 1;
         }
         let stmt = conn.prepare("SELECT REPEAT('A', 20000000);");
-        let stmt = stmt.unwrap();
-        for row in &mut conn.execute(&stmt, []) {
+        let mut stmt = stmt.unwrap();
+        for row in &mut stmt.execute([]) {
             assert!(row.is_ok());
             let row = row.unwrap();
             let v: &[u8] = row.get(0).bytes_ref();
@@ -1031,11 +1046,13 @@ mod test {
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a LONGBLOB)").is_ok());
-        let stmt = conn.prepare("INSERT INTO tbl(a) values ( ? );");
-        assert!(stmt.is_ok());
-        let stmt = stmt.unwrap();
-        let val = Vec::from_elem(20000000, 65u8);
-        assert!(conn.execute(&stmt, [Bytes(val)]).is_ok());
+        {
+            let stmt = conn.prepare("INSERT INTO tbl(a) values ( ? );");
+            assert!(stmt.is_ok());
+            let mut stmt = stmt.unwrap();
+            let val = Vec::from_elem(20000000, 65u8);
+            assert!(stmt.execute([Bytes(val)]).is_ok());
+        }
         let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(row.is_ok());
         let row = row.unwrap();
@@ -1099,8 +1116,8 @@ mod test {
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        let stmt = conn.prepare("DO 1").unwrap();
-        bench.iter(|| { conn.execute(&stmt, []); })
+        let mut stmt = conn.prepare("DO 1").unwrap();
+        bench.iter(|| { stmt.execute([]); })
     }
 
     #[bench]
@@ -1120,8 +1137,8 @@ mod test {
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        let stmt = conn.prepare("SELECT 1").unwrap();
-        bench.iter(|| { conn.execute(&stmt, []); })
+        let mut stmt = conn.prepare("SELECT 1").unwrap();
+        bench.iter(|| { stmt.execute([]); })
     }
 
     #[bench]
@@ -1131,9 +1148,9 @@ mod test {
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        let stmt = conn.prepare("SELECT ?").unwrap();
+        let mut stmt = conn.prepare("SELECT ?").unwrap();
         let mut i = 0;
-        bench.iter(|| { conn.execute(&stmt, [Int(i)]); i += 1; })
+        bench.iter(|| { stmt.execute([Int(i)]); i += 1; })
     }
 
     #[bench]
@@ -1143,9 +1160,9 @@ mod test {
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        let stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
+        let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params = ~[Int(42), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8, 111u8)), Float(1.618), NULL, Int(1)];
-        bench.iter(|| { conn.execute(&stmt, params); })
+        bench.iter(|| { stmt.execute(params); })
     }
 
     #[bench]
@@ -1165,7 +1182,7 @@ mod test {
                                           user: Some(~"root"),
                                           pass: Some(~"password"),
                                           ..Default::default()}).unwrap();
-        let stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
-        bench.iter(|| { conn.execute(&stmt, []); })
+        let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
+        bench.iter(|| { stmt.execute([]); })
     }
 }
