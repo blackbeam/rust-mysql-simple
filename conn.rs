@@ -1049,7 +1049,6 @@ mod test {
     fn bench_simple_exec(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         bench.iter(|| { conn.query("DO 1"); })
     }
@@ -1059,7 +1058,6 @@ mod test {
     fn bench_prepared_exec(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("DO 1").unwrap();
         bench.iter(|| { stmt.execute([]); })
@@ -1070,7 +1068,6 @@ mod test {
     fn bench_simple_query_row(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         bench.iter(|| { (&mut conn.query("SELECT 1")).next(); })
     }
@@ -1080,7 +1077,6 @@ mod test {
     fn bench_simple_prepared_query_row(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT 1").unwrap();
         bench.iter(|| { stmt.execute([]); })
@@ -1091,7 +1087,6 @@ mod test {
     fn bench_simple_prepared_query_row_param(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?").unwrap();
         let mut i = 0;
@@ -1103,7 +1098,6 @@ mod test {
     fn bench_prepared_query_row_5param(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params = ~[Int(42), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8, 111u8)), Float(1.618), NULL, Int(1)];
@@ -1115,7 +1109,6 @@ mod test {
     fn bench_select_large_string(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         bench.iter(|| { for _ in &mut conn.query("SELECT REPEAT('A', 10000)") {} })
     }
@@ -1125,7 +1118,6 @@ mod test {
     fn bench_select_prepared_large_string(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
                                           user: Some("root".to_owned()),
-                                          pass: Some("password".to_owned()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
         bench.iter(|| { stmt.execute([]); })
