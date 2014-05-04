@@ -351,11 +351,11 @@ pub trait MyStream: MyReader + MyWriter {
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()>;
     fn write_command(&mut self, cmd: u8) -> MyResult<()>;
     fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MyResult<()>;
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()>;
-    fn query<'a>(&'a mut self, query: &str) -> MyResult<Option<QueryResult<'a>>>;
+    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>>;
+    fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>>;
     fn prepare(&mut self, query: &str) -> MyResult<Stmt>;
     fn send_long_data(&mut self, stmt: &Stmt, params: &[Value], ids: Vec<u16>) -> MyResult<()>;
-    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MyResult<Option<QueryResult<'a>>>;
+    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MyResult<QueryResult<'a>>;
     fn connect(&mut self) -> MyResult<()>;
     fn get_system_var(&mut self, name: &str) -> Option<Value>;
 }
@@ -521,7 +521,7 @@ impl MyStream for MyConn {
         }
         Ok(())
     }
-    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MyResult<Option<QueryResult<'a>>> {
+    fn execute<'a>(&'a mut self, stmt: &Stmt, params: &[Value]) -> MyResult<QueryResult<'a>> {
         if stmt.num_params != params.len() as u16 {
             return Err(MyStrError(format!("Statement takes {:u} parameters but {:u} was supplied", stmt.num_params, params.len())));
         }
@@ -558,7 +558,11 @@ impl MyStream for MyConn {
             0u8 => {
                 let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
-                Ok(None)
+                Ok(QueryResult{conn: self,
+                               columns: Vec::with_capacity(0),
+                               eof: true,
+                               is_bin: true,
+                               ok_packet: Some(ok)})
             },
             0xffu8 => {
                 let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
@@ -578,14 +582,15 @@ impl MyStream for MyConn {
                     columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
                 }
                 try!(self.read_packet());
-                return Ok(Some(QueryResult{conn: self,
-                                 columns: columns,
-                                 eof: false,
-                                 is_bin: true}));
+                return Ok(QueryResult{conn: self,
+                                      columns: columns,
+                                      eof: false,
+                                      is_bin: true,
+                                      ok_packet: None});
             }
         }
     }
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()> {
+    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
         let path = Path::new(file_name);
         let mut file = try_io!(File::open(&path));
         let mut chunk = Vec::from_elem(self.max_allowed_packet, 0u8);
@@ -608,25 +613,35 @@ impl MyStream for MyConn {
         try!(self.write_packet(&Vec::with_capacity(0)));
         let pld = try!(self.read_packet());
         if *pld.get(0) == 0u8 {
-            self.handle_ok(&try_io!(OkPacket::from_payload(pld.as_slice())));
+            let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+            self.handle_ok(&ok);
+            return Ok(Some(ok));
         }
-        Ok(())
+        Ok(None)
     }
-    fn query<'a>(&'a mut self, query: &str) -> MyResult<Option<QueryResult<'a>>> {
+    fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
             0u8 => {
                 let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
-                return Ok(None);
+                return Ok(QueryResult{conn: self,
+                                      columns: Vec::with_capacity(0),
+                                      eof: true,
+                                      is_bin: false,
+                                      ok_packet: Some(ok)});
             },
             0xfb_u8 => {
                 let mut reader = BufReader::new(pld.as_slice());
                 try_io!(reader.seek(1, SeekCur));
                 let file_name = try_io!(reader.read_to_end());
                 return match self.send_local_infile(file_name.as_slice()) {
-                    Ok(..) => Ok(None),
+                    Ok(x) => Ok(QueryResult{conn: self,
+                                            columns: Vec::with_capacity(0),
+                                            eof: true,
+                                            is_bin: false,
+                                            ok_packet: x}),
                     Err(err) => Err(err)
                 };
             },
@@ -645,10 +660,11 @@ impl MyStream for MyConn {
                 }
                 // skip eof packet
                 try!(self.read_packet());
-                return Ok(Some(QueryResult{conn: self,
-                                        columns: columns,
-                                        eof: false,
-                                        is_bin: false}));
+                return Ok(QueryResult{conn: self,
+                                      columns: columns,
+                                      eof: false,
+                                      is_bin: false,
+                                      ok_packet: None});
             }
         }
     }
@@ -735,11 +751,32 @@ impl MyStream for MyConn {
 pub struct QueryResult<'a> {
     conn: &'a mut MyConn,
     columns: Vec<Column>,
+    ok_packet: Option<OkPacket>,
     eof: bool,
     is_bin: bool
 }
 
 impl<'a> QueryResult<'a> {
+    pub fn affected_rows(&self) -> u64 {
+        self.conn.affected_rows
+    }
+    pub fn last_insert_id(&self) -> u64 {
+        self.conn.last_insert_id
+    }
+    pub fn warnings(&self) -> u16 {
+        if self.ok_packet.is_some() {
+            self.ok_packet.get_ref().warnings
+        } else {
+            0u16
+        }
+    }
+    pub fn info(&self) -> Vec<u8> {
+        if self.ok_packet.is_some() {
+            self.ok_packet.get_ref().info.clone()
+        } else {
+            Vec::with_capacity(0)
+        }
+    }
     pub fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.eof {
             return None
@@ -810,14 +847,11 @@ impl<'a> Drop for QueryResult<'a> {
     }
 }
 
-impl<'a> Iterator<MyResult<Vec<Value>>> for &'a mut MyResult<Option<QueryResult<'a>>> {
+impl<'a> Iterator<MyResult<Vec<Value>>> for &'a mut MyResult<QueryResult<'a>> {
     fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.is_ok() {
-            let result_opt = self.as_mut().unwrap();
-            if result_opt.is_some() {
-                let result = result_opt.as_mut().unwrap();
-                return result.next();
-            }
+            let result = self.as_mut().unwrap();
+            return result.next();
         }
         return None;
     }
