@@ -397,8 +397,8 @@ impl MyConn {
                            consts::CLIENT_TRANSACTIONS |
                            consts::CLIENT_LOCAL_FILES |
                            (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        let scramble_buf = scramble(hp.auth_plugin_data.as_slice(), self.opts.get_pass().into_bytes()).unwrap();
-        let scramble_buf_len = 20;
+        let scramble_buf = scramble(hp.auth_plugin_data.as_slice(), self.opts.get_pass().into_bytes());
+        let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
         let mut payload_len = 4 + 4 + 1 + 23 + self.opts.get_user().len() + 1 + 1 + scramble_buf_len;
         if self.opts.get_db_name().len() > 0 {
             client_flags |= consts::CLIENT_CONNECT_WITH_DB;
@@ -413,7 +413,9 @@ impl MyConn {
         try_io!(writer.write_str(self.opts.get_user()));
         try_io!(writer.write_u8(0u8));
         try_io!(writer.write_u8(scramble_buf_len as u8));
-        try_io!(writer.write(scramble_buf));
+        if scramble_buf.is_some() {
+            try_io!(writer.write(scramble_buf.unwrap()));
+        }
         if self.opts.get_db_name().len() > 0 {
             try_io!(writer.write_str(self.opts.get_db_name()));
             try_io!(writer.write_u8(0u8));
@@ -846,7 +848,7 @@ mod test {
     #[test]
     fn test_connect() {
         let conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          ..Default::default()});
+                                      ..Default::default()});
         assert!(conn.is_ok());
     }
 
