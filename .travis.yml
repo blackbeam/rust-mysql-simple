@@ -3,5 +3,7 @@ before_install:
   - sudo apt-get update
 install:
   - sudo apt-get install rust-nightly
+before_script:
+  - mysql -e 'SET GLOBAL max_allowed_packet=20*1024*1024;'
 script:
   - make test doc
