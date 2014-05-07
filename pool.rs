@@ -1,6 +1,6 @@
 use std::cast;
 use sync::{Arc, Mutex};
-use conn::{MyConn, MyOpts, MyResult, Stmt, QueryResult};
+use conn::{MyInnerConn, MyOpts, MyResult, Stmt, QueryResult};
 
 struct MyInnerPool {
     opts: MyOpts,
@@ -14,7 +14,7 @@ impl Drop for MyInnerPool {
         loop {
             match self.pool.pop() {
                 Some(conn) => unsafe {
-                    drop(cast::transmute::<*(), ~MyConn>(conn));
+                    drop(cast::transmute::<*(), ~MyInnerConn>(conn));
                 },
                 None => break
             }
@@ -24,7 +24,7 @@ impl Drop for MyInnerPool {
 
 impl MyInnerPool {
     fn new_conn(&mut self) -> MyResult<()> {
-        match MyConn::new(self.opts.clone()) {
+        match MyInnerConn::new(self.opts.clone()) {
             Ok(conn) => {
                 unsafe { self.pool.push(cast::transmute(~conn)) };
                 Ok(())
@@ -76,7 +76,7 @@ impl MyPool {
 
 pub struct MyPooledConn {
     pool: MyPool,
-    conn: Option<~MyConn>
+    conn: Option<~MyInnerConn>
 }
 
 #[unsafe_destructor]
