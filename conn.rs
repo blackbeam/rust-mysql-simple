@@ -214,7 +214,8 @@ pub struct MyInnerConn {
     seq_id: u8,
     character_set: u8,
     last_command: u8,
-    connected: bool
+    connected: bool,
+    has_results: bool
 }
 
 impl MyInnerConn {
@@ -234,7 +235,8 @@ impl MyInnerConn {
                     last_command: 0u8,
                     max_allowed_packet: consts::MAX_PAYLOAD_LEN,
                     opts: opts,
-                    connected: false
+                    connected: false,
+                    has_results: false
                 };
                 return conn.connect().and(Ok(conn));
             } else {
@@ -256,7 +258,8 @@ impl MyInnerConn {
                     last_command: 0u8,
                     max_allowed_packet: consts::MAX_PAYLOAD_LEN,
                     opts: opts,
-                    connected: false
+                    connected: false,
+                    has_results: true
                 };
                 let res = conn.connect();
                 match res {
@@ -490,7 +493,6 @@ impl MyInnerConn {
                 self.handle_ok(&ok);
                 Ok(QueryResult{conn: self,
                                columns: Vec::with_capacity(0),
-                               eof: true,
                                is_bin: true,
                                ok_packet: Some(ok)})
             },
@@ -512,9 +514,9 @@ impl MyInnerConn {
                     columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
                 }
                 try!(self.read_packet());
+                self.has_results = true;
                 return Ok(QueryResult{conn: self,
                                       columns: columns,
-                                      eof: false,
                                       is_bin: true,
                                       ok_packet: None});
             }
@@ -558,7 +560,6 @@ impl MyInnerConn {
                 self.handle_ok(&ok);
                 return Ok(QueryResult{conn: self,
                                       columns: Vec::with_capacity(0),
-                                      eof: true,
                                       is_bin: false,
                                       ok_packet: Some(ok)});
             },
@@ -569,7 +570,6 @@ impl MyInnerConn {
                 return match self.send_local_infile(file_name.as_slice()) {
                     Ok(x) => Ok(QueryResult{conn: self,
                                             columns: Vec::with_capacity(0),
-                                            eof: true,
                                             is_bin: false,
                                             ok_packet: x}),
                     Err(err) => Err(err)
@@ -590,9 +590,9 @@ impl MyInnerConn {
                 }
                 // skip eof packet
                 try!(self.read_packet());
+                self.has_results = true;
                 return Ok(QueryResult{conn: self,
                                       columns: columns,
-                                      eof: false,
                                       is_bin: false,
                                       ok_packet: None});
             }
@@ -663,6 +663,78 @@ impl MyInnerConn {
         }
         return None;
     }
+    fn next_bin(&mut self, columns: &Vec<Column>) -> MyResult<Option<Vec<Value>>> {
+        if ! self.has_results {
+            return Ok(None);
+        }
+        let pld = match self.read_packet() {
+            Ok(pld) => pld,
+            Err(e) => {
+                self.has_results = false;
+                return Err(e);
+            }
+        };
+        let x = *pld.get(0);
+        if x == 0xfe && pld.len() < 0xfe {
+            self.has_results = false;
+            let p = EOFPacket::from_payload(pld.as_slice());
+            match p {
+                Ok(p) => {
+                    self.handle_eof(&p);
+                },
+                Err(e) => return Err(MyIoError(e))
+            }
+            return Ok(None);
+        }
+        let res = Value::from_bin_payload(pld.as_slice(), columns.as_slice());
+        match res {
+            Ok(p) => Ok(Some(p)),
+            Err(e) => {
+                self.has_results = false;
+                Err(MyIoError(e))
+            }
+        }
+    }
+    fn next_text(&mut self, col_count: uint) -> MyResult<Option<Vec<Value>>> {
+        if ! self.has_results {
+            return Ok(None);
+        }
+        let pld = match self.read_packet() {
+            Ok(pld) => pld,
+            Err(e) => {
+                self.has_results = false;
+                return Err(e);
+            }
+        };
+        let x = *pld.get(0);
+        if (x == 0xfe || x == 0xff) && pld.len() < 0xfe {
+            self.has_results = false;
+            if x == 0xfe {
+                let p = EOFPacket::from_payload(pld.as_slice());
+                match p {
+                    Ok(p) => {
+                        self.handle_eof(&p);
+                    },
+                    Err(err) => return Err(MyIoError(err))
+                }
+                return Ok(None);
+            } else /* x == 0xff */ {
+                let p = ErrPacket::from_payload(pld.as_slice());
+                match p {
+                    Ok(p) => return Err(MySqlError(p)),
+                    Err(err) => return Err(MyIoError(err))
+                }
+            }
+        }
+        let res = Value::from_payload(pld.as_slice(), col_count);
+        match res {
+            Ok(p) => Ok(Some(p)),
+            Err(err) => {
+                self.has_results = false;
+                Err(MyIoError(err))
+            }
+        }
+    }
 }
 
 impl Reader for MyInnerConn {
@@ -715,7 +787,6 @@ pub struct QueryResult<'a> {
     conn: &'a mut MyInnerConn,
     columns: Vec<Column>,
     ok_packet: Option<OkPacket>,
-    eof: bool,
     is_bin: bool
 }
 
@@ -741,62 +812,34 @@ impl<'a> QueryResult<'a> {
         }
     }
     pub fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
-        if self.eof {
-            return None
-        }
-        let pld = match self.conn.read_packet() {
-                Err(err) => {
-                    self.eof = true;
-                    return Some(Err(err));
-                },
-                Ok(pld) => pld
-        };
         if self.is_bin {
-            if *pld.get(0) == 0xfe && pld.len() < 0xfe {
-                self.eof = true;
-                let p = EOFPacket::from_payload(pld.as_slice());
-                match p {
-                    Ok(p) => {
-                        self.conn.handle_eof(&p);
-                    },
-                    Err(e) => return Some(Err(MyIoError(e)))
-                }
-                return None;
-            }
-            let res = Value::from_bin_payload(pld.as_slice(), self.columns.as_slice());
-            match res {
-                Ok(p) => Some(Ok(p)),
+            let r = self.conn.next_bin(&self.columns);
+            match r {
+                Ok(r) => {
+                    match r {
+                        None => {
+                            return None;
+                        },
+                        Some(r) => return Some(Ok(r))
+                    }
+                },
                 Err(e) => {
-                    self.eof = true;
-                    return Some(Err(MyIoError(e)));
+                    return Some(Err(e));
                 }
             }
         } else {
-            if (*pld.get(0) == 0xfe_u8 || *pld.get(0) == 0xff_u8) && pld.len() < 0xfe {
-                self.eof = true;
-                if *pld.get(0) == 0xfe_u8 {
-                    let p = EOFPacket::from_payload(pld.as_slice());
-                    match p {
-                        Ok(p) => {
-                            self.conn.handle_eof(&p);
+            let r = self.conn.next_text(self.columns.len());
+            match r {
+                Ok(r) => {
+                    match r {
+                        None => {
+                            return None;
                         },
-                        Err(e) => return Some(Err(MyIoError(e)))
+                        Some(r) => return Some(Ok(r))
                     }
-                    return None;
-                } else if *pld.get(0) == 0xff_u8 {
-                    let p = ErrPacket::from_payload(pld.as_slice());
-                    match p {
-                        Ok(p) => return Some(Err(MySqlError(p))),
-                        Err(e) => return Some(Err(MyIoError(e)))
-                    }
-                }
-            }
-            let res = Value::from_payload(pld.as_slice(), self.columns.len());
-            match res {
-                Ok(p) => Some(Ok(p)),
+                },
                 Err(e) => {
-                    self.eof = true;
-                    Some(Err(MyIoError(e)))
+                    return Some(Err(e));
                 }
             }
         }
