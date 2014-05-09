@@ -839,24 +839,42 @@ mod test {
     use test::{Bencher};
     use std::default::{Default};
     use std::{str};
-    use std::os::{getcwd};
+    use std::os::{getcwd, getenv};
     use std::io::fs::{File, unlink};
     use std::path::posix::{Path};
     use super::{MyConn, MyOpts};
     use super::super::value::{NULL, Int, UInt, Float, Bytes, Date};
 
+    fn create_test_connection() -> MyConn {
+        create_custom_connection(|_| { })
+    }
+
+    fn create_custom_connection(f: |&mut MyOpts|) -> MyConn {
+        let username = getenv("MYSQL_USER").or(Some("root".to_owned()));
+        let password = getenv("MYSQL_PASS").or(None);
+
+        let mut opts = MyOpts {
+            user: username,
+            pass: password,
+            ..Default::default()
+        };
+
+        f(&mut opts);
+
+        MyConn::new(opts).unwrap()
+    }
+
     #[test]
     fn test_connect() {
-        let conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                      ..Default::default()});
-        assert!(conn.is_ok());
+        create_test_connection();
     }
 
     #[test]
     fn test_connect_with_db() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          db_name: Some("mysql".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.db_name = Some("mysql".to_owned());
+        });
+
         for x in &mut conn.query("SELECT DATABASE()") {
             assert!(x.unwrap().shift().unwrap().unwrap_bytes() == Vec::from_slice(("mysql".to_owned()).into_bytes()));
         }
@@ -864,8 +882,8 @@ mod test {
 
     #[test]
     fn test_query() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_test_connection();
+
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -914,8 +932,8 @@ mod test {
 
     #[test]
     fn test_prepared_statemenst() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_test_connection();
+
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -966,8 +984,7 @@ mod test {
 
     #[test]
     fn test_large_insert() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_test_connection();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -986,8 +1003,8 @@ mod test {
 
     #[test]
     fn test_large_insert_prepared() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_test_connection();
+
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1012,8 +1029,8 @@ mod test {
     #[test]
     #[allow(unused_must_use)]
     fn test_local_infile() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_test_connection();
+
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1047,18 +1064,18 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_exec(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.unix_addr =  Some(Path::new("/run/mysqld/mysqld.sock"));
+        });
         bench.iter(|| { conn.query("DO 1"); })
     }
 
     #[bench]
     #[allow(unused_must_use)]
     fn bench_prepared_exec(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.unix_addr =  Some(Path::new("/run/mysqld/mysqld.sock"));
+        });
         let mut stmt = conn.prepare("DO 1").unwrap();
         bench.iter(|| { stmt.execute([]); })
     }
@@ -1066,18 +1083,18 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_query_row(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.unix_addr =  Some(Path::new("/run/mysqld/mysqld.sock"));
+        });
         bench.iter(|| { (&mut conn.query("SELECT 1")).next(); })
     }
 
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_prepared_query_row(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.unix_addr =  Some(Path::new("/run/mysqld/mysqld.sock"));
+        });
         let mut stmt = conn.prepare("SELECT 1").unwrap();
         bench.iter(|| { stmt.execute([]); })
     }
@@ -1085,9 +1102,9 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_prepared_query_row_param(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.unix_addr =  Some(Path::new("/run/mysqld/mysqld.sock"));
+        });
         let mut stmt = conn.prepare("SELECT ?").unwrap();
         let mut i = 0;
         bench.iter(|| { stmt.execute([Int(i)]); i += 1; })
@@ -1096,9 +1113,9 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_prepared_query_row_5param(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.unix_addr =  Some(Path::new("/run/mysqld/mysqld.sock"));
+        });
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params = ~[Int(42), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8, 111u8)), Float(1.618), NULL, Int(1)];
         bench.iter(|| { stmt.execute(params); })
@@ -1107,18 +1124,18 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_select_large_string(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.unix_addr =  Some(Path::new("/run/mysqld/mysqld.sock"));
+        });
         bench.iter(|| { for _ in &mut conn.query("SELECT REPEAT('A', 10000)") {} })
     }
 
     #[bench]
     #[allow(unused_must_use)]
     fn bench_select_prepared_large_string(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = create_custom_connection(|opts| {
+            opts.unix_addr =  Some(Path::new("/run/mysqld/mysqld.sock"));
+        });
         let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
         bench.iter(|| { stmt.execute([]); })
     }
