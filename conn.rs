@@ -204,7 +204,7 @@ impl default::Default for MyOpts {
 
 pub struct MyConn {
     opts: MyOpts,
-    stream: ~Stream,
+    stream: Box<Stream>,
     affected_rows: u64,
     last_insert_id: u64,
     max_allowed_packet: uint,
@@ -223,7 +223,7 @@ impl MyConn {
             let unix_stream = UnixStream::connect(opts.unix_addr.get_ref());
             if unix_stream.is_ok() {
                 let mut conn = MyConn{
-                    stream: ~(unix_stream.unwrap()) as ~Stream,
+                    stream: box unix_stream.unwrap(),
                     seq_id: 0u8,
                     capability_flags: 0,
                     status_flags: 0u16,
@@ -245,7 +245,7 @@ impl MyConn {
             let tcp_stream = TcpStream::connect(opts.tcp_addr.unwrap());
             if tcp_stream.is_ok() {
                 let mut conn = MyConn{
-                    stream: ~(tcp_stream.unwrap()) as ~Stream,
+                    stream: box tcp_stream.unwrap(),
                     seq_id: 0u8,
                     capability_flags: 0,
                     status_flags: 0u16,
@@ -670,7 +670,7 @@ impl Reader for MyConn {
         self.stream.read(buf)
     }
 }
-impl Reader for ~MyConn {
+impl Reader for Box<MyConn> {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
         self.read(buf)
     }
@@ -686,7 +686,7 @@ impl Writer for MyConn {
         self.stream.write(buf)
     }
 }
-impl Writer for ~MyConn {
+impl Writer for Box<MyConn> {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
         self.write(buf)
     }

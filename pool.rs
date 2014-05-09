@@ -14,7 +14,7 @@ impl Drop for MyInnerPool {
         loop {
             match self.pool.pop() {
                 Some(conn) => unsafe {
-                    drop(cast::transmute::<*(), ~MyConn>(conn));
+                    drop(cast::transmute::<*(), Box<MyConn>>(conn));
                 },
                 None => break
             }
@@ -26,7 +26,7 @@ impl MyInnerPool {
     fn new_conn(&mut self) -> MyResult<()> {
         match MyConn::new(self.opts.clone()) {
             Ok(conn) => {
-                unsafe { self.pool.push(cast::transmute(~conn)) };
+                unsafe { self.pool.push(cast::transmute(box conn)) };
                 Ok(())
             },
             Err(err) => Err(err)
@@ -76,7 +76,7 @@ impl MyPool {
 
 pub struct MyPooledConn {
     pool: MyPool,
-    conn: Option<~MyConn>
+    conn: Option<Box<MyConn>>
 }
 
 #[unsafe_destructor]
