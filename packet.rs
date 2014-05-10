@@ -136,7 +136,7 @@ mod test {
 
     #[test]
     fn test_ok_packet() {
-        let payload = ~[0u8, 1u8, 2u8, 3u8, 0u8, 4u8, 0u8, 32u8];
+        let payload = [0u8, 1u8, 2u8, 3u8, 0u8, 4u8, 0u8, 32u8];
         let ok_packet = OkPacket::from_payload(payload);
         assert!(ok_packet.is_ok());
         let ok_packet = ok_packet.unwrap();
@@ -149,7 +149,7 @@ mod test {
 
     #[test]
     fn test_err_packet() {
-        let payload = ~[255u8, 1u8, 0u8, 35u8, 51u8, 68u8, 48u8, 48u8, 48u8, 32u8, 32u8];
+        let payload = [255u8, 1u8, 0u8, 35u8, 51u8, 68u8, 48u8, 48u8, 48u8, 32u8, 32u8];
         let err_packet = ErrPacket::from_payload(payload);
         assert!(err_packet.is_ok());
         let err_packet = err_packet.unwrap();
@@ -160,7 +160,7 @@ mod test {
 
     #[test]
     fn test_eof_packet() {
-        let payload = ~[0xfe_u8, 1u8, 0u8, 2u8, 0u8];
+        let payload = [0xfe_u8, 1u8, 0u8, 2u8, 0u8];
         let eof_packet = EOFPacket::from_payload(payload);
         assert!(eof_packet.is_ok());
         let eof_packet = eof_packet.unwrap();
@@ -170,7 +170,7 @@ mod test {
 
     #[test]
     fn test_handshake_packet() {
-        let payload = ~[0x0a_u8,
+        let payload =  [0x0a_u8,
                         32u8, 32u8, 32u8, 32u8, 0u8,
                         1u8, 0u8, 0u8, 0u8,
                         1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8,
