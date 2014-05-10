@@ -204,7 +204,7 @@ impl default::Default for MyOpts {
 
 pub struct MyConn {
     opts: MyOpts,
-    stream: ~Stream,
+    stream: Box<Stream>,
     affected_rows: u64,
     last_insert_id: u64,
     max_allowed_packet: uint,
@@ -223,7 +223,7 @@ impl MyConn {
             let unix_stream = UnixStream::connect(opts.unix_addr.get_ref());
             if unix_stream.is_ok() {
                 let mut conn = MyConn{
-                    stream: ~(unix_stream.unwrap()) as ~Stream,
+                    stream: box unix_stream.unwrap(),
                     seq_id: 0u8,
                     capability_flags: 0,
                     status_flags: 0u16,
@@ -245,7 +245,7 @@ impl MyConn {
             let tcp_stream = TcpStream::connect(opts.tcp_addr.unwrap());
             if tcp_stream.is_ok() {
                 let mut conn = MyConn{
-                    stream: ~(tcp_stream.unwrap()) as ~Stream,
+                    stream: box tcp_stream.unwrap(),
                     seq_id: 0u8,
                     capability_flags: 0,
                     status_flags: 0u16,
@@ -409,7 +409,7 @@ impl MyConn {
         try_io!(writer.write_le_u32(client_flags));
         try_io!(writer.write_le_u32(0u32));
         try_io!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try_io!(writer.write(~[0u8, ..23]));
+        try_io!(writer.write([0u8, ..23]));
         try_io!(writer.write_str(self.opts.get_user()));
         try_io!(writer.write_u8(0u8));
         try_io!(writer.write_u8(scramble_buf_len as u8));
@@ -670,7 +670,7 @@ impl Reader for MyConn {
         self.stream.read(buf)
     }
 }
-impl Reader for ~MyConn {
+impl Reader for Box<MyConn> {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
         self.read(buf)
     }
@@ -686,7 +686,7 @@ impl Writer for MyConn {
         self.stream.write(buf)
     }
 }
-impl Writer for ~MyConn {
+impl Writer for Box<MyConn> {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
         self.write(buf)
     }
@@ -1100,7 +1100,7 @@ mod test {
                                           user: Some("root".to_owned()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-        let params = ~[Int(42), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8, 111u8)), Float(1.618), NULL, Int(1)];
+        let params = [Int(42), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8, 111u8)), Float(1.618), NULL, Int(1)];
         bench.iter(|| { stmt.execute(params); })
     }
 
