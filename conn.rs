@@ -454,7 +454,7 @@ impl MyInnerConn {
         }
         Ok(())
     }
-    fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<QueryResult<'a>> {
+    fn _execute(&mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         if stmt.num_params != params.len() as u16 {
             return Err(MyStrError(format!("Statement takes {:u} parameters but {:u} was supplied", stmt.num_params, params.len())));
         }
@@ -488,38 +488,38 @@ impl MyInnerConn {
         try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
-            0u8 => {
+            0x00 => {
                 let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
-                Ok(QueryResult{conn: self,
-                               columns: Vec::with_capacity(0),
-                               is_bin: true,
-                               ok_packet: Some(ok)})
+                Ok((Vec::with_capacity(0), Some(ok)))
             },
-            0xffu8 => {
+            0xff => {
                 let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
                 Err(MySqlError(err))
-            },
+            }
             _ => {
                 let mut reader = BufReader::new(pld.as_slice());
                 let column_count = try_io!(reader.read_lenenc_int());
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
-                let mut i = -1;
-                while { i += 1; i < column_count } {
+                let mut i = 0;
+                while i < column_count {
                     let pld = try!(self.read_packet());
-                    //let pld = match self.read_packet() {
-                    //    Ok(pld) => pld,
-                    //    Err(error) => return Err(error)
-                    //};
                     columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
+                    i += 1;
                 }
                 try!(self.read_packet());
                 self.has_results = true;
-                return Ok(QueryResult{conn: self,
-                                      columns: columns,
-                                      is_bin: true,
-                                      ok_packet: None});
+                Ok((columns, None))
             }
+        }
+    }
+    fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<QueryResult<'a>> {
+        match self._execute(stmt, params) {
+            Ok((columns, ok_packet)) => Ok(QueryResult{conn: self,
+                                                     columns: columns,
+                                                     is_bin: true,
+                                                     ok_packet: ok_packet}),
+            Err(err) => Err(err)
         }
     }
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
