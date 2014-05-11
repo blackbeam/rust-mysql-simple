@@ -551,33 +551,27 @@ impl MyInnerConn {
         }
         Ok(None)
     }
-    pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
+    fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
-            0u8 => {
+            0x00 => {
                 let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
-                return Ok(QueryResult{conn: self,
-                                      columns: Vec::with_capacity(0),
-                                      is_bin: false,
-                                      ok_packet: Some(ok)});
+                return Ok((Vec::with_capacity(0), Some(ok)))
             },
-            0xfb_u8 => {
+            0xfb => {
                 let mut reader = BufReader::new(pld.as_slice());
                 try_io!(reader.seek(1, SeekCur));
                 let file_name = try_io!(reader.read_to_end());
-                return match self.send_local_infile(file_name.as_slice()) {
-                    Ok(x) => Ok(QueryResult{conn: self,
-                                            columns: Vec::with_capacity(0),
-                                            is_bin: false,
-                                            ok_packet: x}),
+                match self.send_local_infile(file_name.as_slice()) {
+                    Ok(x) => Ok((Vec::with_capacity(0), x)),
                     Err(err) => Err(err)
-                };
-            },
-            0xff_u8 => {
+                }
+            }
+            0xff => {
                 let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
-                return Err(MySqlError(err));
+                Err(MySqlError(err))
             },
             _ => {
                 let mut reader = BufReader::new(pld.as_slice());
@@ -591,46 +585,59 @@ impl MyInnerConn {
                 // skip eof packet
                 try!(self.read_packet());
                 self.has_results = true;
-                return Ok(QueryResult{conn: self,
-                                      columns: columns,
-                                      is_bin: false,
-                                      ok_packet: None});
+                Ok((columns, None))
             }
         }
     }
-    pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+    pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
+        match self._query(query) {
+            Ok((columns, ok_packet)) => Ok(QueryResult{conn: self,
+                                                     columns: columns,
+                                                     is_bin: false,
+                                                     ok_packet: ok_packet}),
+            Err(err) => Err(err)
+        }
+    }
+    fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
             0xff => {
-                let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
-                return Err(MySqlError(err));
+                let err =  try_io!(ErrPacket::from_payload(pld.as_slice()));
+                Err(MySqlError(err))
             },
             _ => {
                 let mut stmt = try_io!(InnerStmt::from_payload(pld.as_slice()));
                 if stmt.num_params > 0 {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as uint);
-                    let mut i = -1;
-                    while { i += 1; i < stmt.num_params } {
+                    let mut i = 0;
+                    while i < stmt.num_params {
                         let pld = try!(self.read_packet());
                         params.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
+                        i += 1;
                     }
                     stmt.params = Some(params);
                     try!(self.read_packet());
                 }
                 if stmt.num_columns > 0 {
                     let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as uint);
-                    let mut i = -1;
-                    while { i += 1; i < stmt.num_columns } {
+                    let mut i = 0;
+                    while i < stmt.num_columns {
                         let pld = try!(self.read_packet());
                         columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
+                        i += 1;
                     }
                     stmt.columns = Some(columns);
                     try!(self.read_packet());
                 }
-                return Ok(Stmt{conn: self,
-                               stmt: stmt});
+                Ok(stmt)
             }
+        }
+    }
+    pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+        match self._prepare(query) {
+            Ok(stmt) => Ok(Stmt{conn: self, stmt: stmt}),
+            Err(err) => Err(err)
         }
     }
     fn connect(&mut self) -> MyResult<()> {
