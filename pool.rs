@@ -90,10 +90,10 @@ impl Drop for MyPooledConn {
 }
 
 impl MyPooledConn {
-    fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
+    pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         self.conn.get_mut_ref().query(query)
     }
-    fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+    pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         self.conn.get_mut_ref().prepare(query)
     }
 }
