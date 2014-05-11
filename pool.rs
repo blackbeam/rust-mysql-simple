@@ -54,7 +54,7 @@ impl MyPool {
         let mut pool = self.pool.lock();
 
         while pool.pool.is_empty() {
-            if pool.count < pool.cap {
+            if pool.cap == 0 || pool.count < pool.cap {
                 match pool.new_conn() {
                     Ok(()) => {
                         pool.count += 1;
@@ -133,6 +133,21 @@ mod test {
                 assert!(stmt.is_ok());
                 let mut stmt = stmt.unwrap();
                 assert!(stmt.execute([]).is_ok());
+            });
+        }
+    }
+
+    #[test]
+    fn test_zero_cap() {
+        let pool = MyPool::new(0, MyOpts{user: Some("root".to_owned()),
+                                         ..Default::default()});
+        for _ in range(0, 10) {
+            let pool = pool.clone();
+            spawn(proc() {
+                let conn = pool.get_conn();
+                assert!(conn.is_ok());
+                let mut conn = conn.unwrap();
+                assert!(conn.query("SELECT 1").is_ok());
             });
         }
     }
