@@ -1,6 +1,6 @@
 #![macro_escape]
 
-use std::fmt;
+use core::fmt;
 use std::io::{IoError};
 use super::packet::{ErrPacket};
 
@@ -15,14 +15,8 @@ impl fmt::Show for MyError {
 		match *self {
 			MyIoError(ref io_err) => io_err.fmt(f),
 			MySqlError(ref err_packet) => err_packet.fmt(f),
-			MyStrError(ref err_str) => write!(f.buf, "{}", err_str)
+			MyStrError(ref err_str) => write!(f, "{}", err_str)
 		}
-	}
-}
-
-impl<'a> fmt::Show for &'a mut MyError {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		(**self).fmt(f)
 	}
 }
 

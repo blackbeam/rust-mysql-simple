@@ -47,7 +47,7 @@ impl ErrPacket {
 
 impl fmt::Show for ErrPacket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f.buf,
+        write!(f,
                "ERROR {:u} ({:s}): {:s}",
                self.error_code,
                str::from_utf8(self.sql_state.as_slice()).unwrap(),
@@ -94,7 +94,7 @@ impl HandshakePacket {
         // skip server version
         while try!(reader.read_u8()) != 0u8 {}
         let connection_id = try!(reader.read_le_u32());
-        try!(reader.push_exact(&mut auth_plugin_data, 8));
+        try!(reader.push(8, &mut auth_plugin_data));
         // skip filler
         try!(reader.seek(1, SeekCur));
         let mut capability_flags = try!(reader.read_le_u16()) as u32;
@@ -111,7 +111,7 @@ impl HandshakePacket {
             if (capability_flags & consts::CLIENT_SECURE_CONNECTION) > 0 {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
-                try!(reader.push_exact(&mut auth_plugin_data, len as uint));
+                try!(reader.push(len as uint, &mut auth_plugin_data));
                 if *auth_plugin_data.get(auth_plugin_data.len() - 1) == 0u8 {
                     auth_plugin_data.pop();
                 }

@@ -1,9 +1,10 @@
 use std::{uint, default};
 use std::io::{Stream, Reader, File, IoResult, Seek,
               SeekCur, EndOfFile, BufReader, MemWriter};
-use std::io::net::ip::{SocketAddr, Ipv4Addr, Ipv6Addr};
+use std::io::net::ip::{Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
+use std::from_str::FromStr;
 use super::consts;
 use super::io::{MyReader};
 use super::error::{MyError, MyIoError, MySqlError, MyStrError};
@@ -148,7 +149,8 @@ impl Column {
  */
 #[deriving(Clone, Eq)]
 pub struct MyOpts {
-    pub tcp_addr: Option<SocketAddr>,
+    pub tcp_addr: Option<~str>,
+    pub tcp_port: u16,
     pub unix_addr: Option<Path>,
     pub user: Option<~str>,
     pub pass: Option<~str>,
@@ -179,7 +181,8 @@ impl MyOpts {
 
 impl default::Default for MyOpts {
     fn default() -> MyOpts {
-        MyOpts{tcp_addr: Some(SocketAddr{ip: Ipv4Addr(127, 0, 0, 1), port: 3306}),
+        MyOpts{tcp_addr: Some("127.0.0.1".to_owned()),
+               tcp_port: 3306,
                unix_addr: None,
                user: None,
                pass: None,
@@ -244,7 +247,7 @@ impl MyInnerConn {
             }
         }
         if opts.tcp_addr.is_some() {
-            let tcp_stream = TcpStream::connect(opts.tcp_addr.unwrap());
+            let tcp_stream = TcpStream::connect(opts.tcp_addr.clone().unwrap(), opts.tcp_port);
             if tcp_stream.is_ok() {
                 let mut conn = MyInnerConn{
                     stream: box tcp_stream.unwrap(),
@@ -266,8 +269,8 @@ impl MyInnerConn {
                     Err(err) => return Err(err),
                     _ => {
                         if conn.opts.prefer_socket &&
-                           (conn.opts.tcp_addr.get_ref().ip == Ipv4Addr(127, 0, 0, 1) ||
-                            conn.opts.tcp_addr.get_ref().ip == Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1))
+                           (FromStr::from_str((*conn.opts.tcp_addr.get_ref())) == Some(Ipv4Addr(127, 0, 0, 1)) ||
+                            FromStr::from_str((*conn.opts.tcp_addr.get_ref())) == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)))
                         {
                             let path = conn.get_system_var("socket");
                             if !path.is_some() {
@@ -286,27 +289,31 @@ impl MyInnerConn {
                     }
                 }
             } else {
-                return Err(MyStrError(format!("Could not connect to address: {:?}", opts.tcp_addr)));
+                return Err(MyStrError(format!("Could not connect to address: {:s}", *opts.tcp_addr.get_ref())));
             }
         } else {
             return Err(MyStrError("Could not connect. Address not specified".to_owned()));
         }
     }
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
-        let mut output = Vec::new();
+        let mut output = Vec::with_capacity(0);
         loop {
-            let payload_len = try_io!(self.read_le_uint_n(3));
+            let payload_len = try_io!(self.read_le_uint_n(3)) as uint;
             let seq_id = try_io!(self.read_u8());
             if seq_id != self.seq_id {
                 return Err(MyStrError("Packet out of sync".to_owned()));
             }
             self.seq_id += 1;
             if payload_len as uint >= consts::MAX_PAYLOAD_LEN {
-                try_io!(self.push_exact(&mut output, consts::MAX_PAYLOAD_LEN));
+                try_io!(self.push_at_least(consts::MAX_PAYLOAD_LEN,
+                                           consts::MAX_PAYLOAD_LEN,
+                                           &mut output));
             } else if payload_len == 0 {
                 break;
             } else {
-                try_io!(self.push_exact(&mut output, payload_len as uint));
+                try_io!(self.push_at_least(payload_len,
+                                           payload_len,
+                                           &mut output));
                 break;
             }
         }

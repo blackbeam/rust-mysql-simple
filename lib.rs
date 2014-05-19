@@ -10,6 +10,7 @@
 #![cfg(test)]
 extern crate test;
 extern crate sync;
+extern crate core;
 
 mod scramble;
 pub mod consts;
