@@ -7,7 +7,7 @@ use super::packet::{ErrPacket};
 pub enum MyError {
 	MyIoError(IoError),
 	MySqlError(ErrPacket),
-	MyStrError(~str)
+	MyStrError(String)
 }
 
 impl fmt::Show for MyError {

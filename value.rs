@@ -1,4 +1,3 @@
-use std::str;
 use std::io::{MemWriter, BufReader, IoResult, SeekCur};
 use super::consts;
 use super::conn::{Column};
@@ -19,19 +18,19 @@ pub enum Value {
 
 impl Value {
     /// Get correct string representation of a mysql value
-    pub fn into_str(&self) -> ~str {
+    pub fn into_str(&self) -> String {
         match *self {
-            NULL => "NULL".to_owned(),
+            NULL => String::from_str("NULL"),
             Bytes(ref x) => {
-                match str::from_utf8(x.as_slice()) {
-                    Some(s) => {
+                match String::from_utf8(x.clone()) {
+                    Ok(s) => {
                         let replaced = s.replace("'", "\'");
                         format!("'{:s}'", replaced)
                     },
-                    None => {
-                        let mut s = "0x".to_owned();
+                    Err(_) => {
+                        let mut s = String::from_str("0x");
                         for c in x.iter() {
-                            s = s.append(format!("{:02X}", *c));
+                            s = s.append(format!("{:02X}", *c).as_slice());
                         }
                         s
                     }
@@ -351,9 +350,9 @@ mod test {
     fn test_value_into_str() {
         let v = NULL;
         assert!(v.into_str() == "NULL".to_owned());
-        let v = Bytes(Vec::from_slice("hello".to_owned().into_bytes()));
+        let v = Bytes(Vec::from_slice(String::from_str("hello").as_bytes()));
         assert!(v.into_str() == "'hello'".to_owned());
-        let v = Bytes(Vec::from_slice("h'e'l'l'o".to_owned().into_bytes()));
+        let v = Bytes(Vec::from_slice(String::from_str("h'e'l'l'o").as_bytes()));
         assert!(v.into_str() == "'h\'e\'l\'l\'o'".to_owned());
         let v = Bytes(vec!(0, 1, 2, 3, 4, 255));
         assert!(v.into_str() == "0x0001020304FF".to_owned());

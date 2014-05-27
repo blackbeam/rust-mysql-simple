@@ -149,32 +149,32 @@ impl Column {
  */
 #[deriving(Clone, Eq)]
 pub struct MyOpts {
-    pub tcp_addr: Option<~str>,
+    pub tcp_addr: Option<String>,
     pub tcp_port: u16,
     pub unix_addr: Option<Path>,
-    pub user: Option<~str>,
-    pub pass: Option<~str>,
-    pub db_name: Option<~str>,
+    pub user: Option<String>,
+    pub pass: Option<String>,
+    pub db_name: Option<String>,
     pub prefer_socket: bool,
 }
 
 impl MyOpts {
-    fn get_user(&self) -> ~str {
+    fn get_user(&self) -> String {
         match self.user {
             Some(ref x) => x.clone(),
-            None => "".to_owned()
+            None => String::from_str("")
         }
     }
-    fn get_pass(&self) -> ~str {
+    fn get_pass(&self) -> String {
         match self.pass {
             Some(ref x) => x.clone(),
-            None => "".to_owned()
+            None => String::from_str("")
         }
     }
-    fn get_db_name(&self) -> ~str {
+    fn get_db_name(&self) -> String {
         match self.db_name {
             Some(ref x) => x.clone(),
-            None => "".to_owned()
+            None => String::from_str("")
         }
     }
 }
@@ -247,7 +247,7 @@ impl MyInnerConn {
             }
         }
         if opts.tcp_addr.is_some() {
-            let tcp_stream = TcpStream::connect(opts.tcp_addr.clone().unwrap(), opts.tcp_port);
+            let tcp_stream = TcpStream::connect(opts.tcp_addr.clone().unwrap().as_slice(), opts.tcp_port);
             if tcp_stream.is_ok() {
                 let mut conn = MyInnerConn{
                     stream: box tcp_stream.unwrap(),
@@ -269,8 +269,8 @@ impl MyInnerConn {
                     Err(err) => return Err(err),
                     _ => {
                         if conn.opts.prefer_socket &&
-                           (FromStr::from_str((*conn.opts.tcp_addr.get_ref())) == Some(Ipv4Addr(127, 0, 0, 1)) ||
-                            FromStr::from_str((*conn.opts.tcp_addr.get_ref())) == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)))
+                           (FromStr::from_str((conn.opts.tcp_addr.get_ref().as_slice())) == Some(Ipv4Addr(127, 0, 0, 1)) ||
+                            FromStr::from_str((conn.opts.tcp_addr.get_ref().as_slice())) == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)))
                         {
                             let path = conn.get_system_var("socket");
                             if !path.is_some() {
@@ -407,7 +407,7 @@ impl MyInnerConn {
                            consts::CLIENT_TRANSACTIONS |
                            consts::CLIENT_LOCAL_FILES |
                            (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        let scramble_buf = scramble(hp.auth_plugin_data.as_slice(), self.opts.get_pass().into_bytes());
+        let scramble_buf = scramble(hp.auth_plugin_data.as_slice(), self.opts.get_pass().as_bytes());
         let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
         let mut payload_len = 4 + 4 + 1 + 23 + self.opts.get_user().len() + 1 + 1 + scramble_buf_len;
         if self.opts.get_db_name().len() > 0 {
@@ -420,14 +420,14 @@ impl MyInnerConn {
         try_io!(writer.write_le_u32(0u32));
         try_io!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try_io!(writer.write([0u8, ..23]));
-        try_io!(writer.write_str(self.opts.get_user()));
+        try_io!(writer.write_str(self.opts.get_user().as_slice()));
         try_io!(writer.write_u8(0u8));
         try_io!(writer.write_u8(scramble_buf_len as u8));
         if scramble_buf.is_some() {
             try_io!(writer.write(scramble_buf.unwrap()));
         }
         if self.opts.get_db_name().len() > 0 {
-            try_io!(writer.write_str(self.opts.get_db_name()));
+            try_io!(writer.write_str(self.opts.get_db_name().as_slice()));
             try_io!(writer.write_u8(0u8));
         }
 
@@ -667,7 +667,7 @@ impl MyInnerConn {
         })
     }
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
-        for row in &mut self.query(format!("SELECT @@{:s};", name)) {
+        for row in &mut self.query(format!("SELECT @@{:s};", name).as_slice()) {
             if row.is_ok() {
                 let mut row = row.unwrap();
                 return row.shift();
@@ -915,7 +915,7 @@ mod test {
                                           db_name: Some("mysql".to_owned()),
                                           ..Default::default()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
-            assert!(x.unwrap().shift().unwrap().unwrap_bytes() == Vec::from_slice(("mysql".to_owned()).into_bytes()));
+            assert!(x.unwrap().shift().unwrap().unwrap_bytes() == Vec::from_slice("mysql".as_bytes()));
         }
     }
 
@@ -943,17 +943,17 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             if count == 0 {
-                assert!(*row.get(0) == Bytes(Vec::from_slice("foo".to_owned().into_bytes())));
-                assert!(*row.get(1) == Bytes(Vec::from_slice("-123".to_owned().into_bytes())));
-                assert!(*row.get(2) == Bytes(Vec::from_slice("123".to_owned().into_bytes())));
-                assert!(*row.get(3) == Bytes(Vec::from_slice("2014-05-05".to_owned().into_bytes())));
-                assert!(*row.get(4) == Bytes(Vec::from_slice("123.123".to_owned().into_bytes())));
+                assert!(*row.get(0) == Bytes(Vec::from_slice("foo".as_bytes())));
+                assert!(*row.get(1) == Bytes(Vec::from_slice("-123".as_bytes())));
+                assert!(*row.get(2) == Bytes(Vec::from_slice("123".as_bytes())));
+                assert!(*row.get(3) == Bytes(Vec::from_slice("2014-05-05".as_bytes())));
+                assert!(*row.get(4) == Bytes(Vec::from_slice("123.123".as_bytes())));
             } else {
-                assert!(*row.get(0) == Bytes(Vec::from_slice("foo".to_owned().into_bytes())));
-                assert!(*row.get(1) == Bytes(Vec::from_slice("-321".to_owned().into_bytes())));
-                assert!(*row.get(2) == Bytes(Vec::from_slice("321".to_owned().into_bytes())));
-                assert!(*row.get(3) == Bytes(Vec::from_slice("2014-06-06".to_owned().into_bytes())));
-                assert!(*row.get(4) == Bytes(Vec::from_slice("321.321".to_owned().into_bytes())));
+                assert!(*row.get(0) == Bytes(Vec::from_slice("foo".as_bytes())));
+                assert!(*row.get(1) == Bytes(Vec::from_slice("-321".as_bytes())));
+                assert!(*row.get(2) == Bytes(Vec::from_slice("321".as_bytes())));
+                assert!(*row.get(3) == Bytes(Vec::from_slice("2014-06-06".as_bytes())));
+                assert!(*row.get(4) == Bytes(Vec::from_slice("321.321".as_bytes())));
             }
             count += 1;
         }
@@ -981,8 +981,8 @@ mod test {
             let stmt = conn.prepare("INSERT INTO tbl(a, b, c, d, e) VALUES (?, ?, ?, ?, ?)");
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
-            assert!(stmt.execute([Bytes(Vec::from_slice("hello".to_owned().into_bytes())), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
-            assert!(stmt.execute([Bytes(Vec::from_slice("world".to_owned().into_bytes())), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
+            assert!(stmt.execute([Bytes(Vec::from_slice("hello".as_bytes())), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
+            assert!(stmt.execute([Bytes(Vec::from_slice("world".as_bytes())), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
         }
         {
             let stmt = conn.prepare("SELECT * FROM tbl");
@@ -1030,7 +1030,7 @@ mod test {
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a LONGBLOB)").is_ok());
         let query = format!("INSERT INTO tbl(a) VALUES('{:s}')", str::from_chars(Vec::from_elem(20000000, 'A').as_slice()));
-        assert!(conn.query(query).is_ok());
+        assert!(conn.query(query.as_slice()).is_ok());
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
         let v: Vec<u8> = x.unwrap().shift().unwrap().unwrap_bytes();
@@ -1084,7 +1084,7 @@ mod test {
             file.write_line("CCCCCC");
         }
         let query = format!("LOAD DATA LOCAL INFILE '{:s}' INTO TABLE tbl", str::from_utf8(path.clone().into_vec().as_slice()).unwrap());
-        assert!(conn.query(query).is_ok());
+        assert!(conn.query(query.as_slice()).is_ok());
         let mut count = 0;
         for row in &mut conn.query("SELECT * FROM tbl") {
             assert!(row.is_ok());

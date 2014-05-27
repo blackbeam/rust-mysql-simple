@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 #![feature(macro_rules)]
 
-#![cfg(test)]
+#[cfg(test)]
 extern crate test;
 extern crate sync;
 extern crate core;
