@@ -39,11 +39,11 @@ impl Value {
             Int(x) => format!("{:d}", x),
             UInt(x) => format!("{:u}", x),
             Float(x) => format!("{:f}", x),
-            Date(0, 0, 0, 0, 0, 0, 0) => "''".to_owned(),
+            Date(0, 0, 0, 0, 0, 0, 0) => "''".to_string(),
             Date(y, m, d, 0, 0, 0, 0) => format!("'{:04u}-{:02u}-{:02u}'", y, m, d),
             Date(y, m, d, h, i, s, 0) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}'", y, m, d, h, i, s),
             Date(y, m, d, h, i, s, u) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}.{:06u}'", y, m, d, h, i, s, u),
-            Time(_, 0, 0, 0, 0, 0) => "''".to_owned(),
+            Time(_, 0, 0, 0, 0, 0) => "''".to_string(),
             Time(neg, d, h, i, s, 0) => {
                 if neg {
                     format!("'-{:u} {:03u}:{:02u}:{:02u}'", d, h, i, s)
@@ -349,32 +349,32 @@ mod test {
     #[test]
     fn test_value_into_str() {
         let v = NULL;
-        assert!(v.into_str() == "NULL".to_owned());
+        assert!(v.into_str() == "NULL".to_string());
         let v = Bytes(Vec::from_slice(String::from_str("hello").as_bytes()));
-        assert!(v.into_str() == "'hello'".to_owned());
+        assert!(v.into_str() == "'hello'".to_string());
         let v = Bytes(Vec::from_slice(String::from_str("h'e'l'l'o").as_bytes()));
-        assert!(v.into_str() == "'h\'e\'l\'l\'o'".to_owned());
+        assert!(v.into_str() == "'h\'e\'l\'l\'o'".to_string());
         let v = Bytes(vec!(0, 1, 2, 3, 4, 255));
-        assert!(v.into_str() == "0x0001020304FF".to_owned());
+        assert!(v.into_str() == "0x0001020304FF".to_string());
         let v = Int(-65536);
-        assert!(v.into_str() == "-65536".to_owned());
+        assert!(v.into_str() == "-65536".to_string());
         let v = UInt(4294967296);
-        assert!(v.into_str() == "4294967296".to_owned());
+        assert!(v.into_str() == "4294967296".to_string());
         let v = Float(686.868);
-        assert!(v.into_str() == "686.868".to_owned());
+        assert!(v.into_str() == "686.868".to_string());
         let v = Date(0, 0, 0, 0, 0, 0, 0);
-        assert!(v.into_str() == "''".to_owned());
+        assert!(v.into_str() == "''".to_string());
         let v = Date(2014, 2, 20, 0, 0, 0, 0);
-        assert!(v.into_str() == "'2014-02-20'".to_owned());
+        assert!(v.into_str() == "'2014-02-20'".to_string());
         let v = Date(2014, 2, 20, 22, 0, 0, 0);
-        assert!(v.into_str() == "'2014-02-20 22:00:00'".to_owned());
+        assert!(v.into_str() == "'2014-02-20 22:00:00'".to_string());
         let v = Date(2014, 2, 20, 22, 0, 0, 1);
-        assert!(v.into_str() == "'2014-02-20 22:00:00.000001'".to_owned());
+        assert!(v.into_str() == "'2014-02-20 22:00:00.000001'".to_string());
         let v = Time(false, 0, 0, 0, 0, 0);
-        assert!(v.into_str() == "''".to_owned());
+        assert!(v.into_str() == "''".to_string());
         let v = Time(true, 34, 3, 2, 1, 0);
-        assert!(v.into_str() == "'-34 003:02:01'".to_owned());
+        assert!(v.into_str() == "'-34 003:02:01'".to_string());
         let v = Time(false, 10, 100, 20, 30, 40);
-        assert!(v.into_str() == "'10 100:20:30.000040'".to_owned());
+        assert!(v.into_str() == "'10 100:20:30.000040'".to_string());
     }
 }

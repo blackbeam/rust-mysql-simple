@@ -11,6 +11,7 @@
 extern crate test;
 extern crate sync;
 extern crate core;
+extern crate debug;
 
 mod scramble;
 pub mod consts;

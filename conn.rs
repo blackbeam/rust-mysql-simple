@@ -182,7 +182,7 @@ impl MyOpts {
 
 impl Default for MyOpts {
     fn default() -> MyOpts {
-        MyOpts{tcp_addr: Some("127.0.0.1".to_owned()),
+        MyOpts{tcp_addr: Some("127.0.0.1".to_string()),
                tcp_port: 3306,
                unix_addr: None,
                user: None,
@@ -304,7 +304,7 @@ impl MyInnerConn {
                 }
             }
         }
-        return Err(MyStrError("Could not connect. Address not specified".to_owned()));
+        return Err(MyStrError("Could not connect. Address not specified".to_string()));
     }
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let mut output = Vec::with_capacity(0);
@@ -312,7 +312,7 @@ impl MyInnerConn {
             let payload_len = try_io!(self.read_le_uint_n(3)) as uint;
             let seq_id = try_io!(self.read_u8());
             if seq_id != self.seq_id {
-                return Err(MyStrError("Packet out of sync".to_owned()));
+                return Err(MyStrError("Packet out of sync".to_string()));
             }
             self.seq_id += 1;
             if payload_len as uint >= consts::MAX_PAYLOAD_LEN {
@@ -332,7 +332,7 @@ impl MyInnerConn {
     }
     fn write_packet(&mut self, data: &Vec<u8>) -> MyResult<()> {
         if data.len() > self.max_allowed_packet && self.max_allowed_packet < consts::MAX_PAYLOAD_LEN {
-            return Err(MyStrError("Packet too large".to_owned()));
+            return Err(MyStrError("Packet too large".to_string()));
         }
         if data.len() == 0 {
             try_io!(self.write([0u8, 0u8, 0u8, self.seq_id]));
@@ -390,7 +390,7 @@ impl MyInnerConn {
                 return Err(MyStrError(format!("Unsupported protocol version {:u}", handshake.protocol_version)));
             }
             if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41) == 0 {
-                return Err(MyStrError("Server must set CLIENT_PROTOCOL_41 flag".to_owned()));
+                return Err(MyStrError("Server must set CLIENT_PROTOCOL_41 flag".to_string()));
             }
             self.handle_handshake(&handshake);
             self.do_handshake_response(&handshake)
@@ -407,7 +407,7 @@ impl MyInnerConn {
                     let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
                     return Err(MySqlError(err));
                 },
-                _ => return Err(MyStrError("Unexpected packet".to_owned()))
+                _ => return Err(MyStrError("Unexpected packet".to_string()))
             }
         })
     }
@@ -669,7 +669,7 @@ impl MyInnerConn {
             Ok(uint::parse_bytes(max_allowed_packet.as_slice(), 10).unwrap_or(0))
         }).and_then(|max_allowed_packet| {
             if max_allowed_packet == 0 {
-                Err(MyStrError("Can't get max_allowed_packet value".to_owned()))
+                Err(MyStrError("Can't get max_allowed_packet value".to_string()))
             } else {
                 self.max_allowed_packet = max_allowed_packet;
                 self.connected = true;
@@ -915,15 +915,15 @@ mod test {
 
     #[test]
     fn test_connect() {
-        let conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
+        let conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
                                       ..Default::default()});
         assert!(conn.is_ok());
     }
 
     #[test]
     fn test_connect_with_db() {
-        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
-                                          db_name: Some("mysql".to_owned()),
+        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
+                                          db_name: Some("mysql".to_string()),
                                           ..Default::default()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
             assert!(x.unwrap().shift().unwrap().unwrap_bytes() == Vec::from_slice("mysql".as_bytes()));
@@ -932,7 +932,7 @@ mod test {
 
     #[test]
     fn test_query() {
-        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
+        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -982,7 +982,7 @@ mod test {
 
     #[test]
     fn test_prepared_statemenst() {
-        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
+        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -1035,7 +1035,7 @@ mod test {
 
     #[test]
     fn test_large_insert() {
-        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
+        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -1055,7 +1055,7 @@ mod test {
 
     #[test]
     fn test_large_insert_prepared() {
-        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
+        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -1081,14 +1081,14 @@ mod test {
     #[test]
     #[allow(unused_must_use)]
     fn test_local_infile() {
-        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
+        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a TEXT)").is_ok());
         let mut path = getcwd();
-        path.push("local_infile.txt".to_owned());
+        path.push("local_infile.txt".to_string());
         {
             let mut file = File::create(&path).unwrap();
             file.write_line("AAAAAA");
@@ -1115,7 +1115,7 @@ mod test {
 
     #[test]
     fn test_reset() {
-        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
+        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
                                                ..Default::default()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -1132,7 +1132,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_simple_exec(bench: &mut Bencher) {
         let mut conn = MyInnerConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
+                                          user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         bench.iter(|| { conn.query("DO 1"); })
     }
@@ -1141,7 +1141,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_prepared_exec(bench: &mut Bencher) {
         let mut conn = MyInnerConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
+                                          user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("DO 1").unwrap();
         bench.iter(|| { stmt.execute([]); })
@@ -1151,7 +1151,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_simple_query_row(bench: &mut Bencher) {
         let mut conn = MyInnerConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
+                                          user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         bench.iter(|| { (&mut conn.query("SELECT 1")).next(); })
     }
@@ -1160,7 +1160,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_simple_prepared_query_row(bench: &mut Bencher) {
         let mut conn = MyInnerConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
+                                          user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT 1").unwrap();
         bench.iter(|| { stmt.execute([]); })
@@ -1170,7 +1170,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_simple_prepared_query_row_param(bench: &mut Bencher) {
         let mut conn = MyInnerConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
+                                          user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?").unwrap();
         let mut i = 0;
@@ -1181,7 +1181,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_prepared_query_row_5param(bench: &mut Bencher) {
         let mut conn = MyInnerConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
+                                          user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params = [Int(42), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8, 111u8)), Float(1.618), NULL, Int(1)];
@@ -1192,7 +1192,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_select_large_string(bench: &mut Bencher) {
         let mut conn = MyInnerConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
+                                          user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         bench.iter(|| { for _ in &mut conn.query("SELECT REPEAT('A', 10000)") {} })
     }
@@ -1201,7 +1201,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_select_prepared_large_string(bench: &mut Bencher) {
         let mut conn = MyInnerConn::new(MyOpts{unix_addr: Some(Path::new("/run/mysqld/mysqld.sock")),
-                                          user: Some("root".to_owned()),
+                                          user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
         bench.iter(|| { stmt.execute([]); })
