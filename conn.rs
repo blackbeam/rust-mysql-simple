@@ -1113,6 +1113,21 @@ mod test {
         unlink(&path);
     }
 
+    #[test]
+    fn test_reset() {
+        let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_owned()),
+                                               ..Default::default()}).unwrap();
+        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
+        assert!(conn.query("CREATE DATABASE test").is_ok());
+        assert!(conn.query("USE test").is_ok());
+        assert!(conn.reset().is_ok());
+        for row in &mut conn.query("SELECT DATABASE()") {
+            assert!(row.is_ok());
+            let row = row.unwrap();
+            assert!(row == vec!(NULL));
+        }
+    }
+
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_exec(bench: &mut Bencher) {
