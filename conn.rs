@@ -1,4 +1,5 @@
-use std::{uint, default};
+use std::{uint};
+use std::default::{Default};
 use std::io::{Stream, Reader, File, IoResult, Seek,
               SeekCur, EndOfFile, BufReader, MemWriter};
 use std::io::net::ip::{Ipv4Addr, Ipv6Addr};
@@ -179,7 +180,7 @@ impl MyOpts {
     }
 }
 
-impl default::Default for MyOpts {
+impl Default for MyOpts {
     fn default() -> MyOpts {
         MyOpts{tcp_addr: Some("127.0.0.1".to_owned()),
                tcp_port: 3306,
@@ -207,7 +208,7 @@ impl default::Default for MyOpts {
 
 pub struct MyInnerConn {
     opts: MyOpts,
-    stream: Box<Stream>,
+    stream: Option<Box<Stream>>,
     affected_rows: u64,
     last_insert_id: u64,
     max_allowed_packet: uint,
@@ -221,79 +222,89 @@ pub struct MyInnerConn {
     has_results: bool
 }
 
+impl Default for MyInnerConn {
+    fn default() -> MyInnerConn {
+        MyInnerConn{stream: None,
+                    seq_id: 0u8,
+                    capability_flags: 0,
+                    status_flags: 0u16,
+                    connection_id: 0u32,
+                    character_set: 0u8,
+                    affected_rows: 0u64,
+                    last_insert_id: 0u64,
+                    last_command: 0u8,
+                    max_allowed_packet: consts::MAX_PAYLOAD_LEN,
+                    opts: Default::default(),
+                    connected: false,
+                    has_results: false}
+    }
+}
+
 impl MyInnerConn {
     pub fn new(opts: MyOpts) -> MyResult<MyInnerConn> {
-        if opts.unix_addr.is_some() {
-            let unix_stream = UnixStream::connect(opts.unix_addr.get_ref());
-            if unix_stream.is_ok() {
-                let mut conn = MyInnerConn{
-                    stream: box unix_stream.unwrap(),
-                    seq_id: 0u8,
-                    capability_flags: 0,
-                    status_flags: 0u16,
-                    connection_id: 0u32,
-                    character_set: 0u8,
-                    affected_rows: 0u64,
-                    last_insert_id: 0u64,
-                    last_command: 0u8,
-                    max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-                    opts: opts,
-                    connected: false,
-                    has_results: false
-                };
-                return conn.connect().and(Ok(conn));
-            } else {
-                return Err(MyStrError(format!("Could not connect to address: {:?}", opts.unix_addr)));
-            }
-        }
-        if opts.tcp_addr.is_some() {
-            let tcp_stream = TcpStream::connect(opts.tcp_addr.clone().unwrap().as_slice(), opts.tcp_port);
-            if tcp_stream.is_ok() {
-                let mut conn = MyInnerConn{
-                    stream: box tcp_stream.unwrap(),
-                    seq_id: 0u8,
-                    capability_flags: 0,
-                    status_flags: 0u16,
-                    connection_id: 0u32,
-                    character_set: 0u8,
-                    affected_rows: 0u64,
-                    last_insert_id: 0u64,
-                    last_command: 0u8,
-                    max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-                    opts: opts,
-                    connected: false,
-                    has_results: true
-                };
-                let res = conn.connect();
-                match res {
-                    Err(err) => return Err(err),
-                    _ => {
-                        if conn.opts.prefer_socket &&
-                           (FromStr::from_str((conn.opts.tcp_addr.get_ref().as_slice())) == Some(Ipv4Addr(127, 0, 0, 1)) ||
-                            FromStr::from_str((conn.opts.tcp_addr.get_ref().as_slice())) == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)))
-                        {
-                            let path = conn.get_system_var("socket");
-                            if !path.is_some() {
-                                return Ok(conn);
-                            } else {
-                                let path = path.unwrap().unwrap_bytes();
-                                let opts = MyOpts{
-                                    unix_addr: Some(Path::new(path)),
-                                    ..conn.opts.clone()
-                                };
-                                return MyInnerConn::new(opts).or(Ok(conn));
-                            }
-                        } else {
-                            return Ok(conn);
-                        }
-                    }
+        let mut conn = MyInnerConn{opts: opts, ..Default::default()};
+        try!(conn.connect_stream());
+        try!(conn.connect());
+        if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
+            if FromStr::from_str(conn.opts.tcp_addr.get_ref().as_slice()) == Some(Ipv4Addr(127, 0, 0, 1)) ||
+               FromStr::from_str(conn.opts.tcp_addr.get_ref().as_slice()) == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
+                match conn.get_system_var("socket") {
+                    Some(path) => {
+                        let opts = MyOpts{unix_addr: Some(Path::new(path.unwrap_bytes())),
+                                          ..conn.opts.clone()};
+                        return MyInnerConn::new(opts).or(Ok(conn));
+                    },
+                    _ => return Ok(conn)
                 }
-            } else {
-                return Err(MyStrError(format!("Could not connect to address: {:s}", *opts.tcp_addr.get_ref())));
             }
-        } else {
-            return Err(MyStrError("Could not connect. Address not specified".to_owned()));
         }
+        return Ok(conn);
+    }
+    fn reset(&mut self) -> MyResult<()> {
+        self.stream = None;
+        self.seq_id = 0;
+        self.capability_flags = 0;
+        self.status_flags = 0;
+        self.connection_id = 0;
+        self.character_set = 0;
+        self.affected_rows = 0;
+        self.last_insert_id = 0;
+        self.last_command = 0;
+        self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
+        self.connected = false;
+        self.has_results = false;
+        try!(self.connect_stream());
+        self.connect()
+    }
+    fn connect_stream(&mut self) -> MyResult<()> {
+        if self.opts.unix_addr.is_some() {
+            match UnixStream::connect(self.opts.unix_addr.get_ref()) {
+                Ok(stream) => {
+                    let stream: Box<Stream> = box stream;
+                    self.stream = Some(stream);
+                    return Ok(());
+                },
+                _ => {
+                    return Err(MyStrError(format!("Could not connect to address: {:?}",
+                                                  self.opts.unix_addr)));
+                }
+            }
+        }
+        if self.opts.tcp_addr.is_some() {
+            match TcpStream::connect(self.opts.tcp_addr.get_ref().as_slice(),
+                                     self.opts.tcp_port) {
+                Ok(stream) => {
+                    let stream: Box<Stream> = box stream;
+                    self.stream = Some(stream);
+                    return Ok(());
+                },
+                _ => {
+                    return Err(MyStrError(format!("Could not connect to address: {:s}",
+                                                  *self.opts.tcp_addr.get_ref())))
+                }
+            }
+        }
+        return Err(MyStrError("Could not connect. Address not specified".to_owned()));
     }
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let mut output = Vec::with_capacity(0);
@@ -753,7 +764,7 @@ impl MyInnerConn {
 
 impl Reader for MyInnerConn {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        self.stream.read(buf)
+        self.stream.get_mut_ref().read(buf)
     }
 }
 impl Reader for Box<MyInnerConn> {
@@ -769,7 +780,7 @@ impl<'a> Reader for &'a MyInnerConn {
 
 impl Writer for MyInnerConn {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.stream.write(buf)
+        self.stream.get_mut_ref().write(buf)
     }
 }
 impl Writer for Box<MyInnerConn> {
@@ -986,6 +997,7 @@ mod test {
         }
         {
             let stmt = conn.prepare("SELECT * FROM tbl");
+            println!("{:?}", stmt);
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
             let mut i = 0;
