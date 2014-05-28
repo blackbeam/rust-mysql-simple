@@ -260,7 +260,7 @@ impl MyInnerConn {
         }
         return Ok(conn);
     }
-    fn reset(&mut self) -> MyResult<()> {
+    pub fn reset(&mut self) -> MyResult<()> {
         self.stream = None;
         self.seq_id = 0;
         self.capability_flags = 0;
