@@ -455,6 +455,16 @@ impl MyInnerConn {
         self.last_command = cmd;
         self.write_packet(&vec!(cmd).append(buf))
     }
+    pub fn ping(&mut self) -> bool {
+        match self.write_command(consts::COM_PING) {
+            Ok(_) => {
+                // ommit ok packet
+                let _ = self.read_packet();
+                true
+            },
+            _ => false
+        }
+    }
     fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
         for &id in ids.iter() {
             match params[id as uint] {
@@ -923,6 +933,7 @@ mod test {
     fn test_query() {
         let mut conn = MyInnerConn::new(MyOpts{user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
+        assert!(conn.ping());
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());

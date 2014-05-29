@@ -53,10 +53,13 @@ impl MyPool {
             }
         }
 
-        Ok(MyPooledConn {
-            pool: self.clone(),
-            conn: Some(pool.pool.pop().unwrap())
-        })
+        let mut conn = pool.pool.pop().unwrap();
+
+        if !conn.ping() {
+            try!(conn.reset());
+        }
+
+        Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
     }
 }
 
