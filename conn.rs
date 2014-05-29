@@ -1,6 +1,6 @@
 use std::{uint};
 use std::default::{Default};
-use std::io::{Stream, Reader, File, IoResult, Seek,
+use std::io::{Reader, File, IoResult, Seek,
               SeekCur, EndOfFile, BufReader, MemWriter};
 use std::io::net::ip::{Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
@@ -208,7 +208,8 @@ impl Default for MyOpts {
 
 pub struct MyInnerConn {
     opts: MyOpts,
-    stream: Option<Box<Stream>>,
+    tcp_stream: Option<TcpStream>,
+    unix_stream: Option<UnixStream>,
     affected_rows: u64,
     last_insert_id: u64,
     max_allowed_packet: uint,
@@ -224,7 +225,8 @@ pub struct MyInnerConn {
 
 impl Default for MyInnerConn {
     fn default() -> MyInnerConn {
-        MyInnerConn{stream: None,
+        MyInnerConn{tcp_stream: None,
+                    unix_stream: None,
                     seq_id: 0u8,
                     capability_flags: 0,
                     status_flags: 0u16,
@@ -261,7 +263,8 @@ impl MyInnerConn {
         return Ok(conn);
     }
     pub fn reset(&mut self) -> MyResult<()> {
-        self.stream = None;
+        self.tcp_stream = None;
+        self.unix_stream = None;
         self.seq_id = 0;
         self.capability_flags = 0;
         self.status_flags = 0;
@@ -280,8 +283,7 @@ impl MyInnerConn {
         if self.opts.unix_addr.is_some() {
             match UnixStream::connect(self.opts.unix_addr.get_ref()) {
                 Ok(stream) => {
-                    let stream: Box<Stream> = box stream;
-                    self.stream = Some(stream);
+                    self.unix_stream = Some(stream);
                     return Ok(());
                 },
                 _ => {
@@ -294,8 +296,7 @@ impl MyInnerConn {
             match TcpStream::connect(self.opts.tcp_addr.get_ref().as_slice(),
                                      self.opts.tcp_port) {
                 Ok(stream) => {
-                    let stream: Box<Stream> = box stream;
-                    self.stream = Some(stream);
+                    self.tcp_stream = Some(stream);
                     return Ok(());
                 },
                 _ => {
@@ -764,7 +765,11 @@ impl MyInnerConn {
 
 impl Reader for MyInnerConn {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        self.stream.get_mut_ref().read(buf)
+        if self.unix_stream.is_some() {
+            self.unix_stream.get_mut_ref().read(buf)
+        } else {
+            self.tcp_stream.get_mut_ref().read(buf)
+        }
     }
 }
 impl Reader for Box<MyInnerConn> {
@@ -780,7 +785,11 @@ impl<'a> Reader for &'a MyInnerConn {
 
 impl Writer for MyInnerConn {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.stream.get_mut_ref().write(buf)
+        if self.unix_stream.is_some() {
+            self.unix_stream.get_mut_ref().write(buf)
+        } else {
+            self.tcp_stream.get_mut_ref().write(buf)
+        }
     }
 }
 impl Writer for Box<MyInnerConn> {
