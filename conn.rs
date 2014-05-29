@@ -772,16 +772,6 @@ impl Reader for MyInnerConn {
         }
     }
 }
-impl Reader for Box<MyInnerConn> {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        self.read(buf)
-    }
-}
-impl<'a> Reader for &'a MyInnerConn {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        self.read(buf)
-    }
-}
 
 impl Writer for MyInnerConn {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
@@ -790,16 +780,6 @@ impl Writer for MyInnerConn {
         } else {
             self.tcp_stream.get_mut_ref().write(buf)
         }
-    }
-}
-impl Writer for Box<MyInnerConn> {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.write(buf)
-    }
-}
-impl<'a> Writer for &'a MyInnerConn {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.write(buf)
     }
 }
 
