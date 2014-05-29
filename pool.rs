@@ -1,32 +1,18 @@
-use std::mem::{transmute};
 use sync::{Arc, Mutex};
 use conn::{MyInnerConn, MyOpts, MyResult, Stmt, QueryResult};
 
 struct MyInnerPool {
     opts: MyOpts,
-    pool: Vec<*()>,
+    pool: Vec<MyInnerConn>,
     cap: uint,
     count: uint
-}
-
-impl Drop for MyInnerPool {
-    fn drop(&mut self) {
-        loop {
-            match self.pool.pop() {
-                Some(conn) => unsafe {
-                    drop(transmute::<*(), Box<MyInnerConn>>(conn));
-                },
-                None => break
-            }
-        }
-    }
 }
 
 impl MyInnerPool {
     fn new_conn(&mut self) -> MyResult<()> {
         match MyInnerConn::new(self.opts.clone()) {
             Ok(conn) => {
-                unsafe { self.pool.push(transmute(box conn)) };
+                self.pool.push(conn);
                 Ok(())
             },
             Err(err) => Err(err)
@@ -69,22 +55,21 @@ impl MyPool {
 
         Ok(MyPooledConn {
             pool: self.clone(),
-            conn: unsafe { transmute(pool.pool.pop().unwrap()) }
+            conn: Some(pool.pool.pop().unwrap())
         })
     }
 }
 
 pub struct MyPooledConn {
     pool: MyPool,
-    conn: Option<Box<MyInnerConn>>
+    conn: Option<MyInnerConn>
 }
 
 #[unsafe_destructor]
 impl Drop for MyPooledConn {
     fn drop(&mut self) {
-        let conn = unsafe { transmute(self.conn.take_unwrap()) };
         let mut pool = self.pool.pool.lock();
-        pool.pool.push(conn);
+        pool.pool.push(self.conn.take_unwrap());
         pool.cond.signal();
     }
 }
