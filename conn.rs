@@ -148,7 +148,7 @@ impl Column {
  *                  Y8b d88P             888                      
  *                   "Y88P"              888                      
  */
-#[deriving(Clone, Eq)]
+#[deriving(Clone, PartialEq)]
 pub struct MyOpts {
     pub tcp_addr: Option<String>,
     pub tcp_port: u16,
