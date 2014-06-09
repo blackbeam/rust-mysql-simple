@@ -61,6 +61,10 @@ impl MyPool {
 
         Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
     }
+    fn query(&self, query: &str) -> MyResult<QueryResult> {
+        let conn = try!(self.get_conn());
+        conn.pooled_query(query)
+    }
 }
 
 pub struct MyPooledConn {
@@ -84,6 +88,18 @@ impl MyPooledConn {
     pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         self.conn.get_mut_ref().prepare(query)
     }
+    pub fn get_mut_ref<'a>(&'a mut self) -> &'a mut MyInnerConn {
+        self.conn.get_mut_ref()
+    }
+    pub fn get_ref<'a>(&'a self) -> &'a MyInnerConn {
+        self.conn.get_ref()
+    }
+    fn pooled_query(mut self, query: &str) -> MyResult<QueryResult> {
+        match self.get_mut_ref()._query(query) {
+            Ok((columns, ok_packet)) => Ok(QueryResult::new_pooled(self, columns, ok_packet, false)),
+            Err(err) => Err(err)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -91,6 +107,7 @@ mod test {
     use conn::{MyOpts};
     use std::default::{Default};
     use super::{MyPool};
+    use super::super::value::{Bytes};
 
     #[test]
     fn test_query() {
@@ -103,6 +120,21 @@ mod test {
                 assert!(conn.is_ok());
                 let mut conn = conn.unwrap();
                 assert!(conn.query("SELECT 1").is_ok());
+            });
+        }
+    }
+
+    #[test]
+    fn test_pooled_query() {
+        let pool = MyPool::new(3, MyOpts{user: Some("root".to_string()),
+                                         ..Default::default()});
+        for _ in range(0, 10) {
+            let pool = pool.clone();
+            spawn(proc() {
+                let result = pool.query("SELECT 1");
+                assert!(result.is_ok());
+                let mut result = result.unwrap();
+                assert_eq!(result.next(), Some(Ok(vec![Bytes(vec![0x31u8])])));
             });
         }
     }

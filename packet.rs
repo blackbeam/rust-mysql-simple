@@ -3,6 +3,7 @@ use std::io::{IoResult, BufReader, SeekCur};
 use super::io::{MyReader};
 use super::consts;
 
+#[deriving(PartialEq)]
 pub struct OkPacket {
     pub affected_rows: u64,
     pub last_insert_id: u64,
@@ -25,6 +26,7 @@ impl OkPacket {
     }
 }
 
+#[deriving(PartialEq)]
 pub struct ErrPacket {
     pub sql_state: Vec<u8>,
     pub error_message: Vec<u8>,
@@ -55,6 +57,7 @@ impl fmt::Show for ErrPacket {
     }
 }
 
+#[deriving(PartialEq)]
 pub struct EOFPacket {
     pub warnings: u16,
     pub status_flags: u16

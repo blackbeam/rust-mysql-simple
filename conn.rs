@@ -12,6 +12,7 @@ use super::error::{MyError, MyIoError, MySqlError, MyStrError};
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
+use super::pool::{MyPooledConn};
 
 pub type MyResult<T> = Result<T, MyError>;
 
@@ -544,10 +545,11 @@ impl MyInnerConn {
     }
     fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<QueryResult<'a>> {
         match self._execute(stmt, params) {
-            Ok((columns, ok_packet)) => Ok(QueryResult{conn: self,
-                                                     columns: columns,
-                                                     is_bin: true,
-                                                     ok_packet: ok_packet}),
+            Ok((columns, ok_packet)) => Ok(QueryResult{pooled_conn: None,
+                                                       conn: Some(self),
+                                                       columns: columns,
+                                                       is_bin: true,
+                                                       ok_packet: ok_packet}),
             Err(err) => Err(err)
         }
     }
@@ -580,7 +582,7 @@ impl MyInnerConn {
         }
         Ok(None)
     }
-    fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
+    pub fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
@@ -620,10 +622,11 @@ impl MyInnerConn {
     }
     pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         match self._query(query) {
-            Ok((columns, ok_packet)) => Ok(QueryResult{conn: self,
-                                                     columns: columns,
-                                                     is_bin: false,
-                                                     ok_packet: ok_packet}),
+            Ok((columns, ok_packet)) => Ok(QueryResult{pooled_conn: None,
+                                                       conn: Some(self),
+                                                       columns: columns,
+                                                       is_bin: false,
+                                                       ok_packet: ok_packet}),
             Err(err) => Err(err)
         }
     }
@@ -808,18 +811,47 @@ impl Writer for MyInnerConn {
  */
 
 pub struct QueryResult<'a> {
-    conn: &'a mut MyInnerConn,
+    pooled_conn: Option<MyPooledConn>,
+    conn: Option<&'a mut MyInnerConn>,
     columns: Vec<Column>,
     ok_packet: Option<OkPacket>,
     is_bin: bool
 }
 
 impl<'a> QueryResult<'a> {
+    pub fn new<'a>(conn: &'a mut MyInnerConn,
+                   columns: Vec<Column>,
+                   ok_packet: Option<OkPacket>,
+                   is_bin: bool) -> QueryResult<'a> {
+        QueryResult{pooled_conn: None,
+                    columns: columns,
+                    conn: Some(conn),
+                    ok_packet: ok_packet,
+                    is_bin: is_bin}
+    }
+    pub fn new_pooled(conn: MyPooledConn,
+                      columns: Vec<Column>,
+                      ok_packet: Option<OkPacket>,
+                      is_bin: bool) -> QueryResult {
+        QueryResult{pooled_conn: Some(conn),
+                    columns: columns,
+                    conn: None,
+                    ok_packet: ok_packet,
+                    is_bin: is_bin}
+    }
     pub fn affected_rows(&self) -> u64 {
-        self.conn.affected_rows
+        if self.conn.is_some() {
+            self.conn.get_ref().affected_rows
+        } else {
+            self.pooled_conn.get_ref().get_ref().affected_rows
+        }
     }
     pub fn last_insert_id(&self) -> u64 {
-        self.conn.last_insert_id
+        if self.conn.is_some() {
+            self.conn.get_ref().last_insert_id
+        } else {
+            self.pooled_conn.get_ref().get_ref().last_insert_id
+        }
     }
     pub fn warnings(&self) -> u16 {
         if self.ok_packet.is_some() {
@@ -837,7 +869,13 @@ impl<'a> QueryResult<'a> {
     }
     pub fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.is_bin {
-            let r = self.conn.next_bin(&self.columns);
+            let r = if self.conn.is_some() {
+                let conn_ref = self.conn.get_mut_ref();
+                conn_ref.next_bin(&self.columns)
+            } else {
+                let conn_ref = self.pooled_conn.get_mut_ref().get_mut_ref();
+                conn_ref.next_bin(&self.columns)
+            };
             match r {
                 Ok(r) => {
                     match r {
@@ -852,7 +890,13 @@ impl<'a> QueryResult<'a> {
                 }
             }
         } else {
-            let r = self.conn.next_text(self.columns.len());
+            let r = if self.conn.is_some() {
+                let conn_ref = self.conn.get_mut_ref();
+                conn_ref.next_text(self.columns.len())
+            } else {
+                let conn_ref = self.pooled_conn.get_mut_ref().get_mut_ref();
+                conn_ref.next_text(self.columns.len())
+            };
             match r {
                 Ok(r) => {
                     match r {

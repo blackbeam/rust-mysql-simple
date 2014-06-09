@@ -3,7 +3,7 @@ use super::consts;
 use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
 
-#[deriving(Clone, PartialEq, PartialOrd)]
+#[deriving(Clone, PartialEq, PartialOrd, Show)]
 pub enum Value {
     NULL,
     Bytes(Vec<u8>),

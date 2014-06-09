@@ -4,6 +4,7 @@ use core::fmt;
 use std::io::{IoError};
 use super::packet::{ErrPacket};
 
+#[deriving(PartialEq)]
 pub enum MyError {
 	MyIoError(IoError),
 	MySqlError(ErrPacket),
