@@ -24,7 +24,13 @@ impl Value {
             Bytes(ref x) => {
                 match String::from_utf8(x.clone()) {
                     Ok(s) => {
-                        let replaced = s.replace("'", "\'");
+                        let replaced = s.replace("\x5c", "\x5c\x5c")
+                                        .replace("\x00", "\x5c\x00")
+                                        .replace("\n", "\x5c\n")
+                                        .replace("\r", "\x5c\r")
+                                        .replace("'", "\x5c'")
+                                        .replace("\"", "\x5c\"")
+                                        .replace("\x1a", "\x5c\x1a");
                         format!("'{:s}'", replaced)
                     },
                     Err(_) => {
@@ -352,8 +358,8 @@ mod test {
         assert!(v.into_str() == "NULL".to_string());
         let v = Bytes(Vec::from_slice(String::from_str("hello").as_bytes()));
         assert!(v.into_str() == "'hello'".to_string());
-        let v = Bytes(Vec::from_slice(String::from_str("h'e'l'l'o").as_bytes()));
-        assert!(v.into_str() == "'h\'e\'l\'l\'o'".to_string());
+        let v = Bytes(Vec::from_slice(String::from_str("h\x5c'e'l'l'o").as_bytes()));
+        assert_eq!(v.into_str(), "'h\x5c\x5c\x5c'e\x5c'l\x5c'l\x5c'o'".to_string());
         let v = Bytes(vec!(0, 1, 2, 3, 4, 255));
         assert!(v.into_str() == "0x0001020304FF".to_string());
         let v = Int(-65536);
