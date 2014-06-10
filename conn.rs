@@ -120,8 +120,7 @@ impl Column {
         let org_table = try!(reader.read_lenenc_bytes());
         let name = try!(reader.read_lenenc_bytes());
         let org_name = try!(reader.read_lenenc_bytes());
-        // skip next length
-        let _ = reader.read_lenenc_int();
+        try!(reader.skip_lenenc_int());
         let character_set = try!(reader.read_le_u16());
         let column_length = try!(reader.read_le_u32());
         let column_type = try!(reader.read_u8());
@@ -330,7 +329,7 @@ impl MyInnerConn {
                 return Err(MyStrError("Packet out of sync".to_string()));
             }
             self.seq_id += 1;
-            if payload_len as uint >= consts::MAX_PAYLOAD_LEN {
+            if payload_len >= consts::MAX_PAYLOAD_LEN {
                 try_io!(self.push_at_least(consts::MAX_PAYLOAD_LEN,
                                            consts::MAX_PAYLOAD_LEN,
                                            &mut output));
@@ -516,7 +515,7 @@ impl MyInnerConn {
             try_io!(writer.write_u8(1u8));
             let mut i = -1;
             while { i += 1; i < params.len() } {
-                let _ = match params[i] {
+                match params[i] {
                     NULL => try_io!(writer.write([stmt.params.get_ref().get(i).column_type, 0u8])),
                     Bytes(..) => try_io!(writer.write([consts::MYSQL_TYPE_VAR_STRING, 0u8])),
                     Int(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG, 0u8])),
@@ -729,13 +728,8 @@ impl MyInnerConn {
         let x = *pld.get(0);
         if x == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
-            let p = EOFPacket::from_payload(pld.as_slice());
-            match p {
-                Ok(p) => {
-                    self.handle_eof(&p);
-                },
-                Err(e) => return Err(MyIoError(e))
-            }
+            let p = try_io!(EOFPacket::from_payload(pld.as_slice()));
+            self.handle_eof(&p);
             return Ok(None);
         }
         let res = Value::from_bin_payload(pld.as_slice(), columns.as_slice());
@@ -762,13 +756,8 @@ impl MyInnerConn {
         if (x == 0xfe || x == 0xff) && pld.len() < 0xfe {
             self.has_results = false;
             if x == 0xfe {
-                let p = EOFPacket::from_payload(pld.as_slice());
-                match p {
-                    Ok(p) => {
-                        self.handle_eof(&p);
-                    },
-                    Err(err) => return Err(MyIoError(err))
-                }
+                let p = try_io!(EOFPacket::from_payload(pld.as_slice()));
+                self.handle_eof(&p);
                 return Ok(None);
             } else /* x == 0xff */ {
                 let p = ErrPacket::from_payload(pld.as_slice());

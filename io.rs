@@ -1,8 +1,8 @@
-use std::io::{IoResult};
+use std::io::{IoResult, SeekCur, Seek};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
 
-pub trait MyReader: Reader {
+pub trait MyReader: Reader + Seek {
 	fn read_lenenc_int(&mut self) -> IoResult<u64> {
 		let head_byte = try!(self.read_u8());
 		let mut length;
@@ -14,6 +14,15 @@ pub trait MyReader: Reader {
 		}
 		return self.read_le_uint_n(length);
 	}
+
+    fn skip_lenenc_int(&mut self) -> IoResult<()> {
+        match try!(self.read_u8()) {
+            0xfc => self.seek(2, SeekCur),
+            0xfd => self.seek(3, SeekCur),
+            0xfe => self.seek(8, SeekCur),
+            _ => Ok(())
+        }
+    }
 
 	fn read_lenenc_bytes(&mut self) -> IoResult<Vec<u8>> {
 		let len = try!(self.read_lenenc_int());
@@ -138,7 +147,7 @@ pub trait MyReader: Reader {
 	}
 }
 
-impl<T:Reader> MyReader for T {}
+impl<T:Reader + Seek> MyReader for T {}
 
 pub trait MyWriter: Writer {
 	fn write_le_uint_n(&mut self, x: u64, len: uint) -> IoResult<()> {
