@@ -30,7 +30,7 @@ pub type MyResult<T> = Result<T, MyError>;
  *                                           
  */
 
-struct InnerStmt {
+pub struct InnerStmt {
     params: Option<Vec<Column>>,
     columns: Option<Vec<Column>>,
     statement_id: u32,
@@ -58,12 +58,25 @@ impl InnerStmt {
 
 pub struct Stmt<'a> {
     stmt: InnerStmt,
-    conn: &'a mut MyInnerConn
+    conn: Option<&'a mut MyInnerConn>,
+    pooled_conn: Option<MyPooledConn>
 }
 
 impl<'a> Stmt<'a> {
+    pub fn new<'a>(stmt: InnerStmt, conn: &'a mut MyInnerConn) -> Stmt<'a> {
+        Stmt{stmt: stmt, conn: Some(conn), pooled_conn: None}
+    }
+    pub fn new_pooled(stmt: InnerStmt, pooled_conn: MyPooledConn) -> Stmt {
+        Stmt{stmt: stmt, conn: None, pooled_conn: Some(pooled_conn)}
+    }
     pub fn execute<'a>(&'a mut self, params: &[Value]) -> MyResult<QueryResult<'a>> {
-        self.conn.execute(&self.stmt, params)
+        if self.conn.is_some() {
+            let conn_ref: &'a mut &mut MyInnerConn = self.conn.get_mut_ref();
+            conn_ref.execute(&self.stmt, params)
+        } else {
+            let conn_ref = self.pooled_conn.get_mut_ref().get_mut_ref();
+            conn_ref.execute(&self.stmt, params)
+        }
     }
 }
 
@@ -630,7 +643,7 @@ impl MyInnerConn {
             Err(err) => Err(err)
         }
     }
-    fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
+    pub fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
@@ -668,7 +681,7 @@ impl MyInnerConn {
     }
     pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         match self._prepare(query) {
-            Ok(stmt) => Ok(Stmt{conn: self, stmt: stmt}),
+            Ok(stmt) => Ok(Stmt::new(stmt, self)),
             Err(err) => Err(err)
         }
     }

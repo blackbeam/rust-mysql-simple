@@ -65,6 +65,10 @@ impl MyPool {
         let conn = try!(self.get_conn());
         conn.pooled_query(query)
     }
+    fn prepare(&self, query: &str) -> MyResult<Stmt> {
+        let conn = try!(self.get_conn());
+        conn.pooled_prepare(query)
+    }
 }
 
 pub struct MyPooledConn {
@@ -72,7 +76,6 @@ pub struct MyPooledConn {
     conn: Option<MyInnerConn>
 }
 
-#[unsafe_destructor]
 impl Drop for MyPooledConn {
     fn drop(&mut self) {
         let mut pool = self.pool.pool.lock();
@@ -100,6 +103,12 @@ impl MyPooledConn {
             Err(err) => Err(err)
         }
     }
+    fn pooled_prepare(mut self, query: &str) -> MyResult<Stmt> {
+        match self.get_mut_ref()._prepare(query) {
+            Ok(stmt) => Ok(Stmt::new_pooled(stmt, self)),
+            Err(err) => Err(err)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -107,7 +116,7 @@ mod test {
     use conn::{MyOpts};
     use std::default::{Default};
     use super::{MyPool};
-    use super::super::value::{Bytes};
+    use super::super::value::{Bytes, Int};
 
     #[test]
     fn test_query() {
@@ -153,6 +162,27 @@ mod test {
                 assert!(stmt.is_ok());
                 let mut stmt = stmt.unwrap();
                 assert!(stmt.execute([]).is_ok());
+            });
+        }
+    }
+
+    #[test]
+    fn test_pooled_prepared_query() {
+        let pool = MyPool::new(3, MyOpts{user: Some("root".to_string()),
+                                         ..Default::default()});
+        for _ in range(0, 10) {
+            let pool = pool.clone();
+            spawn(proc() {
+                let stmt = pool.prepare("SELECT 1");
+                assert!(stmt.is_ok());
+                let mut stmt = stmt.unwrap();
+                for _ in range(0, 5) {
+                    let result = stmt.execute([]);
+                    assert!(result.is_ok());
+                    let mut result = result.unwrap();
+                    assert_eq!(result.next(), Some(Ok(vec![Int(1)])));
+                    assert_eq!(result.next(), None);
+                }
             });
         }
     }
