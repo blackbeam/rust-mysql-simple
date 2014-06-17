@@ -349,7 +349,8 @@ impl MyInnerConn {
             return Err(MyStrError("Packet too large".to_string()));
         }
         if data.len() == 0 {
-            try_io!(self.write([0u8, 0u8, 0u8, self.seq_id]));
+            let seq_id = self.seq_id;
+            try_io!(self.write([0u8, 0u8, 0u8, seq_id]));
             self.seq_id += 1;
             return Ok(());
         }
@@ -378,7 +379,8 @@ impl MyInnerConn {
             try_io!(self.write(full_chunk.as_slice()));
         }
         if last_was_max {
-            try_io!(self.write([0u8, 0u8, 0u8, self.seq_id]));
+            let seq_id = self.seq_id;
+            try_io!(self.write([0u8, 0u8, 0u8, seq_id]));
             self.seq_id += 1;
         }
         Ok(())
