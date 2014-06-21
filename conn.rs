@@ -7,7 +7,7 @@ use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
 use std::from_str::FromStr;
 use super::consts;
-use super::io::{MyReader};
+use super::io::{MyReader, MyWriter};
 use super::error::{MyError, MyIoError, MySqlError, MyStrError};
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
@@ -321,7 +321,8 @@ impl MyInnerConn {
         return Err(MyStrError("Could not connect. Address not specified".to_string()));
     }
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
-        let mut output = Vec::with_capacity(0);
+        let mut output = Vec::new();
+        let mut pos = 0;
         loop {
             let payload_len = try_io!(self.read_le_uint_n(3)) as uint;
             let seq_id = try_io!(self.read_u8());
@@ -329,23 +330,27 @@ impl MyInnerConn {
                 return Err(MyStrError("Packet out of sync".to_string()));
             }
             self.seq_id += 1;
-            if payload_len >= consts::MAX_PAYLOAD_LEN {
-                try_io!(self.push_at_least(consts::MAX_PAYLOAD_LEN,
-                                           consts::MAX_PAYLOAD_LEN,
-                                           &mut output));
+            if payload_len == consts::MAX_PAYLOAD_LEN {
+                output.reserve(pos + consts::MAX_PAYLOAD_LEN);
+                unsafe { output.set_len(pos + consts::MAX_PAYLOAD_LEN); }
+                try_io!(self.read_at_least(consts::MAX_PAYLOAD_LEN,
+                                           output.mut_slice_from(pos)));
+                pos += consts::MAX_PAYLOAD_LEN;
             } else if payload_len == 0 {
                 break;
             } else {
-                try_io!(self.push_at_least(payload_len,
-                                           payload_len,
-                                           &mut output));
+                output.reserve(pos + payload_len);
+                unsafe { output.set_len(pos + payload_len); }
+                try_io!(self.read_at_least(payload_len,
+                                           output.mut_slice_from(pos)));
                 break;
             }
         }
         Ok(output)
     }
     fn write_packet(&mut self, data: &Vec<u8>) -> MyResult<()> {
-        if data.len() > self.max_allowed_packet && self.max_allowed_packet < consts::MAX_PAYLOAD_LEN {
+        if data.len() > self.max_allowed_packet &&
+           self.max_allowed_packet < consts::MAX_PAYLOAD_LEN {
             return Err(MyStrError("Packet too large".to_string()));
         }
         if data.len() == 0 {
@@ -357,26 +362,13 @@ impl MyInnerConn {
         let mut last_was_max = false;
         for chunk in data.as_slice().chunks(consts::MAX_PAYLOAD_LEN) {
             let chunk_len = chunk.len();
-            let full_chunk_len = 4 + chunk_len;
-            let mut full_chunk: Vec<u8> = Vec::from_elem(full_chunk_len, 0u8);
-            if chunk_len == consts::MAX_PAYLOAD_LEN {
-                last_was_max = true;
-                *full_chunk.get_mut(0) = 255u8;
-                *full_chunk.get_mut(1) = 255u8;
-                *full_chunk.get_mut(2) = 255u8;
-            } else {
-                last_was_max = false;
-                *full_chunk.get_mut(0) = (chunk_len & 255) as u8;
-                *full_chunk.get_mut(1) = ((chunk_len & (255 << 8)) >> 8) as u8;
-                *full_chunk.get_mut(2) = ((chunk_len & (255 << 16)) >> 16) as u8;
-            }
-            *full_chunk.get_mut(3) = self.seq_id;
+            let mut writer = MemWriter::with_capacity(4 + chunk_len);
+            last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
+            try_io!(writer.write_le_uint_n(chunk_len as u64, 3));
+            try_io!(writer.write_u8(self.seq_id));
             self.seq_id += 1;
-            unsafe {
-                let payload_slice = full_chunk.mut_slice_from(4);
-                payload_slice.copy_memory(chunk);
-            }
-            try_io!(self.write(full_chunk.as_slice()));
+            try_io!(writer.write(chunk));
+            try_io!(self.write(writer.unwrap().as_slice()));
         }
         if last_was_max {
             let seq_id = self.seq_id;
@@ -417,34 +409,35 @@ impl MyInnerConn {
                 0u8 => {
                     let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                     self.handle_ok(&ok);
-                    return Ok(());
+                    Ok(())
                 },
                 0xffu8 => {
                     let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
-                    return Err(MySqlError(err));
+                    Err(MySqlError(err))
                 },
-                _ => return Err(MyStrError("Unexpected packet".to_string()))
+                _ => Err(MyStrError("Unexpected packet".to_string()))
             }
         })
     }
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let mut client_flags = consts::CLIENT_PROTOCOL_41 |
-                           consts::CLIENT_SECURE_CONNECTION |
-                           consts::CLIENT_LONG_PASSWORD |
-                           consts::CLIENT_TRANSACTIONS |
-                           consts::CLIENT_LOCAL_FILES |
-                           (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        let scramble_buf = scramble(hp.auth_plugin_data.as_slice(), self.opts.get_pass().as_bytes());
+                               consts::CLIENT_SECURE_CONNECTION |
+                               consts::CLIENT_LONG_PASSWORD |
+                               consts::CLIENT_TRANSACTIONS |
+                               consts::CLIENT_LOCAL_FILES |
+                               (self.capability_flags &
+                                consts::CLIENT_LONG_FLAG);
+        let scramble_buf = scramble(hp.auth_plugin_data.as_slice(),
+                                    self.opts.get_pass().as_bytes());
         let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
         let mut payload_len = 4 + 4 + 1 + 23 + self.opts.get_user().len() + 1 + 1 + scramble_buf_len;
         if self.opts.get_db_name().len() > 0 {
             client_flags |= consts::CLIENT_CONNECT_WITH_DB;
             payload_len += self.opts.get_db_name().len() + 1;
         }
-
         let mut writer = MemWriter::with_capacity(payload_len);
         try_io!(writer.write_le_u32(client_flags));
-        try_io!(writer.write_le_u32(0u32));
+        try_io!(writer.write([0u8, ..4]));
         try_io!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try_io!(writer.write([0u8, ..23]));
         try_io!(writer.write_str(self.opts.get_user().as_slice()));
@@ -457,7 +450,6 @@ impl MyInnerConn {
             try_io!(writer.write_str(self.opts.get_db_name().as_slice()));
             try_io!(writer.write_u8(0u8));
         }
-
         self.write_packet(&writer.unwrap())
     }
     fn write_command(&mut self, cmd: u8) -> MyResult<()> {
@@ -490,7 +482,8 @@ impl MyInnerConn {
                         try_io!(writer.write_le_u32(stmt.statement_id));
                         try_io!(writer.write_le_u16(id));
                         try_io!(writer.write(chunk));
-                        try!(self.write_command_data(consts::COM_STMT_SEND_LONG_DATA, writer.unwrap().as_slice()));
+                        try!(self.write_command_data(consts::COM_STMT_SEND_LONG_DATA,
+                                                     writer.unwrap().as_slice()));
                     }
                 },
                 _ => (/* quite strange so do nothing */)
@@ -502,21 +495,22 @@ impl MyInnerConn {
         if stmt.num_params != params.len() as u16 {
             return Err(MyStrError(format!("Statement takes {:u} parameters but {:u} was supplied", stmt.num_params, params.len())));
         }
-        let mut writer = MemWriter::new();
-        try_io!(writer.write_le_u32(stmt.statement_id));
-        try_io!(writer.write_u8(0u8));
-        try_io!(writer.write_le_u32(1u32));
+        let mut writer: MemWriter;
         if stmt.num_params > 0 {
             let (bitmap, values, large_ids) = try_io!(Value::to_bin_payload(stmt.params.get_ref().as_slice(),
-                                                                    params,
-                                                                    self.max_allowed_packet));
+                                                                            params,
+                                                                            self.max_allowed_packet));
             if large_ids.is_some() {
                 try!(self.send_long_data(stmt, params, large_ids.unwrap()));
             }
+            let data_len = 4 + 1 + 4 + bitmap.len() + 1 + params.len() * 2 + values.len();
+            writer = MemWriter::with_capacity(data_len);
+            try_io!(writer.write_le_u32(stmt.statement_id));
+            try_io!(writer.write_u8(0u8));
+            try_io!(writer.write_le_u32(1u32));
             try_io!(writer.write(bitmap.as_slice()));
             try_io!(writer.write_u8(1u8));
-            let mut i = -1;
-            while { i += 1; i < params.len() } {
+            for i in range(0, params.len()) {
                 match params[i] {
                     NULL => try_io!(writer.write([stmt.params.get_ref().get(i).column_type, 0u8])),
                     Bytes(..) => try_io!(writer.write([consts::MYSQL_TYPE_VAR_STRING, 0u8])),
@@ -525,9 +519,15 @@ impl MyInnerConn {
                     Float(..) => try_io!(writer.write([consts::MYSQL_TYPE_DOUBLE, 0u8])),
                     Date(..) => try_io!(writer.write([consts::MYSQL_TYPE_DATE, 0u8])),
                     Time(..) => try_io!(writer.write([consts::MYSQL_TYPE_TIME, 0u8]))
-                };
+                }
             }
             try_io!(writer.write(values.as_slice()));
+        } else {
+            let data_len = 4 + 1 + 4;
+            writer = MemWriter::with_capacity(data_len);
+            try_io!(writer.write_le_u32(stmt.statement_id));
+            try_io!(writer.write_u8(0u8));
+            try_io!(writer.write_le_u32(1u32));
         }
         try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
         let pld = try!(self.read_packet());
@@ -545,11 +545,9 @@ impl MyInnerConn {
                 let mut reader = BufReader::new(pld.as_slice());
                 let column_count = try_io!(reader.read_lenenc_int());
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
-                let mut i = 0;
-                while i < column_count {
+                for _ in range(0, column_count) {
                     let pld = try!(self.read_packet());
                     columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
-                    i += 1;
                 }
                 try!(self.read_packet());
                 self.has_results = true;
@@ -622,8 +620,7 @@ impl MyInnerConn {
                 let mut reader = BufReader::new(pld.as_slice());
                 let column_count = try_io!(reader.read_lenenc_int());
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
-                let mut i = -1;
-                while { i += 1; i < column_count } {
+                for _ in range(0, column_count) {
                     let pld = try!(self.read_packet());
                     columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
                 }
@@ -656,22 +653,18 @@ impl MyInnerConn {
                 let mut stmt = try_io!(InnerStmt::from_payload(pld.as_slice()));
                 if stmt.num_params > 0 {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as uint);
-                    let mut i = 0;
-                    while i < stmt.num_params {
+                    for _ in range(0, stmt.num_params) {
                         let pld = try!(self.read_packet());
                         params.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
-                        i += 1;
                     }
                     stmt.params = Some(params);
                     try!(self.read_packet());
                 }
                 if stmt.num_columns > 0 {
                     let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as uint);
-                    let mut i = 0;
-                    while i < stmt.num_columns {
+                    for _ in range(0, stmt.num_columns) {
                         let pld = try!(self.read_packet());
                         columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
-                        i += 1;
                     }
                     stmt.columns = Some(columns);
                     try!(self.read_packet());
@@ -1045,7 +1038,6 @@ mod test {
         }
         {
             let stmt = conn.prepare("SELECT * FROM tbl");
-            println!("{:?}", stmt);
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
             let mut i = 0;
