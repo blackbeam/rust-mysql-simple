@@ -4,6 +4,8 @@
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
+#![feature(unsafe_destructor)]
+
 #![allow(dead_code)]
 #![feature(macro_rules)]
 
