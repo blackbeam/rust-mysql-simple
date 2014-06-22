@@ -2,22 +2,22 @@ use std::vec::{Vec};
 
 mod sha1;
 
-pub fn scramble(scr: &[u8], password: &[u8]) -> Option<[u8, ..20]> {
+pub fn scramble(scr: &[u8], password: &[u8]) -> Option<Vec<u8>> {
     if password.len() == 0 {
         return None;
     }
 
     let sha_pass = sha1::sha1(password);
-    let double_sha_pass = sha1::sha1(sha_pass);
-    let hash = sha1::sha1(Vec::new().append(scr).append(double_sha_pass).as_slice());
+    let double_sha_pass = sha1::sha1(sha_pass.as_slice());
+    let hash = sha1::sha1(Vec::new().append(scr).append(double_sha_pass.as_slice()).as_slice());
 
     let mut output = [0u8, ..20];
 
     for i in range(0u, 20u) {
-        output[i] = sha_pass[i] ^ hash[i];
+        output[i] = *sha_pass.get(i) ^ *hash.get(i);
     }
 
-    Some(output)
+    Some(Vec::from_slice(output))
 }
 
 #[cfg(test)]
@@ -31,8 +31,9 @@ mod test {
         let password = [0x47_u8, 0x21_u8, 0x69_u8, 0x64_u8, 0x65_u8, 0x72_u8, 0x32_u8, 0x37_u8];
         let output = scramble(scr, password);
         assert!(output.is_some());
-        assert!(output.unwrap() == [0x09_u8, 0xcf_u8, 0xf8_u8, 0x85_u8, 0x5e_u8, 0x9e_u8, 0x70_u8,
-                           0x53_u8, 0x40_u8, 0xff_u8, 0x22_u8, 0x70_u8, 0xd8_u8, 0xfb_u8,
-                           0x9f_u8, 0xad_u8, 0xba_u8, 0x90_u8, 0x6b_u8, 0x70_u8]);
+        assert_eq!(output.unwrap(), vec![0x09_u8, 0xcf_u8, 0xf8_u8, 0x85_u8, 0x5e_u8, 0x9e_u8,
+                                         0x70_u8, 0x53_u8, 0x40_u8, 0xff_u8, 0x22_u8, 0x70_u8,
+                                         0xd8_u8, 0xfb_u8, 0x9f_u8, 0xad_u8, 0xba_u8, 0x90_u8,
+                                         0x6b_u8, 0x70_u8]);
     }
 }

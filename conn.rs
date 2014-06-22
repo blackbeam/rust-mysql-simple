@@ -444,7 +444,7 @@ impl MyInnerConn {
         try_io!(writer.write_u8(0u8));
         try_io!(writer.write_u8(scramble_buf_len as u8));
         if scramble_buf.is_some() {
-            try_io!(writer.write(scramble_buf.unwrap()));
+            try_io!(writer.write(scramble_buf.unwrap().as_slice()));
         }
         if self.opts.get_db_name().len() > 0 {
             try_io!(writer.write_str(self.opts.get_db_name().as_slice()));
@@ -966,7 +966,8 @@ mod test {
                                           db_name: Some("mysql".to_string()),
                                           ..Default::default()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
-            assert!(x.unwrap().shift().unwrap().unwrap_bytes() == Vec::from_slice("mysql".as_bytes()));
+            assert_eq!(x.unwrap().shift().unwrap().unwrap_bytes(),
+                       Vec::from_slice("mysql".as_bytes()));
         }
     }
 
@@ -986,7 +987,7 @@ mod test {
         // Drop
         assert!(conn.query("SELECT * FROM tbl").is_ok());
         assert!(conn.query("UPDATE tbl SET a = 'foo';").is_ok());
-        assert!(conn.affected_rows == 2);
+        assert_eq!(conn.affected_rows, 2);
         for _ in &mut conn.query("SELECT * FROM tbl WHERE a = 'bar'") {
             assert!(false);
         }
@@ -995,29 +996,27 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             if count == 0 {
-                assert!(*row.get(0) == Bytes(Vec::from_slice("foo".as_bytes())));
-                assert!(*row.get(1) == Bytes(Vec::from_slice("-123".as_bytes())));
-                assert!(*row.get(2) == Bytes(Vec::from_slice("123".as_bytes())));
-                assert!(*row.get(3) == Bytes(Vec::from_slice("2014-05-05".as_bytes())));
-                assert!(*row.get(4) == Bytes(Vec::from_slice("123.123".as_bytes())));
+                assert_eq!(*row.get(0), Bytes(Vec::from_slice("foo".as_bytes())));
+                assert_eq!(*row.get(1), Bytes(Vec::from_slice("-123".as_bytes())));
+                assert_eq!(*row.get(2), Bytes(Vec::from_slice("123".as_bytes())));
+                assert_eq!(*row.get(3), Bytes(Vec::from_slice("2014-05-05".as_bytes())));
+                assert_eq!(*row.get(4), Bytes(Vec::from_slice("123.123".as_bytes())));
             } else {
-                assert!(*row.get(0) == Bytes(Vec::from_slice("foo".as_bytes())));
-                assert!(*row.get(1) == Bytes(Vec::from_slice("-321".as_bytes())));
-                assert!(*row.get(2) == Bytes(Vec::from_slice("321".as_bytes())));
-                assert!(*row.get(3) == Bytes(Vec::from_slice("2014-06-06".as_bytes())));
-                assert!(*row.get(4) == Bytes(Vec::from_slice("321.321".as_bytes())));
+                assert_eq!(*row.get(0), Bytes(Vec::from_slice("foo".as_bytes())));
+                assert_eq!(*row.get(1), Bytes(Vec::from_slice("-321".as_bytes())));
+                assert_eq!(*row.get(2), Bytes(Vec::from_slice("321".as_bytes())));
+                assert_eq!(*row.get(3), Bytes(Vec::from_slice("2014-06-06".as_bytes())));
+                assert_eq!(*row.get(4), Bytes(Vec::from_slice("321.321".as_bytes())));
             }
             count += 1;
         }
-        assert!(count == 2);
+        assert_eq!(count, 2);
         for row in &mut conn.query("SELECT REPEAT('A', 20000000)") {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let val = row.get(0).bytes_ref();
-            assert!(val.len() == 20000000);
-            for y in val.iter() {
-                assert!(y == &65u8);
-            }
+            let val= row.get(0).bytes_ref();
+            assert_eq!(val.len(), 20000000);
+            assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
         }
     }
 
@@ -1045,17 +1044,17 @@ mod test {
                 assert!(row.is_ok());
                 let row = row.unwrap();
                 if i == 0 {
-                    assert!(*row.get(0) == Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8)));
-                    assert!(*row.get(1) == Int(-123i64));
-                    assert!(*row.get(2) == Int(123i64));
-                    assert!(*row.get(3) == Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                    assert!(row.get(4).get_float() == 123.123);
+                    assert_eq!(*row.get(0), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8)));
+                    assert_eq!(*row.get(1), Int(-123i64));
+                    assert_eq!(*row.get(2), Int(123i64));
+                    assert_eq!(*row.get(3), Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
+                    assert_eq!(row.get(4).get_float(), 123.123);
                 } else {
-                    assert!(*row.get(0) == Bytes(vec!(119u8, 111u8, 114u8, 108u8, 100u8)));
-                    assert!(*row.get(1) == NULL);
-                    assert!(*row.get(2) == NULL);
-                    assert!(*row.get(3) == NULL);
-                    assert!(row.get(4).get_float() == 321.321);
+                    assert_eq!(*row.get(0), Bytes(vec!(119u8, 111u8, 114u8, 108u8, 100u8)));
+                    assert_eq!(*row.get(1), NULL);
+                    assert_eq!(*row.get(2), NULL);
+                    assert_eq!(*row.get(3), NULL);
+                    assert_eq!(row.get(4).get_float(), 321.321);
                 }
                 i += 1;
             }
@@ -1065,11 +1064,9 @@ mod test {
         for row in &mut stmt.execute([]) {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let v: &[u8] = row.get(0).bytes_ref();
-            assert!(v.len() == 20000000);
-            for y in v.iter() {
-                assert!(y == &65u8);
-            }
+            let val= row.get(0).bytes_ref();
+            assert_eq!(val.len(), 20000000);
+            assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
         }
     }
 
@@ -1086,11 +1083,8 @@ mod test {
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
         let v: Vec<u8> = x.unwrap().shift().unwrap().unwrap_bytes();
-        assert!(v.len() == 20000000);
-        for y in v.iter() {
-            assert!(y == &65u8);
-        }
-
+        assert_eq!(v.len(), 20000000);
+        assert_eq!(v, Vec::from_elem(20000000, 65u8));
     }
 
     #[test]
@@ -1111,11 +1105,9 @@ mod test {
         let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(row.is_ok());
         let row = row.unwrap();
-        let v = row.get(0).bytes_ref();
-        assert!(v.len() == 20000000);
-        for y in v.iter() {
-            assert!(y == &65u8);
-        }
+        let val= row.get(0).bytes_ref();
+        assert_eq!(val.len(), 20000000);
+        assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
     }
 
     #[test]
@@ -1142,14 +1134,14 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             match count {
-                0 => assert!(row == vec!(Bytes(vec!(65u8, 65u8, 65u8, 65u8, 65u8, 65u8)))),
-                1 => assert!(row == vec!(Bytes(vec!(66u8, 66u8, 66u8, 66u8, 66u8, 66u8)))),
-                2 => assert!(row == vec!(Bytes(vec!(67u8, 67u8, 67u8, 67u8, 67u8, 67u8)))),
+                0 => assert_eq!(row, vec!(Bytes(vec!(65u8, 65u8, 65u8, 65u8, 65u8, 65u8)))),
+                1 => assert_eq!(row, vec!(Bytes(vec!(66u8, 66u8, 66u8, 66u8, 66u8, 66u8)))),
+                2 => assert_eq!(row, vec!(Bytes(vec!(67u8, 67u8, 67u8, 67u8, 67u8, 67u8)))),
                 _ => assert!(false)
             }
             count += 1;
         }
-        assert!(count == 3);
+        assert_eq!(count, 3);
         unlink(&path);
     }
 
@@ -1164,7 +1156,7 @@ mod test {
         for row in &mut conn.query("SELECT DATABASE()") {
             assert!(row.is_ok());
             let row = row.unwrap();
-            assert!(row == vec!(NULL));
+            assert_eq!(row, vec!(NULL));
         }
     }
 
