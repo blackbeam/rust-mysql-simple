@@ -1,5 +1,5 @@
 use sync::{Arc, Mutex};
-use super::error::{MyStrError};
+use super::error::{MyDriverError, InvalidPoolConstraints};
 use conn::{MyInnerConn, MyOpts, MyResult, Stmt, QueryResult};
 
 struct MyInnerPool {
@@ -13,7 +13,7 @@ struct MyInnerPool {
 impl MyInnerPool {
     fn new(min: uint, max: uint, opts: MyOpts) -> MyResult<MyInnerPool> {
         if min > max || max == 0 {
-            return Err(MyStrError("Invalid pool constraints".to_string()));
+            return Err(MyDriverError(InvalidPoolConstraints));
         }
         let mut pool = MyInnerPool {
             opts: opts,

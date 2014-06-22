@@ -8,7 +8,7 @@ use super::packet::{ErrPacket};
 pub enum MyError {
 	MyIoError(IoError),
 	MySqlError(ErrPacket),
-	MyStrError(String)
+	MyDriverError(DriverError)
 }
 
 impl fmt::Show for MyError {
@@ -16,7 +16,7 @@ impl fmt::Show for MyError {
 		match *self {
 			MyIoError(ref io_err) => io_err.fmt(f),
 			MySqlError(ref err_packet) => err_packet.fmt(f),
-			MyStrError(ref err_str) => write!(f, "{}", err_str)
+			MyDriverError(ref driver_err) => write!(f, "{}", driver_err)
 		}
 	}
 }
@@ -30,6 +30,56 @@ macro_rules! try_io(
 		}
 	)
 )
+
+#[deriving(PartialEq, Eq)]
+pub enum DriverError {
+	CouldNotConnect(Option<String>),
+	UnsupportedProtocol(u8),
+	PacketOutOfSync,
+	PacketTooLarge,
+	Protocol41NotSet,
+	UnexpectedPacket,
+	MismatchedStmtParams(u16, uint),
+	InvalidPoolConstraints,
+	SetupError,
+}
+
+impl fmt::Show for DriverError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match *self {
+			CouldNotConnect(None) => {
+				write!(f, "Could not connect: address not specified")
+			}
+			CouldNotConnect(Some(ref addr)) => {
+				write!(f, "Could not connect to address: {}", addr)
+			}
+			UnsupportedProtocol(proto_version) => {
+				write!(f, "Unsupported protocol version {:u}", proto_version)
+			}
+			PacketOutOfSync => {
+				write!(f, "Packet out of sync")
+			}
+			PacketTooLarge => {
+				write!(f, "Packet too large")
+			}
+			Protocol41NotSet => {
+				write!(f, "Server must set CLIENT_PROTOCOL_41 flag")
+			}
+			UnexpectedPacket => {
+				write!(f, "Unexpected packet")
+			}
+			MismatchedStmtParams(exp, prov) => {
+				write!(f, "Statement takes {:u} parameters but {:u} was supplied", exp, prov)
+			}
+			InvalidPoolConstraints => {
+				write!(f, "Invalid pool constraints")
+			},
+			SetupError => {
+				write!(f, "Could not setup connection")
+			}
+		}
+	}
+}
 
 pub static ER_HASHCHK: u16 = 1000u16;
 pub static ER_NISAMCHK: u16 = 1001u16;

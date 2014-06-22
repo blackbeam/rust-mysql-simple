@@ -8,7 +8,10 @@ use std::io::net::unix::{UnixStream};
 use std::from_str::FromStr;
 use super::consts;
 use super::io::{MyReader, MyWriter};
-use super::error::{MyError, MyIoError, MySqlError, MyStrError};
+use super::error::{MyError, MyIoError, MySqlError, MyDriverError, CouldNotConnect,
+                   UnsupportedProtocol, PacketOutOfSync, PacketTooLarge,
+                   Protocol41NotSet, UnexpectedPacket, MismatchedStmtParams,
+                   SetupError};
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
@@ -302,8 +305,8 @@ impl MyInnerConn {
                     return Ok(());
                 },
                 _ => {
-                    return Err(MyStrError(format!("Could not connect to address: {:?}",
-                                                  self.opts.unix_addr)));
+                    let path_str = format!("{:?}", *self.opts.unix_addr.get_ref()).to_string();
+                    return Err(MyDriverError(CouldNotConnect(Some(path_str))));
                 }
             }
         }
@@ -318,12 +321,11 @@ impl MyInnerConn {
                     return Ok(());
                 },
                 _ => {
-                    return Err(MyStrError(format!("Could not connect to address: {:s}",
-                                                  *self.opts.tcp_addr.get_ref())))
+                    return Err(MyDriverError(CouldNotConnect(self.opts.tcp_addr.clone())));
                 }
             }
         }
-        return Err(MyStrError("Could not connect. Address not specified".to_string()));
+        return Err(MyDriverError(CouldNotConnect(None)));
     }
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let mut output = Vec::new();
@@ -332,7 +334,7 @@ impl MyInnerConn {
             let payload_len = try_io!(self.read_le_uint_n(3)) as uint;
             let seq_id = try_io!(self.read_u8());
             if seq_id != self.seq_id {
-                return Err(MyStrError("Packet out of sync".to_string()));
+                return Err(MyDriverError(PacketOutOfSync));
             }
             self.seq_id += 1;
             if payload_len == consts::MAX_PAYLOAD_LEN {
@@ -356,7 +358,7 @@ impl MyInnerConn {
     fn write_packet(&mut self, data: &Vec<u8>) -> MyResult<()> {
         if data.len() > self.max_allowed_packet &&
            self.max_allowed_packet < consts::MAX_PAYLOAD_LEN {
-            return Err(MyStrError("Packet too large".to_string()));
+            return Err(MyDriverError(PacketTooLarge));
         }
         if data.len() == 0 {
             let seq_id = self.seq_id;
@@ -400,10 +402,10 @@ impl MyInnerConn {
         self.read_packet().and_then(|pld| {
             let handshake = try_io!(HandshakePacket::from_payload(pld.as_slice()));
             if handshake.protocol_version != 10u8 {
-                return Err(MyStrError(format!("Unsupported protocol version {:u}", handshake.protocol_version)));
+                return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
             }
             if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41) == 0 {
-                return Err(MyStrError("Server must set CLIENT_PROTOCOL_41 flag".to_string()));
+                return Err(MyDriverError(Protocol41NotSet));
             }
             self.handle_handshake(&handshake);
             self.do_handshake_response(&handshake)
@@ -420,7 +422,7 @@ impl MyInnerConn {
                     let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
                     Err(MySqlError(err))
                 },
-                _ => Err(MyStrError("Unexpected packet".to_string()))
+                _ => Err(MyDriverError(UnexpectedPacket))
             }
         })
     }
@@ -498,7 +500,7 @@ impl MyInnerConn {
     }
     fn _execute(&mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         if stmt.num_params != params.len() as u16 {
-            return Err(MyStrError(format!("Statement takes {:u} parameters but {:u} was supplied", stmt.num_params, params.len())));
+            return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, params.len())));
         }
         let mut writer: MemWriter;
         if stmt.num_params > 0 {
@@ -695,7 +697,7 @@ impl MyInnerConn {
             Ok(uint::parse_bytes(max_allowed_packet.as_slice(), 10).unwrap_or(0))
         }).and_then(|max_allowed_packet| {
             if max_allowed_packet == 0 {
-                Err(MyStrError("Can't get max_allowed_packet value".to_string()))
+                Err(MyDriverError(SetupError))
             } else {
                 self.max_allowed_packet = max_allowed_packet;
                 self.connected = true;
