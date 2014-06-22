@@ -1,14 +1,32 @@
 use sync::{Arc, Mutex};
+use super::error::{MyStrError};
 use conn::{MyInnerConn, MyOpts, MyResult, Stmt, QueryResult};
 
 struct MyInnerPool {
     opts: MyOpts,
     pool: Vec<MyInnerConn>,
-    cap: uint,
+    min: uint,
+    max: uint,
     count: uint
 }
 
 impl MyInnerPool {
+    fn new(min: uint, max: uint, opts: MyOpts) -> MyResult<MyInnerPool> {
+        if min > max || max == 0 {
+            return Err(MyStrError("Invalid pool constraints".to_string()));
+        }
+        let mut pool = MyInnerPool {
+            opts: opts,
+            pool: Vec::with_capacity(max),
+            max: max,
+            min: min,
+            count: 0
+        };
+        for _ in range(0, min) {
+            try!(pool.new_conn());
+        }
+        Ok(pool)
+    }
     fn new_conn(&mut self) -> MyResult<()> {
         match MyInnerConn::new(self.opts.clone()) {
             Ok(conn) => {
@@ -26,21 +44,20 @@ pub struct MyPool {
 }
 
 impl MyPool {
-    pub fn new(cap: uint, opts: MyOpts) -> MyPool {
-        let pool = MyInnerPool {
-            opts: opts,
-            pool: Vec::new(),
-            cap: cap,
-            count: 0
-        };
-        MyPool{ pool: Arc::new(Mutex::new(pool)) }
+    pub fn new(opts: MyOpts) -> MyResult<MyPool> {
+        MyPool::new_manual(10, 100, opts)
+    }
+
+    pub fn new_manual(min: uint, max: uint, opts: MyOpts) -> MyResult<MyPool> {
+        let pool = try!(MyInnerPool::new(min, max, opts));
+        Ok(MyPool{ pool: Arc::new(Mutex::new(pool)) })
     }
 
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
         let mut pool = self.pool.lock();
 
         while pool.pool.is_empty() {
-            if pool.cap == 0 || pool.count < pool.cap {
+            if pool.count < pool.max {
                 match pool.new_conn() {
                     Ok(()) => {
                         pool.count += 1;
@@ -79,7 +96,11 @@ pub struct MyPooledConn {
 impl Drop for MyPooledConn {
     fn drop(&mut self) {
         let mut pool = self.pool.pool.lock();
-        pool.pool.push(self.conn.take_unwrap());
+        if pool.count > pool.min {
+            pool.count -= 1;
+        } else {
+            pool.pool.push(self.conn.take_unwrap());
+        }
         pool.cond.signal();
     }
 }
@@ -120,8 +141,10 @@ mod test {
 
     #[test]
     fn test_query() {
-        let pool = MyPool::new(3, MyOpts{user: Some("root".to_string()),
-                                         ..Default::default()});
+        let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
+                                      ..Default::default()});
+        assert!(pool.is_ok());
+        let pool = pool.unwrap();
         for _ in range(0, 10) {
             let pool = pool.clone();
             spawn(proc() {
@@ -135,8 +158,10 @@ mod test {
 
     #[test]
     fn test_pooled_query() {
-        let pool = MyPool::new(3, MyOpts{user: Some("root".to_string()),
-                                         ..Default::default()});
+        let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
+                                      ..Default::default()});
+        assert!(pool.is_ok());
+        let pool = pool.unwrap();
         for _ in range(0, 10) {
             let pool = pool.clone();
             spawn(proc() {
@@ -150,8 +175,10 @@ mod test {
 
     #[test]
     fn test_prepared_query() {
-        let pool = MyPool::new(3, MyOpts{user: Some("root".to_string()),
-                                         ..Default::default()});
+        let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
+                                      ..Default::default()});
+        assert!(pool.is_ok());
+        let pool = pool.unwrap();
         for _ in range(0, 10) {
             let pool = pool.clone();
             spawn(proc() {
@@ -168,8 +195,10 @@ mod test {
 
     #[test]
     fn test_pooled_prepared_query() {
-        let pool = MyPool::new(3, MyOpts{user: Some("root".to_string()),
-                                         ..Default::default()});
+        let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
+                                      ..Default::default()});
+        assert!(pool.is_ok());
+        let pool = pool.unwrap();
         for _ in range(0, 10) {
             let pool = pool.clone();
             spawn(proc() {
@@ -183,21 +212,6 @@ mod test {
                     assert_eq!(result.next(), Some(Ok(vec![Int(1)])));
                     assert_eq!(result.next(), None);
                 }
-            });
-        }
-    }
-
-    #[test]
-    fn test_zero_cap() {
-        let pool = MyPool::new(0, MyOpts{user: Some("root".to_string()),
-                                         ..Default::default()});
-        for _ in range(0, 10) {
-            let pool = pool.clone();
-            spawn(proc() {
-                let conn = pool.get_conn();
-                assert!(conn.is_ok());
-                let mut conn = conn.unwrap();
-                assert!(conn.query("SELECT 1").is_ok());
             });
         }
     }
