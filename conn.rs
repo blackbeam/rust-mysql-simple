@@ -170,6 +170,7 @@ pub struct MyOpts {
     pub pass: Option<String>,
     pub db_name: Option<String>,
     pub prefer_socket: bool,
+    pub keepalive_timeout: Option<uint>,
 }
 
 impl MyOpts {
@@ -201,7 +202,8 @@ impl Default for MyOpts {
                user: None,
                pass: None,
                db_name: None,
-               prefer_socket: true}
+               prefer_socket: true,
+               keepalive_timeout: Some(60 * 60)}
     }
 }
 
@@ -308,7 +310,10 @@ impl MyInnerConn {
         if self.opts.tcp_addr.is_some() {
             match TcpStream::connect(self.opts.tcp_addr.get_ref().as_slice(),
                                      self.opts.tcp_port) {
-                Ok(stream) => {
+                Ok(mut stream) => {
+                    // keepalive one hour
+                    let keepalive_timeout = self.opts.keepalive_timeout.clone();
+                    try_io!(stream.set_keepalive(keepalive_timeout));
                     self.tcp_stream = Some(stream);
                     return Ok(());
                 },
