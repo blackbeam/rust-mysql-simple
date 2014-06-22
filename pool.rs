@@ -1,10 +1,10 @@
 use sync::{Arc, Mutex};
 use super::error::{MyDriverError, InvalidPoolConstraints};
-use conn::{MyInnerConn, MyOpts, MyResult, Stmt, QueryResult};
+use conn::{MyConn, MyOpts, MyResult, Stmt, QueryResult};
 
 struct MyInnerPool {
     opts: MyOpts,
-    pool: Vec<MyInnerConn>,
+    pool: Vec<MyConn>,
     min: uint,
     max: uint,
     count: uint
@@ -28,7 +28,7 @@ impl MyInnerPool {
         Ok(pool)
     }
     fn new_conn(&mut self) -> MyResult<()> {
-        match MyInnerConn::new(self.opts.clone()) {
+        match MyConn::new(self.opts.clone()) {
             Ok(conn) => {
                 self.pool.push(conn);
                 Ok(())
@@ -90,7 +90,7 @@ impl MyPool {
 
 pub struct MyPooledConn {
     pool: MyPool,
-    conn: Option<MyInnerConn>
+    conn: Option<MyConn>
 }
 
 impl Drop for MyPooledConn {
@@ -112,10 +112,10 @@ impl MyPooledConn {
     pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         self.conn.get_mut_ref().prepare(query)
     }
-    pub fn get_mut_ref<'a>(&'a mut self) -> &'a mut MyInnerConn {
+    pub fn get_mut_ref<'a>(&'a mut self) -> &'a mut MyConn {
         self.conn.get_mut_ref()
     }
-    pub fn get_ref<'a>(&'a self) -> &'a MyInnerConn {
+    pub fn get_ref<'a>(&'a self) -> &'a MyConn {
         self.conn.get_ref()
     }
     fn pooled_query(mut self, query: &str) -> MyResult<QueryResult> {
