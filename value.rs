@@ -356,9 +356,9 @@ mod test {
     fn test_value_into_str() {
         let v = NULL;
         assert_eq!(v.into_str(), "NULL".to_string());
-        let v = Bytes(Vec::from_slice(String::from_str("hello").as_bytes()));
+        let v = Bytes(Vec::from_slice(b"hello"));
         assert_eq!(v.into_str(), "'hello'".to_string());
-        let v = Bytes(Vec::from_slice(String::from_str("h\x5c'e'l'l'o").as_bytes()));
+        let v = Bytes(Vec::from_slice(b"h\x5c'e'l'l'o"));
         assert_eq!(v.into_str(), "'h\x5c\x5c\x5c'e\x5c'l\x5c'l\x5c'o'".to_string());
         let v = Bytes(vec!(0, 1, 2, 3, 4, 255));
         assert_eq!(v.into_str(), "0x0001020304FF".to_string());

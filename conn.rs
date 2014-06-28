@@ -974,7 +974,7 @@ mod test {
                                           ..Default::default()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
             assert_eq!(x.unwrap().shift().unwrap().unwrap_bytes(),
-                       Vec::from_slice("mysql".as_bytes()));
+                       Vec::from_slice(b"mysql"));
         }
     }
 
@@ -1003,17 +1003,17 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             if count == 0 {
-                assert_eq!(*row.get(0), Bytes(Vec::from_slice("foo".as_bytes())));
-                assert_eq!(*row.get(1), Bytes(Vec::from_slice("-123".as_bytes())));
-                assert_eq!(*row.get(2), Bytes(Vec::from_slice("123".as_bytes())));
-                assert_eq!(*row.get(3), Bytes(Vec::from_slice("2014-05-05".as_bytes())));
-                assert_eq!(*row.get(4), Bytes(Vec::from_slice("123.123".as_bytes())));
+                assert_eq!(*row.get(0), Bytes(Vec::from_slice(b"foo")));
+                assert_eq!(*row.get(1), Bytes(Vec::from_slice(b"-123")));
+                assert_eq!(*row.get(2), Bytes(Vec::from_slice(b"123")));
+                assert_eq!(*row.get(3), Bytes(Vec::from_slice(b"2014-05-05")));
+                assert_eq!(*row.get(4), Bytes(Vec::from_slice(b"123.123")));
             } else {
-                assert_eq!(*row.get(0), Bytes(Vec::from_slice("foo".as_bytes())));
-                assert_eq!(*row.get(1), Bytes(Vec::from_slice("-321".as_bytes())));
-                assert_eq!(*row.get(2), Bytes(Vec::from_slice("321".as_bytes())));
-                assert_eq!(*row.get(3), Bytes(Vec::from_slice("2014-06-06".as_bytes())));
-                assert_eq!(*row.get(4), Bytes(Vec::from_slice("321.321".as_bytes())));
+                assert_eq!(*row.get(0), Bytes(Vec::from_slice(b"foo")));
+                assert_eq!(*row.get(1), Bytes(Vec::from_slice(b"-321")));
+                assert_eq!(*row.get(2), Bytes(Vec::from_slice(b"321")));
+                assert_eq!(*row.get(3), Bytes(Vec::from_slice(b"2014-06-06")));
+                assert_eq!(*row.get(4), Bytes(Vec::from_slice(b"321.321")));
             }
             count += 1;
         }
@@ -1039,8 +1039,8 @@ mod test {
             let stmt = conn.prepare("INSERT INTO tbl(a, b, c, d, e) VALUES (?, ?, ?, ?, ?)");
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
-            assert!(stmt.execute([Bytes(Vec::from_slice("hello".as_bytes())), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
-            assert!(stmt.execute([Bytes(Vec::from_slice("world".as_bytes())), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
+            assert!(stmt.execute([Bytes(Vec::from_slice(b"hello")), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
+            assert!(stmt.execute([Bytes(Vec::from_slice(b"world")), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
         }
         {
             let stmt = conn.prepare("SELECT * FROM tbl");
@@ -1051,13 +1051,13 @@ mod test {
                 assert!(row.is_ok());
                 let row = row.unwrap();
                 if i == 0 {
-                    assert_eq!(*row.get(0), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8)));
+                    assert_eq!(*row.get(0), Bytes(Vec::from_slice(b"hello")));
                     assert_eq!(*row.get(1), Int(-123i64));
                     assert_eq!(*row.get(2), Int(123i64));
                     assert_eq!(*row.get(3), Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
                     assert_eq!(row.get(4).get_float(), 123.123);
                 } else {
-                    assert_eq!(*row.get(0), Bytes(vec!(119u8, 111u8, 114u8, 108u8, 100u8)));
+                    assert_eq!(*row.get(0), Bytes(Vec::from_slice(b"world")));
                     assert_eq!(*row.get(1), NULL);
                     assert_eq!(*row.get(2), NULL);
                     assert_eq!(*row.get(3), NULL);
@@ -1141,9 +1141,9 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             match count {
-                0 => assert_eq!(row, vec!(Bytes(vec!(65u8, 65u8, 65u8, 65u8, 65u8, 65u8)))),
-                1 => assert_eq!(row, vec!(Bytes(vec!(66u8, 66u8, 66u8, 66u8, 66u8, 66u8)))),
-                2 => assert_eq!(row, vec!(Bytes(vec!(67u8, 67u8, 67u8, 67u8, 67u8, 67u8)))),
+                0 => assert_eq!(row, vec!(Bytes(Vec::from_slice(b"AAAAAA")))),
+                1 => assert_eq!(row, vec!(Bytes(Vec::from_slice(b"BBBBBB")))),
+                2 => assert_eq!(row, vec!(Bytes(Vec::from_slice(b"CCCCCC")))),
                 _ => assert!(false)
             }
             count += 1;
@@ -1223,7 +1223,7 @@ mod test {
                                           user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-        let params = [Int(42), Bytes(vec!(104u8, 101u8, 108u8, 108u8, 111u8, 111u8)), Float(1.618), NULL, Int(1)];
+        let params = [Int(42), Bytes(Vec::from_slice(b"123456")), Float(1.618), NULL, Int(1)];
         bench.iter(|| { stmt.execute(params); })
     }
 
