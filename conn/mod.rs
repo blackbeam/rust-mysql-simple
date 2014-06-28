@@ -8,17 +8,15 @@ use std::io::net::unix::{UnixStream};
 use std::from_str::FromStr;
 use super::consts;
 use super::io::{MyReader, MyWriter};
-use super::error::{MyError, MyIoError, MySqlError, MyDriverError, CouldNotConnect,
+use super::error::{MyIoError, MySqlError, MyDriverError, CouldNotConnect,
                    UnsupportedProtocol, PacketOutOfSync, PacketTooLarge,
                    Protocol41NotSet, UnexpectedPacket, MismatchedStmtParams,
-                   SetupError};
+                   SetupError, MyResult};
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
 
 pub mod pool;
-
-pub type MyResult<T> = Result<T, MyError>;
 
 /***
  *     .d8888b.  888                  888    

@@ -81,6 +81,8 @@ impl fmt::Show for DriverError {
 	}
 }
 
+pub type MyResult<T> = Result<T, MyError>;
+
 pub static ER_HASHCHK: u16 = 1000u16;
 pub static ER_NISAMCHK: u16 = 1001u16;
 pub static ER_NO: u16 = 1002u16;

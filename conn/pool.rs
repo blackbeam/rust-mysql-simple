@@ -1,6 +1,7 @@
 use sync::{Arc, Mutex};
 use super::super::error::{MyDriverError, InvalidPoolConstraints};
-use conn::{MyConn, MyOpts, MyResult, Stmt, QueryResult};
+use super::{MyConn, MyOpts, Stmt, QueryResult};
+use super::super::error::{MyResult};
 
 struct MyInnerPool {
     opts: MyOpts,
