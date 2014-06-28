@@ -96,7 +96,7 @@ pub struct MyPooledConn {
 impl Drop for MyPooledConn {
     fn drop(&mut self) {
         let mut pool = self.pool.pool.lock();
-        if pool.count > pool.min {
+        if pool.count > pool.min || self.conn.is_none() {
             pool.count -= 1;
         } else {
             pool.pool.push(self.conn.take_unwrap());
@@ -117,6 +117,9 @@ impl MyPooledConn {
     }
     pub fn get_ref<'a>(&'a self) -> &'a MyConn {
         self.conn.get_ref()
+    }
+    pub fn unwrap(mut self) -> MyConn {
+        self.conn.take_unwrap()
     }
     fn pooled_query(mut self, query: &str) -> MyResult<QueryResult> {
         match self.get_mut_ref()._query(query) {
