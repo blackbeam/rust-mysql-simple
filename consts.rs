@@ -4,19 +4,23 @@ pub static MAX_PAYLOAD_LEN: uint = 16777215;
 
 pub static UTF8_GENERAL_CI: u8 = 33u8;
 
-/// Status flags
-pub static SERVER_STATUS_IN_TRANS: u16 = 0x0001;
-pub static SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
-pub static SERVER_MORE_RESULTS_EXISTS: u16 = 0x0008;
-pub static SERVER_STATUS_NO_GOOD_INDEX_USED: u16 = 0x0010;
-pub static SERVER_STATUS_NO_INDEX_USED: u16 = 0x0020;
-pub static SERVER_STATUS_CURSOR_EXISTS: u16 = 0x0040;
-pub static SERVER_STATUS_LAST_ROW_SENT: u16 = 0x0080;
-pub static SERVER_STATUS_DB_DROPPED: u16 = 0x0100;
-pub static SERVER_STATUS_NO_BACKSLASH_ESCAPES: u16 = 0x0200;
-pub static SERVER_STATUS_METADATA_CHANGED: u16 = 0x0400;
-pub static SERVER_QUERY_WAS_SLOW: u16 = 0x0800;
-pub static SERVER_PT_OUT_PARAMS: u16 = 0x1000;
+/// Server status flags
+#[allow(non_camel_case_types)]
+#[deriving(Clone, FromPrimitive)]
+pub enum StatusFlag {
+    SERVER_STATUS_IN_TRANS             = 0x0001u16,
+    SERVER_STATUS_AUTOCOMMIT           = 0x0002u16,
+    SERVER_MORE_RESULTS_EXISTS         = 0x0008u16,
+    SERVER_STATUS_NO_GOOD_INDEX_USED   = 0x0010u16,
+    SERVER_STATUS_NO_INDEX_USED        = 0x0020u16,
+    SERVER_STATUS_CURSOR_EXISTS        = 0x0040u16,
+    SERVER_STATUS_LAST_ROW_SENT        = 0x0080u16,
+    SERVER_STATUS_DB_DROPPED           = 0x0100u16,
+    SERVER_STATUS_NO_BACKSLASH_ESCAPES = 0x0200u16,
+    SERVER_STATUS_METADATA_CHANGED     = 0x0400u16,
+    SERVER_QUERY_WAS_SLOW              = 0x0800u16,
+    SERVER_PT_OUT_PARAMS               = 0x1000u16,
+}
 
 /// Capability flags
 pub static CLIENT_LONG_PASSWORD: u32 = 0x00000001;
