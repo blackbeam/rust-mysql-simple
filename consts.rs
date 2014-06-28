@@ -4,7 +4,7 @@ pub static MAX_PAYLOAD_LEN: uint = 16777215;
 
 pub static UTF8_GENERAL_CI: u8 = 33u8;
 
-/// Server status flags
+/// Server status flags (u16)
 #[allow(non_camel_case_types)]
 #[deriving(Clone, FromPrimitive)]
 pub enum StatusFlag {
@@ -50,39 +50,43 @@ pub enum CapabilityFlag {
     CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA = 0x00200000u32,
 }
 
-/// Commands
-pub static COM_SLEEP: u8 = 0x00u8;
-pub static COM_QUIT: u8 = 0x01_u8;
-pub static COM_INIT_DB: u8 = 0x02_u8;
-pub static COM_QUERY: u8 = 0x03_u8;
-pub static COM_FIELD_LIST: u8 = 0x04_u8;
-pub static COM_CREATE_DB: u8 = 0x05_u8;
-pub static COM_DROP_DB: u8 = 0x06_u8;
-pub static COM_REFRESH: u8 = 0x07_u8;
-pub static COM_SHUTDOWN: u8 = 0x08_u8;
-pub static COM_STATISTICS: u8 = 0x09_u8;
-pub static COM_PROCESS_INFO: u8 = 0x0a_u8;
-pub static COM_CONNECT: u8 = 0x0b_u8;
-pub static COM_PROCESS_KILL: u8 = 0x0c_u8;
-pub static COM_DEBUG: u8 = 0x0d_u8;
-pub static COM_PING: u8 = 0x0e_u8;
-pub static COM_TIME: u8 = 0x0f_u8;
-pub static COM_DELAYED_INSERT: u8 = 0x10_u8;
-pub static COM_CHANGE_USER: u8 = 0x11_u8;
-pub static COM_BINLOG_DUMP: u8 = 0x12_u8;
-pub static COM_TABLE_DUMP: u8 = 0x13_u8;
-pub static COM_CONNECT_OUT: u8 = 0x14_u8;
-pub static COM_REGISTER_SLAVE: u8 = 0x15_u8;
-pub static COM_STMT_PREPARE: u8 = 0x16_u8;
-pub static COM_STMT_EXECUTE: u8 = 0x17_u8;
-pub static COM_STMT_SEND_LONG_DATA: u8 = 0x18_u8;
-pub static COM_STMT_CLOSE: u8 = 0x19_u8;
-pub static COM_STMT_RESET: u8 = 0x1a_u8;
-pub static COM_SET_OPTION: u8 = 0x1b_u8;
-pub static COM_STMT_FETCH: u8 = 0x1c_u8;
-pub static COM_DAEMON: u8 = 0x1d_u8;
-pub static COM_BINLOG_DUMP_GTID: u8 = 0x1e_u8;
-pub static COM_RESET_CONNECTION: u8 = 0x1f_u8;
+/// Commands (u8)
+#[allow(non_camel_case_types)]
+#[deriving(Clone, FromPrimitive)]
+pub enum Command {
+    COM_SLEEP               = 0x00_u8,
+    COM_QUIT                = 0x01_u8,
+    COM_INIT_DB             = 0x02_u8,
+    COM_QUERY               = 0x03_u8,
+    COM_FIELD_LIST          = 0x04_u8,
+    COM_CREATE_DB           = 0x05_u8,
+    COM_DROP_DB             = 0x06_u8,
+    COM_REFRESH             = 0x07_u8,
+    COM_SHUTDOWN            = 0x08_u8,
+    COM_STATISTICS          = 0x09_u8,
+    COM_PROCESS_INFO        = 0x0a_u8,
+    COM_CONNECT             = 0x0b_u8,
+    COM_PROCESS_KILL        = 0x0c_u8,
+    COM_DEBUG               = 0x0d_u8,
+    COM_PING                = 0x0e_u8,
+    COM_TIME                = 0x0f_u8,
+    COM_DELAYED_INSERT      = 0x10_u8,
+    COM_CHANGE_USER         = 0x11_u8,
+    COM_BINLOG_DUMP         = 0x12_u8,
+    COM_TABLE_DUMP          = 0x13_u8,
+    COM_CONNECT_OUT         = 0x14_u8,
+    COM_REGISTER_SLAVE      = 0x15_u8,
+    COM_STMT_PREPARE        = 0x16_u8,
+    COM_STMT_EXECUTE        = 0x17_u8,
+    COM_STMT_SEND_LONG_DATA = 0x18_u8,
+    COM_STMT_CLOSE          = 0x19_u8,
+    COM_STMT_RESET          = 0x1a_u8,
+    COM_SET_OPTION          = 0x1b_u8,
+    COM_STMT_FETCH          = 0x1c_u8,
+    COM_DAEMON              = 0x1d_u8,
+    COM_BINLOG_DUMP_GTID    = 0x1e_u8,
+    COM_RESET_CONNECTION    = 0x1f_u8,
+}
 
 /// Text protocol column types
 #[allow(non_camel_case_types)]

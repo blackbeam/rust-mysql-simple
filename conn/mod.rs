@@ -132,7 +132,7 @@ impl Column {
         // skip filler
         try!(reader.seek(2, SeekCur));
         let mut default_values = Vec::with_capacity(0);
-        if command == consts::COM_FIELD_LIST {
+        if command == consts::COM_FIELD_LIST as u8 {
             let len = try!(reader.read_lenenc_int());
             default_values = try!(reader.read_exact(len as uint));
         }
@@ -459,15 +459,15 @@ impl MyConn {
         }
         self.write_packet(&writer.unwrap())
     }
-    fn write_command(&mut self, cmd: u8) -> MyResult<()> {
+    fn write_command(&mut self, cmd: consts::Command) -> MyResult<()> {
         self.seq_id = 0u8;
-        self.last_command = cmd;
-        self.write_packet(&vec!(cmd))
+        self.last_command = cmd as u8;
+        self.write_packet(&vec!(cmd as u8))
     }
-    fn write_command_data(&mut self, cmd: u8, buf: &[u8]) -> MyResult<()> {
+    fn write_command_data(&mut self, cmd: consts::Command, buf: &[u8]) -> MyResult<()> {
         self.seq_id = 0u8;
-        self.last_command = cmd;
-        self.write_packet(&vec!(cmd).append(buf))
+        self.last_command = cmd as u8;
+        self.write_packet(&vec!(cmd as u8).append(buf))
     }
     pub fn ping(&mut self) -> bool {
         match self.write_command(consts::COM_PING) {
