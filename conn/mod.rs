@@ -34,7 +34,7 @@ pub type MyResult<T> = Result<T, MyError>;
  *                                           
  */
 
-pub struct InnerStmt {
+struct InnerStmt {
     params: Option<Vec<Column>>,
     columns: Option<Vec<Column>>,
     statement_id: u32,
@@ -67,10 +67,10 @@ pub struct Stmt<'a> {
 }
 
 impl<'a> Stmt<'a> {
-    pub fn new<'a>(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
+    fn new<'a>(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
         Stmt{stmt: stmt, conn: Some(conn), pooled_conn: None}
     }
-    pub fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt {
+    fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt {
         Stmt{stmt: stmt, conn: None, pooled_conn: Some(pooled_conn)}
     }
     pub fn execute<'a>(&'a mut self, params: &[Value]) -> MyResult<QueryResult<'a>> {
@@ -824,7 +824,7 @@ pub struct QueryResult<'a> {
 }
 
 impl<'a> QueryResult<'a> {
-    pub fn new<'a>(conn: &'a mut MyConn,
+    fn new<'a>(conn: &'a mut MyConn,
                    columns: Vec<Column>,
                    ok_packet: Option<OkPacket>,
                    is_bin: bool) -> QueryResult<'a> {
@@ -834,7 +834,7 @@ impl<'a> QueryResult<'a> {
                     ok_packet: ok_packet,
                     is_bin: is_bin}
     }
-    pub fn new_pooled(conn: pool::MyPooledConn,
+    fn new_pooled(conn: pool::MyPooledConn,
                       columns: Vec<Column>,
                       ok_packet: Option<OkPacket>,
                       is_bin: bool) -> QueryResult {
