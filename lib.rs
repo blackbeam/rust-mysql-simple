@@ -22,4 +22,3 @@ pub mod packet;
 pub mod io;
 pub mod value;
 pub mod conn;
-pub mod pool;

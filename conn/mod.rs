@@ -15,7 +15,8 @@ use super::error::{MyError, MyIoError, MySqlError, MyDriverError, CouldNotConnec
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
-use super::pool::{MyPooledConn};
+
+pub mod pool;
 
 pub type MyResult<T> = Result<T, MyError>;
 
@@ -62,14 +63,14 @@ impl InnerStmt {
 pub struct Stmt<'a> {
     stmt: InnerStmt,
     conn: Option<&'a mut MyConn>,
-    pooled_conn: Option<MyPooledConn>
+    pooled_conn: Option<pool::MyPooledConn>
 }
 
 impl<'a> Stmt<'a> {
     pub fn new<'a>(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
         Stmt{stmt: stmt, conn: Some(conn), pooled_conn: None}
     }
-    pub fn new_pooled(stmt: InnerStmt, pooled_conn: MyPooledConn) -> Stmt {
+    pub fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt {
         Stmt{stmt: stmt, conn: None, pooled_conn: Some(pooled_conn)}
     }
     pub fn execute<'a>(&'a mut self, params: &[Value]) -> MyResult<QueryResult<'a>> {
@@ -601,7 +602,7 @@ impl MyConn {
         }
         Ok(None)
     }
-    pub fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
+    fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
@@ -648,7 +649,7 @@ impl MyConn {
             Err(err) => Err(err)
         }
     }
-    pub fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
+    fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match *pld.get(0) {
@@ -815,7 +816,7 @@ impl Writer for MyConn {
  */
 
 pub struct QueryResult<'a> {
-    pooled_conn: Option<MyPooledConn>,
+    pooled_conn: Option<pool::MyPooledConn>,
     conn: Option<&'a mut MyConn>,
     columns: Vec<Column>,
     ok_packet: Option<OkPacket>,
@@ -833,7 +834,7 @@ impl<'a> QueryResult<'a> {
                     ok_packet: ok_packet,
                     is_bin: is_bin}
     }
-    pub fn new_pooled(conn: MyPooledConn,
+    pub fn new_pooled(conn: pool::MyPooledConn,
                       columns: Vec<Column>,
                       ok_packet: Option<OkPacket>,
                       is_bin: bool) -> QueryResult {

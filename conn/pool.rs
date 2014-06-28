@@ -1,5 +1,5 @@
 use sync::{Arc, Mutex};
-use super::error::{MyDriverError, InvalidPoolConstraints};
+use super::super::error::{MyDriverError, InvalidPoolConstraints};
 use conn::{MyConn, MyOpts, MyResult, Stmt, QueryResult};
 
 struct MyInnerPool {
@@ -137,7 +137,7 @@ mod test {
     use conn::{MyOpts};
     use std::default::{Default};
     use super::{MyPool};
-    use super::super::value::{Bytes, Int};
+    use super::super::super::value::{Bytes, Int};
 
     #[test]
     fn test_query() {
