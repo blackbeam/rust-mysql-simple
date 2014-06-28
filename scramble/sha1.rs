@@ -6,7 +6,7 @@ static K3: u32 = 0x8F1BBCDCu32;
 static K4: u32 = 0xCA62C1D6u32;
 
 fn circular_shift(bits: u32, word: u32) -> u32 {
-    return word << bits | word >> 32u32 - bits;
+    return word << (bits as uint) | word >> ((32u32 - bits) as uint);
 }
 
 #[allow(unused_must_use)]

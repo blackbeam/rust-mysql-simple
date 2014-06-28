@@ -145,7 +145,7 @@ mod test {
                                       ..Default::default()});
         assert!(pool.is_ok());
         let pool = pool.unwrap();
-        for _ in range(0, 10) {
+        for _ in range(0u, 10u) {
             let pool = pool.clone();
             spawn(proc() {
                 let conn = pool.get_conn();
@@ -162,7 +162,7 @@ mod test {
                                       ..Default::default()});
         assert!(pool.is_ok());
         let pool = pool.unwrap();
-        for _ in range(0, 10) {
+        for _ in range(0u, 10u) {
             let pool = pool.clone();
             spawn(proc() {
                 let result = pool.query("SELECT 1");
@@ -179,7 +179,7 @@ mod test {
                                       ..Default::default()});
         assert!(pool.is_ok());
         let pool = pool.unwrap();
-        for _ in range(0, 10) {
+        for _ in range(0u, 10u) {
             let pool = pool.clone();
             spawn(proc() {
                 let conn = pool.get_conn();
@@ -199,13 +199,13 @@ mod test {
                                       ..Default::default()});
         assert!(pool.is_ok());
         let pool = pool.unwrap();
-        for _ in range(0, 10) {
+        for _ in range(0u, 10u) {
             let pool = pool.clone();
             spawn(proc() {
                 let stmt = pool.prepare("SELECT 1");
                 assert!(stmt.is_ok());
                 let mut stmt = stmt.unwrap();
-                for _ in range(0, 5) {
+                for _ in range(0u, 5u) {
                     let result = stmt.execute([]);
                     assert!(result.is_ok());
                     let mut result = result.unwrap();

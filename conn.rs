@@ -1017,7 +1017,7 @@ mod test {
             }
             count += 1;
         }
-        assert_eq!(count, 2);
+        assert_eq!(count, 2u);
         for row in &mut conn.query("SELECT REPEAT('A', 20000000)") {
             assert!(row.is_ok());
             let row = row.unwrap();
@@ -1148,7 +1148,7 @@ mod test {
             }
             count += 1;
         }
-        assert_eq!(count, 3);
+        assert_eq!(count, 3u);
         unlink(&path);
     }
 
