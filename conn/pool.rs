@@ -78,11 +78,11 @@ impl MyPool {
 
         Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
     }
-    fn query(&self, query: &str) -> MyResult<QueryResult> {
+    pub fn query(&self, query: &str) -> MyResult<QueryResult> {
         let conn = try!(self.get_conn());
         conn.pooled_query(query)
     }
-    fn prepare(&self, query: &str) -> MyResult<Stmt> {
+    pub fn prepare(&self, query: &str) -> MyResult<Stmt> {
         let conn = try!(self.get_conn());
         conn.pooled_prepare(query)
     }
