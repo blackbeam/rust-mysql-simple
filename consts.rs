@@ -88,7 +88,7 @@ pub enum Command {
     COM_RESET_CONNECTION    = 0x1f_u8,
 }
 
-/// Text protocol column types
+/// Text protocol column types (u8)
 #[allow(non_camel_case_types)]
 #[deriving(Clone, FromPrimitive)]
 pub enum ColumnType {
@@ -120,22 +120,24 @@ pub enum ColumnType {
     MYSQL_TYPE_GEOMETRY    = 0xff_u8,
 }
 
-/// Column flags
-pub static NOT_NULL_FLAG: u16 = 1u16;
-pub static PRI_KEY_FLAG: u16 = 2u16;
-pub static UNIQUE_KEY_FLAG: u16 = 4u16;
-pub static MULTIPLE_KEY_FLAG: u16 = 8u16;
-pub static BLOB_FLAG: u16 = 16u16;
-pub static UNSIGNED_FLAG: u16 = 32u16;
-pub static ZEROFILL_FLAG: u16 = 64u16;
-pub static BINARY_FLAG: u16 = 128u16;
-pub static ENUM_FLAG: u16 = 256u16;
-pub static AUTO_INCREMENT_FLAG: u16 = 512u16;
-pub static TIMESTAMP_FLAG: u16 = 1024u16;
-pub static SET_FLAG: u16 = 2048u16;
-pub static NO_DEFAULT_VALUE_FLAG: u16 = 4096u16;
-pub static ON_UPDATE_NOW_FLAG: u16 = 8192u16;
-pub static NUM_FLAG: u16 = 32768u16;
-pub static PART_KEY_FLAG: u16 = 16384u16;
-pub static GROUP_FLAG: u16 = 32768u16;
-// pub static UNIQUE_FLAG: u16 = 65536u16;
+/// Column flags (u16)
+#[allow(non_camel_case_types)]
+#[deriving(Clone, FromPrimitive)]
+pub enum ColumnFlag {
+    NOT_NULL_FLAG         = 1u16,
+    PRI_KEY_FLAG          = 2u16,
+    UNIQUE_KEY_FLAG       = 4u16,
+    MULTIPLE_KEY_FLAG     = 8u16,
+    BLOB_FLAG             = 16u16,
+    UNSIGNED_FLAG         = 32u16,
+    ZEROFILL_FLAG         = 64u16,
+    BINARY_FLAG           = 128u16,
+    ENUM_FLAG             = 256u16,
+    AUTO_INCREMENT_FLAG   = 512u16,
+    TIMESTAMP_FLAG        = 1024u16,
+    SET_FLAG              = 2048u16,
+    NO_DEFAULT_VALUE_FLAG = 4096u16,
+    ON_UPDATE_NOW_FLAG    = 8192u16,
+    NUM_FLAG              = 32768u16,
+    PART_KEY_FLAG         = 16384u16,
+}
