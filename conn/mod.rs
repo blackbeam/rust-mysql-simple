@@ -404,7 +404,7 @@ impl MyConn {
             if handshake.protocol_version != 10u8 {
                 return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
             }
-            if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41) == 0 {
+            if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41 as u32) == 0 {
                 return Err(MyDriverError(Protocol41NotSet));
             }
             self.handle_handshake(&handshake);
@@ -427,19 +427,19 @@ impl MyConn {
         })
     }
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
-        let mut client_flags = consts::CLIENT_PROTOCOL_41 |
-                               consts::CLIENT_SECURE_CONNECTION |
-                               consts::CLIENT_LONG_PASSWORD |
-                               consts::CLIENT_TRANSACTIONS |
-                               consts::CLIENT_LOCAL_FILES |
+        let mut client_flags = consts::CLIENT_PROTOCOL_41 as u32 |
+                               consts::CLIENT_SECURE_CONNECTION as u32 |
+                               consts::CLIENT_LONG_PASSWORD as u32 |
+                               consts::CLIENT_TRANSACTIONS as u32 |
+                               consts::CLIENT_LOCAL_FILES as u32 |
                                (self.capability_flags &
-                                consts::CLIENT_LONG_FLAG);
+                                consts::CLIENT_LONG_FLAG as u32);
         let scramble_buf = scramble(hp.auth_plugin_data.as_slice(),
                                     self.opts.get_pass().as_bytes());
         let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
         let mut payload_len = 4 + 4 + 1 + 23 + self.opts.get_user().len() + 1 + 1 + scramble_buf_len;
         if self.opts.get_db_name().len() > 0 {
-            client_flags |= consts::CLIENT_CONNECT_WITH_DB;
+            client_flags |= consts::CLIENT_CONNECT_WITH_DB as u32;
             payload_len += self.opts.get_db_name().len() + 1;
         }
         let mut writer = MemWriter::with_capacity(payload_len);

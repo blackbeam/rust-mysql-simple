@@ -22,29 +22,33 @@ pub enum StatusFlag {
     SERVER_PT_OUT_PARAMS               = 0x1000u16,
 }
 
-/// Capability flags
-pub static CLIENT_LONG_PASSWORD: u32 = 0x00000001;
-pub static CLIENT_FOUND_ROWS: u32 = 0x00000002;
-pub static CLIENT_LONG_FLAG: u32 = 0x00000004;
-pub static CLIENT_CONNECT_WITH_DB: u32 = 0x00000008;
-pub static CLIENT_NO_SCHEMA: u32 = 0x00000010;
-pub static CLIENT_COMPRESS: u32 = 0x00000020;
-pub static CLIENT_ODBC: u32 = 0x00000040;
-pub static CLIENT_LOCAL_FILES: u32 = 0x00000080;
-pub static CLIENT_IGNORE_SPACE: u32 = 0x00000100;
-pub static CLIENT_PROTOCOL_41: u32 = 0x00000200;
-pub static CLIENT_INTERACTIVE: u32 = 0x00000400;
-pub static CLIENT_SSL: u32 = 0x00000800;
-pub static CLIENT_IGNORE_SIGPIPE: u32 = 0x00001000;
-pub static CLIENT_TRANSACTIONS: u32 = 0x00002000;
-pub static CLIENT_RESERVED: u32 = 0x00004000;
-pub static CLIENT_SECURE_CONNECTION: u32 = 0x00008000;
-pub static CLIENT_MULTI_STATEMENTS: u32 = 0x00010000;
-pub static CLIENT_MULTI_RESULTS: u32 = 0x00020000;
-pub static CLIENT_PS_MULTI_RESULTS: u32 = 0x00040000;
-pub static CLIENT_PLUGIN_AUTH: u32 = 0x00080000;
-pub static CLIENT_CONNECT_ATTRS: u32 = 0x00100000;
-pub static CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA: u32 = 0x00200000;
+/// Capability flags (u32)
+#[allow(non_camel_case_types)]
+#[deriving(Clone, FromPrimitive)]
+pub enum CapabilityFlag {
+    CLIENT_LONG_PASSWORD                  = 0x00000001u32,
+    CLIENT_FOUND_ROWS                     = 0x00000002u32,
+    CLIENT_LONG_FLAG                      = 0x00000004u32,
+    CLIENT_CONNECT_WITH_DB                = 0x00000008u32,
+    CLIENT_NO_SCHEMA                      = 0x00000010u32,
+    CLIENT_COMPRESS                       = 0x00000020u32,
+    CLIENT_ODBC                           = 0x00000040u32,
+    CLIENT_LOCAL_FILES                    = 0x00000080u32,
+    CLIENT_IGNORE_SPACE                   = 0x00000100u32,
+    CLIENT_PROTOCOL_41                    = 0x00000200u32,
+    CLIENT_INTERACTIVE                    = 0x00000400u32,
+    CLIENT_SSL                            = 0x00000800u32,
+    CLIENT_IGNORE_SIGPIPE                 = 0x00001000u32,
+    CLIENT_TRANSACTIONS                   = 0x00002000u32,
+    CLIENT_RESERVED                       = 0x00004000u32,
+    CLIENT_SECURE_CONNECTION              = 0x00008000u32,
+    CLIENT_MULTI_STATEMENTS               = 0x00010000u32,
+    CLIENT_MULTI_RESULTS                  = 0x00020000u32,
+    CLIENT_PS_MULTI_RESULTS               = 0x00040000u32,
+    CLIENT_PLUGIN_AUTH                    = 0x00080000u32,
+    CLIENT_CONNECT_ATTRS                  = 0x00100000u32,
+    CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA = 0x00200000u32,
+}
 
 /// Commands
 pub static COM_SLEEP: u8 = 0x00u8;

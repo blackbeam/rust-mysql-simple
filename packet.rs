@@ -105,13 +105,13 @@ impl HandshakePacket {
             character_set = try!(reader.read_u8());
             status_flags = try!(reader.read_le_u16());
             capability_flags |= (try!(reader.read_le_u16()) as u32) << 16;
-            if (capability_flags & consts::CLIENT_PLUGIN_AUTH) > 0 {
+            if (capability_flags & consts::CLIENT_PLUGIN_AUTH as u32) > 0 {
                 length_of_auth_plugin_data = try!(reader.read_u8()) as i16;
             } else {
                 try!(reader.seek(1, SeekCur));
             }
             try!(reader.seek(10, SeekCur));
-            if (capability_flags & consts::CLIENT_SECURE_CONNECTION) > 0 {
+            if (capability_flags & consts::CLIENT_SECURE_CONNECTION as u32) > 0 {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
                 try!(reader.push(len as uint, &mut auth_plugin_data));
@@ -119,7 +119,7 @@ impl HandshakePacket {
                     auth_plugin_data.pop();
                 }
             }
-            if (capability_flags & consts::CLIENT_PLUGIN_AUTH) > 0 {
+            if (capability_flags & consts::CLIENT_PLUGIN_AUTH as u32) > 0 {
                 auth_plugin_name = try!(reader.read_to_end());
                 if *auth_plugin_name.get(auth_plugin_name.len() - 1) == 0u8 {
                     auth_plugin_name.pop();
