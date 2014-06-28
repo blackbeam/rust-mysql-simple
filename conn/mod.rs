@@ -6,6 +6,7 @@ use std::io::net::ip::{Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
 use std::from_str::FromStr;
+use std::num::{FromPrimitive};
 use super::consts;
 use super::io::{MyReader, MyWriter};
 use super::error::{MyIoError, MySqlError, MyDriverError, CouldNotConnect,
@@ -108,7 +109,7 @@ pub struct Column {
     pub column_length: u32,
     pub character_set: u16,
     pub flags: u16,
-    pub column_type: u8,
+    pub column_type: consts::ColumnType,
     pub decimals: u8
 }
 
@@ -143,7 +144,7 @@ impl Column {
                 org_name: org_name,
                 character_set: character_set,
                 column_length: column_length,
-                column_type: column_type,
+                column_type: FromPrimitive::from_u8(column_type).unwrap(),
                 flags: flags,
                 decimals: decimals,
                 default_values: default_values})
@@ -518,13 +519,13 @@ impl MyConn {
             try_io!(writer.write_u8(1u8));
             for i in range(0, params.len()) {
                 match params[i] {
-                    NULL => try_io!(writer.write([stmt.params.get_ref().get(i).column_type, 0u8])),
-                    Bytes(..) => try_io!(writer.write([consts::MYSQL_TYPE_VAR_STRING, 0u8])),
-                    Int(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG, 0u8])),
-                    UInt(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG, 128u8])),
-                    Float(..) => try_io!(writer.write([consts::MYSQL_TYPE_DOUBLE, 0u8])),
-                    Date(..) => try_io!(writer.write([consts::MYSQL_TYPE_DATE, 0u8])),
-                    Time(..) => try_io!(writer.write([consts::MYSQL_TYPE_TIME, 0u8]))
+                    NULL => try_io!(writer.write([stmt.params.get_ref().get(i).column_type as u8, 0u8])),
+                    Bytes(..) => try_io!(writer.write([consts::MYSQL_TYPE_VAR_STRING as u8, 0u8])),
+                    Int(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG as u8, 0u8])),
+                    UInt(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG as u8, 128u8])),
+                    Float(..) => try_io!(writer.write([consts::MYSQL_TYPE_DOUBLE as u8, 0u8])),
+                    Date(..) => try_io!(writer.write([consts::MYSQL_TYPE_DATE as u8, 0u8])),
+                    Time(..) => try_io!(writer.write([consts::MYSQL_TYPE_TIME as u8, 0u8]))
                 }
             }
             try_io!(writer.write(values.as_slice()));

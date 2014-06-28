@@ -77,32 +77,36 @@ pub static COM_BINLOG_DUMP_GTID: u8 = 0x1e_u8;
 pub static COM_RESET_CONNECTION: u8 = 0x1f_u8;
 
 /// Text protocol column types
-pub static MYSQL_TYPE_DECIMAL: u8 = 0x00_u8;
-pub static MYSQL_TYPE_TINY: u8 = 0x01_u8;
-pub static MYSQL_TYPE_SHORT: u8 = 0x02_u8;
-pub static MYSQL_TYPE_LONG: u8 = 0x03_u8;
-pub static MYSQL_TYPE_FLOAT: u8 = 0x04_u8;
-pub static MYSQL_TYPE_DOUBLE: u8 = 0x05_u8;
-pub static MYSQL_TYPE_NULL: u8 = 0x06_u8;
-pub static MYSQL_TYPE_TIMESTAMP: u8 = 0x07_u8;
-pub static MYSQL_TYPE_LONGLONG: u8 = 0x08_u8;
-pub static MYSQL_TYPE_INT24: u8 = 0x09_u8;
-pub static MYSQL_TYPE_DATE: u8 = 0x0a_u8;
-pub static MYSQL_TYPE_TIME: u8 = 0x0b_u8;
-pub static MYSQL_TYPE_DATETIME: u8 = 0x0c_u8;
-pub static MYSQL_TYPE_YEAR: u8 = 0x0d_u8;
-pub static MYSQL_TYPE_VARCHAR: u8 = 0x0f_u8;
-pub static MYSQL_TYPE_BIT: u8 = 0x10_u8;
-pub static MYSQL_TYPE_NEWDECIMAL: u8 = 0xf6_u8;
-pub static MYSQL_TYPE_ENUM: u8 = 0xf7_u8;
-pub static MYSQL_TYPE_SET: u8 = 0xf8_u8;
-pub static MYSQL_TYPE_TINY_BLOB: u8 = 0xf9_u8;
-pub static MYSQL_TYPE_MEDIUM_BLOB: u8 = 0xfa_u8;
-pub static MYSQL_TYPE_LONG_BLOB: u8 = 0xfb_u8;
-pub static MYSQL_TYPE_BLOB: u8 = 0xfc_u8;
-pub static MYSQL_TYPE_VAR_STRING: u8 = 0xfd_u8;
-pub static MYSQL_TYPE_STRING: u8 = 0xfe_u8;
-pub static MYSQL_TYPE_GEOMETRY: u8 = 0xff_u8;
+#[allow(non_camel_case_types)]
+#[deriving(Clone, FromPrimitive)]
+pub enum ColumnType {
+    MYSQL_TYPE_DECIMAL     = 0x00_u8,
+    MYSQL_TYPE_TINY        = 0x01_u8,
+    MYSQL_TYPE_SHORT       = 0x02_u8,
+    MYSQL_TYPE_LONG        = 0x03_u8,
+    MYSQL_TYPE_FLOAT       = 0x04_u8,
+    MYSQL_TYPE_DOUBLE      = 0x05_u8,
+    MYSQL_TYPE_NULL        = 0x06_u8,
+    MYSQL_TYPE_TIMESTAMP   = 0x07_u8,
+    MYSQL_TYPE_LONGLONG    = 0x08_u8,
+    MYSQL_TYPE_INT24       = 0x09_u8,
+    MYSQL_TYPE_DATE        = 0x0a_u8,
+    MYSQL_TYPE_TIME        = 0x0b_u8,
+    MYSQL_TYPE_DATETIME    = 0x0c_u8,
+    MYSQL_TYPE_YEAR        = 0x0d_u8,
+    MYSQL_TYPE_VARCHAR     = 0x0f_u8,
+    MYSQL_TYPE_BIT         = 0x10_u8,
+    MYSQL_TYPE_NEWDECIMAL  = 0xf6_u8,
+    MYSQL_TYPE_ENUM        = 0xf7_u8,
+    MYSQL_TYPE_SET         = 0xf8_u8,
+    MYSQL_TYPE_TINY_BLOB   = 0xf9_u8,
+    MYSQL_TYPE_MEDIUM_BLOB = 0xfa_u8,
+    MYSQL_TYPE_LONG_BLOB   = 0xfb_u8,
+    MYSQL_TYPE_BLOB        = 0xfc_u8,
+    MYSQL_TYPE_VAR_STRING  = 0xfd_u8,
+    MYSQL_TYPE_STRING      = 0xfe_u8,
+    MYSQL_TYPE_GEOMETRY    = 0xff_u8,
+}
 
 /// Column flags
 pub static NOT_NULL_FLAG: u16 = 1u16;

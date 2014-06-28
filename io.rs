@@ -43,7 +43,7 @@ pub trait MyReader: Reader + Seek {
 		Ok(buf)
 	}
 
-	fn read_bin_value(&mut self, column_type: u8, unsigned: bool) -> IoResult<Value> {
+	fn read_bin_value(&mut self, column_type: consts::ColumnType, unsigned: bool) -> IoResult<Value> {
 		match column_type {
             consts::MYSQL_TYPE_STRING |
             consts::MYSQL_TYPE_VAR_STRING |

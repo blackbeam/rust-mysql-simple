@@ -309,7 +309,7 @@ impl Value {
         while {i += 1; i < columns.len()} {
             if *bitmap.get((i + bit_offset) / 8) & (1 << ((i + bit_offset) % 8)) == 0 {
                 values.push(try!(reader.read_bin_value(columns[i].column_type,
-                                                                  (columns[i].flags & consts::UNSIGNED_FLAG) != 0)));
+                                                       (columns[i].flags & consts::UNSIGNED_FLAG) != 0)));
             } else {
                 values.push(NULL);
             }
