@@ -1,4 +1,4 @@
-#![crate_id="rust-mysql-simple#0.9.0.0"]	
+#![crate_id="mysql"]	
 #![comment="Mysql client library writen in rust"]
 #![license="MIT"]
 #![crate_type="rlib"]
