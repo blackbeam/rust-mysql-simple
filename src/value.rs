@@ -1,4 +1,7 @@
 use std::io::{MemWriter, BufReader, IoResult, SeekCur};
+use std::from_str::{from_str};
+use std::str::{from_utf8};
+use std::num::{Bounded};
 use super::consts::{UNSIGNED_FLAG};
 use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
@@ -348,9 +351,151 @@ impl Value {
     }
 }
 
+pub trait FromValue {
+    fn from_value(v: &Value) -> Self;
+}
+
+pub fn from_value<T: FromValue>(v: &Value) -> T {
+    FromValue::from_value(v)
+}
+
+macro_rules! from_value_impl_opt(
+    ($t:ty) => (
+        impl FromValue for Option<$t> {
+            fn from_value(v: &Value) -> Option<$t> {
+                match *v {
+                    NULL => None,
+                    _ => Some(from_value(v))
+                }
+            }
+        }
+    )
+)
+
+macro_rules! from_value_impl_num(
+    ($t:ty) => (
+        impl FromValue for $t {
+            fn from_value(v: &Value) -> $t {
+                let min: $t = Bounded::min_value();
+                let max: $t = Bounded::max_value();
+                match *v {
+                    Int(x) if x >= min as i64 && x <= max as i64 => x as $t,
+                    UInt(x) if x <= max as u64 => x as $t,
+                    Bytes(ref bts) => {
+                        from_utf8(bts.as_slice()).and_then(|s| {
+                            from_str::<$t>(s)
+                        }).expect("Error retrieving $t from value")
+                    },
+                    _ => fail!("Error retrieving $t from value")
+                }
+            }
+        }
+
+        from_value_impl_opt!($t)
+    )
+)
+
+from_value_impl_num!(i8)
+from_value_impl_num!(u8)
+from_value_impl_num!(i16)
+from_value_impl_num!(u16)
+from_value_impl_num!(i32)
+from_value_impl_num!(u32)
+from_value_impl_num!(int)
+from_value_impl_num!(uint)
+
+impl FromValue for i64 {
+    fn from_value(v: &Value) -> i64 {
+        let max: i64 = Bounded::max_value();
+        match *v {
+            Int(x) => x,
+            UInt(x) if x <= max as u64 => x as i64,
+            Bytes(ref bts) => {
+                from_utf8(bts.as_slice()).and_then(|s| {
+                    from_str::<i64>(s)
+                }).expect("Error retrieving i64 from value")
+            },
+            _ => fail!("Error retrieving i64 from value")
+        }
+    }
+}
+from_value_impl_opt!(i64)
+
+impl FromValue for u64 {
+    fn from_value(v: &Value) -> u64 {
+        match *v {
+            Int(x) => x as u64,
+            UInt(x) => x,
+            Bytes(ref bts) => {
+                from_utf8(bts.as_slice()).and_then(|s| {
+                    from_str::<u64>(s)
+                }).expect("Error retrieving u64 from value")
+            },
+            _ => fail!("Error retrieving u64 from value")
+        }
+    }
+}
+from_value_impl_opt!(u64)
+
+impl FromValue for f32 {
+    fn from_value(v: &Value) -> f32 {
+        let min: f32 = Bounded::min_value();
+        let max: f32 = Bounded::max_value();
+        match *v {
+            Float(x) if x >= min as f64 && x <= max as f64 => x as f32,
+            Bytes(ref bts) => {
+                from_utf8(bts.as_slice()).and_then(|s| {
+                    from_str::<f32>(s)
+                }).expect("Error retrieving f32 from value")
+            },
+            _ => fail!("Error retrieving f32 from value")
+        }
+    }
+}
+from_value_impl_opt!(f32)
+
+impl FromValue for f64 {
+    fn from_value(v: &Value) -> f64 {
+        match *v {
+            Float(x) => x,
+            Bytes(ref bts) => {
+                from_utf8(bts.as_slice()).and_then(|s| {
+                    from_str::<f64>(s)
+                }).expect("Error retrieving f64 from value")
+            },
+            _ => fail!("Error retrieving f64 from value")
+        }
+    }
+}
+from_value_impl_opt!(f64)
+
+impl FromValue for Vec<u8> {
+    fn from_value(v: &Value) -> Vec<u8> {
+        match *v {
+            Bytes(ref bts) => Vec::from_slice(bts.as_slice()),
+            _ => fail!("Error retrieving Vec<u8> from value")
+        }
+    }
+}
+from_value_impl_opt!(Vec<u8>)
+
+impl FromValue for String {
+    fn from_value(v: &Value) -> String {
+        match *v {
+            Bytes(ref bts) => {
+                from_utf8(bts.as_slice()).and_then(|s| {
+                    Some(String::from_str(s))
+                }).expect("Error retrieving String from value")
+            },
+            _ => fail!("Error retrieving String from value")
+        }
+    }
+}
+from_value_impl_opt!(String)
+
 #[cfg(test)]
 mod test {
-    use super::{Bytes, Int, UInt, Date, Time, Float, NULL};
+    use super::{Bytes, Int, UInt, Date, Time, Float, NULL, from_value};
 
     #[test]
     fn test_value_into_str() {
@@ -382,5 +527,28 @@ mod test {
         assert_eq!(v.into_str(), "'-34 003:02:01'".to_string());
         let v = Time(false, 10, 100, 20, 30, 40);
         assert_eq!(v.into_str(), "'10 100:20:30.000040'".to_string());
+    }
+
+    #[test]
+    fn test_from_value() {
+        assert_eq!(-100i8, from_value::<i8>(&Int(-100i64)));
+        assert_eq!(100i8, from_value::<i8>(&UInt(100u64)));
+        assert_eq!(100i8, from_value::<i8>(&Bytes(Vec::from_slice(b"100"))));
+        assert_eq!(Some(100i8), from_value::<Option<i8>>(&Bytes(Vec::from_slice(b"100"))));
+        assert_eq!(None, from_value::<Option<i8>>(&NULL));
+        assert_eq!(Vec::from_slice(b"test"), from_value::<Vec<u8>>(&Bytes(Vec::from_slice(b"test"))));
+        assert_eq!("test".to_string(), from_value::<String>(&Bytes(Vec::from_slice(b"test"))));
+    }
+
+    #[test]
+    #[should_fail]
+    fn test_from_value_fail_1() {
+        from_value::<i8>(&Int(500i64));
+    }
+
+    #[test]
+    #[should_fail]
+    fn test_from_value_fail_2() {
+        from_value::<i8>(&Bytes(Vec::from_slice(b"500")));
     }
 }
