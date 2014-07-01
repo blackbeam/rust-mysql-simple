@@ -1046,7 +1046,7 @@ mod test {
             let stmt = conn.prepare("SELECT * FROM tbl");
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
-            let mut i = 0;
+            let mut i = 0i;
             for row in &mut stmt.execute([]) {
                 assert!(row.is_ok());
                 let row = row.unwrap();
