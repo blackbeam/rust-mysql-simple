@@ -1,11 +1,11 @@
 [package]
 
-name = "rust-musql-simple"
+name = "mysql"
 version = "0.0.0"
 authors = ["blackbeam"]
 
 [[lib]]
 
-name = "rust-mysql-simple"
+name = "mysql"
 crate_type = ["rlib", "dylib"]
 path = "src/lib.rs"
