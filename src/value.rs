@@ -469,6 +469,19 @@ impl FromValue for f64 {
 }
 from_value_impl_opt!(f64)
 
+impl FromValue for bool {
+    fn from_value(v:&Value) -> bool {
+        match *v {
+            Int(x) if x == 0 => false,
+            Int(x) if x == 1 => true,
+            Bytes(ref bts) if bts.len() == 1 && *bts.get(0) == 0x30 => false,
+            Bytes(ref bts) if bts.len() == 1 && *bts.get(0) == 0x31 => true,
+            _ => fail!("Error retrieving bool from value")
+        }
+    }
+}
+from_value_impl_opt!(bool)
+
 impl FromValue for Vec<u8> {
     fn from_value(v: &Value) -> Vec<u8> {
         match *v {
@@ -538,6 +551,10 @@ mod test {
         assert_eq!(None, from_value::<Option<i8>>(&NULL));
         assert_eq!(Vec::from_slice(b"test"), from_value::<Vec<u8>>(&Bytes(Vec::from_slice(b"test"))));
         assert_eq!("test".to_string(), from_value::<String>(&Bytes(Vec::from_slice(b"test"))));
+        assert_eq!(true, from_value::<bool>(&Int(1)));
+        assert_eq!(false, from_value::<bool>(&Int(0)));
+        assert_eq!(true, from_value::<bool>(&Bytes(Vec::from_slice(b"1"))));
+        assert_eq!(false, from_value::<bool>(&Bytes(Vec::from_slice(b"0"))));
     }
 
     #[test]
