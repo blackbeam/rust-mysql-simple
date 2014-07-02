@@ -2,6 +2,17 @@ install:
   - curl -O http://static.rust-lang.org/dist/rust-nightly-x86_64-unknown-linux-gnu.tar.gz
   - tar xfz rust-nightly-x86_64-unknown-linux-gnu.tar.gz
   - (cd rust-nightly-x86_64-unknown-linux-gnu/ && sudo ./install.sh)
+  - git clone https://github.com/rust-lang/cargo
+  - git clone https://github.com/wycats/hammer.rs
+  - git clone https://github.com/carllerche/hamcrest-rust
+  - git clone https://github.com/alexcrichton/toml-rs
+  - cd cargo
+  - git submodule init
+  - git config submodule."libs/hammer.rs".url ../hammer.rs
+  - git config submodule."libs/hamcrest-rust".url ../hamcrest-rust
+  - git config submodule."libs/toml-rs".url ../toml-rs
+  - git submodule update
+  - make PREFIX=/usr install
 before_script:
   - mysql -e 'SET GLOBAL max_allowed_packet=20*1024*1024;'
 script:
