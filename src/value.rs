@@ -563,7 +563,7 @@ from_value_impl_opt!(Timespec)
 #[cfg(test)]
 mod test {
     use super::{Bytes, Int, UInt, Date, Time, Float, NULL, from_value};
-    use time::{Timespec};
+    use time::{Timespec, now};
 
     #[test]
     fn test_value_into_str() {
@@ -610,11 +610,11 @@ mod test {
         assert_eq!(false, from_value::<bool>(&Int(0)));
         assert_eq!(true, from_value::<bool>(&Bytes(Vec::from_slice(b"1"))));
         assert_eq!(false, from_value::<bool>(&Bytes(Vec::from_slice(b"0"))));
-        assert_eq!(Timespec{sec: 1404241033, nsec: 0},
+        assert_eq!(Timespec{sec: 1404255433 - now().tm_gmtoff as i64, nsec: 0},
                    from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-07-01 22:57:13"))));
-        assert_eq!(Timespec{sec: 1404241033, nsec: 1000},
+        assert_eq!(Timespec{sec: 1404255433 - now().tm_gmtoff as i64, nsec: 1000},
                    from_value::<Timespec>(&Date(2014, 7, 1, 22, 57, 13, 1)));
-        assert_eq!(Timespec{sec: 1404158400, nsec: 0},
+        assert_eq!(Timespec{sec: 1404172800 - now().tm_gmtoff as i64, nsec: 0},
                    from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-07-01"))));
     }
 
