@@ -13,8 +13,8 @@ install:
   - git config submodule."libs/toml-rs".url ../toml-rs
   - git submodule update
   - (make && sudo make PREFIX=/usr install)
+  - cd ..
 before_script:
   - mysql -e 'SET GLOBAL max_allowed_packet=20*1024*1024;'
 script:
-  - cd ..
   - make test doc
