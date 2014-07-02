@@ -1,23 +1,22 @@
-all: rust-mysql-simple doc
+all: lib doc
 
-rust-mysql-simple:
-	mkdir -p lib
-	rustc --out-dir=lib --opt-level 3 src/lib.rs
+target/deps: lib
 
-doc:
+target/tests/mysql: test
+
+lib:
+	cargo build
+
+doc: target/deps
 	mkdir -p doc
-	rustdoc -o doc src/lib.rs
+	rustdoc -o doc -L target/deps src/lib.rs
 
 test:
-	rustc --test src/lib.rs --opt-level 3 -o mysql-test
-	RUST_TEST_TASKS=1 ./mysql-test
-	rm ./mysql-test
+	RUST_TEST_TASKS=1 cargo test
 
-bench:
-	rustc --test src/lib.rs --opt-level 3 -o mysql-test
-	RUST_TEST_TASKS=1 ./mysql-test --bench
-	rm ./mysql-test
+bench: target/tests/mysql
+	RUST_TEST_TASKS=1 ./target/tests/mysql --bench
 
 clean:
-	rm -rf lib
+	rm -rf target
 	rm -rf doc
