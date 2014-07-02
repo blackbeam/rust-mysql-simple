@@ -12,7 +12,7 @@ install:
   - git config submodule."libs/hamcrest-rust".url ../hamcrest-rust
   - git config submodule."libs/toml-rs".url ../toml-rs
   - git submodule update
-  - make PREFIX=/usr install
+  - (make && make PREFIX=/usr install)
 before_script:
   - mysql -e 'SET GLOBAL max_allowed_packet=20*1024*1024;'
 script:
