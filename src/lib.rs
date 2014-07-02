@@ -5,6 +5,8 @@
 #![crate_type="dylib"]
 
 #![feature(unsafe_destructor)]
+#![feature(phase)]
+
 
 #![allow(dead_code)]
 #![feature(macro_rules)]
@@ -15,6 +17,9 @@ extern crate sync;
 extern crate core;
 extern crate debug;
 extern crate time;
+
+#[phase(plugin)]
+extern crate lazy_static;
 
 mod scramble;
 pub mod consts;

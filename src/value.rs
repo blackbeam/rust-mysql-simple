@@ -7,6 +7,31 @@ use super::consts::{UNSIGNED_FLAG};
 use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
 
+lazy_static! {
+    static ref TM_GMTOFF: i32 = now().tm_gmtoff;
+    static ref TM_ISDST: i32 = now().tm_isdst;
+    static ref MIN_i8: i8 = Bounded::min_value();
+    static ref MAX_i8: i8 = Bounded::max_value();
+    static ref MIN_i16: i16 = Bounded::min_value();
+    static ref MAX_i16: i16 = Bounded::max_value();
+    static ref MIN_i32: i32 = Bounded::min_value();
+    static ref MAX_i32: i32 = Bounded::max_value();
+    static ref MIN_u8: u8 = Bounded::min_value();
+    static ref MAX_u8: u8 = Bounded::max_value();
+    static ref MIN_u16: u16 = Bounded::min_value();
+    static ref MAX_u16: u16 = Bounded::max_value();
+    static ref MIN_u32: u32 = Bounded::min_value();
+    static ref MAX_u32: u32 = Bounded::max_value();
+    static ref MIN_int: int = Bounded::min_value();
+    static ref MAX_int: int = Bounded::max_value();
+    static ref MIN_uint: uint = Bounded::min_value();
+    static ref MAX_uint: uint = Bounded::max_value();
+    static ref MAX_i64: i64 = Bounded::max_value();
+    static ref MIN_f32: f32 = Bounded::min_value();
+    static ref MAX_f32: f32 = Bounded::max_value();
+}
+
+
 #[deriving(Clone, PartialEq, PartialOrd, Show)]
 pub enum Value {
     NULL,
@@ -374,14 +399,12 @@ macro_rules! from_value_impl_opt(
 )
 
 macro_rules! from_value_impl_num(
-    ($t:ty) => (
+    ($t:ty, $min:ident, $max:ident) => (
         impl FromValue for $t {
             fn from_value(v: &Value) -> $t {
-                let min: $t = Bounded::min_value();
-                let max: $t = Bounded::max_value();
                 match *v {
-                    Int(x) if x >= min as i64 && x <= max as i64 => x as $t,
-                    UInt(x) if x <= max as u64 => x as $t,
+                    Int(x) if x >= *$min as i64 && x <= *$max as i64 => x as $t,
+                    UInt(x) if x <= *$max as u64 => x as $t,
                     Bytes(ref bts) => {
                         from_utf8(bts.as_slice()).and_then(|s| {
                             from_str::<$t>(s)
@@ -396,21 +419,20 @@ macro_rules! from_value_impl_num(
     )
 )
 
-from_value_impl_num!(i8)
-from_value_impl_num!(u8)
-from_value_impl_num!(i16)
-from_value_impl_num!(u16)
-from_value_impl_num!(i32)
-from_value_impl_num!(u32)
-from_value_impl_num!(int)
-from_value_impl_num!(uint)
+from_value_impl_num!(i8, MIN_i8, MAX_i8)
+from_value_impl_num!(u8, MIN_u8, MAX_u8)
+from_value_impl_num!(i16, MIN_i16, MAX_i16)
+from_value_impl_num!(u16, MIN_u16, MAX_u16)
+from_value_impl_num!(i32, MIN_i32, MAX_i32)
+from_value_impl_num!(u32, MIN_u32, MAX_u32)
+from_value_impl_num!(int, MIN_int, MAX_int)
+from_value_impl_num!(uint, MIN_uint, MAX_uint)
 
 impl FromValue for i64 {
     fn from_value(v: &Value) -> i64 {
-        let max: i64 = Bounded::max_value();
         match *v {
             Int(x) => x,
-            UInt(x) if x <= max as u64 => x as i64,
+            UInt(x) if x <= *MAX_i64 as u64 => x as i64,
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     from_str::<i64>(s)
@@ -440,10 +462,8 @@ from_value_impl_opt!(u64)
 
 impl FromValue for f32 {
     fn from_value(v: &Value) -> f32 {
-        let min: f32 = Bounded::min_value();
-        let max: f32 = Bounded::max_value();
         match *v {
-            Float(x) if x >= min as f64 && x <= max as f64 => x as f32,
+            Float(x) if x >= *MIN_f32 as f64 && x <= *MAX_f32 as f64 => x as f32,
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     from_str::<f32>(s)
@@ -519,14 +539,18 @@ impl FromValue for Timespec {
                     tm_min: i as i32,
                     tm_sec: s as i32,
                     tm_nsec: u as i32 * 1_000,
-                    ..now()
+                    tm_gmtoff: *TM_GMTOFF,
+                    tm_wday: 0,
+                    tm_yday: 0,
+                    tm_isdst: *TM_ISDST,
                 }.to_timespec()
             },
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).and_then(|mut tm| {
-                    tm.tm_gmtoff = now().tm_gmtoff;
+                    tm.tm_gmtoff = *TM_GMTOFF;
+                    tm.tm_isdst = *TM_ISDST;
                     Some(tm)
                 }).expect("Error retrieving Timespec from value").to_timespec()
             },

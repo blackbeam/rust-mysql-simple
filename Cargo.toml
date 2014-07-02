@@ -9,3 +9,7 @@ authors = ["blackbeam"]
 name = "mysql"
 crate_type = ["rlib", "dylib"]
 path = "src/lib.rs"
+
+[dependencies.lazy_static]
+
+git = "https://github.com/Kimundi/lazy-static.rs"
