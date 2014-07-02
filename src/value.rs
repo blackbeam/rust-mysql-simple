@@ -2,6 +2,7 @@ use std::io::{MemWriter, BufReader, IoResult, SeekCur};
 use std::from_str::{from_str};
 use std::str::{from_utf8};
 use std::num::{Bounded};
+use time::{Tm, Timespec, now, strptime};
 use super::consts::{UNSIGNED_FLAG};
 use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
@@ -506,9 +507,39 @@ impl FromValue for String {
 }
 from_value_impl_opt!(String)
 
+impl FromValue for Timespec {
+    fn from_value(v: &Value) -> Timespec {
+        match *v {
+            Date(y, m, d, h, i, s, u) => {
+                Tm{
+                    tm_year: y as i32 - 1_900,
+                    tm_mon: m as i32 - 1,
+                    tm_mday: d as i32,
+                    tm_hour: h as i32,
+                    tm_min: i as i32,
+                    tm_sec: s as i32,
+                    tm_nsec: u as i32 * 1_000,
+                    ..now()
+                }.to_timespec()
+            },
+            Bytes(ref bts) => {
+                from_utf8(bts.as_slice()).and_then(|s| {
+                    strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
+                }).and_then(|mut tm| {
+                    tm.tm_gmtoff = now().tm_gmtoff;
+                    Some(tm)
+                }).expect("Error retrieving Timespec from value").to_timespec()
+            },
+            _ => fail!("Error retrieving Timespec from value")
+        }
+    }
+}
+from_value_impl_opt!(Timespec)
+
 #[cfg(test)]
 mod test {
     use super::{Bytes, Int, UInt, Date, Time, Float, NULL, from_value};
+    use time::{Timespec};
 
     #[test]
     fn test_value_into_str() {
@@ -555,17 +586,30 @@ mod test {
         assert_eq!(false, from_value::<bool>(&Int(0)));
         assert_eq!(true, from_value::<bool>(&Bytes(Vec::from_slice(b"1"))));
         assert_eq!(false, from_value::<bool>(&Bytes(Vec::from_slice(b"0"))));
+        assert_eq!(Timespec{sec: 1404241033, nsec: 0},
+                   from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-07-01 22:57:13"))));
+        assert_eq!(Timespec{sec: 1404241033, nsec: 1000},
+                   from_value::<Timespec>(&Date(2014, 7, 1, 22, 57, 13, 1)));
+        assert_eq!(Timespec{sec: 1404158400, nsec: 0},
+                   from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-07-01"))));
     }
 
     #[test]
     #[should_fail]
-    fn test_from_value_fail_1() {
+    fn test_from_value_fail_i8_1() {
         from_value::<i8>(&Int(500i64));
     }
 
     #[test]
     #[should_fail]
-    fn test_from_value_fail_2() {
+    fn test_from_value_fail_i8_2() {
         from_value::<i8>(&Bytes(Vec::from_slice(b"500")));
+    }
+
+    #[test]
+    #[should_fail]
+    #[allow(non_snake_case_functions)]
+    fn test_from_value_fail_Timespec() {
+        from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-50-01")));
     }
 }
