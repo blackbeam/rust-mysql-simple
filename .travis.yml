@@ -16,4 +16,5 @@ install:
 before_script:
   - mysql -e 'SET GLOBAL max_allowed_packet=20*1024*1024;'
 script:
+  - cd ..
   - make test doc
