@@ -1,6 +1,6 @@
 use std::{uint};
 use std::default::{Default};
-use std::io::{Reader, File, IoResult, Seek,
+use std::io::{Reader, File, IoResult, Seek, Stream,
               SeekCur, EndOfFile, BufReader, MemWriter};
 use std::io::net::ip::{Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
@@ -297,6 +297,13 @@ impl MyConn {
         try!(self.connect_stream());
         self.connect()
     }
+    fn get_mut_stream<'a>(&'a mut self) -> &'a mut Stream {
+        if self.unix_stream.is_some() {
+            self.unix_stream.get_mut_ref() as &mut Stream
+        } else {
+            self.tcp_stream.get_mut_ref() as &mut Stream
+        }
+    }
     fn connect_stream(&mut self) -> MyResult<()> {
         if self.opts.unix_addr.is_some() {
             match UnixStream::connect(self.opts.unix_addr.get_ref()) {
@@ -331,8 +338,8 @@ impl MyConn {
         let mut output = Vec::new();
         let mut pos = 0;
         loop {
-            let payload_len = try_io!(self.read_le_uint_n(3)) as uint;
-            let seq_id = try_io!(self.read_u8());
+            let payload_len = try_io!(self.get_mut_stream().read_le_uint_n(3)) as uint;
+            let seq_id = try_io!(self.get_mut_stream().read_u8());
             if seq_id != self.seq_id {
                 return Err(MyDriverError(PacketOutOfSync));
             }
@@ -340,16 +347,16 @@ impl MyConn {
             if payload_len == consts::MAX_PAYLOAD_LEN {
                 output.reserve(pos + consts::MAX_PAYLOAD_LEN);
                 unsafe { output.set_len(pos + consts::MAX_PAYLOAD_LEN); }
-                try_io!(self.read_at_least(consts::MAX_PAYLOAD_LEN,
-                                           output.mut_slice_from(pos)));
+                try_io!(self.get_mut_stream().read_at_least(consts::MAX_PAYLOAD_LEN,
+                                                            output.mut_slice_from(pos)));
                 pos += consts::MAX_PAYLOAD_LEN;
             } else if payload_len == 0 {
                 break;
             } else {
                 output.reserve(pos + payload_len);
                 unsafe { output.set_len(pos + payload_len); }
-                try_io!(self.read_at_least(payload_len,
-                                           output.mut_slice_from(pos)));
+                try_io!(self.get_mut_stream().read_at_least(payload_len,
+                                                            output.mut_slice_from(pos)));
                 break;
             }
         }
@@ -362,7 +369,7 @@ impl MyConn {
         }
         if data.len() == 0 {
             let seq_id = self.seq_id;
-            try_io!(self.write([0u8, 0u8, 0u8, seq_id]));
+            try_io!(self.get_mut_stream().write([0u8, 0u8, 0u8, seq_id]));
             self.seq_id += 1;
             return Ok(());
         }
@@ -375,11 +382,11 @@ impl MyConn {
             try_io!(writer.write_u8(self.seq_id));
             self.seq_id += 1;
             try_io!(writer.write(chunk));
-            try_io!(self.write(writer.unwrap().as_slice()));
+            try_io!(self.get_mut_stream().write(writer.unwrap().as_slice()));
         }
         if last_was_max {
             let seq_id = self.seq_id;
-            try_io!(self.write([0u8, 0u8, 0u8, seq_id]));
+            try_io!(self.get_mut_stream().write([0u8, 0u8, 0u8, seq_id]));
             self.seq_id += 1;
         }
         Ok(())
@@ -776,26 +783,6 @@ impl MyConn {
                 self.has_results = false;
                 Err(MyIoError(err))
             }
-        }
-    }
-}
-
-impl Reader for MyConn {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        if self.unix_stream.is_some() {
-            self.unix_stream.get_mut_ref().read(buf)
-        } else {
-            self.tcp_stream.get_mut_ref().read(buf)
-        }
-    }
-}
-
-impl Writer for MyConn {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        if self.unix_stream.is_some() {
-            self.unix_stream.get_mut_ref().write(buf)
-        } else {
-            self.tcp_stream.get_mut_ref().write(buf)
         }
     }
 }
