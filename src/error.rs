@@ -2,7 +2,7 @@
 
 use core::fmt;
 use std::io::{IoError};
-use super::packet::{ErrPacket};
+pub use super::packet::{ErrPacket};
 
 #[deriving(PartialEq)]
 pub enum MyError {
