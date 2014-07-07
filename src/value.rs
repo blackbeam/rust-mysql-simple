@@ -2,7 +2,7 @@ use std::io::{MemWriter, BufReader, IoResult, SeekCur};
 use std::from_str::{from_str};
 use std::str::{from_utf8};
 use std::num::{Bounded};
-use time::{Tm, Timespec, now, strptime};
+use time::{Tm, Timespec, now, strptime, at};
 use super::consts::{UNSIGNED_FLAG};
 use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
@@ -376,6 +376,125 @@ impl Value {
         }
     }
 }
+
+pub trait ToValue {
+    fn to_value(&self) -> Value;
+}
+
+macro_rules! to_value_impl_opt(
+    ($t:ty) => (
+        impl ToValue for Option<$t> {
+            fn to_value(&self) -> Value {
+                match *self {
+                    None => NULL,
+                    Some(ref x) => x.to_value()
+                }
+            }
+        }
+    )
+)
+
+macro_rules! to_value_impl_num(
+    ($t:ty) => (
+        impl ToValue for $t {
+            fn to_value(&self) -> Value { Int(*self as i64) }
+        }
+
+        to_value_impl_opt!($t)
+    )
+)
+
+to_value_impl_num!(i8)
+to_value_impl_num!(u8)
+to_value_impl_num!(i16)
+to_value_impl_num!(u16)
+to_value_impl_num!(i32)
+to_value_impl_num!(u32)
+to_value_impl_num!(int)
+to_value_impl_num!(i64)
+
+impl ToValue for u64 {
+    fn to_value(&self) -> Value { UInt(*self) }
+}
+to_value_impl_opt!(u64)
+
+impl ToValue for uint {
+    fn to_value(&self) -> Value {
+        if *self as u64 <= *MAX_i64 as u64 {
+            Int(*self as i64)
+        } else {
+            UInt(*self as u64)
+        }
+    }
+}
+to_value_impl_opt!(uint)
+
+impl ToValue for f32 {
+    fn to_value(&self) -> Value { Float(*self as f64) }
+}
+to_value_impl_opt!(f32)
+
+impl ToValue for f64 {
+    fn to_value(&self) -> Value { Float(*self) }
+}
+to_value_impl_opt!(f64)
+
+impl ToValue for bool {
+    fn to_value(&self) -> Value { if *self { Int(1) } else { Int(0) }}
+}
+to_value_impl_opt!(bool)
+
+impl<'a> ToValue for &'a [u8] {
+    fn to_value(&self) -> Value { Bytes(Vec::from_slice(*self)) }
+}
+impl<'a> ToValue for Option<&'a [u8]> {
+    fn to_value(&self) -> Value {
+        match *self {
+            None => NULL,
+            Some(ref x) => x.to_value()
+        }
+    }
+}
+
+impl ToValue for Vec<u8> {
+    fn to_value(&self) -> Value { Bytes(self.clone()) }
+}
+to_value_impl_opt!(Vec<u8>)
+
+impl<'a> ToValue for &'a str {
+    fn to_value(&self) -> Value { Bytes(Vec::from_slice(self.as_bytes())) }
+}
+impl<'a> ToValue for Option<&'a str> {
+    fn to_value(&self) -> Value {
+        match *self {
+            None => NULL,
+            Some(ref x) => x.to_value()
+        }
+    }
+}
+
+impl ToValue for String {
+    fn to_value(&self) -> Value { Bytes(Vec::from_slice(self.as_bytes())) }
+}
+to_value_impl_opt!(String)
+
+impl ToValue for Value {
+    fn to_value(&self) -> Value { self.clone() }
+}
+
+impl ToValue for Timespec {
+    fn to_value(&self) -> Value {
+        let t = at(*self);
+        Date(t.tm_year as u16,
+             (t.tm_mon + 1) as u8,
+             t.tm_mday as u8,
+             t.tm_hour as u8,
+             t.tm_min as u8,
+             t.tm_sec as u8,
+             t.tm_nsec as u32 / 1000)
+    }
+}
+to_value_impl_opt!(Timespec)
 
 pub trait FromValue {
     fn from_value(v: &Value) -> Self;
