@@ -15,7 +15,7 @@ use super::error::{MyIoError, MySqlError, MyDriverError, CouldNotConnect,
                    SetupError, MyResult};
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
-use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
+use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time, ToValue};
 
 pub mod pool;
 
@@ -72,7 +72,7 @@ impl<'a> Stmt<'a> {
     fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt {
         Stmt{stmt: stmt, conn: None, pooled_conn: Some(pooled_conn)}
     }
-    pub fn execute<'a>(&'a mut self, params: &[Value]) -> MyResult<QueryResult<'a>> {
+    pub fn execute<'a>(&'a mut self, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
         if self.conn.is_some() {
             let conn_ref: &'a mut &mut MyConn = self.conn.get_mut_ref();
             conn_ref.execute(&self.stmt, params)
@@ -569,8 +569,9 @@ impl MyConn {
             }
         }
     }
-    fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<QueryResult<'a>> {
-        match self._execute(stmt, params) {
+    fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
+        let _params: Vec<Value> = params.iter().map(|x| x.to_value() ).collect();
+        match self._execute(stmt, _params.as_slice()) {
             Ok((columns, ok_packet)) => Ok(QueryResult{pooled_conn: None,
                                                        conn: Some(self),
                                                        columns: columns,
@@ -945,7 +946,8 @@ mod test {
     use std::io::fs::{File, unlink};
     use std::path::posix::{Path};
     use super::{MyConn, MyOpts};
-    use super::super::value::{NULL, Int, UInt, Float, Bytes, Date};
+    use super::super::value::{NULL, Int, Bytes, Date, ToValue};
+    use time::{Tm, now};
 
     #[test]
     fn test_connect() {
@@ -1026,8 +1028,10 @@ mod test {
             let stmt = conn.prepare("INSERT INTO tbl(a, b, c, d, e) VALUES (?, ?, ?, ?, ?)");
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
-            assert!(stmt.execute([Bytes(Vec::from_slice(b"hello")), Int(-123), UInt(123), Date(2014, 5, 5,0,0,0,0), Float(123.123f64)]).is_ok());
-            assert!(stmt.execute([Bytes(Vec::from_slice(b"world")), NULL, NULL, NULL, Float(321.321f64)]).is_ok());
+            let t = Tm{tm_year: 2014, tm_mon: 4, tm_mday: 5,
+                       tm_hour: 0,    tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now()};
+            assert!(stmt.execute([&b"hello", &-123i, &123i, &(t.to_timespec()), &123.123f64]).is_ok());
+            assert!(stmt.execute([&b"world", &NULL, &NULL, &NULL, &321.321f64]).is_ok());
         }
         {
             let stmt = conn.prepare("SELECT * FROM tbl");
@@ -1094,7 +1098,7 @@ mod test {
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
             let val = Vec::from_elem(20000000, 65u8);
-            assert!(stmt.execute([Bytes(val)]).is_ok());
+            assert!(stmt.execute([&val]).is_ok());
         }
         let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(row.is_ok());
@@ -1199,8 +1203,8 @@ mod test {
                                           user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?").unwrap();
-        let mut i = 0;
-        bench.iter(|| { stmt.execute([Int(i)]); i += 1; })
+        let mut i = 0i;
+        bench.iter(|| { stmt.execute([&i]); i += 1; })
     }
 
     #[bench]
@@ -1210,7 +1214,7 @@ mod test {
                                           user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-        let params = [Int(42), Bytes(Vec::from_slice(b"123456")), Float(1.618), NULL, Int(1)];
+        let params: &[&ToValue] = [&42i8, &b"123456", &1.618f64, &NULL, &1i8];
         bench.iter(|| { stmt.execute(params); })
     }
 
