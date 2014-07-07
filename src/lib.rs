@@ -1,4 +1,4 @@
-#![crate_id="mysql"]	
+#![crate_name="mysql"]	
 #![comment="Mysql client library writen in rust"]
 #![license="MIT"]
 #![crate_type="rlib"]
