@@ -381,26 +381,20 @@ pub trait ToValue {
     fn to_value(&self) -> Value;
 }
 
-macro_rules! to_value_impl_opt(
-    ($t:ty) => (
-        impl ToValue for Option<$t> {
-            fn to_value(&self) -> Value {
-                match *self {
-                    None => NULL,
-                    Some(ref x) => x.to_value()
-                }
-            }
+impl<T:ToValue> ToValue for Option<T> {
+    fn to_value(&self) -> Value {
+        match *self {
+            None => NULL,
+            Some(ref x) => x.to_value()
         }
-    )
-)
+    }
+}
 
 macro_rules! to_value_impl_num(
     ($t:ty) => (
         impl ToValue for $t {
             fn to_value(&self) -> Value { Int(*self as i64) }
         }
-
-        to_value_impl_opt!($t)
     )
 )
 
@@ -416,7 +410,6 @@ to_value_impl_num!(i64)
 impl ToValue for u64 {
     fn to_value(&self) -> Value { UInt(*self) }
 }
-to_value_impl_opt!(u64)
 
 impl ToValue for uint {
     fn to_value(&self) -> Value {
@@ -427,56 +420,34 @@ impl ToValue for uint {
         }
     }
 }
-to_value_impl_opt!(uint)
 
 impl ToValue for f32 {
     fn to_value(&self) -> Value { Float(*self as f64) }
 }
-to_value_impl_opt!(f32)
 
 impl ToValue for f64 {
     fn to_value(&self) -> Value { Float(*self) }
 }
-to_value_impl_opt!(f64)
 
 impl ToValue for bool {
     fn to_value(&self) -> Value { if *self { Int(1) } else { Int(0) }}
 }
-to_value_impl_opt!(bool)
 
 impl<'a> ToValue for &'a [u8] {
     fn to_value(&self) -> Value { Bytes(Vec::from_slice(*self)) }
-}
-impl<'a> ToValue for Option<&'a [u8]> {
-    fn to_value(&self) -> Value {
-        match *self {
-            None => NULL,
-            Some(ref x) => x.to_value()
-        }
-    }
 }
 
 impl ToValue for Vec<u8> {
     fn to_value(&self) -> Value { Bytes(self.clone()) }
 }
-to_value_impl_opt!(Vec<u8>)
 
 impl<'a> ToValue for &'a str {
     fn to_value(&self) -> Value { Bytes(Vec::from_slice(self.as_bytes())) }
-}
-impl<'a> ToValue for Option<&'a str> {
-    fn to_value(&self) -> Value {
-        match *self {
-            None => NULL,
-            Some(ref x) => x.to_value()
-        }
-    }
 }
 
 impl ToValue for String {
     fn to_value(&self) -> Value { Bytes(Vec::from_slice(self.as_bytes())) }
 }
-to_value_impl_opt!(String)
 
 impl ToValue for Value {
     fn to_value(&self) -> Value { self.clone() }
@@ -494,28 +465,27 @@ impl ToValue for Timespec {
              t.tm_nsec as u32 / 1000)
     }
 }
-to_value_impl_opt!(Timespec)
 
 pub trait FromValue {
     fn from_value(v: &Value) -> Self;
 }
 
+impl FromValue for Value {
+    fn from_value(v: &Value) -> Value { v.clone() }
+}
+
+impl<T:FromValue> FromValue for Option<T> {
+    fn from_value(v: &Value) -> Option<T> {
+        match *v {
+            NULL => None,
+            _ => Some(from_value(v))
+        }
+    }
+}
+
 pub fn from_value<T: FromValue>(v: &Value) -> T {
     FromValue::from_value(v)
 }
-
-macro_rules! from_value_impl_opt(
-    ($t:ty) => (
-        impl FromValue for Option<$t> {
-            fn from_value(v: &Value) -> Option<$t> {
-                match *v {
-                    NULL => None,
-                    _ => Some(from_value(v))
-                }
-            }
-        }
-    )
-)
 
 macro_rules! from_value_impl_num(
     ($t:ty, $min:ident, $max:ident) => (
@@ -533,8 +503,6 @@ macro_rules! from_value_impl_num(
                 }
             }
         }
-
-        from_value_impl_opt!($t)
     )
 )
 
@@ -561,7 +529,6 @@ impl FromValue for i64 {
         }
     }
 }
-from_value_impl_opt!(i64)
 
 impl FromValue for u64 {
     fn from_value(v: &Value) -> u64 {
@@ -577,7 +544,6 @@ impl FromValue for u64 {
         }
     }
 }
-from_value_impl_opt!(u64)
 
 impl FromValue for f32 {
     fn from_value(v: &Value) -> f32 {
@@ -592,7 +558,6 @@ impl FromValue for f32 {
         }
     }
 }
-from_value_impl_opt!(f32)
 
 impl FromValue for f64 {
     fn from_value(v: &Value) -> f64 {
@@ -607,7 +572,6 @@ impl FromValue for f64 {
         }
     }
 }
-from_value_impl_opt!(f64)
 
 impl FromValue for bool {
     fn from_value(v:&Value) -> bool {
@@ -620,7 +584,6 @@ impl FromValue for bool {
         }
     }
 }
-from_value_impl_opt!(bool)
 
 impl FromValue for Vec<u8> {
     fn from_value(v: &Value) -> Vec<u8> {
@@ -630,7 +593,6 @@ impl FromValue for Vec<u8> {
         }
     }
 }
-from_value_impl_opt!(Vec<u8>)
 
 impl FromValue for String {
     fn from_value(v: &Value) -> String {
@@ -644,7 +606,6 @@ impl FromValue for String {
         }
     }
 }
-from_value_impl_opt!(String)
 
 impl FromValue for Timespec {
     fn from_value(v: &Value) -> Timespec {
@@ -677,7 +638,6 @@ impl FromValue for Timespec {
         }
     }
 }
-from_value_impl_opt!(Timespec)
 
 #[cfg(test)]
 mod test {
