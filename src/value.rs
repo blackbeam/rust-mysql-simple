@@ -467,11 +467,16 @@ impl ToValue for Timespec {
 }
 
 pub trait FromValue {
+    /// Will fail if could not retrieve `Self` from `Value`
     fn from_value(v: &Value) -> Self;
+
+    /// Will return `None` if could not retrieve `Self` from `Value`
+    fn from_value_opt(v: &Value) -> Option<Self>;
 }
 
 impl FromValue for Value {
     fn from_value(v: &Value) -> Value { v.clone() }
+    fn from_value_opt(v: &Value) -> Option<Value> { Some(v.clone()) }
 }
 
 impl<T:FromValue> FromValue for Option<T> {
@@ -481,25 +486,45 @@ impl<T:FromValue> FromValue for Option<T> {
             _ => Some(from_value(v))
         }
     }
+    fn from_value_opt(v: &Value) -> Option<Option<T>> {
+        match *v {
+            NULL => Some(None),
+            _ => {
+                match from_value_opt(v) {
+                    None => None,
+                    x => Some(x)
+                }
+            }
+        }
+    }
 }
 
+/// Will fail if could not retrieve `Self` from `Value`
 pub fn from_value<T: FromValue>(v: &Value) -> T {
     FromValue::from_value(v)
+}
+
+/// Will return `None` if could not retrieve `Self` from `Value`
+pub fn from_value_opt<T: FromValue>(v: &Value) -> Option<T> {
+    FromValue::from_value_opt(v)
 }
 
 macro_rules! from_value_impl_num(
     ($t:ty, $min:ident, $max:ident) => (
         impl FromValue for $t {
             fn from_value(v: &Value) -> $t {
+                from_value_opt(v).expect("Error retrieving $t from value")
+            }
+            fn from_value_opt(v: &Value) -> Option<$t> {
                 match *v {
-                    Int(x) if x >= *$min as i64 && x <= *$max as i64 => x as $t,
-                    UInt(x) if x <= *$max as u64 => x as $t,
+                    Int(x) if x >= *$min as i64 && x <= *$max as i64 => Some(x as $t),
+                    UInt(x) if x <= *$max as u64 => Some(x as $t),
                     Bytes(ref bts) => {
                         from_utf8(bts.as_slice()).and_then(|s| {
                             from_str::<$t>(s)
-                        }).expect("Error retrieving $t from value")
+                        })
                     },
-                    _ => fail!("Error retrieving $t from value")
+                    _ => None
                 }
             }
         }
@@ -517,113 +542,137 @@ from_value_impl_num!(uint, MIN_uint, MAX_uint)
 
 impl FromValue for i64 {
     fn from_value(v: &Value) -> i64 {
+        from_value_opt(v).expect("Error retrieving i64 from value")
+    }
+    fn from_value_opt(v: &Value) -> Option<i64> {
         match *v {
-            Int(x) => x,
-            UInt(x) if x <= *MAX_i64 as u64 => x as i64,
+            Int(x) => Some(x),
+            UInt(x) if x <= *MAX_i64 as u64 => Some(x as i64),
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     from_str::<i64>(s)
-                }).expect("Error retrieving i64 from value")
+                })
             },
-            _ => fail!("Error retrieving i64 from value")
+            _ => None
         }
     }
 }
 
 impl FromValue for u64 {
     fn from_value(v: &Value) -> u64 {
+        from_value_opt(v).expect("Error retrieving u64 from value")
+    }
+    fn from_value_opt(v: &Value) -> Option<u64> {
         match *v {
-            Int(x) => x as u64,
-            UInt(x) => x,
+            Int(x) => Some(x as u64),
+            UInt(x) => Some(x),
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     from_str::<u64>(s)
-                }).expect("Error retrieving u64 from value")
+                })
             },
-            _ => fail!("Error retrieving u64 from value")
+            _ => None
         }
     }
 }
 
 impl FromValue for f32 {
     fn from_value(v: &Value) -> f32 {
+        from_value_opt(v).expect("Error retrieving f32 from value")
+    }
+    fn from_value_opt(v: &Value) -> Option<f32> {
         match *v {
-            Float(x) if x >= *MIN_f32 as f64 && x <= *MAX_f32 as f64 => x as f32,
+            Float(x) if x >= *MIN_f32 as f64 && x <= *MAX_f32 as f64 => Some(x as f32),
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     from_str::<f32>(s)
-                }).expect("Error retrieving f32 from value")
+                })
             },
-            _ => fail!("Error retrieving f32 from value")
+            _ => None
         }
     }
 }
 
 impl FromValue for f64 {
     fn from_value(v: &Value) -> f64 {
+        from_value_opt(v).expect("Error retrieving f64 from value")
+    }
+    fn from_value_opt(v: &Value) -> Option<f64> {
         match *v {
-            Float(x) => x,
+            Float(x) => Some(x),
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     from_str::<f64>(s)
-                }).expect("Error retrieving f64 from value")
+                })
             },
-            _ => fail!("Error retrieving f64 from value")
+            _ => None
         }
     }
 }
 
 impl FromValue for bool {
-    fn from_value(v:&Value) -> bool {
+    fn from_value(v: &Value) -> bool {
+        from_value_opt(v).expect("Error retrieving bool from value")
+    }
+    fn from_value_opt(v:&Value) -> Option<bool> {
         match *v {
-            Int(x) if x == 0 => false,
-            Int(x) if x == 1 => true,
-            Bytes(ref bts) if bts.len() == 1 && *bts.get(0) == 0x30 => false,
-            Bytes(ref bts) if bts.len() == 1 && *bts.get(0) == 0x31 => true,
-            _ => fail!("Error retrieving bool from value")
+            Int(x) if x == 0 => Some(false),
+            Int(x) if x == 1 => Some(true),
+            Bytes(ref bts) if bts.len() == 1 && *bts.get(0) == 0x30 => Some(false),
+            Bytes(ref bts) if bts.len() == 1 && *bts.get(0) == 0x31 => Some(true),
+            _ => None
         }
     }
 }
 
 impl FromValue for Vec<u8> {
     fn from_value(v: &Value) -> Vec<u8> {
+        from_value_opt(v).expect("Error retrieving Vec<u8> from value")
+    }
+    fn from_value_opt(v: &Value) -> Option<Vec<u8>> {
         match *v {
-            Bytes(ref bts) => Vec::from_slice(bts.as_slice()),
-            _ => fail!("Error retrieving Vec<u8> from value")
+            Bytes(ref bts) => Some(Vec::from_slice(bts.as_slice())),
+            _ => None
         }
     }
 }
 
 impl FromValue for String {
     fn from_value(v: &Value) -> String {
+        from_value_opt(v).expect("Error retrieving String from value")
+    }
+    fn from_value_opt(v: &Value) -> Option<String> {
         match *v {
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     Some(String::from_str(s))
-                }).expect("Error retrieving String from value")
+                })
             },
-            _ => fail!("Error retrieving String from value")
+            _ => None
         }
     }
 }
 
 impl FromValue for Timespec {
     fn from_value(v: &Value) -> Timespec {
+        from_value_opt(v).expect("Error retrieving Timespec from value")
+    }
+    fn from_value_opt(v: &Value) -> Option<Timespec> {
         match *v {
             Date(y, m, d, h, i, s, u) => {
-                Tm{
-                    tm_year: y as i32 - 1_900,
-                    tm_mon: m as i32 - 1,
-                    tm_mday: d as i32,
-                    tm_hour: h as i32,
-                    tm_min: i as i32,
-                    tm_sec: s as i32,
-                    tm_nsec: u as i32 * 1_000,
-                    tm_gmtoff: *TM_GMTOFF,
-                    tm_wday: 0,
-                    tm_yday: 0,
-                    tm_isdst: *TM_ISDST,
-                }.to_timespec()
+                Some(Tm{
+                        tm_year: y as i32 - 1_900,
+                        tm_mon: m as i32 - 1,
+                        tm_mday: d as i32,
+                        tm_hour: h as i32,
+                        tm_min: i as i32,
+                        tm_sec: s as i32,
+                        tm_nsec: u as i32 * 1_000,
+                        tm_gmtoff: *TM_GMTOFF,
+                        tm_wday: 0,
+                        tm_yday: 0,
+                        tm_isdst: *TM_ISDST,
+                    }.to_timespec())
             },
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
@@ -631,10 +680,10 @@ impl FromValue for Timespec {
                 }).and_then(|mut tm| {
                     tm.tm_gmtoff = *TM_GMTOFF;
                     tm.tm_isdst = *TM_ISDST;
-                    Some(tm)
-                }).expect("Error retrieving Timespec from value").to_timespec()
+                    Some(tm.to_timespec())
+                })
             },
-            _ => fail!("Error retrieving Timespec from value")
+            _ => None
         }
     }
 }
