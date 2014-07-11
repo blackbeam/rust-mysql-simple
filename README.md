@@ -38,6 +38,7 @@ fn main() {
                   data BLOB
                 );");
 
+    // Just for clarification my name is not Steven.
     let me = Person {
         id: 0,
         name: "Steven".to_string(),
