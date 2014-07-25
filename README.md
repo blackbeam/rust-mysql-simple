@@ -59,10 +59,10 @@ fn main() {
     for row in &mut stmt.execute([]) {
         let row = row.unwrap();
         let person = Person {
-            id: from_value(row.get(0)),
-            name: from_value(row.get(1)),
-            time_created: from_value(row.get(2)),
-            data: from_value(row.get(3))
+            id: from_value(&row[0]),
+            name: from_value(&row[1]),
+            time_created: from_value(&row[2]),
+            data: from_value(&row[3])
         };
         println!("Found person {}", person.name);
     }
