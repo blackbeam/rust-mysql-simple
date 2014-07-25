@@ -69,7 +69,7 @@ impl<'a> Stmt<'a> {
     fn new<'a>(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
         Stmt{stmt: stmt, conn: Some(conn), pooled_conn: None}
     }
-    fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt {
+    fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt<'a> {
         Stmt{stmt: stmt, conn: None, pooled_conn: Some(pooled_conn)}
     }
     pub fn execute<'a>(&'a mut self, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
@@ -419,7 +419,7 @@ impl MyConn {
         }).and_then(|_| {
             self.read_packet()
         }).and_then(|pld| {
-            match *pld.get(0) {
+            match pld[0] {
                 0u8 => {
                     let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                     self.handle_ok(&ok);
@@ -526,7 +526,7 @@ impl MyConn {
             try_io!(writer.write_u8(1u8));
             for i in range(0, params.len()) {
                 match params[i] {
-                    NULL => try_io!(writer.write([stmt.params.get_ref().get(i).column_type as u8, 0u8])),
+                    NULL => try_io!(writer.write([stmt.params.get_ref()[i].column_type as u8, 0u8])),
                     Bytes(..) => try_io!(writer.write([consts::MYSQL_TYPE_VAR_STRING as u8, 0u8])),
                     Int(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG as u8, 0u8])),
                     UInt(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG as u8, 128u8])),
@@ -545,7 +545,7 @@ impl MyConn {
         }
         try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
         let pld = try!(self.read_packet());
-        match *pld.get(0) {
+        match pld[0] {
             0x00 => {
                 let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
@@ -602,7 +602,7 @@ impl MyConn {
         }
         try!(self.write_packet(&Vec::with_capacity(0)));
         let pld = try!(self.read_packet());
-        if *pld.get(0) == 0u8 {
+        if pld[0] == 0u8 {
             let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
             self.handle_ok(&ok);
             return Ok(Some(ok));
@@ -612,7 +612,7 @@ impl MyConn {
     fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
-        match *pld.get(0) {
+        match pld[0] {
             0x00 => {
                 let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
@@ -659,7 +659,7 @@ impl MyConn {
     fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
-        match *pld.get(0) {
+        match pld[0] {
             0xff => {
                 let err =  try_io!(ErrPacket::from_payload(pld.as_slice()));
                 Err(MySqlError(err))
@@ -717,7 +717,7 @@ impl MyConn {
         for row in &mut self.query(format!("SELECT @@{:s};", name).as_slice()) {
             if row.is_ok() {
                 let mut row = row.unwrap();
-                return row.shift();
+                return row.remove(0);
             } else {
                 return None;
             }
@@ -735,7 +735,7 @@ impl MyConn {
                 return Err(e);
             }
         };
-        let x = *pld.get(0);
+        let x = pld[0];
         if x == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
             let p = try_io!(EOFPacket::from_payload(pld.as_slice()));
@@ -762,7 +762,7 @@ impl MyConn {
                 return Err(e);
             }
         };
-        let x = *pld.get(0);
+        let x = pld[0];
         if (x == 0xfe || x == 0xff) && pld.len() < 0xfe {
             self.has_results = false;
             if x == 0xfe {
@@ -824,7 +824,7 @@ impl<'a> QueryResult<'a> {
     fn new_pooled(conn: pool::MyPooledConn,
                       columns: Vec<Column>,
                       ok_packet: Option<OkPacket>,
-                      is_bin: bool) -> QueryResult {
+                      is_bin: bool) -> QueryResult<'a> {
         QueryResult{pooled_conn: Some(conn),
                     columns: columns,
                     conn: None,
@@ -992,17 +992,17 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             if count == 0 {
-                assert_eq!(*row.get(0), Bytes(Vec::from_slice(b"foo")));
-                assert_eq!(*row.get(1), Bytes(Vec::from_slice(b"-123")));
-                assert_eq!(*row.get(2), Bytes(Vec::from_slice(b"123")));
-                assert_eq!(*row.get(3), Bytes(Vec::from_slice(b"2014-05-05")));
-                assert_eq!(*row.get(4), Bytes(Vec::from_slice(b"123.123")));
+                assert_eq!(row[0], Bytes(Vec::from_slice(b"foo")));
+                assert_eq!(row[1], Bytes(Vec::from_slice(b"-123")));
+                assert_eq!(row[2], Bytes(Vec::from_slice(b"123")));
+                assert_eq!(row[3], Bytes(Vec::from_slice(b"2014-05-05")));
+                assert_eq!(row[4], Bytes(Vec::from_slice(b"123.123")));
             } else {
-                assert_eq!(*row.get(0), Bytes(Vec::from_slice(b"foo")));
-                assert_eq!(*row.get(1), Bytes(Vec::from_slice(b"-321")));
-                assert_eq!(*row.get(2), Bytes(Vec::from_slice(b"321")));
-                assert_eq!(*row.get(3), Bytes(Vec::from_slice(b"2014-06-06")));
-                assert_eq!(*row.get(4), Bytes(Vec::from_slice(b"321.321")));
+                assert_eq!(row[0], Bytes(Vec::from_slice(b"foo")));
+                assert_eq!(row[1], Bytes(Vec::from_slice(b"-321")));
+                assert_eq!(row[2], Bytes(Vec::from_slice(b"321")));
+                assert_eq!(row[3], Bytes(Vec::from_slice(b"2014-06-06")));
+                assert_eq!(row[4], Bytes(Vec::from_slice(b"321.321")));
             }
             count += 1;
         }
@@ -1010,7 +1010,7 @@ mod test {
         for row in &mut conn.query("SELECT REPEAT('A', 20000000)") {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let val= row.get(0).bytes_ref();
+            let val= row[0].bytes_ref();
             assert_eq!(val.len(), 20000000);
             assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
         }
@@ -1042,17 +1042,17 @@ mod test {
                 assert!(row.is_ok());
                 let row = row.unwrap();
                 if i == 0 {
-                    assert_eq!(*row.get(0), Bytes(Vec::from_slice(b"hello")));
-                    assert_eq!(*row.get(1), Int(-123i64));
-                    assert_eq!(*row.get(2), Int(123i64));
-                    assert_eq!(*row.get(3), Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                    assert_eq!(row.get(4).get_float(), 123.123);
+                    assert_eq!(row[0], Bytes(Vec::from_slice(b"hello")));
+                    assert_eq!(row[1], Int(-123i64));
+                    assert_eq!(row[2], Int(123i64));
+                    assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
+                    assert_eq!(row[4].get_float(), 123.123);
                 } else {
-                    assert_eq!(*row.get(0), Bytes(Vec::from_slice(b"world")));
-                    assert_eq!(*row.get(1), NULL);
-                    assert_eq!(*row.get(2), NULL);
-                    assert_eq!(*row.get(3), NULL);
-                    assert_eq!(row.get(4).get_float(), 321.321);
+                    assert_eq!(row[0], Bytes(Vec::from_slice(b"world")));
+                    assert_eq!(row[1], NULL);
+                    assert_eq!(row[2], NULL);
+                    assert_eq!(row[3], NULL);
+                    assert_eq!(row[4].get_float(), 321.321);
                 }
                 i += 1;
             }
@@ -1062,7 +1062,7 @@ mod test {
         for row in &mut stmt.execute([]) {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let val= row.get(0).bytes_ref();
+            let val= row[0].bytes_ref();
             assert_eq!(val.len(), 20000000);
             assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
         }
@@ -1080,7 +1080,7 @@ mod test {
         assert!(conn.query(query.as_slice()).is_ok());
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
-        let v: Vec<u8> = x.unwrap().shift().unwrap().unwrap_bytes();
+        let v: Vec<u8> = x.unwrap().remove(0).unwrap().unwrap_bytes();
         assert_eq!(v.len(), 20000000);
         assert_eq!(v, Vec::from_elem(20000000, 65u8));
     }
@@ -1103,7 +1103,7 @@ mod test {
         let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(row.is_ok());
         let row = row.unwrap();
-        let val= row.get(0).bytes_ref();
+        let val= row[0].bytes_ref();
         assert_eq!(val.len(), 20000000);
         assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
     }

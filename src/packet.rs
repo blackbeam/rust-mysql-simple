@@ -115,13 +115,13 @@ impl HandshakePacket {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
                 try!(reader.push(len as uint, &mut auth_plugin_data));
-                if *auth_plugin_data.get(auth_plugin_data.len() - 1) == 0u8 {
+                if auth_plugin_data[auth_plugin_data.len() - 1] == 0u8 {
                     auth_plugin_data.pop();
                 }
             }
             if (capability_flags & consts::CLIENT_PLUGIN_AUTH as u32) > 0 {
                 auth_plugin_name = try!(reader.read_to_end());
-                if *auth_plugin_name.get(auth_plugin_name.len() - 1) == 0u8 {
+                if auth_plugin_name[auth_plugin_name.len() - 1] == 0u8 {
                     auth_plugin_name.pop();
                 }
             }

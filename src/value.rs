@@ -336,7 +336,7 @@ impl Value {
         let mut reader = BufReader::new(pld.slice_from(1 + bitmap_len));
         let mut i = -1;
         while {i += 1; i < columns.len()} {
-            if *bitmap.get((i + bit_offset) / 8) & (1 << ((i + bit_offset) % 8)) == 0 {
+            if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
                 values.push(try!(reader.read_bin_value(columns[i].column_type,
                                                        (columns[i].flags & UNSIGNED_FLAG as u16) != 0)));
             } else {
@@ -618,8 +618,8 @@ impl FromValue for bool {
         match *v {
             Int(x) if x == 0 => Some(false),
             Int(x) if x == 1 => Some(true),
-            Bytes(ref bts) if bts.len() == 1 && *bts.get(0) == 0x30 => Some(false),
-            Bytes(ref bts) if bts.len() == 1 && *bts.get(0) == 0x31 => Some(true),
+            Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x30 => Some(false),
+            Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x31 => Some(true),
             _ => None
         }
     }
