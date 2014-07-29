@@ -859,7 +859,10 @@ impl<'a> QueryResult<'a> {
             Vec::with_capacity(0)
         }
     }
-    pub fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
+}
+
+impl<'a> Iterator<MyResult<Vec<Value>>> for QueryResult<'a> {
+    fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.is_bin {
             let r = if self.conn.is_some() {
                 let conn_ref = self.conn.get_mut_ref();
