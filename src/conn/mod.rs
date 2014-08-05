@@ -7,6 +7,7 @@ use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
 use std::from_str::FromStr;
 use std::num::{FromPrimitive};
+use std::path::{BytesContainer};
 use super::consts;
 use super::io::{MyReader, MyWriter};
 use super::error::{MyIoError, MySqlError, MyDriverError, CouldNotConnect,
@@ -858,6 +859,16 @@ impl<'a> QueryResult<'a> {
         } else {
             Vec::with_capacity(0)
         }
+    }
+    pub fn column_index<T:BytesContainer>(&self, name: T) -> Option<uint> {
+        let len = self.columns.len();
+        let name = name.container_as_bytes();
+        for (c, i) in self.columns.iter().zip(range(0u, len)) {
+            if c.name.as_slice() == name {
+                return Some(i)
+            }
+        }
+        None
     }
 }
 
