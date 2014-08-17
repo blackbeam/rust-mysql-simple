@@ -3,7 +3,7 @@ use std::io::{IoResult, BufReader, SeekCur};
 use super::io::{MyReader};
 use super::consts;
 
-#[deriving(Eq, PartialEq)]
+#[deriving(Clone, Eq, PartialEq)]
 pub struct OkPacket {
     pub affected_rows: u64,
     pub last_insert_id: u64,
@@ -26,7 +26,7 @@ impl OkPacket {
     }
 }
 
-#[deriving(Eq, PartialEq)]
+#[deriving(Clone, Eq, PartialEq)]
 pub struct ErrPacket {
     pub sql_state: Vec<u8>,
     pub error_message: Vec<u8>,
@@ -57,7 +57,7 @@ impl fmt::Show for ErrPacket {
     }
 }
 
-#[deriving(Eq, PartialEq)]
+#[deriving(Clone, Eq, PartialEq)]
 pub struct EOFPacket {
     pub warnings: u16,
     pub status_flags: u16
@@ -74,7 +74,7 @@ impl EOFPacket {
     }
 }
 
-#[deriving(Eq, PartialEq)]
+#[deriving(Clone, Eq, PartialEq)]
 pub struct HandshakePacket {
     pub auth_plugin_data: Vec<u8>,
     pub auth_plugin_name: Vec<u8>,
