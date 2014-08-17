@@ -6,7 +6,7 @@ pub static UTF8_GENERAL_CI: u8 = 33u8;
 
 /// Server status flags (u16)
 #[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive)]
+#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
 #[repr(u16)]
 pub enum StatusFlag {
     SERVER_STATUS_IN_TRANS             = 0x0001u16,
@@ -25,7 +25,7 @@ pub enum StatusFlag {
 
 /// Capability flags (u32)
 #[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive)]
+#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
 #[repr(u32)]
 pub enum CapabilityFlag {
     CLIENT_LONG_PASSWORD                  = 0x00000001u32,
@@ -54,7 +54,7 @@ pub enum CapabilityFlag {
 
 /// Commands (u8)
 #[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive)]
+#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Command {
     COM_SLEEP               = 0x00_u8,
@@ -93,7 +93,7 @@ pub enum Command {
 
 /// Text protocol column types (u8)
 #[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive)]
+#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
 #[repr(u8)]
 pub enum ColumnType {
     MYSQL_TYPE_DECIMAL     = 0x00_u8,
@@ -126,7 +126,7 @@ pub enum ColumnType {
 
 /// Column flags (u16)
 #[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive)]
+#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
 #[repr(u16)]
 pub enum ColumnFlag {
     NOT_NULL_FLAG         = 1u16,

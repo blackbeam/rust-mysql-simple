@@ -4,7 +4,7 @@ use core::fmt;
 use std::io::{IoError};
 pub use super::packet::{ErrPacket};
 
-#[deriving(PartialEq)]
+#[deriving(Eq, PartialEq)]
 pub enum MyError {
 	MyIoError(IoError),
 	MySqlError(ErrPacket),
@@ -31,7 +31,7 @@ macro_rules! try_io(
 	)
 )
 
-#[deriving(PartialEq, Eq)]
+#[deriving(Eq, PartialEq)]
 pub enum DriverError {
 	CouldNotConnect(Option<String>),
 	UnsupportedProtocol(u8),
@@ -85,7 +85,7 @@ pub type MyResult<T> = Result<T, MyError>;
 
 /// Server error codes (u16)
 #[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive)]
+#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
 #[repr(u16)]
 pub enum ServerError {
 	ER_HASHCHK = 1000u16,

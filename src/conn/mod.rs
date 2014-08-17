@@ -34,6 +34,7 @@ pub mod pool;
  *                                           
  */
 
+#[deriving(Eq, PartialEq)]
 struct InnerStmt {
     params: Option<Vec<Column>>,
     columns: Option<Vec<Column>>,
@@ -98,7 +99,7 @@ impl<'a> Stmt<'a> {
  *                                                            
  */
 
-#[deriving(Clone)]
+#[deriving(Clone, Eq, PartialEq)]
 pub struct Column {
     pub catalog: Vec<u8>,
     pub schema: Vec<u8>,
@@ -165,7 +166,7 @@ impl Column {
  *                  Y8b d88P             888                      
  *                   "Y88P"              888                      
  */
-#[deriving(Clone, PartialEq)]
+#[deriving(Clone, Eq, PartialEq)]
 pub struct MyOpts {
     pub tcp_addr: Option<String>,
     pub tcp_port: u16,
