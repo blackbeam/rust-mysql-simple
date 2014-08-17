@@ -4,7 +4,7 @@ name = "mysql"
 version = "0.0.0"
 authors = ["blackbeam"]
 
-[[lib]]
+[lib]
 
 name = "mysql"
 crate_type = ["rlib", "dylib"]
