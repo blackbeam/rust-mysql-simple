@@ -1,14 +1,8 @@
 env:
   global:
     - secure: NReQ/WsOEMia4t2siHH3dW5CSLewydRzZkrYfR7SC7Pxm/VMOszdmLerEpzXYKpX53bb817m6nSeMDRd4oT1E99miiW4w7LXAsu07XVxbcDMTdkllf2bwXMygb1bZoa5TgX/JcfHgzn7kg5pnU8V1SseXIIAEXNJ6+6qqW3TcAk=
-before_install:
-  - yes | sudo add-apt-repository ppa:cmrx64/cargo
-  - sudo apt-get update
 install:
-  - sudo apt-get install cargo
-  - curl -O http://static.rust-lang.org/dist/rust-nightly-x86_64-unknown-linux-gnu.tar.gz
-  - tar xfz rust-nightly-x86_64-unknown-linux-gnu.tar.gz
-  - (cd rust-nightly-x86_64-unknown-linux-gnu/ && sudo ./install.sh)
+  - curl http://www.rust-lang.org/rustup.sh | sudo sh -
 before_script:
   - mysql -e 'SET GLOBAL max_allowed_packet=20*1024*1024;'
 script:
