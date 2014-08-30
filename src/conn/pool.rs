@@ -86,6 +86,10 @@ impl MyPool {
         Ok(MyPool{ pool: Arc::new(Mutex::new(pool)) })
     }
 
+    /// Gives you a ```MyPooledConn```.
+    ///
+    /// ```MyPool``` will check that connection is alive via ```MyConn#ping```
+    // and will call ```MyConn#reset``` if necessary.
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
         let mut pool = self.pool.lock();
 
