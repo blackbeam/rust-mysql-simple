@@ -166,15 +166,27 @@ impl Column {
  *                  Y8b d88P             888                      
  *                   "Y88P"              888                      
  */
+/// Mysql connection options.
 #[deriving(Clone, Eq, PartialEq)]
 pub struct MyOpts {
+    /// TCP address of mysql server (defaults to ```127.0.0.1```).
     pub tcp_addr: Option<String>,
+    /// TCP port of mysql server (defaults to ```3306```).
     pub tcp_port: u16,
+    /// UNIX address of mysql server (defaults to ```None```).
     pub unix_addr: Option<Path>,
+    /// User (defaults to ```None```).
     pub user: Option<String>,
+    /// Password (defaults to ```None```).
     pub pass: Option<String>,
+    /// Database name (defaults to ```None```).
     pub db_name: Option<String>,
+    /// Prefer socet connection (defaults to ```true```).
+    ///
+    /// Will reconnect via socket after TCP connection to ```127.0.0.1``` if
+    /// ```true```.
     pub prefer_socket: bool,
+    /// TCP keepalive timeout in seconds (defaults to one hour).
     pub keepalive_timeout: Option<uint>,
 }
 
