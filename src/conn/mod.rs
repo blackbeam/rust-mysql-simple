@@ -95,6 +95,23 @@ impl<'a> Stmt<'a> {
         }
     }
 
+    /// Returns index of a `Stmt`'s column by name.
+    pub fn column_index<T>(&self, name: T) -> Option<uint>
+    where T: BytesContainer {
+        match self.stmt.columns {
+            None => None,
+            Some(ref columns) => {
+                let name = name.container_as_bytes();
+                for (i, c) in columns.iter().enumerate() {
+                    if c.name.as_slice() == name {
+                        return Some(i)
+                    }
+                }
+                None
+            }
+        }
+    }
+
     /// Executes prepared statement with an arguments passed as a slice of a
     /// references to a [`ToValue`](../value/trait.ToValue.html) trait
     /// implementors.
