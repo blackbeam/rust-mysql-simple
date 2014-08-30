@@ -77,6 +77,24 @@ impl<'a> Stmt<'a> {
         Stmt{stmt: stmt, conn: None, pooled_conn: Some(pooled_conn)}
     }
 
+    /// Returns a slice of a [`Column`s](struct.Column.html) which represents
+    /// `Stmt`'s params if any.
+    pub fn params_ref(&self) -> Option<&[Column]> {
+        match self.stmt.params {
+            Some(ref params) => Some(params.as_slice()),
+            None => None
+        }
+    }
+
+    /// Returns a slice of a [`Column`s](struct.Column.html) which represents
+    /// `Stmt`'s columns if any.
+    pub fn columns_ref(&self) -> Option<&[Column]> {
+        match self.stmt.columns {
+            Some(ref columns) => Some(columns.as_slice()),
+            None => None
+        }
+    }
+
     /// Executes prepared statement with an arguments passed as a slice of a
     /// references to a [`ToValue`](../value/trait.ToValue.html) trait
     /// implementors.
