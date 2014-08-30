@@ -140,19 +140,31 @@ impl<'a> Stmt<'a> {
  *                                                            
  */
 
+/// Mysql
+/// [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition).
 #[deriving(Clone, Eq, PartialEq)]
 pub struct Column {
-    pub catalog: Vec<u8>,
+    /// Schema name.
     pub schema: Vec<u8>,
+    /// Virtual table name.
     pub table: Vec<u8>,
+    /// Phisical table name.
     pub org_table: Vec<u8>,
+    /// Virtual column name.
     pub name: Vec<u8>,
+    /// Phisical column name.
     pub org_name: Vec<u8>,
+    /// Default values.
     pub default_values: Vec<u8>,
+    /// Maximum length of the field.
     pub column_length: u32,
+    /// Column character set.
     pub character_set: u16,
+    /// Flags.
     pub flags: u16,
+    /// Column type.
     pub column_type: consts::ColumnType,
+    /// Max shown decimal digits
     pub decimals: u8
 }
 
@@ -160,7 +172,8 @@ impl Column {
     #[inline]
     fn from_payload(command: u8, pld: &[u8]) -> IoResult<Column> {
         let mut reader = BufReader::new(pld);
-        let catalog = try!(reader.read_lenenc_bytes());
+        // Skip catalog
+        let _ = try!(reader.read_lenenc_bytes());
         let schema = try!(reader.read_lenenc_bytes());
         let table = try!(reader.read_lenenc_bytes());
         let org_table = try!(reader.read_lenenc_bytes());
@@ -179,18 +192,17 @@ impl Column {
             let len = try!(reader.read_lenenc_int());
             default_values = try!(reader.read_exact(len as uint));
         }
-        Ok(Column{catalog: catalog,
-                schema: schema,
-                table: table,
-                org_table: org_table,
-                name: name,
-                org_name: org_name,
-                character_set: character_set,
-                column_length: column_length,
-                column_type: FromPrimitive::from_u8(column_type).unwrap(),
-                flags: flags,
-                decimals: decimals,
-                default_values: default_values})
+        Ok(Column{schema: schema,
+                  table: table,
+                  org_table: org_table,
+                  name: name,
+                  org_name: org_name,
+                  character_set: character_set,
+                  column_length: column_length,
+                  column_type: FromPrimitive::from_u8(column_type).unwrap(),
+                  flags: flags,
+                  decimals: decimals,
+                  default_values: default_values})
     }
 }
 
