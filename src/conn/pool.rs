@@ -86,10 +86,12 @@ impl MyPool {
         Ok(MyPool{ pool: Arc::new(Mutex::new(pool)) })
     }
 
-    /// Gives you a `MyPooledConn`.
+    /// Gives you a [`MyPooledConn`](struct.MyPooledConn.html).
     ///
-    /// `MyPool` will check that connection is alive via `MyConn#ping` and will
-    /// call `MyConn#reset` if necessary.
+    /// `MyPool` will check that connection is alive via
+    /// [`MyConn#ping`](../struct.MyConn.html#method.ping) and will
+    /// call [`MyConn#reset`](../struct.MyConn.html#method.reset) if
+    /// necessary.
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
         let mut pool = self.pool.lock();
 
@@ -141,7 +143,7 @@ impl MyPool {
         conn.pooled_query(query)
     }
 
-    /// See docs on `Pool#query`
+    /// See docs on [`Pool#query`](#method.query)
     pub fn prepare<'a>(&'a self, query: &'a str) -> MyResult<Stmt<'a>> {
         let conn = try!(self.get_conn());
         conn.pooled_prepare(query)
@@ -168,27 +170,31 @@ impl Drop for MyPooledConn {
 }
 
 impl MyPooledConn {
-    /// Redirects to `MyConn#query`.
+    /// Redirects to
+    /// [`MyConn#query`](../struct.MyConn.html#method.query).
     pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         self.conn.get_mut_ref().query(query)
     }
 
-    /// Redirects to `MyConn#prepare`.
+    /// Redirects to
+    /// [`MyConn#prepare`](../struct.MyConn.html#method.prepare).
     pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         self.conn.get_mut_ref().prepare(query)
     }
 
-    /// Gives mutable reference to the wrapped `MyConn`.
+    /// Gives mutable reference to the wrapped
+    /// [`MyConn`](../struct.MyConn.html).
     pub fn get_mut_ref<'a>(&'a mut self) -> &'a mut MyConn {
         self.conn.get_mut_ref()
     }
 
-    /// Gives reference to the wrapped `MyConn`.
+    /// Gives reference to the wrapped
+    /// [`MyConn`](../struct.MyConn.html).
     pub fn get_ref<'a>(&'a self) -> &'a MyConn {
         self.conn.get_ref()
     }
 
-    /// Unwraps wrapped `MyConn`.
+    /// Unwraps wrapped [`MyConn`](../struct.MyConn.html).
     pub fn unwrap(mut self) -> MyConn {
         self.conn.take_unwrap()
     }
