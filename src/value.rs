@@ -760,7 +760,7 @@ mod test {
 
     #[test]
     #[should_fail]
-    #[allow(non_snake_case_functions)]
+    #[allow(non_snake_case)]
     fn test_from_value_fail_Timespec() {
         from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-50-01")));
     }

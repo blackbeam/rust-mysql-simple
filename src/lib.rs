@@ -44,7 +44,7 @@
 //!     pool.prepare("INSERT INTO person (name, time_created, data)
 //!                   VALUES (?, ?, ?);")
 //!     .and_then(|mut stmt| {
-//!         stmt.execute([&me.name, &me.time_created, &me.data]).and(Ok(()))
+//!         stmt.execute(&[&me.name, &me.time_created, &me.data]).and(Ok(()))
 //!     });
 //!
 //!     let mut stmt = pool.prepare("SELECT id, name, time_created, data

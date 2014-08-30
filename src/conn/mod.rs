@@ -2,7 +2,7 @@ use std::{uint};
 use std::default::{Default};
 use std::io::{Reader, File, IoResult, Seek, Stream,
               SeekCur, EndOfFile, BufReader, MemWriter};
-use std::io::net::ip::{Ipv4Addr, Ipv6Addr};
+use std::io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::unix::{UnixStream};
 use std::from_str::FromStr;
@@ -117,10 +117,10 @@ impl<'a> Stmt<'a> {
     /// implementors.
     pub fn execute<'a>(&'a mut self, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
         if self.conn.is_some() {
-            let conn_ref: &'a mut &mut MyConn = self.conn.get_mut_ref();
+            let conn_ref: &'a mut &mut MyConn = self.conn.as_mut().unwrap();
             conn_ref.execute(&self.stmt, params)
         } else {
-            let conn_ref = self.pooled_conn.get_mut_ref().get_mut_ref();
+            let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
             conn_ref.execute(&self.stmt, params)
         }
     }
@@ -334,8 +334,10 @@ impl MyConn {
         try!(conn.connect_stream());
         try!(conn.connect());
         if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
-            if FromStr::from_str(conn.opts.tcp_addr.get_ref().as_slice()) == Some(Ipv4Addr(127, 0, 0, 1)) ||
-               FromStr::from_str(conn.opts.tcp_addr.get_ref().as_slice()) == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
+            let addr: Option<IpAddr> = FromStr::from_str(
+                conn.opts.tcp_addr.as_ref().unwrap().as_slice());
+            if addr == Some(Ipv4Addr(127, 0, 0, 1)) ||
+               addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
                 match conn.get_system_var("socket") {
                     Some(path) => {
                         let opts = MyOpts{unix_addr: Some(Path::new(path.unwrap_bytes())),
@@ -370,28 +372,32 @@ impl MyConn {
 
     fn get_mut_stream<'a>(&'a mut self) -> &'a mut Stream {
         if self.unix_stream.is_some() {
-            self.unix_stream.get_mut_ref() as &mut Stream
+            self.unix_stream.as_mut().unwrap() as &mut Stream
         } else {
-            self.tcp_stream.get_mut_ref() as &mut Stream
+            self.tcp_stream.as_mut().unwrap() as &mut Stream
         }
     }
 
     fn connect_stream(&mut self) -> MyResult<()> {
         if self.opts.unix_addr.is_some() {
-            match UnixStream::connect(self.opts.unix_addr.get_ref()) {
+            match UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
                 Ok(stream) => {
                     self.unix_stream = Some(stream);
                     return Ok(());
                 },
                 _ => {
-                    let path_str = format!("{:?}", *self.opts.unix_addr.get_ref()).to_string();
+                    let path_str = format!("{:?}",
+                                           *self.opts.unix_addr.as_ref().unwrap()
+                                   ).to_string();
                     return Err(MyDriverError(CouldNotConnect(Some(path_str))));
                 }
             }
         }
         if self.opts.tcp_addr.is_some() {
-            match TcpStream::connect(self.opts.tcp_addr.get_ref().as_slice(),
-                                     self.opts.tcp_port) {
+            match TcpStream::connect(
+                self.opts.tcp_addr.as_ref().unwrap().as_slice(),                     
+                self.opts.tcp_port)
+            {
                 Ok(mut stream) => {
                     // keepalive one hour
                     let keepalive_timeout = self.opts.keepalive_timeout.clone();
@@ -941,9 +947,9 @@ impl<'a> QueryResult<'a> {
     /// affected rows.
     pub fn affected_rows(&self) -> u64 {
         if self.conn.is_some() {
-            self.conn.get_ref().affected_rows
+            self.conn.as_ref().unwrap().affected_rows
         } else {
-            self.pooled_conn.get_ref().get_ref().affected_rows
+            self.pooled_conn.as_ref().unwrap().as_ref().affected_rows
         }
     }
     /// Returns
@@ -951,9 +957,9 @@ impl<'a> QueryResult<'a> {
     /// last insert id.
     pub fn last_insert_id(&self) -> u64 {
         if self.conn.is_some() {
-            self.conn.get_ref().last_insert_id
+            self.conn.as_ref().unwrap().last_insert_id
         } else {
-            self.pooled_conn.get_ref().get_ref().last_insert_id
+            self.pooled_conn.as_ref().unwrap().as_ref().last_insert_id
         }
     }
     /// Returns
@@ -961,7 +967,7 @@ impl<'a> QueryResult<'a> {
     /// warnings count.
     pub fn warnings(&self) -> u16 {
         if self.ok_packet.is_some() {
-            self.ok_packet.get_ref().warnings
+            self.ok_packet.as_ref().unwrap().warnings
         } else {
             0u16
         }
@@ -971,7 +977,7 @@ impl<'a> QueryResult<'a> {
     /// info.
     pub fn info(&self) -> Vec<u8> {
         if self.ok_packet.is_some() {
-            self.ok_packet.get_ref().info.clone()
+            self.ok_packet.as_ref().unwrap().info.clone()
         } else {
             Vec::with_capacity(0)
         }
@@ -992,10 +998,10 @@ impl<'a> Iterator<MyResult<Vec<Value>>> for QueryResult<'a> {
     fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.is_bin {
             let r = if self.conn.is_some() {
-                let conn_ref = self.conn.get_mut_ref();
+                let conn_ref = self.conn.as_mut().unwrap();
                 conn_ref.next_bin(&self.columns)
             } else {
-                let conn_ref = self.pooled_conn.get_mut_ref().get_mut_ref();
+                let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
                 conn_ref.next_bin(&self.columns)
             };
             match r {
@@ -1013,10 +1019,10 @@ impl<'a> Iterator<MyResult<Vec<Value>>> for QueryResult<'a> {
             }
         } else {
             let r = if self.conn.is_some() {
-                let conn_ref = self.conn.get_mut_ref();
+                let conn_ref = self.conn.as_mut().unwrap();
                 conn_ref.next_text(self.columns.len())
             } else {
-                let conn_ref = self.pooled_conn.get_mut_ref().get_mut_ref();
+                let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
                 conn_ref.next_text(self.columns.len())
             };
             match r {
@@ -1160,8 +1166,8 @@ mod test {
             let mut stmt = stmt.unwrap();
             let t = Tm{tm_year: 2014, tm_mon: 4, tm_mday: 5,
                        tm_hour: 0,    tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now()};
-            assert!(stmt.execute([&b"hello", &-123i, &123i, &(t.to_timespec()), &123.123f64]).is_ok());
-            assert!(stmt.execute([&b"world", &NULL, &NULL, &NULL, &321.321f64]).is_ok());
+            assert!(stmt.execute(&[&b"hello", &-123i, &123i, &(t.to_timespec()), &123.123f64]).is_ok());
+            assert!(stmt.execute(&[&b"world", &NULL, &NULL, &NULL, &321.321f64]).is_ok());
         }
         {
             let stmt = conn.prepare("SELECT * FROM tbl");
@@ -1228,7 +1234,7 @@ mod test {
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
             let val = Vec::from_elem(20000000, 65u8);
-            assert!(stmt.execute([&val]).is_ok());
+            assert!(stmt.execute(&[&val]).is_ok());
         }
         let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(row.is_ok());
@@ -1334,7 +1340,7 @@ mod test {
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?").unwrap();
         let mut i = 0i;
-        bench.iter(|| { stmt.execute([&i]); i += 1; })
+        bench.iter(|| { stmt.execute(&[&i]); i += 1; })
     }
 
     #[bench]
@@ -1344,7 +1350,7 @@ mod test {
                                           user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-        let params: &[&ToValue] = [&42i8, &b"123456", &1.618f64, &NULL, &1i8];
+        let params: &[&ToValue] = &[&42i8, &b"123456", &1.618f64, &NULL, &1i8];
         bench.iter(|| { stmt.execute(params); })
     }
 

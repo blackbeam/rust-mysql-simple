@@ -163,7 +163,7 @@ impl Drop for MyPooledConn {
         if pool.count > pool.min || self.conn.is_none() {
             pool.count -= 1;
         } else {
-            pool.pool.push(self.conn.take_unwrap());
+            pool.pool.push(self.conn.take().unwrap());
         }
         pool.cond.signal();
     }
@@ -173,34 +173,34 @@ impl MyPooledConn {
     /// Redirects to
     /// [`MyConn#query`](../struct.MyConn.html#method.query).
     pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
-        self.conn.get_mut_ref().query(query)
+        self.conn.as_mut().unwrap().query(query)
     }
 
     /// Redirects to
     /// [`MyConn#prepare`](../struct.MyConn.html#method.prepare).
     pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
-        self.conn.get_mut_ref().prepare(query)
+        self.conn.as_mut().unwrap().prepare(query)
     }
 
     /// Gives mutable reference to the wrapped
     /// [`MyConn`](../struct.MyConn.html).
-    pub fn get_mut_ref<'a>(&'a mut self) -> &'a mut MyConn {
-        self.conn.get_mut_ref()
+    pub fn as_mut<'a>(&'a mut self) -> &'a mut MyConn {
+        self.conn.as_mut().unwrap()
     }
 
     /// Gives reference to the wrapped
     /// [`MyConn`](../struct.MyConn.html).
-    pub fn get_ref<'a>(&'a self) -> &'a MyConn {
-        self.conn.get_ref()
+    pub fn as_ref<'a>(&'a self) -> &'a MyConn {
+        self.conn.as_ref().unwrap()
     }
 
     /// Unwraps wrapped [`MyConn`](../struct.MyConn.html).
     pub fn unwrap(mut self) -> MyConn {
-        self.conn.take_unwrap()
+        self.conn.take().unwrap()
     }
 
     fn pooled_query(mut self, query: &str) -> MyResult<QueryResult> {
-        match self.get_mut_ref()._query(query) {
+        match self.as_mut()._query(query) {
             Ok((columns, ok_packet)) => Ok(QueryResult::new_pooled(self,
                                                                    columns,
                                                                    ok_packet,
@@ -210,7 +210,7 @@ impl MyPooledConn {
     }
 
     fn pooled_prepare(mut self, query: &str) -> MyResult<Stmt> {
-        match self.get_mut_ref()._prepare(query) {
+        match self.as_mut()._prepare(query) {
             Ok(stmt) => Ok(Stmt::new_pooled(stmt, self)),
             Err(err) => Err(err)
         }
