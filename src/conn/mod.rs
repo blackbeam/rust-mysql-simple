@@ -906,12 +906,13 @@ impl MyConn {
  *                   "Y88P"                                                   
  */
 
+/// Mysql result set for text and binary protocols.
 pub struct QueryResult<'a> {
     pooled_conn: Option<pool::MyPooledConn>,
     conn: Option<&'a mut MyConn>,
     columns: Vec<Column>,
     ok_packet: Option<OkPacket>,
-    is_bin: bool
+    is_bin: bool,
 }
 
 impl<'a> QueryResult<'a> {
@@ -935,6 +936,9 @@ impl<'a> QueryResult<'a> {
                     ok_packet: ok_packet,
                     is_bin: is_bin}
     }
+    /// Returns
+    /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
+    /// affected rows.
     pub fn affected_rows(&self) -> u64 {
         if self.conn.is_some() {
             self.conn.get_ref().affected_rows
@@ -942,6 +946,9 @@ impl<'a> QueryResult<'a> {
             self.pooled_conn.get_ref().get_ref().affected_rows
         }
     }
+    /// Returns
+    /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
+    /// last insert id.
     pub fn last_insert_id(&self) -> u64 {
         if self.conn.is_some() {
             self.conn.get_ref().last_insert_id
@@ -949,6 +956,9 @@ impl<'a> QueryResult<'a> {
             self.pooled_conn.get_ref().get_ref().last_insert_id
         }
     }
+    /// Returns
+    /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
+    /// warnings count.
     pub fn warnings(&self) -> u16 {
         if self.ok_packet.is_some() {
             self.ok_packet.get_ref().warnings
@@ -956,6 +966,9 @@ impl<'a> QueryResult<'a> {
             0u16
         }
     }
+    /// Returns
+    /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
+    /// info.
     pub fn info(&self) -> Vec<u8> {
         if self.ok_packet.is_some() {
             self.ok_packet.get_ref().info.clone()
@@ -963,6 +976,7 @@ impl<'a> QueryResult<'a> {
             Vec::with_capacity(0)
         }
     }
+    /// Returns index of a `QueryResult`'s column by name.
     pub fn column_index<T:BytesContainer>(&self, name: T) -> Option<uint> {
         let name = name.container_as_bytes();
         for (i, c) in self.columns.iter().enumerate() {
