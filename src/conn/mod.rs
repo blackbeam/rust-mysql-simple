@@ -238,6 +238,7 @@ impl Default for MyOpts {
  *                   "Y88P"                                        
  */
 
+/// Mysql connection.
 pub struct MyConn {
     opts: MyOpts,
     tcp_stream: Option<TcpStream>,
@@ -275,6 +276,7 @@ impl Default for MyConn {
 }
 
 impl MyConn {
+    /// Creates new `MyConn`.
     pub fn new(opts: MyOpts) -> MyResult<MyConn> {
         let mut conn = MyConn{opts: opts, ..Default::default()};
         try!(conn.connect_stream());
@@ -294,6 +296,8 @@ impl MyConn {
         }
         return Ok(conn);
     }
+
+    /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
         self.tcp_stream = None;
         self.unix_stream = None;
@@ -311,6 +315,7 @@ impl MyConn {
         try!(self.connect_stream());
         self.connect()
     }
+
     fn get_mut_stream<'a>(&'a mut self) -> &'a mut Stream {
         if self.unix_stream.is_some() {
             self.unix_stream.get_mut_ref() as &mut Stream
@@ -318,6 +323,7 @@ impl MyConn {
             self.tcp_stream.get_mut_ref() as &mut Stream
         }
     }
+
     fn connect_stream(&mut self) -> MyResult<()> {
         if self.opts.unix_addr.is_some() {
             match UnixStream::connect(self.opts.unix_addr.get_ref()) {
@@ -348,6 +354,7 @@ impl MyConn {
         }
         return Err(MyDriverError(CouldNotConnect(None)));
     }
+
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let mut output = Vec::new();
         let mut pos = 0;
@@ -376,6 +383,7 @@ impl MyConn {
         }
         Ok(output)
     }
+
     fn write_packet(&mut self, data: &Vec<u8>) -> MyResult<()> {
         if data.len() > self.max_allowed_packet &&
            self.max_allowed_packet < consts::MAX_PAYLOAD_LEN {
@@ -405,20 +413,24 @@ impl MyConn {
         }
         Ok(())
     }
+
     fn handle_handshake(&mut self, hp: &HandshakePacket) {
         self.capability_flags = hp.capability_flags;
         self.status_flags = hp.status_flags;
         self.connection_id = hp.connection_id;
         self.character_set = hp.character_set;
     }
+
     fn handle_ok(&mut self, op: &OkPacket) {
         self.affected_rows = op.affected_rows;
         self.last_insert_id = op.last_insert_id;
         self.status_flags = op.status_flags;
     }
+
     fn handle_eof(&mut self, eof: &EOFPacket) {
         self.status_flags = eof.status_flags;
     }
+
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
             let handshake = try_io!(HandshakePacket::from_payload(pld.as_slice()));
@@ -447,6 +459,7 @@ impl MyConn {
             }
         })
     }
+
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let mut client_flags = consts::CLIENT_PROTOCOL_41 as u32 |
                                consts::CLIENT_SECURE_CONNECTION as u32 |
@@ -480,16 +493,21 @@ impl MyConn {
         }
         self.write_packet(&writer.unwrap())
     }
+
     fn write_command(&mut self, cmd: consts::Command) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd as u8;
         self.write_packet(&vec!(cmd as u8))
     }
+
     fn write_command_data(&mut self, cmd: consts::Command, buf: &[u8]) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd as u8;
         self.write_packet(&vec!(cmd as u8).append(buf))
     }
+
+    /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
+    /// on `MyConn`. Return `true` on success or `false` on error.
     pub fn ping(&mut self) -> bool {
         match self.write_command(consts::COM_PING) {
             Ok(_) => {
@@ -500,6 +518,7 @@ impl MyConn {
             _ => false
         }
     }
+
     fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
         for &id in ids.iter() {
             match params[id as uint] {
@@ -519,6 +538,7 @@ impl MyConn {
         }
         Ok(())
     }
+
     fn _execute(&mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         if stmt.num_params != params.len() as u16 {
             return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, params.len())));
@@ -583,6 +603,7 @@ impl MyConn {
             }
         }
     }
+
     fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
         let _params: Vec<Value> = params.iter().map(|x| x.to_value() ).collect();
         match self._execute(stmt, _params.as_slice()) {
@@ -594,6 +615,7 @@ impl MyConn {
             Err(err) => Err(err)
         }
     }
+
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
         let path = Path::new(file_name);
         let mut file = try_io!(File::open(&path));
@@ -623,6 +645,7 @@ impl MyConn {
         }
         Ok(None)
     }
+
     fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
         let pld = try!(self.read_packet());
@@ -660,6 +683,11 @@ impl MyConn {
             }
         }
     }
+
+    /// Implements text protocol of mysql server.
+    ///
+    /// Executes mysql query on `MyConn`. [`QueryResult`](struct.QueryResult.html)
+    /// will borrow `MyConn` until the end of its scope.
     pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         match self._query(query) {
             Ok((columns, ok_packet)) => Ok(QueryResult{pooled_conn: None,
@@ -670,6 +698,7 @@ impl MyConn {
             Err(err) => Err(err)
         }
     }
+
     fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
         try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
@@ -702,12 +731,18 @@ impl MyConn {
             }
         }
     }
+
+    /// Implements binary protocol of mysql server.
+    ///
+    /// Prepares mysql statement on `MyConn`. [`Stmt`](struct.Stmt.html) will
+    /// borrow `MyConn` until the end of its scope.
     pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         match self._prepare(query) {
             Ok(stmt) => Ok(Stmt::new(stmt, self)),
             Err(err) => Err(err)
         }
     }
+
     fn connect(&mut self) -> MyResult<()> {
         if self.connected {
             return Ok(());
@@ -727,6 +762,7 @@ impl MyConn {
             }
         })
     }
+
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
         for row in &mut self.query(format!("SELECT @@{:s};", name).as_slice()) {
             if row.is_ok() {
@@ -738,6 +774,7 @@ impl MyConn {
         }
         return None;
     }
+
     fn next_bin(&mut self, columns: &Vec<Column>) -> MyResult<Option<Vec<Value>>> {
         if ! self.has_results {
             return Ok(None);
@@ -765,6 +802,7 @@ impl MyConn {
             }
         }
     }
+
     fn next_text(&mut self, col_count: uint) -> MyResult<Option<Vec<Value>>> {
         if ! self.has_results {
             return Ok(None);
