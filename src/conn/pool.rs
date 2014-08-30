@@ -41,8 +41,8 @@ impl MyInnerPool {
 
 /// Pool which is holding mysql connections.
 ///
-/// It will hold at least ```min``` connections and will create as many as
-/// ```max``` connections.
+/// It will hold at least `min` connections and will create as many as `max`
+/// connections.
 ///
 /// ```
 /// use mysql::conn::{MyOpts};
@@ -75,21 +75,21 @@ pub struct MyPool {
 }
 
 impl MyPool {
-    /// Creates new pool with ```min = 10``` and ```max = 100```
+    /// Creates new pool with `min = 10` and `max = 100`.
     pub fn new(opts: MyOpts) -> MyResult<MyPool> {
         MyPool::new_manual(10, 100, opts)
     }
 
-    /// Same as ```new``` but you can set ```min``` and ```max```
+    /// Same as `new` but you can set `min` and `max`.
     pub fn new_manual(min: uint, max: uint, opts: MyOpts) -> MyResult<MyPool> {
         let pool = try!(MyInnerPool::new(min, max, opts));
         Ok(MyPool{ pool: Arc::new(Mutex::new(pool)) })
     }
 
-    /// Gives you a ```MyPooledConn```.
+    /// Gives you a `MyPooledConn`.
     ///
-    /// ```MyPool``` will check that connection is alive via ```MyConn#ping```
-    // and will call ```MyConn#reset``` if necessary.
+    /// `MyPool` will check that connection is alive via `MyConn#ping` and will
+    /// call `MyConn#reset` if necessary.
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
         let mut pool = self.pool.lock();
 
@@ -116,9 +116,9 @@ impl MyPool {
         Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
     }
 
-    /// You can call ```query``` and ```prepare``` directly on a pool but be
-    /// aware of the fact that you can't guarantee that query will be called
-    /// at concrete connection.
+    /// You can call `query` and `prepare` directly on a pool but be aware of
+    /// the fact that you can't guarantee that query will be called at concrete
+    /// connection.
     ///
     /// For example:
     ///
@@ -141,7 +141,7 @@ impl MyPool {
         conn.pooled_query(query)
     }
 
-    /// See docs on ```Pool#query```
+    /// See docs on `Pool#query`
     pub fn prepare<'a>(&'a self, query: &'a str) -> MyResult<Stmt<'a>> {
         let conn = try!(self.get_conn());
         conn.pooled_prepare(query)
@@ -168,27 +168,27 @@ impl Drop for MyPooledConn {
 }
 
 impl MyPooledConn {
-    /// Redirects to ```MyConn#query```.
+    /// Redirects to `MyConn#query`.
     pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         self.conn.get_mut_ref().query(query)
     }
 
-    /// Redirects to ```MyConn#prepare```.
+    /// Redirects to `MyConn#prepare`.
     pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         self.conn.get_mut_ref().prepare(query)
     }
 
-    /// Gives mutable reference to the wrapped ```MyConn```.
+    /// Gives mutable reference to the wrapped `MyConn`.
     pub fn get_mut_ref<'a>(&'a mut self) -> &'a mut MyConn {
         self.conn.get_mut_ref()
     }
 
-    /// Gives reference to the wrapped ```MyConn```.
+    /// Gives reference to the wrapped `MyConn`.
     pub fn get_ref<'a>(&'a self) -> &'a MyConn {
         self.conn.get_ref()
     }
 
-    /// Unwraps wrapped ```MyConn```.
+    /// Unwraps wrapped `MyConn`.
     pub fn unwrap(mut self) -> MyConn {
         self.conn.take_unwrap()
     }
