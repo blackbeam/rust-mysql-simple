@@ -144,6 +144,8 @@ impl MyPool {
     }
 }
 
+/// Pooled mysql connection which will return to the pool at the end of its
+/// scope.
 pub struct MyPooledConn {
     pool: MyPool,
     conn: Option<MyConn>
@@ -162,21 +164,31 @@ impl Drop for MyPooledConn {
 }
 
 impl MyPooledConn {
+    /// Redirects to ```MyConn#query```.
     pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         self.conn.get_mut_ref().query(query)
     }
+
+    /// Redirects to ```MyConn#prepare```.
     pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         self.conn.get_mut_ref().prepare(query)
     }
+
+    /// Gives mutable reference to the wrapped ```MyConn```.
     pub fn get_mut_ref<'a>(&'a mut self) -> &'a mut MyConn {
         self.conn.get_mut_ref()
     }
+
+    /// Gives reference to the wrapped ```MyConn```.
     pub fn get_ref<'a>(&'a self) -> &'a MyConn {
         self.conn.get_ref()
     }
+
+    /// Unwraps wrapped ```MyConn```.
     pub fn unwrap(mut self) -> MyConn {
         self.conn.take_unwrap()
     }
+
     fn pooled_query(mut self, query: &str) -> MyResult<QueryResult> {
         match self.get_mut_ref()._query(query) {
             Ok((columns, ok_packet)) => Ok(QueryResult::new_pooled(self,
@@ -186,6 +198,7 @@ impl MyPooledConn {
             Err(err) => Err(err)
         }
     }
+
     fn pooled_prepare(mut self, query: &str) -> MyResult<Stmt> {
         match self.get_mut_ref()._prepare(query) {
             Ok(stmt) => Ok(Stmt::new_pooled(stmt, self)),
