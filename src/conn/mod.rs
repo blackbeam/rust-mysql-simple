@@ -33,7 +33,6 @@ pub mod pool;
  *                                           
  *                                           
  */
-
 #[deriving(Eq, PartialEq)]
 struct InnerStmt {
     params: Option<Vec<Column>>,
@@ -61,6 +60,8 @@ impl InnerStmt {
     }
 }
 
+/// Mysql
+/// [prepared statement](http://dev.mysql.com/doc/internals/en/prepared-statements.html).
 pub struct Stmt<'a> {
     stmt: InnerStmt,
     conn: Option<&'a mut MyConn>,
@@ -71,9 +72,14 @@ impl<'a> Stmt<'a> {
     fn new<'a>(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
         Stmt{stmt: stmt, conn: Some(conn), pooled_conn: None}
     }
+
     fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt<'a> {
         Stmt{stmt: stmt, conn: None, pooled_conn: Some(pooled_conn)}
     }
+
+    /// Executes prepared statement with an arguments passed as a slice of a
+    /// references to a [`ToValue`](../value/trait.ToValue.html) trait
+    /// implementors.
     pub fn execute<'a>(&'a mut self, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
         if self.conn.is_some() {
             let conn_ref: &'a mut &mut MyConn = self.conn.get_mut_ref();
