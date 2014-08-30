@@ -935,9 +935,8 @@ impl<'a> QueryResult<'a> {
         }
     }
     pub fn column_index<T:BytesContainer>(&self, name: T) -> Option<uint> {
-        let len = self.columns.len();
         let name = name.container_as_bytes();
-        for (c, i) in self.columns.iter().zip(range(0u, len)) {
+        for (i, c) in self.columns.iter().enumerate() {
             if c.name.as_slice() == name {
                 return Some(i)
             }
