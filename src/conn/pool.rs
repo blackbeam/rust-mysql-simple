@@ -39,16 +39,48 @@ impl MyInnerPool {
     }
 }
 
+/// Pool which is holding mysql connections.
+///
+/// It will hold at least ```min``` connections and will create as many as
+/// ```max``` connections.
+///
+/// ```
+/// use mysql::conn::{MyOpts};
+/// use std::default::{Default};
+/// use mysql::conn::pool::{MyPool};
+/// use mysql::value::{ToValue};
+///
+/// fn main() {
+///     let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
+///                                   ..Default::default()});
+///     assert!(pool.is_ok());
+///     let pool = pool.unwrap();
+///     for _ in range(0u, 100) {
+///         let pool = pool.clone();
+///         spawn(proc() {
+///             let conn = pool.get_conn();
+///             assert!(conn.is_ok());
+///             let mut conn = conn.unwrap();
+///             let result = conn.query("SELECT 1");
+///             assert!(result.is_ok());
+///             let mut result = result.unwrap();
+///             assert_eq!(result.next(), Some(Ok(vec!["1".to_value()])));
+///         });
+///     }
+/// }
+/// ```
 #[deriving(Clone)]
 pub struct MyPool {
     pool: Arc<Mutex<MyInnerPool>>
 }
 
 impl MyPool {
+    /// Creates new pool with ```min = 10``` and ```max = 100```
     pub fn new(opts: MyOpts) -> MyResult<MyPool> {
         MyPool::new_manual(10, 100, opts)
     }
 
+    /// Same as ```new``` but you can set ```min``` and ```max```
     pub fn new_manual(min: uint, max: uint, opts: MyOpts) -> MyResult<MyPool> {
         let pool = try!(MyInnerPool::new(min, max, opts));
         Ok(MyPool{ pool: Arc::new(Mutex::new(pool)) })
@@ -79,10 +111,33 @@ impl MyPool {
 
         Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
     }
+
+    /// You can call ```query``` and ```prepare``` directly on a pool but be
+    /// aware of the fact that you can't guarantee that query will be called
+    /// at concrete connection.
+    ///
+    /// For example:
+    ///
+    /// ```ignore
+    /// let opts = MyOpts{user: Some("root".to_string()), ..Default::default()};
+    /// let pool = MyPool::new(opts).unwrap();
+    ///
+    /// pool.query("USE some_database");
+    /// let result = pool.query("INSERT INTO users (name) VALUES ('Steven')");
+    /// let result = pool.query("SELECT * FROM users"); // Error! `no database selected`
+    ///                                                 // because PooledConn on which
+    ///                                                 // you have executed USE was
+    ///                                                 // borrowed by result shadowed
+    ///                                                 // on previous line and will not
+    ///                                                 // be available until the end of
+    ///                                                 // its scope.
+    /// ```
     pub fn query<'a>(&'a self, query: &'a str) -> MyResult<QueryResult<'a>> {
         let conn = try!(self.get_conn());
         conn.pooled_query(query)
     }
+
+    /// See docs on ```Pool#query```
     pub fn prepare<'a>(&'a self, query: &'a str) -> MyResult<Stmt<'a>> {
         let conn = try!(self.get_conn());
         conn.pooled_prepare(query)
@@ -124,7 +179,10 @@ impl MyPooledConn {
     }
     fn pooled_query(mut self, query: &str) -> MyResult<QueryResult> {
         match self.get_mut_ref()._query(query) {
-            Ok((columns, ok_packet)) => Ok(QueryResult::new_pooled(self, columns, ok_packet, false)),
+            Ok((columns, ok_packet)) => Ok(QueryResult::new_pooled(self,
+                                                                   columns,
+                                                                   ok_packet,
+                                                                   false)),
             Err(err) => Err(err)
         }
     }
