@@ -81,16 +81,18 @@ impl Value {
             Time(_, 0, 0, 0, 0, 0) => "''".to_string(),
             Time(neg, d, h, i, s, 0) => {
                 if neg {
-                    format!("'-{:u} {:03u}:{:02u}:{:02u}'", d, h, i, s)
+                    format!("'-{:03u}:{:02u}:{:02u}'", d * 24 + h as u32, i, s)
                 } else {
-                    format!("'{:u} {:03u}:{:02u}:{:02u}'", d, h, i, s)
+                    format!("'{:03u}:{:02u}:{:02u}'", d * 24 + h as u32, i, s)
                 }
             },
             Time(neg, d, h, i, s, u) => {
                 if neg {
-                    format!("'-{:u} {:03u}:{:02u}:{:02u}.{:06u}'", d, h, i, s, u)
+                    format!("'-{:03u}:{:02u}:{:02u}.{:06u}'",
+                            d * 24 + h as u32, i, s, u)
                 } else {
-                    format!("'{:u} {:03u}:{:02u}:{:02u}.{:06u}'", d, h, i, s, u)
+                    format!("'{:03u}:{:02u}:{:02u}.{:06u}'",
+                            d * 24 + h as u32, i, s, u)
                 }
             }
         }
@@ -720,9 +722,9 @@ mod test {
         let v = Time(false, 0, 0, 0, 0, 0);
         assert_eq!(v.into_str(), "''".to_string());
         let v = Time(true, 34, 3, 2, 1, 0);
-        assert_eq!(v.into_str(), "'-34 003:02:01'".to_string());
+        assert_eq!(v.into_str(), "'-819:02:01'".to_string());
         let v = Time(false, 10, 100, 20, 30, 40);
-        assert_eq!(v.into_str(), "'10 100:20:30.000040'".to_string());
+        assert_eq!(v.into_str(), "'340:20:30.000040'".to_string());
     }
 
     #[test]
