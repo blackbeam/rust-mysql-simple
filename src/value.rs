@@ -1,7 +1,9 @@
 use std::io::{MemWriter, BufReader, IoResult, SeekCur};
 use std::from_str::{from_str};
 use std::str::{from_utf8};
-use std::num::{Bounded};
+use std::num::{Bounded, pow};
+use std::time::{Duration};
+use std::i64::{parse_bytes};
 use time::{Tm, Timespec, now, strptime, at};
 use super::consts::{UNSIGNED_FLAG};
 use super::conn::{Column};
@@ -468,6 +470,50 @@ impl ToValue for Timespec {
     }
 }
 
+impl ToValue for Duration {
+    fn to_value(&self) -> Value {
+        let mut this = self.clone();
+        let neg = this.num_seconds() < 0;
+        let mut days = this.num_days();
+        if neg {
+            days = 0 - days;
+            this = this + Duration::days(days);
+        } else {
+            this = this - Duration::days(days);
+        }
+        let mut hrs = this.num_hours();
+        if neg {
+            hrs = 0 - hrs;
+            this = this + Duration::hours(hrs);
+        } else {
+            this = this - Duration::hours(hrs);
+        }
+        let mut mins = this.num_minutes();
+        if neg {
+            mins = 0 - mins;
+            this = this + Duration::minutes(mins);
+        } else {
+            this = this - Duration::minutes(mins);
+        }
+        let mut secs = this.num_seconds();
+        if neg {
+            secs = 0 - secs;
+            this = this + Duration::seconds(secs);
+        } else {
+            this = this - Duration::seconds(secs);
+        }
+        let mut mics = this.num_microseconds().unwrap();
+        if mics > 0 {
+            if neg {
+                mics = 1_000_000 - mics;
+            }
+        } else {
+            mics = 0 - mics
+        }
+        Time(neg, days as u32, hrs as u8, mins as u8, secs as u8, mics as u32)
+    }
+}
+
 pub trait FromValue {
     /// Will fail if could not retrieve `Self` from `Value`
     fn from_value(v: &Value) -> Self;
@@ -690,10 +736,111 @@ impl FromValue for Timespec {
     }
 }
 
+impl FromValue for Duration {
+    fn from_value(v: &Value) -> Duration {
+        from_value_opt(v).expect("Error retrieving Duration from value")
+    }
+
+    fn from_value_opt(v: &Value) -> Option<Duration> {
+        match *v {
+            Time(neg, d, h, m, s, u) => {
+                let microseconds = u as i64 + 
+                    (s as i64 * 1_000_000) + 
+                    (m as i64 * 60 * 1_000_000) +
+                    (h as i64 * 60 * 60 * 1_000_000) +
+                    (d as i64 * 24 * 60 * 60 * 1_000_000);
+                if neg {
+                    Some(Duration::microseconds(0 - microseconds))
+                } else {
+                    Some(Duration::microseconds(microseconds))
+                }
+            },
+            Bytes(ref bts) => {
+                let mut btss = bts.as_slice();
+                let neg = btss[0] == b'-';
+                if neg {
+                    btss = bts.slice_from(1);
+                }
+                let ms: i64 = {
+                    let xss: Vec<&[u8]> = btss.split(|x| *x == b'.').collect();
+                    let ms: i64 = match xss.as_slice() {
+                        [_, ms] if ms.len() <= 6 &&
+                                   parse_bytes(ms, 10).is_some() => {
+                            parse_bytes(ms, 10).unwrap() *
+                            pow::<i64>(10,  6 - ms.len())
+                        },
+                        [_, []] | [_] => 0,
+                        _ => {
+                            return None;
+                        }
+                    };
+                    if xss.len() == 2 {
+                        btss = xss[0].clone();
+                    }
+                    ms
+                };
+                match btss {
+                    // XXX:XX:XX
+                    [h3@0x30..0x38,
+                     h2@0x30..0x39,
+                     h1@0x30..0x39,
+                     b':',
+                     m2@0x30..0x35,
+                     m1@0x30..0x39,
+                     b':',
+                     s2@0x30..0x35,
+                     s1@0x30..0x39] => {
+                        let s = (s2 as i64 & 0x0F) * 10 + (s1 as i64 & 0x0F);
+                        let m = (m2 as i64 & 0x0F) * 10 + (m1 as i64 & 0x0F);
+                        let h = (h3 as i64 & 0x0F) * 100 +
+                                (h2 as i64 & 0x0F) * 10 +
+                                (h1 as i64 & 0x0F);
+                        let microseconds = ms +
+                                           s * 1_000_000 +
+                                           m * 60 * 1_000_000 +
+                                           h * 60 * 60 * 1_000_000;
+                        if neg {
+                            Some(Duration::microseconds(0 - microseconds))
+                        } else {
+                            Some(Duration::microseconds(microseconds))
+                        }
+                    },
+                    // XX:XX:XX
+                    [h2@0x30..0x39,
+                     h1@0x30..0x39,
+                     b':',
+                     m2@0x30..0x35,
+                     m1@0x30..0x39,
+                     b':',
+                     s2@0x30..0x35,
+                     s1@0x30..0x39] => {
+                        let s = (s2 as i64 | 0x0F) * 10 + (s1 as i64 | 0x0F);
+                        let m = (m2 as i64 | 0x0F) * 10 + (m1 as i64 | 0x0F);
+                        let h = (h2 as i64 | 0x0F) * 10 +
+                                (h1 as i64 | 0x0F);
+                        let microseconds = ms +
+                                           s * 1_000_000 +
+                                           m * 60 * 1_000_000 +
+                                           h * 60 * 60 * 1_000_000;
+                        if neg {
+                            Some(Duration::microseconds(0 - microseconds))
+                        } else {
+                            Some(Duration::microseconds(microseconds))
+                        }
+                    },
+                    _ => None
+                }
+            },
+            _ => None
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::{Bytes, Int, UInt, Date, Time, Float, NULL, from_value};
+    use super::{Bytes, Int, UInt, Date, Time, Float, NULL, from_value, ToValue};
     use time::{Timespec, now};
+    use std::time::{Duration};
 
     #[test]
     fn test_value_into_str() {
@@ -746,6 +893,14 @@ mod test {
                    from_value::<Timespec>(&Date(2014, 7, 1, 22, 57, 13, 1)));
         assert_eq!(Timespec{sec: 1404172800 - now().tm_gmtoff as i64, nsec: 0},
                    from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-07-01"))));
+        assert_eq!(Duration::milliseconds(-433830500),
+                   from_value::<Duration>(&Bytes(Vec::from_slice(b"-120:30:30.5"))));
+    }
+
+    #[test]
+    fn test_to_value() {
+        assert_eq!(Duration::milliseconds(-433830500).to_value(),
+                   Time(true, 5, 0, 30, 30, 500000));
     }
 
     #[test]
