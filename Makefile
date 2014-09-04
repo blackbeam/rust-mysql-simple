@@ -15,7 +15,7 @@ test:
 	RUST_TEST_TASKS=1 cargo test
 
 bench: target/tests/mysql
-	RUST_TEST_TASKS=1 cargo test -- --bench
+	RUST_TEST_TASKS=1 cargo bench
 
 clean:
 	rm -rf target
