@@ -1080,7 +1080,6 @@ mod test {
     use std::{str};
     use std::os::{getcwd};
     use std::io::fs::{File, unlink};
-    use std::path::posix::{Path};
     use super::{MyConn, MyOpts};
     use super::super::value::{NULL, Int, Bytes, Date, ToValue};
     use time::{Tm, now};
