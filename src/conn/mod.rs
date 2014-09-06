@@ -524,6 +524,9 @@ impl MyConn {
                                consts::CLIENT_LONG_PASSWORD as u32 |
                                consts::CLIENT_TRANSACTIONS as u32 |
                                consts::CLIENT_LOCAL_FILES as u32 |
+                               consts::CLIENT_MULTI_STATEMENTS as u32 |
+                               consts::CLIENT_MULTI_RESULTS as u32 |
+                               consts::CLIENT_PS_MULTI_RESULTS as u32 |
                                (self.capability_flags &
                                 consts::CLIENT_LONG_FLAG as u32);
         let scramble_buf = scramble(hp.auth_plugin_data.as_slice(),
@@ -636,30 +639,7 @@ impl MyConn {
             try_io!(writer.write_le_u32(1u32));
         }
         try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
-        let pld = try!(self.read_packet());
-        match pld[0] {
-            0x00 => {
-                let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
-                self.handle_ok(&ok);
-                Ok((Vec::with_capacity(0), Some(ok)))
-            },
-            0xff => {
-                let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
-                Err(MySqlError(err))
-            }
-            _ => {
-                let mut reader = BufReader::new(pld.as_slice());
-                let column_count = try_io!(reader.read_lenenc_int());
-                let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
-                for _ in range(0, column_count) {
-                    let pld = try!(self.read_packet());
-                    columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
-                }
-                try!(self.read_packet());
-                self.has_results = true;
-                Ok((columns, None))
-            }
-        }
+        self.handle_result_set()
     }
 
     fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
@@ -694,7 +674,7 @@ impl MyConn {
             }
             r = file.read(chunk.as_mut_slice());
         }
-        try!(self.write_packet(&Vec::with_capacity(0)));
+        try!(self.write_packet(&Vec::new()));
         let pld = try!(self.read_packet());
         if pld[0] == 0u8 {
             let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
@@ -704,24 +684,23 @@ impl MyConn {
         Ok(None)
     }
 
-    fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
-        try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
+    fn handle_result_set(&mut self) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         let pld = try!(self.read_packet());
         match pld[0] {
             0x00 => {
                 let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
-                return Ok((Vec::with_capacity(0), Some(ok)))
+                Ok((Vec::new(), Some(ok)))
             },
             0xfb => {
                 let mut reader = BufReader::new(pld.as_slice());
                 try_io!(reader.seek(1, SeekCur));
                 let file_name = try_io!(reader.read_to_end());
                 match self.send_local_infile(file_name.as_slice()) {
-                    Ok(x) => Ok((Vec::with_capacity(0), x)),
+                    Ok(x) => Ok((Vec::new(), x)),
                     Err(err) => Err(err)
                 }
-            }
+            },
             0xff => {
                 let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
                 Err(MySqlError(err))
@@ -742,6 +721,11 @@ impl MyConn {
         }
     }
 
+    fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
+        try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
+        self.handle_result_set()
+    }
+
     /// Implements text protocol of mysql server.
     ///
     /// Executes mysql query on `MyConn`. [`QueryResult`](struct.QueryResult.html)
@@ -753,7 +737,9 @@ impl MyConn {
                                                        columns: columns,
                                                        is_bin: false,
                                                        ok_packet: ok_packet}),
-            Err(err) => Err(err)
+            Err(err) => {
+                Err(err)
+            }
         }
     }
 
@@ -799,6 +785,10 @@ impl MyConn {
             Ok(stmt) => Ok(Stmt::new(stmt, self)),
             Err(err) => Err(err)
         }
+    }
+
+    fn more_results_exists(&self) -> bool {
+        self.has_results
     }
 
     fn connect(&mut self) -> MyResult<()> {
@@ -932,6 +922,7 @@ impl<'a> QueryResult<'a> {
                     ok_packet: ok_packet,
                     is_bin: is_bin}
     }
+
     fn new_pooled(conn: pool::MyPooledConn,
                       columns: Vec<Column>,
                       ok_packet: Option<OkPacket>,
@@ -942,6 +933,42 @@ impl<'a> QueryResult<'a> {
                     ok_packet: ok_packet,
                     is_bin: is_bin}
     }
+
+    fn handle_if_more_results(&mut self) -> Option<MyResult<Vec<Value>>> {
+        if self.conn.is_some() {
+            let conn_ref = self.conn.as_mut().unwrap();
+            if conn_ref.status_flags &
+               consts::SERVER_MORE_RESULTS_EXISTS as u16 > 0 {
+                match conn_ref.handle_result_set() {
+                    Ok((cols, ok_p)) => {
+                        self.columns = cols;
+                        self.ok_packet = ok_p;
+                        None
+                    },
+                    Err(e) => return Some(Err(e))
+                }
+            } else {
+                None
+            }
+        } else {
+            let conn_ref =
+                self.pooled_conn.as_mut().unwrap().as_mut();
+            if conn_ref.status_flags &
+               consts::SERVER_MORE_RESULTS_EXISTS as u16 > 0 {
+                match conn_ref.handle_result_set() {
+                    Ok((cols, ok_p)) => {
+                        self.columns = cols;
+                        self.ok_packet = ok_p;
+                        None
+                    },
+                    Err(e) => return Some(Err(e))
+                }
+            } else {
+                None
+            }
+        }
+    }
+
     /// Returns
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// affected rows.
@@ -952,6 +979,7 @@ impl<'a> QueryResult<'a> {
             self.pooled_conn.as_ref().unwrap().as_ref().affected_rows
         }
     }
+
     /// Returns
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// last insert id.
@@ -962,6 +990,7 @@ impl<'a> QueryResult<'a> {
             self.pooled_conn.as_ref().unwrap().as_ref().last_insert_id
         }
     }
+
     /// Returns
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// warnings count.
@@ -972,6 +1001,7 @@ impl<'a> QueryResult<'a> {
             0u16
         }
     }
+
     /// Returns
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// info.
@@ -982,6 +1012,7 @@ impl<'a> QueryResult<'a> {
             Vec::with_capacity(0)
         }
     }
+
     /// Returns index of a `QueryResult`'s column by name.
     pub fn column_index<T:BytesContainer>(&self, name: T) -> Option<uint> {
         let name = name.container_as_bytes();
@@ -992,52 +1023,62 @@ impl<'a> QueryResult<'a> {
         }
         None
     }
+
+    /// This predicate will help you if you are expecting multiple result sets.
+    ///
+    /// For example:
+    ///
+    /// ```ignore
+    /// conn.query(r#"
+    ///            CREATE PROCEDURE multi() BEGIN
+    ///                SELECT 1;
+    ///                SELECT 2;
+    ///            END
+    ///            "#);
+    /// let mut result = conn.query("CALL multi()").unwrap();
+    /// while result.more_results_exists() {
+    ///     for x in result {
+    ///         // On first iteration of `while` you will get result set from
+    ///         // SELECT 1 and from SELECT 2 on second.
+    ///     }
+    /// }
+    /// ```
+    pub fn more_results_exists(&self) -> bool {
+        if self.conn.is_some() {
+            self.conn.as_ref().unwrap().has_results
+        } else {
+            self.pooled_conn.as_ref().unwrap().as_ref().has_results
+        }
+    }
 }
 
 impl<'a> Iterator<MyResult<Vec<Value>>> for QueryResult<'a> {
     fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
-        if self.is_bin {
-            let r = if self.conn.is_some() {
+        let r = if self.is_bin {
+            if self.conn.is_some() {
                 let conn_ref = self.conn.as_mut().unwrap();
                 conn_ref.next_bin(&self.columns)
             } else {
                 let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
                 conn_ref.next_bin(&self.columns)
-            };
-            match r {
-                Ok(r) => {
-                    match r {
-                        None => {
-                            return None;
-                        },
-                        Some(r) => return Some(Ok(r))
-                    }
-                },
-                Err(e) => {
-                    return Some(Err(e));
-                }
             }
         } else {
-            let r = if self.conn.is_some() {
+            if self.conn.is_some() {
                 let conn_ref = self.conn.as_mut().unwrap();
                 conn_ref.next_text(self.columns.len())
             } else {
                 let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
                 conn_ref.next_text(self.columns.len())
-            };
-            match r {
-                Ok(r) => {
-                    match r {
-                        None => {
-                            return None;
-                        },
-                        Some(r) => return Some(Ok(r))
-                    }
-                },
-                Err(e) => {
-                    return Some(Err(e));
-                }
             }
+        };
+        match r {
+            Ok(r) => {
+                match r {
+                    None => self.handle_if_more_results(),
+                    Some(r) => Some(Ok(r))
+                }
+            },
+            Err(e) => Some(Err(e))
         }
     }
 }
@@ -1045,7 +1086,15 @@ impl<'a> Iterator<MyResult<Vec<Value>>> for QueryResult<'a> {
 #[unsafe_destructor]
 impl<'a> Drop for QueryResult<'a> {
     fn drop(&mut self) {
-        for _ in *self {}
+        if self.conn.is_some() {
+            while self.conn.as_ref().unwrap().more_results_exists() {
+                for _ in *self {}
+            }
+        } else {
+            while self.pooled_conn.as_ref().unwrap().as_ref().more_results_exists() {
+                for _ in *self {}
+            }
+        }
     }
 }
 
@@ -1081,7 +1130,7 @@ mod test {
     use std::os::{getcwd};
     use std::io::fs::{File, unlink};
     use super::{MyConn, MyOpts};
-    use super::super::value::{NULL, Int, Bytes, Date, ToValue};
+    use super::super::value::{NULL, Int, Bytes, Date, ToValue, from_value};
     use time::{Tm, now};
 
     #[test]
@@ -1291,6 +1340,34 @@ mod test {
             let row = row.unwrap();
             assert_eq!(row, vec!(NULL));
         }
+    }
+
+    #[test]
+    fn test_multi_resultset() {
+        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
+                                          prefer_socket: false,
+                                          ..Default::default()}).unwrap();
+        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
+        assert!(conn.query("CREATE DATABASE test").is_ok());
+        assert!(conn.query("USE test").is_ok());
+        assert!(conn.query("DROP PROCEDURE IF EXISTS multi").is_ok());
+        assert!(conn.query(r#"CREATE PROCEDURE multi() BEGIN
+                                  SELECT 1;
+                                  SELECT 1;
+                              END"#).is_ok());
+        assert!(conn.query("CALL multi();").is_ok());
+        {
+            let mut result = conn.query("SELECT 1; SELECT 2; SELECT 3;").unwrap();
+            let mut i: i64 = 1;
+            while result.more_results_exists() {
+                for x in result {
+                    assert_eq!(i, from_value::<i64>(&x.unwrap()[0]));
+                }
+                i += 1;
+            }
+
+        }
+        assert!(conn.query("DROP DATABASE test").is_ok());
     }
 
     #[bench]
