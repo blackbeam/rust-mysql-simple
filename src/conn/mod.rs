@@ -126,6 +126,23 @@ impl<'a> Stmt<'a> {
     }
 }
 
+#[unsafe_destructor]
+impl<'a> Drop for Stmt<'a> {
+    fn drop(&mut self) {
+        let data = [(self.stmt.statement_id & 0x000000FF) as u8,
+                    ((self.stmt.statement_id & 0x0000FF00) >> 8) as u8,
+                    ((self.stmt.statement_id & 0x00FF0000) >> 16) as u8,
+                    ((self.stmt.statement_id & 0xFF000000) >> 24) as u8,];
+        if self.conn.is_some() {
+            let conn = self.conn.as_mut().unwrap();
+            let _ = conn.write_command_data(consts::COM_STMT_CLOSE, data);
+        } else {
+            let conn = self.pooled_conn.as_mut().unwrap().as_mut();
+            let _ = conn.write_command_data(consts::COM_STMT_CLOSE, data);
+        }
+    }
+}
+
 /***
  *     .d8888b.           888                                 
  *    d88P  Y88b          888                                 
