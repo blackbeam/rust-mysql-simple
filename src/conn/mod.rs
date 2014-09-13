@@ -190,7 +190,7 @@ impl Column {
     fn from_payload(command: u8, pld: &[u8]) -> IoResult<Column> {
         let mut reader = BufReader::new(pld);
         // Skip catalog
-        let _ = try!(reader.read_lenenc_bytes());
+        try!(reader.skip_lenenc_bytes());
         let schema = try!(reader.read_lenenc_bytes());
         let table = try!(reader.read_lenenc_bytes());
         let org_table = try!(reader.read_lenenc_bytes());

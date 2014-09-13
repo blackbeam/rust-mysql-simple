@@ -33,6 +33,15 @@ pub trait MyReader: Reader + Seek {
 		}
 	}
 
+    fn skip_lenenc_bytes(&mut self) -> IoResult<()> {
+        let len = try!(self.read_lenenc_int());
+        if len > 0 {
+            self.seek(len as i64, SeekCur)
+        } else {
+            Ok(())
+        }
+    }
+
 	fn read_to_null(&mut self) -> IoResult<Vec<u8>> {
 		let mut buf = Vec::new();
 		let mut x = try!(self.read_u8());
