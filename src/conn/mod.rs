@@ -52,11 +52,11 @@ impl InnerStmt {
         let num_params = try!(reader.read_le_u16());
         let warning_count = try!(reader.read_le_u16());
         Ok(InnerStmt{statement_id: statement_id,
-              num_columns: num_columns,
-              num_params: num_params,
-              warning_count: warning_count,
-              params: None,
-              columns: None})
+                     num_columns: num_columns,
+                     num_params: num_params,
+                     warning_count: warning_count,
+                     params: None,
+                     columns: None})
     }
 }
 
@@ -328,19 +328,19 @@ pub struct MyConn {
 impl Default for MyConn {
     fn default() -> MyConn {
         MyConn{tcp_stream: None,
-                    unix_stream: None,
-                    seq_id: 0u8,
-                    capability_flags: 0,
-                    status_flags: 0u16,
-                    connection_id: 0u32,
-                    character_set: 0u8,
-                    affected_rows: 0u64,
-                    last_insert_id: 0u64,
-                    last_command: 0u8,
-                    max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-                    opts: Default::default(),
-                    connected: false,
-                    has_results: false}
+               unix_stream: None,
+               seq_id: 0u8,
+               capability_flags: 0,
+               status_flags: 0u16,
+               connection_id: 0u32,
+               character_set: 0u8,
+               affected_rows: 0u64,
+               last_insert_id: 0u64,
+               last_command: 0u8,
+               max_allowed_packet: consts::MAX_PAYLOAD_LEN,
+               opts: Default::default(),
+               connected: false,
+               has_results: false}
     }
 }
 
@@ -830,11 +830,9 @@ impl MyConn {
 
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
         for row in &mut self.query(format!("SELECT @@{:s};", name).as_slice()) {
-            if row.is_ok() {
-                let mut row = row.unwrap();
-                return row.remove(0);
-            } else {
-                return None;
+            match row {
+                Ok(mut r) => return r.remove(0),
+                _ => ()
             }
         }
         return None;
