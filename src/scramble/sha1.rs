@@ -33,7 +33,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
     {
         msg = msg.append([0u8, ..8]);
         let len = msg.len();
-        let mut writer = BufWriter::new(msg.mut_slice_from(len - 8));
+        let mut writer = BufWriter::new(msg.slice_from_mut(len - 8));
         writer.write_be_u64(msg_bit_len as u64);
     }
 
@@ -130,3 +130,4 @@ mod test {
                                             0xf1u8, 0x85u8, 0xc0u8, 0xadu8, 0x44u8, 0x0cu8]);
     }
 }
+

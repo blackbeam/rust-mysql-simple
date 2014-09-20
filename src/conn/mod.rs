@@ -4,7 +4,7 @@ use std::io::{Reader, File, IoResult, Seek, Stream,
               SeekCur, EndOfFile, BufReader, MemWriter};
 use std::io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
-use std::io::net::unix::{UnixStream};
+use std::io::net::pipe::{UnixStream};
 use std::from_str::FromStr;
 use std::num::{FromPrimitive};
 use std::path::{BytesContainer};
@@ -1433,7 +1433,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_prepared_query_row_5param(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+                                         ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params: &[&ToValue] = &[&42i8, &b"123456", &1.618f64, &NULL, &1i8];
         bench.iter(|| { stmt.execute(params); })
@@ -1456,3 +1456,4 @@ mod test {
         bench.iter(|| { stmt.execute([]); })
     }
 }
+
