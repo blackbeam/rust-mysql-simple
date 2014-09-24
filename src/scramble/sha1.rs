@@ -16,7 +16,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
                                 0x98BADCFE,
                                 0x10325476,
                                 0xC3D2E1F0];
-    let mut msg = Vec::from_slice(message);
+    let mut msg = message.to_vec();
     let msg_bit_len = msg.len() * 8;
     let offset = (msg.len() * 8) % 512;
     if offset < 448 {
@@ -31,7 +31,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         }
     }
     {
-        msg = msg.append([0u8, ..8]);
+        msg.extend([0u8, ..8].into_vec().into_iter());
         let len = msg.len();
         let mut writer = BufWriter::new(msg.slice_from_mut(len - 8));
         writer.write_be_u64(msg_bit_len as u64);
@@ -104,7 +104,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         writer.write_be_u32(hash[3]);
         writer.write_be_u32(hash[4]);
     }
-    Vec::from_slice(output)
+    output.to_vec()
 }
 
 #[cfg(test)]

@@ -187,15 +187,15 @@ mod test {
         assert_eq!(handshake_packet.connection_id, 1);
         assert_eq!(handshake_packet.auth_plugin_data, vec!(1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8));
         assert_eq!(handshake_packet.capability_flags, 0x00008003);
-        let mut payload = Vec::from_slice(payload);
+        let mut payload = payload.to_vec();
         payload.push(33u8);
-        payload.push_all_move(vec!(4u8, 0u8));
-        payload.push_all_move(vec!(0x08_u8, 0u8));
-        payload.push_all_move(vec!(0x15_u8));
-        payload.push_all_move(::std::vec::Vec::from_elem(10, 0u8));
-        payload.push_all_move(vec!(0x26_u8, 0x3a_u8, 0x34_u8, 0x34_u8, 0x46_u8, 0x44_u8,
-                                0x63_u8, 0x44_u8, 0x69_u8, 0x63_u8, 0x39_u8, 0x30_u8, 0x00_u8));
-        payload.push_all_move(vec!(1u8, 2u8, 3u8, 4u8, 5u8, 0u8));
+        payload.extend(vec!(4u8, 0u8).into_iter());
+        payload.extend(vec!(0x08_u8, 0u8).into_iter());
+        payload.extend(vec!(0x15_u8).into_iter());
+        payload.extend(Vec::from_elem(10, 0u8).into_iter());
+        payload.extend(vec!(0x26_u8, 0x3a_u8, 0x34_u8, 0x34_u8, 0x46_u8, 0x44_u8,
+                            0x63_u8, 0x44_u8, 0x69_u8, 0x63_u8, 0x39_u8, 0x30_u8, 0x00_u8).into_iter());
+        payload.extend(vec!(1u8, 2u8, 3u8, 4u8, 5u8, 0u8).into_iter());
         let handshake_packet = HandshakePacket::from_payload(payload.as_slice());
         assert!(handshake_packet.is_ok());
         let handshake_packet = handshake_packet.unwrap();

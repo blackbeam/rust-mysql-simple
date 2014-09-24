@@ -67,7 +67,7 @@ impl Value {
                     Err(_) => {
                         let mut s = String::from_str("0x");
                         for c in x.iter() {
-                            s = s.append(format!("{:02X}", *c).as_slice());
+                            s.extend(format!("{:02X}", *c).as_slice().chars());
                         }
                         s
                     }
@@ -438,7 +438,7 @@ impl ToValue for bool {
 }
 
 impl<'a> ToValue for &'a [u8] {
-    fn to_value(&self) -> Value { Bytes(Vec::from_slice(*self)) }
+    fn to_value(&self) -> Value { Bytes(self.to_vec()) }
 }
 
 impl ToValue for Vec<u8> {
@@ -446,11 +446,11 @@ impl ToValue for Vec<u8> {
 }
 
 impl<'a> ToValue for &'a str {
-    fn to_value(&self) -> Value { Bytes(Vec::from_slice(self.as_bytes())) }
+    fn to_value(&self) -> Value { Bytes(self.as_bytes().to_vec()) }
 }
 
 impl ToValue for String {
-    fn to_value(&self) -> Value { Bytes(Vec::from_slice(self.as_bytes())) }
+    fn to_value(&self) -> Value { Bytes(self.as_bytes().to_vec()) }
 }
 
 impl ToValue for Value {
@@ -679,7 +679,7 @@ impl FromValue for Vec<u8> {
     }
     fn from_value_opt(v: &Value) -> Option<Vec<u8>> {
         match *v {
-            Bytes(ref bts) => Some(Vec::from_slice(bts.as_slice())),
+            Bytes(ref bts) => Some(bts.as_slice().to_vec()),
             _ => None
         }
     }
@@ -846,9 +846,9 @@ mod test {
     fn test_value_into_str() {
         let v = NULL;
         assert_eq!(v.into_str(), "NULL".to_string());
-        let v = Bytes(Vec::from_slice(b"hello"));
+        let v = Bytes(b"hello".to_vec());
         assert_eq!(v.into_str(), "'hello'".to_string());
-        let v = Bytes(Vec::from_slice(b"h\x5c'e'l'l'o"));
+        let v = Bytes(b"h\x5c'e'l'l'o".to_vec());
         assert_eq!(v.into_str(), "'h\x5c\x5c\x5c'e\x5c'l\x5c'l\x5c'o'".to_string());
         let v = Bytes(vec!(0, 1, 2, 3, 4, 255));
         assert_eq!(v.into_str(), "0x0001020304FF".to_string());
@@ -878,23 +878,26 @@ mod test {
     fn test_from_value() {
         assert_eq!(-100i8, from_value::<i8>(&Int(-100i64)));
         assert_eq!(100i8, from_value::<i8>(&UInt(100u64)));
-        assert_eq!(100i8, from_value::<i8>(&Bytes(Vec::from_slice(b"100"))));
-        assert_eq!(Some(100i8), from_value::<Option<i8>>(&Bytes(Vec::from_slice(b"100"))));
+        assert_eq!(100i8, from_value::<i8>(&Bytes(b"100".to_vec())));
+        assert_eq!(Some(100i8),
+                   from_value::<Option<i8>>(&Bytes(b"100".to_vec())));
         assert_eq!(None, from_value::<Option<i8>>(&NULL));
-        assert_eq!(Vec::from_slice(b"test"), from_value::<Vec<u8>>(&Bytes(Vec::from_slice(b"test"))));
-        assert_eq!("test".to_string(), from_value::<String>(&Bytes(Vec::from_slice(b"test"))));
+        assert_eq!(b"test".to_vec(),
+                   from_value::<Vec<u8>>(&Bytes(b"test".to_vec())));
+        assert_eq!("test".to_string(),
+                   from_value::<String>(&Bytes(b"test".to_vec())));
         assert_eq!(true, from_value::<bool>(&Int(1)));
         assert_eq!(false, from_value::<bool>(&Int(0)));
-        assert_eq!(true, from_value::<bool>(&Bytes(Vec::from_slice(b"1"))));
-        assert_eq!(false, from_value::<bool>(&Bytes(Vec::from_slice(b"0"))));
+        assert_eq!(true, from_value::<bool>(&Bytes(b"1".to_vec())));
+        assert_eq!(false, from_value::<bool>(&Bytes(b"0".to_vec())));
         assert_eq!(Timespec{sec: 1404255433 - now().tm_gmtoff as i64, nsec: 0},
-                   from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-07-01 22:57:13"))));
+                   from_value::<Timespec>(&Bytes(b"2014-07-01 22:57:13".to_vec())));
         assert_eq!(Timespec{sec: 1404255433 - now().tm_gmtoff as i64, nsec: 1000},
                    from_value::<Timespec>(&Date(2014, 7, 1, 22, 57, 13, 1)));
         assert_eq!(Timespec{sec: 1404172800 - now().tm_gmtoff as i64, nsec: 0},
-                   from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-07-01"))));
+                   from_value::<Timespec>(&Bytes(b"2014-07-01".to_vec())));
         assert_eq!(Duration::milliseconds(-433830500),
-                   from_value::<Duration>(&Bytes(Vec::from_slice(b"-120:30:30.5"))));
+                   from_value::<Duration>(&Bytes(b"-120:30:30.5".to_vec())));
     }
 
     #[test]
@@ -912,13 +915,13 @@ mod test {
     #[test]
     #[should_fail]
     fn test_from_value_fail_i8_2() {
-        from_value::<i8>(&Bytes(Vec::from_slice(b"500")));
+        from_value::<i8>(&Bytes(b"500".to_vec()));
     }
 
     #[test]
     #[should_fail]
     #[allow(non_snake_case)]
     fn test_from_value_fail_Timespec() {
-        from_value::<Timespec>(&Bytes(Vec::from_slice(b"2014-50-01")));
+        from_value::<Timespec>(&Bytes(b"2014-50-01".to_vec()));
     }
 }

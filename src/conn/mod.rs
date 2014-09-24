@@ -443,16 +443,18 @@ impl MyConn {
             if payload_len == consts::MAX_PAYLOAD_LEN {
                 output.reserve(pos + consts::MAX_PAYLOAD_LEN);
                 unsafe { output.set_len(pos + consts::MAX_PAYLOAD_LEN); }
-                try_io!(self.get_mut_stream().read_at_least(consts::MAX_PAYLOAD_LEN,
-                                                            output.mut_slice_from(pos)));
+                try_io!(self.get_mut_stream()
+                            .read_at_least(consts::MAX_PAYLOAD_LEN,
+                                           output.slice_from_mut(pos)));
                 pos += consts::MAX_PAYLOAD_LEN;
             } else if payload_len == 0 {
                 break;
             } else {
                 output.reserve(pos + payload_len);
                 unsafe { output.set_len(pos + payload_len); }
-                try_io!(self.get_mut_stream().read_at_least(payload_len,
-                                                            output.mut_slice_from(pos)));
+                try_io!(self.get_mut_stream()
+                            .read_at_least(payload_len,
+                                           output.slice_from_mut(pos)));
                 break;
             }
         }
@@ -581,7 +583,7 @@ impl MyConn {
     fn write_command_data(&mut self, cmd: consts::Command, buf: &[u8]) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd as u8;
-        self.write_packet(&vec!(cmd as u8).append(buf))
+        self.write_packet(&vec!(cmd as u8).into_iter().chain(buf.into_vec().into_iter()).collect())
     }
 
     /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
@@ -622,38 +624,56 @@ impl MyConn {
             return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, params.len())));
         }
         let mut writer: MemWriter;
-        if stmt.num_params > 0 {
-            let (bitmap, values, large_ids) = try_io!(Value::to_bin_payload(stmt.params.get_ref().as_slice(),
-                                                                            params,
-                                                                            self.max_allowed_packet));
-            if large_ids.is_some() {
-                try!(self.send_long_data(stmt, params, large_ids.unwrap()));
-            }
-            let data_len = 4 + 1 + 4 + bitmap.len() + 1 + params.len() * 2 + values.len();
-            writer = MemWriter::with_capacity(data_len);
-            try_io!(writer.write_le_u32(stmt.statement_id));
-            try_io!(writer.write_u8(0u8));
-            try_io!(writer.write_le_u32(1u32));
-            try_io!(writer.write(bitmap.as_slice()));
-            try_io!(writer.write_u8(1u8));
-            for i in range(0, params.len()) {
-                match params[i] {
-                    NULL => try_io!(writer.write([stmt.params.get_ref()[i].column_type as u8, 0u8])),
-                    Bytes(..) => try_io!(writer.write([consts::MYSQL_TYPE_VAR_STRING as u8, 0u8])),
-                    Int(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG as u8, 0u8])),
-                    UInt(..) => try_io!(writer.write([consts::MYSQL_TYPE_LONGLONG as u8, 128u8])),
-                    Float(..) => try_io!(writer.write([consts::MYSQL_TYPE_DOUBLE as u8, 0u8])),
-                    Date(..) => try_io!(writer.write([consts::MYSQL_TYPE_DATE as u8, 0u8])),
-                    Time(..) => try_io!(writer.write([consts::MYSQL_TYPE_TIME as u8, 0u8]))
+        match stmt.params {
+            Some(ref sparams) => {
+                let (bitmap, values, large_ids) =
+                    try_io!(Value::to_bin_payload(sparams.as_slice(),
+                                                  params,
+                                                  self.max_allowed_packet));
+                match large_ids {
+                    Some(ids) => try!(self.send_long_data(stmt, params, ids)),
+                    _ => ()
                 }
+                writer = MemWriter::with_capacity(9 + bitmap.len() + 1 +
+                                                  params.len() * 2 +
+                                                  values.len());
+                try_io!(writer.write_le_u32(stmt.statement_id));
+                try_io!(writer.write_u8(0u8));
+                try_io!(writer.write_le_u32(1u32));
+                try_io!(writer.write(bitmap.as_slice()));
+                try_io!(writer.write_u8(1u8));
+                for i in range(0, params.len()) {
+                    match params[i] {
+                        NULL => try_io!(writer.write(
+                            [sparams[i].column_type as u8, 0u8])),
+                        Bytes(..) => try_io!(
+                            writer.write([consts::MYSQL_TYPE_VAR_STRING as u8,
+                                          0u8])),
+                        Int(..) => try_io!(
+                            writer.write([consts::MYSQL_TYPE_LONGLONG as u8,
+                                          0u8])),
+                        UInt(..) => try_io!(
+                            writer.write([consts::MYSQL_TYPE_LONGLONG as u8,
+                                          128u8])),
+                        Float(..) => try_io!(
+                            writer.write([consts::MYSQL_TYPE_DOUBLE as u8,
+                                          0u8])),
+                        Date(..) => try_io!(
+                            writer.write([consts::MYSQL_TYPE_DATE as u8,
+                                          0u8])),
+                        Time(..) => try_io!(
+                            writer.write([consts::MYSQL_TYPE_TIME as u8,
+                                          0u8]))
+                    }
+                }
+                try_io!(writer.write(values.as_slice()));
+            },
+            None => {
+                writer = MemWriter::with_capacity(4 + 1 + 4);
+                try_io!(writer.write_le_u32(stmt.statement_id));
+                try_io!(writer.write_u8(0u8));
+                try_io!(writer.write_le_u32(1u32));
             }
-            try_io!(writer.write(values.as_slice()));
-        } else {
-            let data_len = 4 + 1 + 4;
-            writer = MemWriter::with_capacity(data_len);
-            try_io!(writer.write_le_u32(stmt.statement_id));
-            try_io!(writer.write_u8(0u8));
-            try_io!(writer.write_le_u32(1u32));
         }
         try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
         self.handle_result_set()
@@ -679,7 +699,7 @@ impl MyConn {
         loop {
             match r {
                 Ok(cnt) => {
-                    try!(self.write_packet(&Vec::from_slice(chunk.slice_to(cnt))));
+                    try!(self.write_packet(&chunk.slice_to(cnt).to_vec()));
                 },
                 Err(e) => {
                     if e.kind == EndOfFile {
@@ -1161,8 +1181,8 @@ mod test {
                                           db_name: Some("mysql".to_string()),
                                           ..Default::default()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
-            assert_eq!(x.unwrap().shift().unwrap().unwrap_bytes(),
-                       Vec::from_slice(b"mysql"));
+            assert_eq!(x.unwrap().remove(0).unwrap().unwrap_bytes(),
+                       b"mysql".to_vec());
         }
     }
 
@@ -1191,17 +1211,17 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             if count == 0 {
-                assert_eq!(row[0], Bytes(Vec::from_slice(b"foo")));
-                assert_eq!(row[1], Bytes(Vec::from_slice(b"-123")));
-                assert_eq!(row[2], Bytes(Vec::from_slice(b"123")));
-                assert_eq!(row[3], Bytes(Vec::from_slice(b"2014-05-05")));
-                assert_eq!(row[4], Bytes(Vec::from_slice(b"123.123")));
+                assert_eq!(row[0], Bytes(b"foo".to_vec()));
+                assert_eq!(row[1], Bytes(b"-123".to_vec()));
+                assert_eq!(row[2], Bytes(b"123".to_vec()));
+                assert_eq!(row[3], Bytes(b"2014-05-05".to_vec()));
+                assert_eq!(row[4], Bytes(b"123.123".to_vec()));
             } else {
-                assert_eq!(row[0], Bytes(Vec::from_slice(b"foo")));
-                assert_eq!(row[1], Bytes(Vec::from_slice(b"-321")));
-                assert_eq!(row[2], Bytes(Vec::from_slice(b"321")));
-                assert_eq!(row[3], Bytes(Vec::from_slice(b"2014-06-06")));
-                assert_eq!(row[4], Bytes(Vec::from_slice(b"321.321")));
+                assert_eq!(row[0], Bytes(b"foo".to_vec()));
+                assert_eq!(row[1], Bytes(b"-321".to_vec()));
+                assert_eq!(row[2], Bytes(b"321".to_vec()));
+                assert_eq!(row[3], Bytes(b"2014-06-06".to_vec()));
+                assert_eq!(row[4], Bytes(b"321.321".to_vec()));
             }
             count += 1;
         }
@@ -1241,13 +1261,13 @@ mod test {
                 assert!(row.is_ok());
                 let row = row.unwrap();
                 if i == 0 {
-                    assert_eq!(row[0], Bytes(Vec::from_slice(b"hello")));
+                    assert_eq!(row[0], Bytes(b"hello".to_vec()));
                     assert_eq!(row[1], Int(-123i64));
                     assert_eq!(row[2], Int(123i64));
                     assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
                     assert_eq!(row[4].get_float(), 123.123);
                 } else {
-                    assert_eq!(row[0], Bytes(Vec::from_slice(b"world")));
+                    assert_eq!(row[0], Bytes(b"world".to_vec()));
                     assert_eq!(row[1], NULL);
                     assert_eq!(row[2], NULL);
                     assert_eq!(row[3], NULL);
@@ -1331,9 +1351,9 @@ mod test {
             assert!(row.is_ok());
             let row = row.unwrap();
             match count {
-                0 => assert_eq!(row, vec!(Bytes(Vec::from_slice(b"AAAAAA")))),
-                1 => assert_eq!(row, vec!(Bytes(Vec::from_slice(b"BBBBBB")))),
-                2 => assert_eq!(row, vec!(Bytes(Vec::from_slice(b"CCCCCC")))),
+                0 => assert_eq!(row, vec!(Bytes(b"AAAAAA".to_vec()))),
+                1 => assert_eq!(row, vec!(Bytes(b"BBBBBB".to_vec()))),
+                2 => assert_eq!(row, vec!(Bytes(b"CCCCCC".to_vec()))),
                 _ => assert!(false)
             }
             count += 1;
@@ -1433,7 +1453,7 @@ mod test {
     #[allow(unused_must_use)]
     fn bench_prepared_query_row_5param(bench: &mut Bencher) {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                         ..Default::default()}).unwrap();
+                                          ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params: &[&ToValue] = &[&42i8, &b"123456", &1.618f64, &NULL, &1i8];
         bench.iter(|| { stmt.execute(params); })
@@ -1456,4 +1476,3 @@ mod test {
         bench.iter(|| { stmt.execute([]); })
     }
 }
-
