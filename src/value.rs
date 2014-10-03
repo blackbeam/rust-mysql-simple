@@ -337,7 +337,7 @@ impl Value {
         while {i += 1; i < bitmap_len} {
             bitmap.push(pld[i+1]);
         }
-        let mut reader = BufReader::new(pld.slice_from(1 + bitmap_len));
+        let mut reader = BufReader::new(pld[1 + bitmap_len..]);
         let mut i = -1;
         while {i += 1; i < columns.len()} {
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
@@ -759,7 +759,7 @@ impl FromValue for Duration {
                 let mut btss = bts.as_slice();
                 let neg = btss[0] == b'-';
                 if neg {
-                    btss = bts.slice_from(1);
+                    btss = bts[1..];
                 }
                 let ms: i64 = {
                     let xss: Vec<&[u8]> = btss.split(|x| *x == b'.').collect();
@@ -781,15 +781,15 @@ impl FromValue for Duration {
                 };
                 match btss {
                     // XXX:XX:XX
-                    [h3@0x30..0x38,
-                     h2@0x30..0x39,
-                     h1@0x30..0x39,
+                    [h3@0x30...0x38,
+                     h2@0x30...0x39,
+                     h1@0x30...0x39,
                      b':',
-                     m2@0x30..0x35,
-                     m1@0x30..0x39,
+                     m2@0x30...0x35,
+                     m1@0x30...0x39,
                      b':',
-                     s2@0x30..0x35,
-                     s1@0x30..0x39] => {
+                     s2@0x30...0x35,
+                     s1@0x30...0x39] => {
                         let s = (s2 as i64 & 0x0F) * 10 + (s1 as i64 & 0x0F);
                         let m = (m2 as i64 & 0x0F) * 10 + (m1 as i64 & 0x0F);
                         let h = (h3 as i64 & 0x0F) * 100 +
@@ -806,14 +806,14 @@ impl FromValue for Duration {
                         }
                     },
                     // XX:XX:XX
-                    [h2@0x30..0x39,
-                     h1@0x30..0x39,
+                    [h2@0x30...0x39,
+                     h1@0x30...0x39,
                      b':',
-                     m2@0x30..0x35,
-                     m1@0x30..0x39,
+                     m2@0x30...0x35,
+                     m1@0x30...0x39,
                      b':',
-                     s2@0x30..0x35,
-                     s1@0x30..0x39] => {
+                     s2@0x30...0x35,
+                     s1@0x30...0x39] => {
                         let s = (s2 as i64 | 0x0F) * 10 + (s1 as i64 | 0x0F);
                         let m = (m2 as i64 | 0x0F) * 10 + (m1 as i64 | 0x0F);
                         let h = (h2 as i64 | 0x0F) * 10 +

@@ -75,6 +75,7 @@
 
 #![feature(unsafe_destructor)]
 #![feature(phase)]
+#![feature(slicing_syntax)]
 
 
 #![allow(dead_code)]
