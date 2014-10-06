@@ -9,28 +9,29 @@ use super::consts::{UNSIGNED_FLAG};
 use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
 
+
 lazy_static! {
     static ref TM_GMTOFF: i32 = now().tm_gmtoff;
     static ref TM_ISDST: i32 = now().tm_isdst;
-    static ref MIN_i8: i8 = Bounded::min_value();
-    static ref MAX_i8: i8 = Bounded::max_value();
-    static ref MIN_i16: i16 = Bounded::min_value();
-    static ref MAX_i16: i16 = Bounded::max_value();
-    static ref MIN_i32: i32 = Bounded::min_value();
-    static ref MAX_i32: i32 = Bounded::max_value();
-    static ref MIN_u8: u8 = Bounded::min_value();
-    static ref MAX_u8: u8 = Bounded::max_value();
-    static ref MIN_u16: u16 = Bounded::min_value();
-    static ref MAX_u16: u16 = Bounded::max_value();
-    static ref MIN_u32: u32 = Bounded::min_value();
-    static ref MAX_u32: u32 = Bounded::max_value();
-    static ref MIN_int: int = Bounded::min_value();
-    static ref MAX_int: int = Bounded::max_value();
-    static ref MIN_uint: uint = Bounded::min_value();
-    static ref MAX_uint: uint = Bounded::max_value();
-    static ref MAX_i64: i64 = Bounded::max_value();
-    static ref MIN_f32: f32 = Bounded::min_value();
-    static ref MAX_f32: f32 = Bounded::max_value();
+    static ref MIN_I8: i8 = Bounded::min_value();
+    static ref MAX_I8: i8 = Bounded::max_value();
+    static ref MIN_I16: i16 = Bounded::min_value();
+    static ref MAX_I16: i16 = Bounded::max_value();
+    static ref MIN_I32: i32 = Bounded::min_value();
+    static ref MAX_I32: i32 = Bounded::max_value();
+    static ref MIN_U8: u8 = Bounded::min_value();
+    static ref MAX_U8: u8 = Bounded::max_value();
+    static ref MIN_U16: u16 = Bounded::min_value();
+    static ref MAX_U16: u16 = Bounded::max_value();
+    static ref MIN_U32: u32 = Bounded::min_value();
+    static ref MAX_U32: u32 = Bounded::max_value();
+    static ref MIN_INT: int = Bounded::min_value();
+    static ref MAX_INT: int = Bounded::max_value();
+    static ref MIN_UINT: uint = Bounded::min_value();
+    static ref MAX_UINT: uint = Bounded::max_value();
+    static ref MAX_I64: i64 = Bounded::max_value();
+    static ref MIN_F32: f32 = Bounded::min_value();
+    static ref MAX_F32: f32 = Bounded::max_value();
 }
 
 
@@ -417,7 +418,7 @@ impl ToValue for u64 {
 
 impl ToValue for uint {
     fn to_value(&self) -> Value {
-        if *self as u64 <= *MAX_i64 as u64 {
+        if *self as u64 <= *MAX_I64 as u64 {
             Int(*self as i64)
         } else {
             UInt(*self as u64)
@@ -579,14 +580,14 @@ macro_rules! from_value_impl_num(
     )
 )
 
-from_value_impl_num!(i8, MIN_i8, MAX_i8)
-from_value_impl_num!(u8, MIN_u8, MAX_u8)
-from_value_impl_num!(i16, MIN_i16, MAX_i16)
-from_value_impl_num!(u16, MIN_u16, MAX_u16)
-from_value_impl_num!(i32, MIN_i32, MAX_i32)
-from_value_impl_num!(u32, MIN_u32, MAX_u32)
-from_value_impl_num!(int, MIN_int, MAX_int)
-from_value_impl_num!(uint, MIN_uint, MAX_uint)
+from_value_impl_num!(i8, MIN_I8, MAX_I8)
+from_value_impl_num!(u8, MIN_U8, MAX_U8)
+from_value_impl_num!(i16, MIN_I16, MAX_I16)
+from_value_impl_num!(u16, MIN_U16, MAX_U16)
+from_value_impl_num!(i32, MIN_I32, MAX_I32)
+from_value_impl_num!(u32, MIN_U32, MAX_U32)
+from_value_impl_num!(int, MIN_INT, MAX_INT)
+from_value_impl_num!(uint, MIN_UINT, MAX_UINT)
 
 impl FromValue for i64 {
     fn from_value(v: &Value) -> i64 {
@@ -595,7 +596,7 @@ impl FromValue for i64 {
     fn from_value_opt(v: &Value) -> Option<i64> {
         match *v {
             Int(x) => Some(x),
-            UInt(x) if x <= *MAX_i64 as u64 => Some(x as i64),
+            UInt(x) if x <= *MAX_I64 as u64 => Some(x as i64),
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     from_str::<i64>(s)
@@ -630,7 +631,7 @@ impl FromValue for f32 {
     }
     fn from_value_opt(v: &Value) -> Option<f32> {
         match *v {
-            Float(x) if x >= *MIN_f32 as f64 && x <= *MAX_f32 as f64 => Some(x as f32),
+            Float(x) if x >= *MIN_F32 as f64 && x <= *MAX_F32 as f64 => Some(x as f32),
             Bytes(ref bts) => {
                 from_utf8(bts.as_slice()).and_then(|s| {
                     from_str::<f32>(s)
@@ -781,15 +782,15 @@ impl FromValue for Duration {
                 };
                 match btss {
                     // XXX:XX:XX
-                    [h3@0x30..0x38,
-                     h2@0x30..0x39,
-                     h1@0x30..0x39,
+                    [h3@0x30 ... 0x38,
+                     h2@0x30 ... 0x39,
+                     h1@0x30 ... 0x39,
                      b':',
-                     m2@0x30..0x35,
-                     m1@0x30..0x39,
+                     m2@0x30 ... 0x35,
+                     m1@0x30 ... 0x39,
                      b':',
-                     s2@0x30..0x35,
-                     s1@0x30..0x39] => {
+                     s2@0x30 ... 0x35,
+                     s1@0x30 ... 0x39] => {
                         let s = (s2 as i64 & 0x0F) * 10 + (s1 as i64 & 0x0F);
                         let m = (m2 as i64 & 0x0F) * 10 + (m1 as i64 & 0x0F);
                         let h = (h3 as i64 & 0x0F) * 100 +
@@ -806,14 +807,14 @@ impl FromValue for Duration {
                         }
                     },
                     // XX:XX:XX
-                    [h2@0x30..0x39,
-                     h1@0x30..0x39,
+                    [h2@0x30 ... 0x39,
+                     h1@0x30 ... 0x39,
                      b':',
-                     m2@0x30..0x35,
-                     m1@0x30..0x39,
+                     m2@0x30 ... 0x35,
+                     m1@0x30 ... 0x39,
                      b':',
-                     s2@0x30..0x35,
-                     s1@0x30..0x39] => {
+                     s2@0x30 ... 0x35,
+                     s1@0x30 ... 0x39] => {
                         let s = (s2 as i64 | 0x0F) * 10 + (s1 as i64 | 0x0F);
                         let m = (m2 as i64 | 0x0F) * 10 + (m1 as i64 | 0x0F);
                         let h = (h2 as i64 | 0x0F) * 10 +
