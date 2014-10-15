@@ -583,7 +583,7 @@ impl MyConn {
     fn write_command_data(&mut self, cmd: consts::Command, buf: &[u8]) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd as u8;
-        self.write_packet(&vec!(cmd as u8).into_iter().chain(buf.into_vec().into_iter()).collect())
+        self.write_packet(&vec!(cmd as u8).into_iter().chain(buf.to_vec().into_iter()).collect())
     }
 
     /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
@@ -1249,8 +1249,8 @@ mod test {
             let mut stmt = stmt.unwrap();
             let t = Tm{tm_year: 2014, tm_mon: 4, tm_mday: 5,
                        tm_hour: 0,    tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now()};
-            assert!(stmt.execute(&[&b"hello".into_vec(), &-123i, &123i, &(t.to_timespec()), &123.123f64]).is_ok());
-            assert!(stmt.execute(&[&b"world".into_vec(), &NULL, &NULL, &NULL, &321.321f64]).is_ok());
+            assert!(stmt.execute(&[&b"hello".to_vec(), &-123i, &123i, &(t.to_timespec()), &123.123f64]).is_ok());
+            assert!(stmt.execute(&[&b"world".to_vec(), &NULL, &NULL, &NULL, &321.321f64]).is_ok());
         }
         {
             let stmt = conn.prepare("SELECT * FROM tbl");
@@ -1455,7 +1455,7 @@ mod test {
         let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
                                           ..Default::default()}).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-        let params: &[&ToValue] = &[&42i8, &b"123456".into_vec(), &1.618f64, &NULL, &1i8];
+        let params: &[&ToValue] = &[&42i8, &b"123456".to_vec(), &1.618f64, &NULL, &1i8];
         bench.iter(|| { stmt.execute(params); })
     }
 

@@ -31,7 +31,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         }
     }
     {
-        msg.extend([0u8, ..8].into_vec().into_iter());
+        msg.extend([0u8, ..8].to_vec().into_iter());
         let len = msg.len();
         let mut writer = BufWriter::new(msg.slice_from_mut(len - 8));
         writer.write_be_u64(msg_bit_len as u64);

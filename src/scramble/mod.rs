@@ -7,9 +7,9 @@ pub fn scramble(scr: &[u8], password: &[u8]) -> Option<Vec<u8>> {
 
     let sha_pass = sha1::sha1(password);
     let double_sha_pass = sha1::sha1(sha_pass.as_slice());
-    let hash = sha1::sha1(scr.into_vec()
+    let hash = sha1::sha1(scr.to_vec()
                              .into_iter()
-                             .chain(double_sha_pass.into_vec().into_iter())
+                             .chain(double_sha_pass.into_iter())
                              .collect::<Vec<u8>>().as_slice());
 
     let mut output = [0u8, ..20];
