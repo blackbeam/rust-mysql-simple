@@ -1,7 +1,7 @@
 language: rust
 env:
   global:
-    - secure: NReQ/WsOEMia4t2siHH3dW5CSLewydRzZkrYfR7SC7Pxm/VMOszdmLerEpzXYKpX53bb817m6nSeMDRd4oT1E99miiW4w7LXAsu07XVxbcDMTdkllf2bwXMygb1bZoa5TgX/JcfHgzn7kg5pnU8V1SseXIIAEXNJ6+6qqW3TcAk=
+    - secure: DLtoi131hH5kOKHzpBB0ZoVDjCWwSiHmTeGaS86ZPx+IHYQzZ6Ll4x/e82SBDG8YGRoOiJUYfatju84ew7Tk9RLK/xvULPJ/WNhSwBK/p9pYWmAl1+QFoaYT3VvsnuIzmIoFjAz6jluBAxvZ5L+pgagayC0BM1Kw83dMS6Ef1LY=
 script:
   - make test doc
 after_script:
