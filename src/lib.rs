@@ -40,7 +40,6 @@
 extern crate test;
 extern crate sync;
 extern crate core;
-extern crate debug;
 extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;

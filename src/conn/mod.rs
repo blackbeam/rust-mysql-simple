@@ -561,8 +561,10 @@ impl MyConn {
                     return Ok(());
                 },
                 _ => {
-                    let path_str = format!("{:?}",
-                                           *self.opts.unix_addr.as_ref().unwrap()
+                    let path_str = format!("{}",
+                                           self.opts.unix_addr.as_ref()
+                                           .unwrap()
+                                           .display()
                                    ).to_string();
                     return Err(MyDriverError(CouldNotConnect(Some(path_str))));
                 }
