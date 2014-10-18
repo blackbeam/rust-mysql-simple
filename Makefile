@@ -17,6 +17,7 @@ lib:
 
 doc:
 	cargo doc
+	ln -s target/doc doc
 
 test:
 	bash -c "if [ -e $(MYSQL_DATA_DIR)/mysqld.pid ]; \
@@ -33,7 +34,8 @@ test:
 	mkdir $(MYSQL_DATA_DIR)
 
 	mysql_install_db --basedir=/usr \
-		--datadir=$(MYSQL_DATA_DIR) &>/dev/null
+		--datadir=$(MYSQL_DATA_DIR) \
+		--force
 
 	mysqld  --basedir=/usr \
 		--bind-address=127.0.0.1 \
@@ -49,9 +51,9 @@ test:
         --ssl-cert=$(MYSQL_SSL_CERT) \
         --ssl-key=$(MYSQL_SSL_KEY) \
         --ssl-cipher=DHE-RSA-AES256-SHA \
-		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &>/dev/null &
+		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &
 	sleep 5
-	mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password' >/dev/null
+	mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'
 
 	bash -c "\
 	    if (RUST_TEST_TASKS=1 cargo test);\
@@ -91,7 +93,8 @@ bench:
 	mkdir $(MYSQL_DATA_DIR)
 
 	mysql_install_db --basedir=/usr \
-		--datadir=$(MYSQL_DATA_DIR) &>/dev/null
+		--datadir=$(MYSQL_DATA_DIR) \
+		--force
 
 	mysqld  --basedir=/usr \
 		--bind-address=127.0.0.1 \
@@ -107,9 +110,9 @@ bench:
         --ssl-cert=$(MYSQL_SSL_CERT) \
         --ssl-key=$(MYSQL_SSL_KEY) \
         --ssl-cipher=DHE-RSA-AES256-SHA \
-		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &>/dev/null &
+		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &
 	sleep 5
-	mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password' >/dev/null
+	mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'
 
 	bash -c "\
 	    if (RUST_TEST_TASKS=1 cargo bench);\
@@ -137,3 +140,4 @@ bench:
 
 clean:
 	cargo clean
+	rm -f doc
