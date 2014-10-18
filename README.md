@@ -3,4 +3,4 @@ rust-mysql-simple [![Build Status](https://travis-ci.org/blackbeam/rust-mysql-si
 Mysql client library implemented in rust **nightly**. Feel free to open a new issues and pull requests.
 
 ### Documentation
-Latest crate API docs hosted on [rust-ci.org](http://www.rust-ci.org/blackbeam/rust-mysql-simple/doc/mysql/).
+Latest crate API docs hosted [here](http://blackbeam.org/doc/mysql/index.html).
