@@ -1,3 +1,6 @@
+#[cfg(feature = "openssl")]
+use openssl::{ssl, x509};
+
 use std::{uint};
 use std::default::{Default};
 use std::io::{Reader, File, IoResult, Seek, Stream,
@@ -9,11 +12,20 @@ use std::from_str::FromStr;
 use std::num::{FromPrimitive};
 use std::path::{BytesContainer};
 use super::consts;
-use super::io::{MyReader, MyWriter};
+use super::io::{MyReader,
+                MyWriter,
+                InsecureStream,
+                TCPStream,
+                UNIXStream,
+                MyStream};
+#[cfg(feature = "ssl")]
+use super::io::{SecureStream};
 use super::error::{MyIoError, MySqlError, MyDriverError, CouldNotConnect,
                    UnsupportedProtocol, PacketOutOfSync, PacketTooLarge,
                    Protocol41NotSet, UnexpectedPacket, MismatchedStmtParams,
                    SetupError, MyResult};
+#[cfg(feature = "ssl")]
+use super::error::{MySslError, SslNotSupported};
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time, ToValue};
@@ -257,6 +269,20 @@ pub struct MyOpts {
     pub prefer_socket: bool,
     /// TCP keepalive timeout in seconds (defaults to one hour).
     pub keepalive_timeout: Option<uint>,
+
+    #[cfg(feature = "ssl")]
+    /// #### Only available if `ssl` feature enabled.
+    /// Perform or not ssl peer verification (defaults to `false`).
+    /// Only make sense if ssl_opts is not None.
+    pub verify_peer: bool,
+
+    #[cfg(feature = "ssl")]
+    /// #### Only available if `ssl` feature enabled.
+    /// SSL certificates and keys in pem format.
+    /// If not None, then ssl connection implied.
+    ///
+    /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
+    pub ssl_opts: Option<(Path, Option<(Path, Path)>)>
 }
 
 impl MyOpts {
@@ -280,16 +306,37 @@ impl MyOpts {
     }
 }
 
+#[cfg(feature = "ssl")]
 impl Default for MyOpts {
     fn default() -> MyOpts {
-        MyOpts{tcp_addr: Some("127.0.0.1".to_string()),
-               tcp_port: 3306,
-               unix_addr: None,
-               user: None,
-               pass: None,
-               db_name: None,
-               prefer_socket: true,
-               keepalive_timeout: Some(60 * 60)}
+        MyOpts{
+            tcp_addr: Some("127.0.0.1".to_string()),
+            tcp_port: 3306,
+            unix_addr: None,
+            user: None,
+            pass: None,
+            db_name: None,
+            prefer_socket: true,
+            keepalive_timeout: Some(60 * 60),
+            verify_peer: false,
+            ssl_opts: None,
+        }
+    }
+}
+
+#[cfg(not(feature = "ssl"))]
+impl Default for MyOpts {
+    fn default() -> MyOpts {
+        MyOpts{
+            tcp_addr: Some("127.0.0.1".to_string()),
+            tcp_port: 3306,
+            unix_addr: None,
+            user: None,
+            pass: None,
+            db_name: None,
+            prefer_socket: true,
+            keepalive_timeout: Some(60 * 60),
+        }
     }
 }
 
@@ -310,8 +357,7 @@ impl Default for MyOpts {
 /// Mysql connection.
 pub struct MyConn {
     opts: MyOpts,
-    tcp_stream: Option<TcpStream>,
-    unix_stream: Option<UnixStream>,
+    stream: Option<MyStream>,
     affected_rows: u64,
     last_insert_id: u64,
     max_allowed_packet: uint,
@@ -322,29 +368,56 @@ pub struct MyConn {
     character_set: u8,
     last_command: u8,
     connected: bool,
-    has_results: bool
+    has_results: bool,
+    #[cfg(feature = "openssl")]
+    ssl_context: Option<ssl::SslContext>,
 }
 
+#[cfg(feature = "openssl")]
 impl Default for MyConn {
     fn default() -> MyConn {
-        MyConn{tcp_stream: None,
-               unix_stream: None,
-               seq_id: 0u8,
-               capability_flags: 0,
-               status_flags: 0u16,
-               connection_id: 0u32,
-               character_set: 0u8,
-               affected_rows: 0u64,
-               last_insert_id: 0u64,
-               last_command: 0u8,
-               max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-               opts: Default::default(),
-               connected: false,
-               has_results: false}
+        MyConn{
+            stream: None,
+            seq_id: 0u8,
+            capability_flags: 0,
+            status_flags: 0u16,
+            connection_id: 0u32,
+            character_set: 0u8,
+            affected_rows: 0u64,
+            last_insert_id: 0u64,
+            last_command: 0u8,
+            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
+            opts: Default::default(),
+            connected: false,
+            has_results: false,
+            ssl_context: None,
+        }
+    }
+}
+
+#[cfg(not(feature = "ssl"))]
+impl Default for MyConn {
+    fn default() -> MyConn {
+        MyConn{
+            stream: None,
+            seq_id: 0u8,
+            capability_flags: 0,
+            status_flags: 0u16,
+            connection_id: 0u32,
+            character_set: 0u8,
+            affected_rows: 0u64,
+            last_insert_id: 0u64,
+            last_command: 0u8,
+            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
+            opts: Default::default(),
+            connected: false,
+            has_results: false,
+        }
     }
 }
 
 impl MyConn {
+    #[cfg(not(feature = "ssl"))]
     /// Creates new `MyConn`.
     pub fn new(opts: MyOpts) -> MyResult<MyConn> {
         let mut conn = MyConn{opts: opts, ..Default::default()};
@@ -368,10 +441,56 @@ impl MyConn {
         return Ok(conn);
     }
 
+    #[cfg(feature = "ssl")]
+    /// Creates new `MyConn`.
+    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+        let mut conn = MyConn{opts: opts, ..Default::default()};
+        try!(conn.connect_stream());
+        try!(conn.connect());
+        if let None = conn.opts.ssl_opts {
+            if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
+                let addr: Option<IpAddr> = FromStr::from_str(
+                    conn.opts.tcp_addr.as_ref().unwrap().as_slice());
+                if addr == Some(Ipv4Addr(127, 0, 0, 1)) ||
+                   addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
+                    match conn.get_system_var("socket") {
+                        Some(path) => {
+                            let opts = MyOpts{unix_addr: Some(Path::new(path.unwrap_bytes())),
+                                              ..conn.opts.clone()};
+                            return MyConn::new(opts).or(Ok(conn));
+                        },
+                        _ => return Ok(conn)
+                    }
+                }
+            }
+        }
+        return Ok(conn);
+    }
+
+    #[cfg(feature = "ssl")]
     /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
-        self.tcp_stream = None;
-        self.unix_stream = None;
+        self.stream = None;
+        self.seq_id = 0;
+        self.capability_flags = 0;
+        self.status_flags = 0;
+        self.connection_id = 0;
+        self.character_set = 0;
+        self.affected_rows = 0;
+        self.last_insert_id = 0;
+        self.last_command = 0;
+        self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
+        self.connected = false;
+        self.has_results = false;
+        self.ssl_context = None;
+        try!(self.connect_stream());
+        self.connect()
+    }
+
+    #[cfg(not(feature = "ssl"))]
+    /// Resets `MyConn` (drops state then reconnects).
+    pub fn reset(&mut self) -> MyResult<()> {
+        self.stream = None;
         self.seq_id = 0;
         self.capability_flags = 0;
         self.status_flags = 0;
@@ -388,18 +507,46 @@ impl MyConn {
     }
 
     fn get_mut_stream<'a>(&'a mut self) -> &'a mut Stream {
-        if self.unix_stream.is_some() {
-            self.unix_stream.as_mut().unwrap() as &mut Stream
-        } else {
-            self.tcp_stream.as_mut().unwrap() as &mut Stream
+        self.stream.as_mut().unwrap()
+    }
+
+    #[cfg(feature = "openssl")]
+    fn switch_to_ssl(&mut self) -> MyResult<()> {
+        let stream = self.stream.take().unwrap();
+        match stream {
+            InsecureStream(s) => {
+                let mut ctx = try_ssl!(ssl::SslContext::new(ssl::Tlsv1));
+                if self.opts.verify_peer {
+                    ctx.set_verify(ssl::SslVerifyPeer, None);
+                } else {
+                    ctx.set_verify(ssl::SslVerifyNone, None);
+                }
+                match self.opts.ssl_opts {
+                    Some((ref ca_cert, None)) => {
+                        ctx.set_CA_file(ca_cert);
+                    },
+                    Some((ref ca_cert, Some((ref client_cert, ref client_key)))) => {
+                        ctx.set_CA_file(ca_cert);
+                        ctx.set_certificate_file(client_cert, x509::PEM);
+                        ctx.set_private_key_file(client_key, x509::PEM);
+                    },
+                    _ => { fail!("unreachable") }
+                }
+                self.stream = Some(SecureStream(try_ssl!(ssl::SslStream::new(&ctx, s))));
+                self.ssl_context = Some(ctx);
+            },
+            s => {
+                self.stream = Some(s);
+            }
         }
+        Ok(())
     }
 
     fn connect_stream(&mut self) -> MyResult<()> {
         if self.opts.unix_addr.is_some() {
             match UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
                 Ok(stream) => {
-                    self.unix_stream = Some(stream);
+                    self.stream = Some(InsecureStream(UNIXStream(stream)));
                     return Ok(());
                 },
                 _ => {
@@ -419,7 +566,7 @@ impl MyConn {
                     // keepalive one hour
                     let keepalive_timeout = self.opts.keepalive_timeout.clone();
                     try_io!(stream.set_keepalive(keepalive_timeout));
-                    self.tcp_stream = Some(stream);
+                    self.stream = Some(InsecureStream(TCPStream(stream)));
                     return Ok(());
                 },
                 _ => {
@@ -508,6 +655,7 @@ impl MyConn {
         self.status_flags = eof.status_flags;
     }
 
+    #[cfg(not(feature = "ssl"))]
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
             let handshake = try_io!(HandshakePacket::from_payload(pld.as_slice()));
@@ -537,7 +685,48 @@ impl MyConn {
         })
     }
 
-    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
+    #[cfg(feature = "ssl")]
+    fn do_handshake(&mut self) -> MyResult<()> {
+        self.read_packet().and_then(|pld| {
+            let handshake = try_io!(HandshakePacket::from_payload(pld.as_slice()));
+            if handshake.protocol_version != 10u8 {
+                return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
+            }
+            if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41 as u32) == 0 {
+                return Err(MyDriverError(Protocol41NotSet));
+            }
+            self.handle_handshake(&handshake);
+            if self.opts.ssl_opts.is_some() {
+                if let Some(InsecureStream(TCPStream(_))) = self.stream {
+                    if (handshake.capability_flags & consts::CLIENT_SSL as u32) == 0 {
+                        return Err(MyDriverError(SslNotSupported));
+                    } else {
+                        try!(self.do_ssl_request());
+                        try!(self.switch_to_ssl());
+                    }
+                }
+            }
+            self.do_handshake_response(&handshake)
+        }).and_then(|_| {
+            self.read_packet()
+        }).and_then(|pld| {
+            match pld[0] {
+                0u8 => {
+                    let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+                    self.handle_ok(&ok);
+                    Ok(())
+                },
+                0xffu8 => {
+                    let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
+                    Err(MySqlError(err))
+                },
+                _ => Err(MyDriverError(UnexpectedPacket))
+            }
+        })
+    }
+
+    #[cfg(feature = "ssl")]
+    fn get_client_flags(&self) -> u32 {
         let mut client_flags = consts::CLIENT_PROTOCOL_41 as u32 |
                                consts::CLIENT_SECURE_CONNECTION as u32 |
                                consts::CLIENT_LONG_PASSWORD as u32 |
@@ -548,12 +737,53 @@ impl MyConn {
                                consts::CLIENT_PS_MULTI_RESULTS as u32 |
                                (self.capability_flags &
                                 consts::CLIENT_LONG_FLAG as u32);
+        if self.opts.get_db_name().len() > 0 {
+            client_flags |= consts::CLIENT_CONNECT_WITH_DB as u32;
+        }
+        if let Some(InsecureStream(_)) = self.stream {
+            if let Some(_) = self.opts.ssl_opts {
+                client_flags |= consts::CLIENT_SSL as u32;
+            }
+        }
+        client_flags
+    }
+
+    #[cfg(not(feature = "ssl"))]
+    fn get_client_flags(&self) -> u32 {
+        let mut client_flags = consts::CLIENT_PROTOCOL_41 as u32 |
+                               consts::CLIENT_SECURE_CONNECTION as u32 |
+                               consts::CLIENT_LONG_PASSWORD as u32 |
+                               consts::CLIENT_TRANSACTIONS as u32 |
+                               consts::CLIENT_LOCAL_FILES as u32 |
+                               consts::CLIENT_MULTI_STATEMENTS as u32 |
+                               consts::CLIENT_MULTI_RESULTS as u32 |
+                               consts::CLIENT_PS_MULTI_RESULTS as u32 |
+                               (self.capability_flags &
+                                consts::CLIENT_LONG_FLAG as u32);
+        if self.opts.get_db_name().len() > 0 {
+            client_flags |= consts::CLIENT_CONNECT_WITH_DB as u32;
+        }
+        client_flags
+    }
+
+    #[cfg(feature = "ssl")]
+    fn do_ssl_request(&mut self) -> MyResult<()> {
+        let client_flags = self.get_client_flags();
+        let mut writer = MemWriter::with_capacity(4 + 4 + 1 + 23);
+        try_io!(writer.write_le_u32(client_flags));
+        try_io!(writer.write([0u8, ..4]));
+        try_io!(writer.write_u8(consts::UTF8_GENERAL_CI));
+        try_io!(writer.write([0u8, ..23]));
+        self.write_packet(&writer.unwrap())
+    }
+
+    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
+        let client_flags = self.get_client_flags();
         let scramble_buf = scramble(hp.auth_plugin_data.as_slice(),
                                     self.opts.get_pass().as_bytes());
         let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
         let mut payload_len = 4 + 4 + 1 + 23 + self.opts.get_user().len() + 1 + 1 + scramble_buf_len;
         if self.opts.get_db_name().len() > 0 {
-            client_flags |= consts::CLIENT_CONNECT_WITH_DB as u32;
             payload_len += self.opts.get_db_name().len() + 1;
         }
         let mut writer = MemWriter::with_capacity(payload_len);
@@ -1168,18 +1398,44 @@ mod test {
     use super::super::value::{NULL, Int, Bytes, Date, ToValue, from_value};
     use time::{Tm, now};
 
+    static USER: &'static str = "root";
+    static PASS: &'static str = "password";
+    static ADDR: &'static str = "127.0.0.1";
+    static PORT: u16          = 3307;
+
+    #[cfg(feature = "openssl")]
+    fn get_opts() -> MyOpts {
+        MyOpts {
+            user: Some(USER.to_string()),
+            pass: Some(PASS.to_string()),
+            tcp_addr: Some(ADDR.to_string()),
+            tcp_port: PORT,
+            ssl_opts: Some((Path::new("tests/ca-cert.pem"), None)),
+            ..Default::default()
+        }
+    }
+
+    #[cfg(not(feature = "ssl"))]
+    fn get_opts() -> MyOpts {
+        MyOpts {
+            user: Some(USER.to_string()),
+            pass: Some(PASS.to_string()),
+            tcp_addr: Some(ADDR.to_string()),
+            tcp_port: PORT,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_connect() {
-        let conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                      ..Default::default()});
+        let conn = MyConn::new(get_opts());
         assert!(conn.is_ok());
     }
 
     #[test]
     fn test_connect_with_db() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          db_name: Some("mysql".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(MyOpts{db_name: Some("mysql".to_string()),
+                                          ..get_opts()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
             assert_eq!(x.unwrap().remove(0).unwrap().unwrap_bytes(),
                        b"mysql".to_vec());
@@ -1188,8 +1444,7 @@ mod test {
 
     #[test]
     fn test_query() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         assert!(conn.ping());
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
@@ -1237,8 +1492,7 @@ mod test {
 
     #[test]
     fn test_prepared_statemenst() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1289,8 +1543,7 @@ mod test {
 
     #[test]
     fn test_large_insert() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1306,8 +1559,7 @@ mod test {
 
     #[test]
     fn test_large_insert_prepared() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1330,8 +1582,7 @@ mod test {
     #[test]
     #[allow(unused_must_use)]
     fn test_local_infile() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1364,8 +1615,7 @@ mod test {
 
     #[test]
     fn test_reset() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                               ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1379,9 +1629,8 @@ mod test {
 
     #[test]
     fn test_multi_resultset() {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          prefer_socket: false,
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(MyOpts{prefer_socket: false,
+                                          ..get_opts()}).unwrap();
         assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
@@ -1408,16 +1657,14 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_exec(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         bench.iter(|| { conn.query("DO 1"); })
     }
 
     #[bench]
     #[allow(unused_must_use)]
     fn bench_prepared_exec(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("DO 1").unwrap();
         bench.iter(|| { stmt.execute([]); })
     }
@@ -1425,16 +1672,14 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_query_row(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         bench.iter(|| { (&mut conn.query("SELECT 1")).next(); })
     }
 
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_prepared_query_row(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("SELECT 1").unwrap();
         bench.iter(|| { stmt.execute([]); })
     }
@@ -1442,8 +1687,7 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_simple_prepared_query_row_param(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("SELECT ?").unwrap();
         let mut i = 0i;
         bench.iter(|| { stmt.execute(&[&i]); i += 1; })
@@ -1452,8 +1696,7 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_prepared_query_row_5param(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
         let params: &[&ToValue] = &[&42i8, &b"123456".to_vec(), &1.618f64, &NULL, &1i8];
         bench.iter(|| { stmt.execute(params); })
@@ -1462,17 +1705,16 @@ mod test {
     #[bench]
     #[allow(unused_must_use)]
     fn bench_select_large_string(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         bench.iter(|| { for _ in &mut conn.query("SELECT REPEAT('A', 10000)") {} })
     }
 
     #[bench]
     #[allow(unused_must_use)]
     fn bench_select_prepared_large_string(bench: &mut Bencher) {
-        let mut conn = MyConn::new(MyOpts{user: Some("root".to_string()),
-                                          ..Default::default()}).unwrap();
+        let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
         bench.iter(|| { stmt.execute([]); })
     }
 }
+

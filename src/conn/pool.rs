@@ -51,8 +51,12 @@ impl MyInnerPool {
 /// use mysql::value::{ToValue};
 ///
 /// fn main() {
-///     let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
-///                                   ..Default::default()});
+///     # let opts = MyOpts{user: Some("root".to_string()),
+///     #                   pass: Some("password".to_string()),
+///     #                   tcp_addr: Some("127.0.0.1".to_string()),
+///     #                   tcp_port: 3307,
+///     #                   ..Default::default()};
+///     let pool = MyPool::new(opts);
 ///     assert!(pool.is_ok());
 ///     let pool = pool.unwrap();
 ///     for _ in range(0u, 100) {
@@ -119,7 +123,7 @@ impl MyPool {
     }
 
     /// You can call `query` and `prepare` directly on a pool but be aware of
-    /// the fact that you can't guarantee that query will be called at concrete
+    /// the fact that you can't guarantee that query will be called on concrete
     /// connection.
     ///
     /// For example:
@@ -224,10 +228,37 @@ mod test {
     use super::{MyPool};
     use super::super::super::value::{Bytes, Int};
 
+    static USER: &'static str = "root";
+    static PASS: &'static str = "password";
+    static ADDR: &'static str = "127.0.0.1";
+    static PORT: u16          = 3307;
+
+    #[cfg(feature = "openssl")]
+    fn get_opts() -> MyOpts {
+        MyOpts {
+            user: Some(USER.to_string()),
+            pass: Some(PASS.to_string()),
+            tcp_addr: Some(ADDR.to_string()),
+            tcp_port: PORT,
+            ssl_opts: Some((Path::new("tests/ca-cert.pem"), None)),
+            ..Default::default()
+        }
+    }
+
+    #[cfg(not(feature = "ssl"))]
+    fn get_opts() -> MyOpts {
+        MyOpts {
+            user: Some(USER.to_string()),
+            pass: Some(PASS.to_string()),
+            tcp_addr: Some(ADDR.to_string()),
+            tcp_port: PORT,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_query() {
-        let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
-                                      ..Default::default()});
+        let pool = MyPool::new(get_opts());
         assert!(pool.is_ok());
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
@@ -243,8 +274,7 @@ mod test {
 
     #[test]
     fn test_pooled_query() {
-        let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
-                                      ..Default::default()});
+        let pool = MyPool::new(get_opts());
         assert!(pool.is_ok());
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
@@ -260,8 +290,7 @@ mod test {
 
     #[test]
     fn test_prepared_query() {
-        let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
-                                      ..Default::default()});
+        let pool = MyPool::new(get_opts());
         assert!(pool.is_ok());
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
@@ -280,8 +309,7 @@ mod test {
 
     #[test]
     fn test_pooled_prepared_query() {
-        let pool = MyPool::new(MyOpts{user: Some("root".to_string()),
-                                      ..Default::default()});
+        let pool = MyPool::new(get_opts());
         assert!(pool.is_ok());
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {

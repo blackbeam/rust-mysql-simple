@@ -1,5 +1,7 @@
 #![macro_escape]
 
+#[cfg(feature = "openssl")]
+use openssl::ssl::error::{SslError};
 use core::fmt;
 use std::io::{IoError};
 pub use super::packet::{ErrPacket};
@@ -8,15 +10,30 @@ pub use super::packet::{ErrPacket};
 pub enum MyError {
 	MyIoError(IoError),
 	MySqlError(ErrPacket),
-	MyDriverError(DriverError)
+	MyDriverError(DriverError),
+	#[cfg(feature = "openssl")]
+	MySslError(SslError),
 }
 
+#[cfg(feature = "ssl")]
 impl fmt::Show for MyError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
 			MyIoError(ref io_err) => io_err.fmt(f),
 			MySqlError(ref err_packet) => err_packet.fmt(f),
-			MyDriverError(ref driver_err) => write!(f, "{}", driver_err)
+			MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
+			MySslError(ref ssl_error) => ssl_error.fmt(f),
+		}
+	}
+}
+
+#[cfg(not(feature = "ssl"))]
+impl fmt::Show for MyError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match *self {
+			MyIoError(ref io_err) => io_err.fmt(f),
+			MySqlError(ref err_packet) => err_packet.fmt(f),
+			MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
 		}
 	}
 }
@@ -27,6 +44,16 @@ macro_rules! try_io(
 		match $code {
 			Ok(x) => x,
 			Err(e) => return Err(MyIoError(e))
+		}
+	)
+)
+
+#[macro_export]
+macro_rules! try_ssl(
+	($code:expr) => (
+		match $code {
+			Ok(x) => x,
+			Err(e) => return Err(MySslError(e)),
 		}
 	)
 )
@@ -42,6 +69,7 @@ pub enum DriverError {
 	MismatchedStmtParams(u16, uint),
 	InvalidPoolConstraints,
 	SetupError,
+	SslNotSupported,
 }
 
 impl fmt::Show for DriverError {
@@ -76,6 +104,10 @@ impl fmt::Show for DriverError {
 			},
 			SetupError => {
 				write!(f, "Could not setup connection")
+			},
+			SslNotSupported => {
+				write!(f, "Client requires secure connection but server \
+					       does not have this capability")
 			}
 		}
 	}

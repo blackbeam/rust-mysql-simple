@@ -10,6 +10,42 @@ name = "mysql"
 crate_type = ["rlib", "dylib"]
 path = "src/lib.rs"
 
+[profile.dev]
+
+opt-level = 0
+debug = true
+
+[profile.release]
+
+opt-level = 3
+debug = false
+
+[profile.test]
+
+opt-level = 0
+debug = true
+
+[profile.bench]
+
+opt-level = 3
+debug = false
+
+[profile.doc]
+
+opt-level = 0
+debug = true
+
+[features]
+
+default = ["ssl"]
+
+ssl = ["openssl"]
+
 [dependencies.lazy_static]
 
 git = "https://github.com/Kimundi/lazy-static.rs"
+
+[dependencies.openssl]
+
+git = "https://github.com/sfackler/rust-openssl"
+optional = true

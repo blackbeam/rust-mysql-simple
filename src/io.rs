@@ -1,6 +1,9 @@
-use std::io::{IoResult, SeekCur, Seek};
+use std::io::{IoResult, SeekCur, Seek, Reader, Writer};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
+use std::io::net::{tcp, pipe};
+#[cfg(feature = "openssl")]
+use openssl::ssl;
 
 pub trait MyReader: Reader + Seek {
 	fn read_lenenc_int(&mut self) -> IoResult<u64> {
@@ -191,3 +194,90 @@ pub trait MyWriter: Writer {
 }
 
 impl<T:Writer> MyWriter for T {}
+
+pub enum MyStream {
+    #[cfg(feature = "openssl")]
+    SecureStream(ssl::SslStream<PlainStream>),
+    InsecureStream(PlainStream),
+}
+
+#[cfg(feature = "ssl")]
+impl Reader for MyStream {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+        match *self {
+            SecureStream(ref mut s) => s.read(buf),
+            InsecureStream(ref mut s) => s.read(buf),
+        }
+    }
+}
+
+#[cfg(not(feature = "ssl"))]
+impl Reader for MyStream {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+        match *self {
+            InsecureStream(ref mut s) => s.read(buf),
+        }
+    }
+}
+
+#[cfg(feature = "ssl")]
+impl Writer for MyStream {
+    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+        match *self {
+            SecureStream(ref mut s) => s.write(buf),
+            InsecureStream(ref mut s) => s.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        match *self {
+            SecureStream(ref mut s) => s.flush(),
+            InsecureStream(ref mut s) => s.flush(),
+        }
+    }
+}
+
+#[cfg(not(feature = "ssl"))]
+impl Writer for MyStream {
+    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+        match *self {
+            InsecureStream(ref mut s) => s.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        match *self {
+            InsecureStream(ref mut s) => s.flush(),
+        }
+    }
+}
+
+pub enum PlainStream {
+    TCPStream(tcp::TcpStream),
+    UNIXStream(pipe::UnixStream),
+}
+
+impl Reader for PlainStream {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+        match *self {
+            TCPStream(ref mut s) => s.read(buf),
+            UNIXStream(ref mut s) => s.read(buf),
+        }
+    }
+}
+
+impl Writer for PlainStream {
+    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+        match *self {
+            TCPStream(ref mut s) => s.write(buf),
+            UNIXStream(ref mut s) => s.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        match *self {
+            TCPStream(ref mut s) => s.flush(),
+            UNIXStream(ref mut s) => s.flush(),
+        }
+    }
+}
