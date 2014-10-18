@@ -249,13 +249,24 @@ impl Column {
  *                   "Y88P"              888                      
  */
 /// Mysql connection options.
+///
+/// For example:
+///
+/// ```ignore
+/// let opts = MyOpts {
+///     user: Some("username".to_string()),
+///     pass: Some("password".to_string()),
+///     db_name: Some("mydatabase".to_string()),
+///     ..Default::default()
+/// };
+/// ```
 #[deriving(Clone, Eq, PartialEq)]
 pub struct MyOpts {
     /// TCP address of mysql server (defaults to `127.0.0.1`).
     pub tcp_addr: Option<String>,
     /// TCP port of mysql server (defaults to `3306`).
     pub tcp_port: u16,
-    /// UNIX address of mysql server (defaults to `None`).
+    /// Path to unix socket of mysql server (defaults to `None`).
     pub unix_addr: Option<Path>,
     /// User (defaults to `None`).
     pub user: Option<String>,

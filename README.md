@@ -4,3 +4,19 @@ Mysql client library implemented in rust **nightly**. Feel free to open a new is
 
 ### Documentation
 Latest crate API docs hosted [here](http://blackbeam.org/doc/mysql/index.html).
+
+### Installation
+Just include another `[dependencies.*]` section into your Cargo.toml:
+
+```toml
+[dependencies.mysql]
+git = "https://github.com/blackbeam/rust-mysql-simple"
+```
+
+rust-mysql-simple offer support of SSL via `ssl` cargo feature which is enabled by default. If you have no plans to use SSL, then you should disable that feature to not to depend on rust-openssl:
+
+```toml
+[dependencies.mysql]
+git = "https://github.com/blackbeam/rust-mysql-simple"
+default-features = false
+```

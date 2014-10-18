@@ -17,7 +17,6 @@ lib:
 
 doc:
 	cargo doc
-	ln -s target/doc doc
 
 test:
 	bash -c "if [ -e $(MYSQL_DATA_DIR)/mysqld.pid ]; \
@@ -148,4 +147,3 @@ bench:
 
 clean:
 	cargo clean
-	rm -f doc
