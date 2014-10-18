@@ -5,7 +5,6 @@ MYSQL_SSL_CA = $(mkfile_dir)tests/ca-cert.pem
 MYSQL_SSL_CERT = $(mkfile_dir)tests/server-cert.pem
 MYSQL_SSL_KEY = $(mkfile_dir)tests/server-key.pem
 MYSQL_PORT = 3307
-WHOAMI = $(whoami)
 
 all: lib doc
 
@@ -21,8 +20,6 @@ doc:
 	ln -s target/doc doc
 
 test:
-	echo `whoami`
-	ls -la .
 	bash -c "if [ -e $(MYSQL_DATA_DIR)/mysqld.pid ]; \
 			 then \
 				 kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`;\
@@ -36,12 +33,15 @@ test:
 
 	mkdir $(MYSQL_DATA_DIR)
 
-	mysql_install_db --basedir=/usr \
+	mysql_install_db \
+		--no-defaults \
+		--basedir=/usr \
 		--datadir=$(MYSQL_DATA_DIR) \
-		--force \
-		--user=`whoami`
+		--force
 
-	mysqld  --basedir=/usr \
+	mysqld \
+		--no-defaults \
+		--basedir=/usr \
 		--bind-address=127.0.0.1 \
 		--datadir=$(MYSQL_DATA_DIR) \
 		--max-allowed-packet=32M \
@@ -96,12 +96,15 @@ bench:
 
 	mkdir $(MYSQL_DATA_DIR)
 
-	mysql_install_db --basedir=/usr \
+	mysql_install_db \
+		--no-defaults \
+		--basedir=/usr \
 		--datadir=$(MYSQL_DATA_DIR) \
-		--force \
-		--user=`whoami`
+		--force
 
-	mysqld  --basedir=/usr \
+	mysqld \
+		--no-defaults \
+		--basedir=/usr \
 		--bind-address=127.0.0.1 \
 		--datadir=$(MYSQL_DATA_DIR) \
 		--max-allowed-packet=32M \

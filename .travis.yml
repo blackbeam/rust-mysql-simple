@@ -3,6 +3,6 @@ env:
   global:
     - secure: NReQ/WsOEMia4t2siHH3dW5CSLewydRzZkrYfR7SC7Pxm/VMOszdmLerEpzXYKpX53bb817m6nSeMDRd4oT1E99miiW4w7LXAsu07XVxbcDMTdkllf2bwXMygb1bZoa5TgX/JcfHgzn7kg5pnU8V1SseXIIAEXNJ6+6qqW3TcAk=
 script:
-  - sudo make test doc
+  - make test doc
 after_script:
   - curl http://www.rust-ci.org/artifacts/put?t=$RUSTCI_TOKEN | sh
