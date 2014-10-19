@@ -5,6 +5,7 @@ MYSQL_SSL_CA = $(mkfile_dir)tests/ca-cert.pem
 MYSQL_SSL_CERT = $(mkfile_dir)tests/server-cert.pem
 MYSQL_SSL_KEY = $(mkfile_dir)tests/server-key.pem
 MYSQL_PORT = 3307
+BASEDIR := $(shell mysqld --verbose --help 2>/dev/null | grep -e '^basedir' | awk '{ print $$2 }')
 
 all: lib doc
 
@@ -34,13 +35,13 @@ test:
 
 	mysql_install_db \
 		--no-defaults \
-		--basedir=/usr \
+		--basedir=$(BASEDIR) \
 		--datadir=$(MYSQL_DATA_DIR) \
 		--force
 
 	mysqld \
 		--no-defaults \
-		--basedir=/usr \
+		--basedir=$(BASEDIR) \
 		--bind-address=127.0.0.1 \
 		--datadir=$(MYSQL_DATA_DIR) \
 		--max-allowed-packet=32M \
@@ -97,13 +98,13 @@ bench:
 
 	mysql_install_db \
 		--no-defaults \
-		--basedir=/usr \
+		--basedir=$(BASEDIR) \
 		--datadir=$(MYSQL_DATA_DIR) \
 		--force
 
 	mysqld \
 		--no-defaults \
-		--basedir=/usr \
+		--basedir=$(BASEDIR) \
 		--bind-address=127.0.0.1 \
 		--datadir=$(MYSQL_DATA_DIR) \
 		--max-allowed-packet=32M \
