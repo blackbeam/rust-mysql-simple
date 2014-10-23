@@ -5,7 +5,7 @@ use std::num::{Bounded, pow};
 use std::time::{Duration};
 use std::i64::{parse_bytes};
 use time::{Tm, Timespec, now, strptime, at};
-use super::consts::{UNSIGNED_FLAG};
+use super::consts;
 use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
 
@@ -334,16 +334,15 @@ impl Value {
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
         let mut bitmap: Vec<u8> = Vec::with_capacity(bitmap_len);
         let mut values: Vec<Value> = Vec::with_capacity(columns.len());
-        let mut i = -1;
-        while {i += 1; i < bitmap_len} {
+        for i in range(0, bitmap_len) {
             bitmap.push(pld[i+1]);
         }
         let mut reader = BufReader::new(pld.slice_from(1 + bitmap_len));
-        let mut i = -1;
-        while {i += 1; i < columns.len()} {
+        for i in range(0, columns.len()) {
+            let c = &columns[i];
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
-                values.push(try!(reader.read_bin_value(columns[i].column_type,
-                                                       (columns[i].flags & UNSIGNED_FLAG as u16) != 0)));
+                values.push(try!(reader.read_bin_value(c.column_type,
+                                                       c.flags.contains(consts::UNSIGNED_FLAG))));
             } else {
                 values.push(NULL);
             }

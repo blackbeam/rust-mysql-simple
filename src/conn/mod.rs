@@ -190,7 +190,7 @@ pub struct Column {
     /// Column character set.
     pub character_set: u16,
     /// Flags.
-    pub flags: u16,
+    pub flags: consts::ColumnFlags,
     /// Column type.
     pub column_type: consts::ColumnType,
     /// Max shown decimal digits
@@ -212,7 +212,7 @@ impl Column {
         let character_set = try!(reader.read_le_u16());
         let column_length = try!(reader.read_le_u32());
         let column_type = try!(reader.read_u8());
-        let flags = try!(reader.read_le_u16());
+        let flags = consts::ColumnFlags::from_bits_truncate(try!(reader.read_le_u16()));
         let decimals = try!(reader.read_u8());
         // skip filler
         try!(reader.seek(2, SeekCur));
@@ -372,9 +372,9 @@ pub struct MyConn {
     affected_rows: u64,
     last_insert_id: u64,
     max_allowed_packet: uint,
-    capability_flags: u32,
+    capability_flags: consts::CapabilityFlags,
     connection_id: u32,
-    status_flags: u16,
+    status_flags: consts::StatusFlags,
     seq_id: u8,
     character_set: u8,
     last_command: u8,
@@ -390,8 +390,8 @@ impl Default for MyConn {
         MyConn{
             stream: None,
             seq_id: 0u8,
-            capability_flags: 0,
-            status_flags: 0u16,
+            capability_flags: consts::CapabilityFlags::empty(),
+            status_flags: consts::StatusFlags::empty(),
             connection_id: 0u32,
             character_set: 0u8,
             affected_rows: 0u64,
@@ -412,8 +412,8 @@ impl Default for MyConn {
         MyConn{
             stream: None,
             seq_id: 0u8,
-            capability_flags: 0,
-            status_flags: 0u16,
+            capability_flags: consts::CapabilityFlags::empty(),
+            status_flags: consts::StatusFlags::empty(),
             connection_id: 0u32,
             character_set: 0u8,
             affected_rows: 0u64,
@@ -483,8 +483,8 @@ impl MyConn {
     pub fn reset(&mut self) -> MyResult<()> {
         self.stream = None;
         self.seq_id = 0;
-        self.capability_flags = 0;
-        self.status_flags = 0;
+        self.capability_flags = consts::CapabilityFlags::empty();
+        self.status_flags = consts::StatusFlags::empty();
         self.connection_id = 0;
         self.character_set = 0;
         self.affected_rows = 0;
@@ -503,8 +503,8 @@ impl MyConn {
     pub fn reset(&mut self) -> MyResult<()> {
         self.stream = None;
         self.seq_id = 0;
-        self.capability_flags = 0;
-        self.status_flags = 0;
+        self.capability_flags = consts::CapabilityFlags::empty();
+        self.status_flags = consts::StatusFlags::empty();
         self.connection_id = 0;
         self.character_set = 0;
         self.affected_rows = 0;
@@ -675,7 +675,7 @@ impl MyConn {
             if handshake.protocol_version != 10u8 {
                 return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
             }
-            if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41 as u32) == 0 {
+            if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
                 return Err(MyDriverError(Protocol41NotSet));
             }
             self.handle_handshake(&handshake);
@@ -705,13 +705,13 @@ impl MyConn {
             if handshake.protocol_version != 10u8 {
                 return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
             }
-            if (handshake.capability_flags & consts::CLIENT_PROTOCOL_41 as u32) == 0 {
+            if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
                 return Err(MyDriverError(Protocol41NotSet));
             }
             self.handle_handshake(&handshake);
             if self.opts.ssl_opts.is_some() {
                 if let Some(InsecureStream(TCPStream(_))) = self.stream {
-                    if (handshake.capability_flags & consts::CLIENT_SSL as u32) == 0 {
+                    if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
                         return Err(MyDriverError(SslNotSupported));
                     } else {
                         try!(self.do_ssl_request());
@@ -739,42 +739,40 @@ impl MyConn {
     }
 
     #[cfg(feature = "ssl")]
-    fn get_client_flags(&self) -> u32 {
-        let mut client_flags = consts::CLIENT_PROTOCOL_41 as u32 |
-                               consts::CLIENT_SECURE_CONNECTION as u32 |
-                               consts::CLIENT_LONG_PASSWORD as u32 |
-                               consts::CLIENT_TRANSACTIONS as u32 |
-                               consts::CLIENT_LOCAL_FILES as u32 |
-                               consts::CLIENT_MULTI_STATEMENTS as u32 |
-                               consts::CLIENT_MULTI_RESULTS as u32 |
-                               consts::CLIENT_PS_MULTI_RESULTS as u32 |
-                               (self.capability_flags &
-                                consts::CLIENT_LONG_FLAG as u32);
+    fn get_client_flags(&self) -> consts::CapabilityFlags {
+        let mut client_flags = consts::CLIENT_PROTOCOL_41 |
+                               consts::CLIENT_SECURE_CONNECTION |
+                               consts::CLIENT_LONG_PASSWORD |
+                               consts::CLIENT_TRANSACTIONS |
+                               consts::CLIENT_LOCAL_FILES |
+                               consts::CLIENT_MULTI_STATEMENTS |
+                               consts::CLIENT_MULTI_RESULTS |
+                               consts::CLIENT_PS_MULTI_RESULTS |
+                               (self.capability_flags & consts::CLIENT_LONG_FLAG);
         if self.opts.get_db_name().len() > 0 {
-            client_flags |= consts::CLIENT_CONNECT_WITH_DB as u32;
+            client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
         }
         if let Some(InsecureStream(_)) = self.stream {
             if let Some(_) = self.opts.ssl_opts {
-                client_flags |= consts::CLIENT_SSL as u32;
+                client_flags.insert(consts::CLIENT_SSL);
             }
         }
         client_flags
     }
 
     #[cfg(not(feature = "ssl"))]
-    fn get_client_flags(&self) -> u32 {
-        let mut client_flags = consts::CLIENT_PROTOCOL_41 as u32 |
-                               consts::CLIENT_SECURE_CONNECTION as u32 |
-                               consts::CLIENT_LONG_PASSWORD as u32 |
-                               consts::CLIENT_TRANSACTIONS as u32 |
-                               consts::CLIENT_LOCAL_FILES as u32 |
-                               consts::CLIENT_MULTI_STATEMENTS as u32 |
-                               consts::CLIENT_MULTI_RESULTS as u32 |
-                               consts::CLIENT_PS_MULTI_RESULTS as u32 |
-                               (self.capability_flags &
-                                consts::CLIENT_LONG_FLAG as u32);
+    fn get_client_flags(&self) -> consts::CapabilityFlags {
+        let mut client_flags = consts::CLIENT_PROTOCOL_41 |
+                               consts::CLIENT_SECURE_CONNECTION |
+                               consts::CLIENT_LONG_PASSWORD |
+                               consts::CLIENT_TRANSACTIONS |
+                               consts::CLIENT_LOCAL_FILES |
+                               consts::CLIENT_MULTI_STATEMENTS |
+                               consts::CLIENT_MULTI_RESULTS |
+                               consts::CLIENT_PS_MULTI_RESULTS |
+                               (self.capability_flags & consts::CLIENT_LONG_FLAG);
         if self.opts.get_db_name().len() > 0 {
-            client_flags |= consts::CLIENT_CONNECT_WITH_DB as u32;
+            client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
         }
         client_flags
     }
@@ -783,7 +781,7 @@ impl MyConn {
     fn do_ssl_request(&mut self) -> MyResult<()> {
         let client_flags = self.get_client_flags();
         let mut writer = MemWriter::with_capacity(4 + 4 + 1 + 23);
-        try_io!(writer.write_le_u32(client_flags));
+        try_io!(writer.write_le_u32(client_flags.bits()));
         try_io!(writer.write([0u8, ..4]));
         try_io!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try_io!(writer.write([0u8, ..23]));
@@ -800,7 +798,7 @@ impl MyConn {
             payload_len += self.opts.get_db_name().len() + 1;
         }
         let mut writer = MemWriter::with_capacity(payload_len);
-        try_io!(writer.write_le_u32(client_flags));
+        try_io!(writer.write_le_u32(client_flags.bits()));
         try_io!(writer.write([0u8, ..4]));
         try_io!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try_io!(writer.write([0u8, ..23]));
@@ -1215,8 +1213,7 @@ impl<'a> QueryResult<'a> {
     fn handle_if_more_results(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.conn.is_some() {
             let conn_ref = self.conn.as_mut().unwrap();
-            if conn_ref.status_flags &
-               consts::SERVER_MORE_RESULTS_EXISTS as u16 > 0 {
+            if conn_ref.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
                 match conn_ref.handle_result_set() {
                     Ok((cols, ok_p)) => {
                         self.columns = cols;
@@ -1231,8 +1228,7 @@ impl<'a> QueryResult<'a> {
         } else {
             let conn_ref =
                 self.pooled_conn.as_mut().unwrap().as_mut();
-            if conn_ref.status_flags &
-               consts::SERVER_MORE_RESULTS_EXISTS as u16 > 0 {
+            if conn_ref.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
                 match conn_ref.handle_result_set() {
                     Ok((cols, ok_p)) => {
                         self.columns = cols;

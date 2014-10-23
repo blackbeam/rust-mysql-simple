@@ -4,52 +4,52 @@ pub static MAX_PAYLOAD_LEN: uint = 16777215;
 
 pub static UTF8_GENERAL_CI: u8 = 33u8;
 
-/// Server status flags (u16)
-#[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
-#[repr(u16)]
-pub enum StatusFlag {
-    SERVER_STATUS_IN_TRANS             = 0x0001u16,
-    SERVER_STATUS_AUTOCOMMIT           = 0x0002u16,
-    SERVER_MORE_RESULTS_EXISTS         = 0x0008u16,
-    SERVER_STATUS_NO_GOOD_INDEX_USED   = 0x0010u16,
-    SERVER_STATUS_NO_INDEX_USED        = 0x0020u16,
-    SERVER_STATUS_CURSOR_EXISTS        = 0x0040u16,
-    SERVER_STATUS_LAST_ROW_SENT        = 0x0080u16,
-    SERVER_STATUS_DB_DROPPED           = 0x0100u16,
-    SERVER_STATUS_NO_BACKSLASH_ESCAPES = 0x0200u16,
-    SERVER_STATUS_METADATA_CHANGED     = 0x0400u16,
-    SERVER_QUERY_WAS_SLOW              = 0x0800u16,
-    SERVER_PT_OUT_PARAMS               = 0x1000u16,
+/// Server status flags
+bitflags! {
+    #[deriving(Show)]
+    flags StatusFlags: u16 {
+        const SERVER_STATUS_IN_TRANS             = 0x0001u16,
+        const SERVER_STATUS_AUTOCOMMIT           = 0x0002u16,
+        const SERVER_MORE_RESULTS_EXISTS         = 0x0008u16,
+        const SERVER_STATUS_NO_GOOD_INDEX_USED   = 0x0010u16,
+        const SERVER_STATUS_NO_INDEX_USED        = 0x0020u16,
+        const SERVER_STATUS_CURSOR_EXISTS        = 0x0040u16,
+        const SERVER_STATUS_LAST_ROW_SENT        = 0x0080u16,
+        const SERVER_STATUS_DB_DROPPED           = 0x0100u16,
+        const SERVER_STATUS_NO_BACKSLASH_ESCAPES = 0x0200u16,
+        const SERVER_STATUS_METADATA_CHANGED     = 0x0400u16,
+        const SERVER_QUERY_WAS_SLOW              = 0x0800u16,
+        const SERVER_PT_OUT_PARAMS               = 0x1000u16,
+    }
 }
 
 /// Capability flags (u32)
-#[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
-#[repr(u32)]
-pub enum CapabilityFlag {
-    CLIENT_LONG_PASSWORD                  = 0x00000001u32,
-    CLIENT_FOUND_ROWS                     = 0x00000002u32,
-    CLIENT_LONG_FLAG                      = 0x00000004u32,
-    CLIENT_CONNECT_WITH_DB                = 0x00000008u32,
-    CLIENT_NO_SCHEMA                      = 0x00000010u32,
-    CLIENT_COMPRESS                       = 0x00000020u32,
-    CLIENT_ODBC                           = 0x00000040u32,
-    CLIENT_LOCAL_FILES                    = 0x00000080u32,
-    CLIENT_IGNORE_SPACE                   = 0x00000100u32,
-    CLIENT_PROTOCOL_41                    = 0x00000200u32,
-    CLIENT_INTERACTIVE                    = 0x00000400u32,
-    CLIENT_SSL                            = 0x00000800u32,
-    CLIENT_IGNORE_SIGPIPE                 = 0x00001000u32,
-    CLIENT_TRANSACTIONS                   = 0x00002000u32,
-    CLIENT_RESERVED                       = 0x00004000u32,
-    CLIENT_SECURE_CONNECTION              = 0x00008000u32,
-    CLIENT_MULTI_STATEMENTS               = 0x00010000u32,
-    CLIENT_MULTI_RESULTS                  = 0x00020000u32,
-    CLIENT_PS_MULTI_RESULTS               = 0x00040000u32,
-    CLIENT_PLUGIN_AUTH                    = 0x00080000u32,
-    CLIENT_CONNECT_ATTRS                  = 0x00100000u32,
-    CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA = 0x00200000u32,
+bitflags! {
+    #[deriving(Show)]
+    flags CapabilityFlags: u32 {
+        const CLIENT_LONG_PASSWORD                  = 0x00000001u32,
+        const CLIENT_FOUND_ROWS                     = 0x00000002u32,
+        const CLIENT_LONG_FLAG                      = 0x00000004u32,
+        const CLIENT_CONNECT_WITH_DB                = 0x00000008u32,
+        const CLIENT_NO_SCHEMA                      = 0x00000010u32,
+        const CLIENT_COMPRESS                       = 0x00000020u32,
+        const CLIENT_ODBC                           = 0x00000040u32,
+        const CLIENT_LOCAL_FILES                    = 0x00000080u32,
+        const CLIENT_IGNORE_SPACE                   = 0x00000100u32,
+        const CLIENT_PROTOCOL_41                    = 0x00000200u32,
+        const CLIENT_INTERACTIVE                    = 0x00000400u32,
+        const CLIENT_SSL                            = 0x00000800u32,
+        const CLIENT_IGNORE_SIGPIPE                 = 0x00001000u32,
+        const CLIENT_TRANSACTIONS                   = 0x00002000u32,
+        const CLIENT_RESERVED                       = 0x00004000u32,
+        const CLIENT_SECURE_CONNECTION              = 0x00008000u32,
+        const CLIENT_MULTI_STATEMENTS               = 0x00010000u32,
+        const CLIENT_MULTI_RESULTS                  = 0x00020000u32,
+        const CLIENT_PS_MULTI_RESULTS               = 0x00040000u32,
+        const CLIENT_PLUGIN_AUTH                    = 0x00080000u32,
+        const CLIENT_CONNECT_ATTRS                  = 0x00100000u32,
+        const CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA = 0x00200000u32,
+    }
 }
 
 /// Commands (u8)
@@ -125,24 +125,24 @@ pub enum ColumnType {
 }
 
 /// Column flags (u16)
-#[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
-#[repr(u16)]
-pub enum ColumnFlag {
-    NOT_NULL_FLAG         = 1u16,
-    PRI_KEY_FLAG          = 2u16,
-    UNIQUE_KEY_FLAG       = 4u16,
-    MULTIPLE_KEY_FLAG     = 8u16,
-    BLOB_FLAG             = 16u16,
-    UNSIGNED_FLAG         = 32u16,
-    ZEROFILL_FLAG         = 64u16,
-    BINARY_FLAG           = 128u16,
-    ENUM_FLAG             = 256u16,
-    AUTO_INCREMENT_FLAG   = 512u16,
-    TIMESTAMP_FLAG        = 1024u16,
-    SET_FLAG              = 2048u16,
-    NO_DEFAULT_VALUE_FLAG = 4096u16,
-    ON_UPDATE_NOW_FLAG    = 8192u16,
-    NUM_FLAG              = 32768u16,
-    PART_KEY_FLAG         = 16384u16,
+bitflags! {
+    #[deriving(Show)]
+    flags ColumnFlags: u16 {
+        const NOT_NULL_FLAG         = 1u16,
+        const PRI_KEY_FLAG          = 2u16,
+        const UNIQUE_KEY_FLAG       = 4u16,
+        const MULTIPLE_KEY_FLAG     = 8u16,
+        const BLOB_FLAG             = 16u16,
+        const UNSIGNED_FLAG         = 32u16,
+        const ZEROFILL_FLAG         = 64u16,
+        const BINARY_FLAG           = 128u16,
+        const ENUM_FLAG             = 256u16,
+        const AUTO_INCREMENT_FLAG   = 512u16,
+        const TIMESTAMP_FLAG        = 1024u16,
+        const SET_FLAG              = 2048u16,
+        const NO_DEFAULT_VALUE_FLAG = 4096u16,
+        const ON_UPDATE_NOW_FLAG    = 8192u16,
+        const NUM_FLAG              = 32768u16,
+        const PART_KEY_FLAG         = 16384u16,
+    }
 }
