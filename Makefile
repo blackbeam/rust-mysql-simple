@@ -56,7 +56,7 @@ test:
 		--ssl-key=$(MYSQL_SSL_KEY) \
 		--ssl-cipher=DHE-RSA-AES256-SHA \
 		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &
-	sleep 5
+	sleep 10
 	mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'
 
 	bash -c "\
@@ -119,7 +119,7 @@ bench:
 		--ssl-key=$(MYSQL_SSL_KEY) \
 		--ssl-cipher=DHE-RSA-AES256-SHA \
 		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &
-	sleep 5
+	sleep 10
 	mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'
 
 	bash -c "\
