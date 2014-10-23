@@ -1561,7 +1561,7 @@ mod test {
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a LONGBLOB)").is_ok());
-        let query = format!("INSERT INTO tbl(a) VALUES('{:s}')", str::from_chars(Vec::from_elem(20000000, 'A').as_slice()));
+        let query = format!("INSERT INTO tbl(a) VALUES('{:s}')", String::from_chars(Vec::from_elem(20000000, 'A').as_slice()));
         assert!(conn.query(query.as_slice()).is_ok());
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
