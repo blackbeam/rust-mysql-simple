@@ -166,7 +166,7 @@ pub trait MyWriter: Writer {
 		let mut buf = Vec::from_elem(len, 0u8);
 		let mut offset = 0;
 		while offset < len {
-			*buf.get_mut(offset) = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
+			buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
 			offset += 1;
 		}
 		self.write(buf.as_slice())

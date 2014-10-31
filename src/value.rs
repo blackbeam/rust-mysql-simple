@@ -360,7 +360,7 @@ impl Value {
         let cap = max_allowed_packet - bitmap_len - values.len() * 8;
         for value in values.iter() {
             match *value {
-                NULL => *bitmap.get_mut(i as uint / 8) |= 1 << ((i % 8u16) as uint),
+                NULL => bitmap[i as uint / 8] |= 1 << ((i % 8u16) as uint),
                 _ => {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
