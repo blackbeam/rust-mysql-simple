@@ -1,7 +1,10 @@
 use std::{fmt, str};
 use std::io::{IoResult, BufReader, SeekCur};
+use regex::Regex;
 use super::io::{MyReader};
 use super::consts;
+use super::error;
+use super::error::{MyIoError};
 
 #[deriving(Clone, Eq, PartialEq)]
 pub struct OkPacket {
@@ -74,10 +77,34 @@ impl EOFPacket {
     }
 }
 
+/// (major, minor, micro) mysql server version.
+pub type ServerVersion = (u16, u16, u16);
+static VERSION_RE: Regex = regex!(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)");
+
+fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
+    let ver_str = String::from_utf8_lossy(bytes).into_string();
+    VERSION_RE.captures(ver_str.as_slice())
+    .and_then(|capts| {
+        Some((
+            from_str::<u16>(capts.at(1)).unwrap_or(0),
+            from_str::<u16>(capts.at(2)).unwrap_or(0),
+            from_str::<u16>(capts.at(3)).unwrap_or(0),
+        ))
+    })
+    .and_then(|version| {
+        if version == (0, 0, 0) {
+            None
+        } else {
+            Some(version)
+        }
+    }).ok_or(error::MyDriverError(error::CouldNotParseVersion))
+}
+
 #[deriving(Clone, Eq, PartialEq)]
 pub struct HandshakePacket {
     pub auth_plugin_data: Vec<u8>,
     pub auth_plugin_name: Vec<u8>,
+    pub server_version: ServerVersion,
     pub connection_id: u32,
     pub capability_flags: consts::CapabilityFlags,
     pub status_flags: consts::StatusFlags,
@@ -86,7 +113,7 @@ pub struct HandshakePacket {
 }
 
 impl HandshakePacket {
-    pub fn from_payload(pld: &[u8]) -> IoResult<HandshakePacket> {
+    pub fn from_payload(pld: &[u8]) -> error::MyResult<HandshakePacket> {
         let mut length_of_auth_plugin_data = 0i16;
         let mut auth_plugin_data: Vec<u8> = Vec::with_capacity(32);
         let mut auth_plugin_name: Vec<u8> = Vec::with_capacity(32);
@@ -94,43 +121,43 @@ impl HandshakePacket {
         let mut status_flags = consts::StatusFlags::empty();
         let payload_len = pld.len();
         let mut reader = BufReader::new(pld);
-        let protocol_version = try!(reader.read_u8());
-        // skip server version
-        while try!(reader.read_u8()) != 0u8 {}
-        let connection_id = try!(reader.read_le_u32());
-        try!(reader.push(8, &mut auth_plugin_data));
+        let protocol_version = try_io!(reader.read_u8());
+        let version_bytes = try_io!(reader.read_to_null());
+        let server_version = try!(parse_version(version_bytes.as_slice()));
+        let connection_id = try_io!(reader.read_le_u32());
+        try_io!(reader.push(8, &mut auth_plugin_data));
         // skip filler
-        try!(reader.seek(1, SeekCur));
-        let lower_cf = try!(reader.read_le_u16());
+        try_io!(reader.seek(1, SeekCur));
+        let lower_cf = try_io!(reader.read_le_u16());
         let mut capability_flags = consts::CapabilityFlags::from_bits_truncate(lower_cf as u32);
-        if try!(reader.tell()) != payload_len as u64 {
-            character_set = try!(reader.read_u8());
-            status_flags = consts::StatusFlags::from_bits_truncate(try!(reader.read_le_u16()));
-            let upper_cf = try!(reader.read_le_u16());
+        if try_io!(reader.tell()) != payload_len as u64 {
+            character_set = try_io!(reader.read_u8());
+            status_flags = consts::StatusFlags::from_bits_truncate(try_io!(reader.read_le_u16()));
+            let upper_cf = try_io!(reader.read_le_u16());
             capability_flags.insert(consts::CapabilityFlags::from_bits_truncate((upper_cf as u32) << 16));
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                length_of_auth_plugin_data = try!(reader.read_u8()) as i16;
+                length_of_auth_plugin_data = try_io!(reader.read_u8()) as i16;
             } else {
-                try!(reader.seek(1, SeekCur));
+                try_io!(reader.seek(1, SeekCur));
             }
-            try!(reader.seek(10, SeekCur));
+            try_io!(reader.seek(10, SeekCur));
             if capability_flags.contains(consts::CLIENT_SECURE_CONNECTION) {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
-                try!(reader.push(len as uint, &mut auth_plugin_data));
+                try_io!(reader.push(len as uint, &mut auth_plugin_data));
                 if auth_plugin_data[auth_plugin_data.len() - 1] == 0u8 {
                     auth_plugin_data.pop();
                 }
             }
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                auth_plugin_name = try!(reader.read_to_end());
+                auth_plugin_name = try_io!(reader.read_to_end());
                 if auth_plugin_name[auth_plugin_name.len() - 1] == 0u8 {
                     auth_plugin_name.pop();
                 }
             }
         }
         Ok(HandshakePacket{protocol_version: protocol_version, connection_id: connection_id,
-                         auth_plugin_data: auth_plugin_data,
+                         auth_plugin_data: auth_plugin_data, server_version: server_version,
                          capability_flags: capability_flags, character_set: character_set,
                          status_flags: status_flags, auth_plugin_name: auth_plugin_name})
     }
@@ -177,16 +204,12 @@ mod test {
 
     #[test]
     fn test_handshake_packet() {
-        let payload =  [0x0a_u8,
-                        32u8, 32u8, 32u8, 32u8, 0u8,
-                        1u8, 0u8, 0u8, 0u8,
-                        1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8,
-                        0u8,
-                        4u8, 0x80_u8];
+        let payload = b"\x0a5.6.4\x00\x01\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\x00\x04\x80";
         let handshake_packet = HandshakePacket::from_payload(payload);
         assert!(handshake_packet.is_ok());
         let handshake_packet = handshake_packet.unwrap();
         assert_eq!(handshake_packet.protocol_version, 0x0a);
+        assert_eq!(handshake_packet.server_version, (5, 6, 4));
         assert_eq!(handshake_packet.connection_id, 1);
         assert_eq!(handshake_packet.auth_plugin_data, vec!(1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8));
         assert_eq!(handshake_packet.capability_flags,

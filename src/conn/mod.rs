@@ -701,7 +701,7 @@ impl MyConn {
     #[cfg(feature = "ssl")]
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
-            let handshake = try_io!(HandshakePacket::from_payload(pld.as_slice()));
+            let handshake = try!(HandshakePacket::from_payload(pld.as_slice()));
             if handshake.protocol_version != 10u8 {
                 return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
             }

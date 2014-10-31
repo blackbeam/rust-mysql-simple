@@ -70,6 +70,7 @@ pub enum DriverError {
 	InvalidPoolConstraints,
 	SetupError,
 	SslNotSupported,
+	CouldNotParseVersion,
 }
 
 impl fmt::Show for DriverError {
@@ -108,7 +109,10 @@ impl fmt::Show for DriverError {
 			SslNotSupported => {
 				write!(f, "Client requires secure connection but server \
 					       does not have this capability")
-			}
+			},
+			CouldNotParseVersion => {
+				write!(f, "Could not parse MySQL version")
+			},
 		}
 	}
 }

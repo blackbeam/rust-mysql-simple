@@ -43,6 +43,9 @@ extern crate core;
 extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;
+extern crate regex;
+#[phase(plugin)]
+extern crate regex_macros;
 
 #[phase(plugin)]
 extern crate lazy_static;
