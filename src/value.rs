@@ -109,13 +109,13 @@ impl Value {
     pub fn bytes_ref<'a>(&'a self) -> &'a [u8] {
         match *self {
             Bytes(ref x) => x.as_slice(),
-            _ => fail!("Called `Value::bytes_ref()` on non `Bytes` value")
+            _ => panic!("Called `Value::bytes_ref()` on non `Bytes` value")
         }
     }
     pub fn unwrap_bytes(self) -> Vec<u8> {
         match self {
             Bytes(x) => x,
-            _ => fail!("Called `Value::unwrap_bytes()` on non `Bytes` value")
+            _ => panic!("Called `Value::unwrap_bytes()` on non `Bytes` value")
         }
     }
     pub fn unwrap_bytes_or(self, y: Vec<u8>) -> Vec<u8> {
@@ -133,7 +133,7 @@ impl Value {
     pub fn get_int(&self) -> i64 {
         match *self {
             Int(x) => x,
-            _ => fail!("Called `Value::get_int()` on non `Int` value")
+            _ => panic!("Called `Value::get_int()` on non `Int` value")
         }
     }
     pub fn get_int_or(&self, y: i64) -> i64 {
@@ -151,7 +151,7 @@ impl Value {
     pub fn get_uint(&self) -> u64 {
         match *self {
             UInt(x) => x,
-            _ => fail!("Called `Value::get_uint()` on non `UInt` value")
+            _ => panic!("Called `Value::get_uint()` on non `UInt` value")
         }
     }
     pub fn get_uint_or(&self, y: u64) -> u64 {
@@ -169,7 +169,7 @@ impl Value {
     pub fn get_float(&self) -> f64 {
         match *self {
             Float(x) => x,
-            _ => fail!("Called `Value::get_float()` on non `Float` value")
+            _ => panic!("Called `Value::get_float()` on non `Float` value")
         }
     }
     pub fn get_float_or(&self, y: f64) -> f64 {
@@ -187,19 +187,19 @@ impl Value {
     pub fn get_year(&self) -> u16 {
         match *self {
             Date(y, _, _, _, _, _, _) => y,
-            _ => fail!("Called `Value::get_year()` on non `Date` value")
+            _ => panic!("Called `Value::get_year()` on non `Date` value")
         }
     }
     pub fn get_month(&self) -> u8 {
         match *self {
             Date(_, m, _, _, _, _, _) => m,
-            _ => fail!("Called `Value::get_month()` on non `Date` value")
+            _ => panic!("Called `Value::get_month()` on non `Date` value")
         }
     }
     pub fn get_day(&self) -> u8 {
         match *self {
             Date(_, _, d, _, _, _, _) => d,
-            _ => fail!("Called `Value::get_day()` on non `Date` value")
+            _ => panic!("Called `Value::get_day()` on non `Date` value")
         }
     }
     pub fn is_time(&self) -> bool {
@@ -212,41 +212,41 @@ impl Value {
         match *self {
             Time(false, _, _, _, _, _) => false,
             Time(true, _, _, _, _, _) => true,
-            _ => fail!("Called `Value::is_neg()` on non `Time` value")
+            _ => panic!("Called `Value::is_neg()` on non `Time` value")
         }
     }
     pub fn get_days(&self) -> u32 {
         match *self {
             Time(_, d, _, _, _, _) => d,
-            _ => fail!("Called `Value::get_days()` on non `Time` value")
+            _ => panic!("Called `Value::get_days()` on non `Time` value")
         }
     }
     pub fn get_hour(&self) -> u8 {
         match *self {
             Date(_, _, _, h, _, _, _) => h,
             Time(_, _, h, _, _, _) => h,
-            _ => fail!("Called `Value::get_hour()` on non `Date` nor `Time` value")
+            _ => panic!("Called `Value::get_hour()` on non `Date` nor `Time` value")
         }
     }
     pub fn get_min(&self) -> u8 {
         match *self {
             Date(_, _, _, _, i, _, _) => i,
             Time(_, _, _, i, _, _) => i,
-            _ => fail!("Called `Value::get_min()` on non `Date` nor `Time` value")
+            _ => panic!("Called `Value::get_min()` on non `Date` nor `Time` value")
         }
     }
     pub fn get_sec(&self) -> u8 {
         match *self {
             Date(_, _, _, _, _, s, _) => s,
             Time(_, _, _, _, s, _) => s,
-            _ => fail!("Called `Value::get_sec()` on non `Date` nor `Time` value")
+            _ => panic!("Called `Value::get_sec()` on non `Date` nor `Time` value")
         }
     }
     pub fn get_usec(&self) -> u32 {
         match *self {
             Date(_, _, _, _, _, _, u) => u,
             Time(_, _, _, _, _, u) => u,
-            _ => fail!("Called `Value::get_usec()` on non `Date` nor `Time` value")
+            _ => panic!("Called `Value::get_usec()` on non `Date` nor `Time` value")
         }
     }
     pub fn to_bin(&self) -> IoResult<Vec<u8>> {
@@ -515,7 +515,7 @@ impl ToValue for Duration {
 }
 
 pub trait FromValue {
-    /// Will fail if could not retrieve `Self` from `Value`
+    /// Will panic if could not retrieve `Self` from `Value`
     fn from_value(v: &Value) -> Self;
 
     /// Will return `None` if could not retrieve `Self` from `Value`
@@ -547,7 +547,7 @@ impl<T:FromValue> FromValue for Option<T> {
     }
 }
 
-/// Will fail if could not retrieve `Self` from `Value`
+/// Will panic if could not retrieve `Self` from `Value`
 pub fn from_value<T: FromValue>(v: &Value) -> T {
     FromValue::from_value(v)
 }
@@ -908,20 +908,20 @@ mod test {
 
     #[test]
     #[should_fail]
-    fn test_from_value_fail_i8_1() {
+    fn test_from_value_panic_i8_1() {
         from_value::<i8>(&Int(500i64));
     }
 
     #[test]
     #[should_fail]
-    fn test_from_value_fail_i8_2() {
+    fn test_from_value_panic_i8_2() {
         from_value::<i8>(&Bytes(b"500".to_vec()));
     }
 
     #[test]
     #[should_fail]
     #[allow(non_snake_case)]
-    fn test_from_value_fail_Timespec() {
+    fn test_from_value_panic_Timespec() {
         from_value::<Timespec>(&Bytes(b"2014-50-01".to_vec()));
     }
 }

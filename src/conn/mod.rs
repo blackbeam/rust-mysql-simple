@@ -541,7 +541,7 @@ impl MyConn {
                         ctx.set_certificate_file(client_cert, x509::PEM);
                         ctx.set_private_key_file(client_key, x509::PEM);
                     },
-                    _ => { fail!("unreachable") }
+                    _ => { panic!("unreachable") }
                 }
                 self.stream = Some(SecureStream(try_ssl!(ssl::SslStream::new(&ctx, s))));
                 self.ssl_context = Some(ctx);
