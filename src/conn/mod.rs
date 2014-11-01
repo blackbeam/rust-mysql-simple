@@ -3,7 +3,7 @@ use openssl::{ssl, x509};
 
 use std::{uint};
 use std::default::{Default};
-use std::io::{Reader, File, IoResult, Seek, Stream,
+use std::io::{Reader, File, IoResult, Seek,
               SeekCur, EndOfFile, BufReader, MemWriter};
 use std::io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
@@ -15,19 +15,26 @@ use super::consts;
 use super::io::{MyReader,
                 MyWriter,
                 InsecureStream,
+                PlainStream,
                 TCPStream,
                 UNIXStream,
                 MyStream};
 #[cfg(feature = "ssl")]
-use super::io::{SecureStream};
-use super::error::{MyIoError, MySqlError, MyDriverError, CouldNotConnect,
-                   UnsupportedProtocol, PacketOutOfSync, PacketTooLarge,
-                   Protocol41NotSet, UnexpectedPacket, MismatchedStmtParams,
-                   SetupError, MyResult};
+use super::io::{SecureStream, MySslStream};
+use super::error::{MyIoError,
+                   MySqlError,
+                   MyDriverError,
+                   CouldNotConnect,
+                   UnsupportedProtocol,
+                   Protocol41NotSet,
+                   UnexpectedPacket,
+                   MismatchedStmtParams,
+                   SetupError,
+                   MyResult};
 #[cfg(feature = "ssl")]
 use super::error::{MySslError, SslNotSupported};
 use super::scramble::{scramble};
-use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket};
+use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time, ToValue};
 
 pub mod pool;
@@ -202,13 +209,13 @@ impl Column {
     fn from_payload(command: u8, pld: &[u8]) -> IoResult<Column> {
         let mut reader = BufReader::new(pld);
         // Skip catalog
-        try!(reader.skip_lenenc_bytes());
+        let _ = try!(reader.read_lenenc_bytes());
         let schema = try!(reader.read_lenenc_bytes());
         let table = try!(reader.read_lenenc_bytes());
         let org_table = try!(reader.read_lenenc_bytes());
         let name = try!(reader.read_lenenc_bytes());
         let org_name = try!(reader.read_lenenc_bytes());
-        try!(reader.skip_lenenc_int());
+        let _ = try!(reader.read_lenenc_int());
         let character_set = try!(reader.read_le_u16());
         let column_length = try!(reader.read_le_u32());
         let column_type = try!(reader.read_u8());
@@ -369,6 +376,7 @@ impl Default for MyOpts {
 pub struct MyConn {
     opts: MyOpts,
     stream: Option<MyStream>,
+    server_version: ServerVersion,
     affected_rows: u64,
     last_insert_id: u64,
     max_allowed_packet: uint,
@@ -402,6 +410,7 @@ impl Default for MyConn {
             connected: false,
             has_results: false,
             ssl_context: None,
+            server_version: (0, 0, 0),
         }
     }
 }
@@ -423,6 +432,7 @@ impl Default for MyConn {
             opts: Default::default(),
             connected: false,
             has_results: false,
+            server_version: (0, 0, 0),
         }
     }
 }
@@ -481,43 +491,82 @@ impl MyConn {
     #[cfg(feature = "ssl")]
     /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
-        self.stream = None;
-        self.seq_id = 0;
-        self.capability_flags = consts::CapabilityFlags::empty();
-        self.status_flags = consts::StatusFlags::empty();
-        self.connection_id = 0;
-        self.character_set = 0;
-        self.affected_rows = 0;
-        self.last_insert_id = 0;
-        self.last_command = 0;
-        self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
-        self.connected = false;
-        self.has_results = false;
-        self.ssl_context = None;
-        try!(self.connect_stream());
-        self.connect()
+        if self.server_version > (5, 7, 2) {
+            try!(self.write_command(consts::COM_RESET_CONNECTION));
+            self.read_packet()
+            .and_then(|pld| {
+                match pld[0] {
+                    0 => {
+                        let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+                        self.handle_ok(&ok);
+                        self.last_command = 0;
+                        Ok(())
+                    },
+                    _ => {
+                        let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
+                        Err(MySqlError(err))
+                    }
+                }
+            })
+        } else {
+            self.stream = None;
+            self.seq_id = 0;
+            self.capability_flags = consts::CapabilityFlags::empty();
+            self.status_flags = consts::StatusFlags::empty();
+            self.connection_id = 0;
+            self.character_set = 0;
+            self.affected_rows = 0;
+            self.last_insert_id = 0;
+            self.last_command = 0;
+            self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
+            self.connected = false;
+            self.has_results = false;
+            self.ssl_context = None;
+            try!(self.connect_stream());
+            self.connect()
+        }
+
     }
 
     #[cfg(not(feature = "ssl"))]
     /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
-        self.stream = None;
-        self.seq_id = 0;
-        self.capability_flags = consts::CapabilityFlags::empty();
-        self.status_flags = consts::StatusFlags::empty();
-        self.connection_id = 0;
-        self.character_set = 0;
-        self.affected_rows = 0;
-        self.last_insert_id = 0;
-        self.last_command = 0;
-        self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
-        self.connected = false;
-        self.has_results = false;
-        try!(self.connect_stream());
-        self.connect()
+        if self.server_version > (5, 7, 2) {
+            try!(self.write_command(consts::COM_RESET_CONNECTION));
+            self.read_packet()
+            .and_then(|pld| {
+                match pld[0] {
+                    0 => {
+                        let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+                        self.handle_ok(&ok);
+                        self.last_command = 0;
+                        Ok(())
+                    },
+                    _ => {
+                        let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
+                        Err(MySqlError(err))
+                    }
+                }
+            })
+        } else {
+            self.stream = None;
+            self.seq_id = 0;
+            self.capability_flags = consts::CapabilityFlags::empty();
+            self.status_flags = consts::StatusFlags::empty();
+            self.connection_id = 0;
+            self.character_set = 0;
+            self.affected_rows = 0;
+            self.last_insert_id = 0;
+            self.last_command = 0;
+            self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
+            self.connected = false;
+            self.has_results = false;
+            try!(self.connect_stream());
+            self.connect()
+        }
     }
 
-    fn get_mut_stream<'a>(&'a mut self) -> &'a mut Stream {
+    fn get_mut_stream<'a>(&'a mut self) -> &'a mut MyStream {
         self.stream.as_mut().unwrap()
     }
 
@@ -525,7 +574,7 @@ impl MyConn {
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         let stream = self.stream.take().unwrap();
         match stream {
-            InsecureStream(s) => {
+            InsecureStream(mut s) => {
                 let mut ctx = try_ssl!(ssl::SslContext::new(ssl::Tlsv1));
                 if self.opts.verify_peer {
                     ctx.set_verify(ssl::SslVerifyPeer, None);
@@ -543,7 +592,8 @@ impl MyConn {
                     },
                     _ => { panic!("unreachable") }
                 }
-                self.stream = Some(SecureStream(try_ssl!(ssl::SslStream::new(&ctx, s))));
+                s.wrapped = true;
+                self.stream = Some(SecureStream(MySslStream(try_ssl!(ssl::SslStream::new(&ctx, s)))));
                 self.ssl_context = Some(ctx);
             },
             s => {
@@ -557,7 +607,7 @@ impl MyConn {
         if self.opts.unix_addr.is_some() {
             match UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
                 Ok(stream) => {
-                    self.stream = Some(InsecureStream(UNIXStream(stream)));
+                    self.stream = Some(InsecureStream(PlainStream{s: UNIXStream(stream), wrapped: false}));
                     return Ok(());
                 },
                 _ => {
@@ -579,7 +629,7 @@ impl MyConn {
                     // keepalive one hour
                     let keepalive_timeout = self.opts.keepalive_timeout.clone();
                     try_io!(stream.set_keepalive(keepalive_timeout));
-                    self.stream = Some(InsecureStream(TCPStream(stream)));
+                    self.stream = Some(InsecureStream(PlainStream{s: TCPStream(stream), wrapped: false}));
                     return Ok(());
                 },
                 _ => {
@@ -591,63 +641,17 @@ impl MyConn {
     }
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
-        let mut output = Vec::new();
-        let mut pos = 0;
-        loop {
-            let payload_len = try_io!(self.get_mut_stream().read_le_uint_n(3)) as uint;
-            let seq_id = try_io!(self.get_mut_stream().read_u8());
-            if seq_id != self.seq_id {
-                return Err(MyDriverError(PacketOutOfSync));
-            }
-            self.seq_id += 1;
-            if payload_len == consts::MAX_PAYLOAD_LEN {
-                output.reserve(pos + consts::MAX_PAYLOAD_LEN);
-                unsafe { output.set_len(pos + consts::MAX_PAYLOAD_LEN); }
-                try_io!(self.get_mut_stream()
-                            .read_at_least(consts::MAX_PAYLOAD_LEN,
-                                           output.slice_from_mut(pos)));
-                pos += consts::MAX_PAYLOAD_LEN;
-            } else if payload_len == 0 {
-                break;
-            } else {
-                output.reserve(pos + payload_len);
-                unsafe { output.set_len(pos + payload_len); }
-                try_io!(self.get_mut_stream()
-                            .read_at_least(payload_len,
-                                           output.slice_from_mut(pos)));
-                break;
-            }
-        }
-        Ok(output)
+        let old_seq_id = self.seq_id;
+        let (data, seq_id) = try!(self.get_mut_stream().read_packet(old_seq_id));
+        self.seq_id = seq_id;
+        Ok(data)
     }
 
     fn write_packet(&mut self, data: &Vec<u8>) -> MyResult<()> {
-        if data.len() > self.max_allowed_packet &&
-           self.max_allowed_packet < consts::MAX_PAYLOAD_LEN {
-            return Err(MyDriverError(PacketTooLarge));
-        }
-        if data.len() == 0 {
-            let seq_id = self.seq_id;
-            try_io!(self.get_mut_stream().write([0u8, 0u8, 0u8, seq_id]));
-            self.seq_id += 1;
-            return Ok(());
-        }
-        let mut last_was_max = false;
-        for chunk in data.as_slice().chunks(consts::MAX_PAYLOAD_LEN) {
-            let chunk_len = chunk.len();
-            let mut writer = MemWriter::with_capacity(4 + chunk_len);
-            last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
-            try_io!(writer.write_le_uint_n(chunk_len as u64, 3));
-            try_io!(writer.write_u8(self.seq_id));
-            self.seq_id += 1;
-            try_io!(writer.write(chunk));
-            try_io!(self.get_mut_stream().write(writer.unwrap().as_slice()));
-        }
-        if last_was_max {
-            let seq_id = self.seq_id;
-            try_io!(self.get_mut_stream().write([0u8, 0u8, 0u8, seq_id]));
-            self.seq_id += 1;
-        }
+        let seq_id = self.seq_id;
+        let max_allowed_packet = self.max_allowed_packet;
+        self.seq_id = try!(self.get_mut_stream()
+                               .write_packet(data.as_slice(), seq_id, max_allowed_packet));
         Ok(())
     }
 
@@ -656,6 +660,7 @@ impl MyConn {
         self.status_flags = hp.status_flags;
         self.connection_id = hp.connection_id;
         self.character_set = hp.character_set;
+        self.server_version = hp.server_version;
     }
 
     fn handle_ok(&mut self, op: &OkPacket) {
@@ -710,7 +715,7 @@ impl MyConn {
             }
             self.handle_handshake(&handshake);
             if self.opts.ssl_opts.is_some() {
-                if let Some(InsecureStream(TCPStream(_))) = self.stream {
+                if let Some(InsecureStream(PlainStream{s: TCPStream(_), ..})) = self.stream {
                     if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
                         return Err(MyDriverError(SslNotSupported));
                     } else {
@@ -1625,15 +1630,10 @@ mod test {
     #[test]
     fn test_reset() {
         let mut conn = MyConn::new(get_opts()).unwrap();
-        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
-        assert!(conn.query("CREATE DATABASE test").is_ok());
-        assert!(conn.query("USE test").is_ok());
+        assert!(conn.query("CREATE TEMPORARY TABLE `db`.`test` (`test` VARCHAR(255) NULL);").is_ok());
+        assert!(conn.query("SELECT * FROM `db`.`test`;").is_ok());
         assert!(conn.reset().is_ok());
-        for row in &mut conn.query("SELECT DATABASE()") {
-            assert!(row.is_ok());
-            let row = row.unwrap();
-            assert_eq!(row, vec!(NULL));
-        }
+        assert!(conn.query("SELECT * FROM `db`.`test`;").is_err());
     }
 
     #[test]

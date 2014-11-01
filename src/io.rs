@@ -1,11 +1,16 @@
-use std::io::{IoResult, SeekCur, Seek, Reader, Writer};
+use std::io::{IoResult, Reader, Writer, MemWriter};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
+use super::error::{MyResult,
+                   MyDriverError,
+                   PacketTooLarge,
+                   PacketOutOfSync,
+                   MyIoError};
 use std::io::net::{tcp, pipe};
 #[cfg(feature = "openssl")]
 use openssl::ssl;
 
-pub trait MyReader: Reader + Seek {
+pub trait MyReader: Reader {
 	fn read_lenenc_int(&mut self) -> IoResult<u64> {
 		let head_byte = try!(self.read_u8());
 		let mut length;
@@ -18,15 +23,6 @@ pub trait MyReader: Reader + Seek {
 		return self.read_le_uint_n(length);
 	}
 
-    fn skip_lenenc_int(&mut self) -> IoResult<()> {
-        match try!(self.read_u8()) {
-            0xfc => self.seek(2, SeekCur),
-            0xfd => self.seek(3, SeekCur),
-            0xfe => self.seek(8, SeekCur),
-            _ => Ok(())
-        }
-    }
-
 	fn read_lenenc_bytes(&mut self) -> IoResult<Vec<u8>> {
 		let len = try!(self.read_lenenc_int());
 		if len > 0 {
@@ -35,15 +31,6 @@ pub trait MyReader: Reader + Seek {
 			Ok(Vec::with_capacity(0))
 		}
 	}
-
-    fn skip_lenenc_bytes(&mut self) -> IoResult<()> {
-        let len = try!(self.read_lenenc_int());
-        if len > 0 {
-            self.seek(len as i64, SeekCur)
-        } else {
-            Ok(())
-        }
-    }
 
 	fn read_to_null(&mut self) -> IoResult<Vec<u8>> {
 		let mut buf = Vec::new();
@@ -157,9 +144,39 @@ pub trait MyReader: Reader + Seek {
             _ => Ok(NULL)
         }
 	}
+
+    /// Reads mysql packet payload returns it with new seq_id value.
+    fn read_packet(&mut self, mut seq_id: u8) -> MyResult<(Vec<u8>, u8)> {
+        let mut output = Vec::new();
+        let mut pos = 0;
+        loop {
+            let payload_len = try_io!(self.read_le_uint_n(3)) as uint;
+            let srv_seq_id = try_io!(self.read_u8());
+            if srv_seq_id != seq_id {
+                return Err(MyDriverError(PacketOutOfSync));
+            }
+            seq_id += 1;
+            if payload_len == consts::MAX_PAYLOAD_LEN {
+                output.reserve(pos + consts::MAX_PAYLOAD_LEN);
+                unsafe { output.set_len(pos + consts::MAX_PAYLOAD_LEN); }
+                try_io!(self.read_at_least(consts::MAX_PAYLOAD_LEN,
+                                           output.slice_from_mut(pos)));
+                pos += consts::MAX_PAYLOAD_LEN;
+            } else if payload_len == 0 {
+                break;
+            } else {
+                output.reserve(pos + payload_len);
+                unsafe { output.set_len(pos + payload_len); }
+                try_io!(self.read_at_least(payload_len,
+                                           output.slice_from_mut(pos)));
+                break;
+            }
+        }
+        Ok((output, seq_id))
+    }
 }
 
-impl<T:Reader + Seek> MyReader for T {}
+impl<T:Reader> MyReader for T {}
 
 pub trait MyWriter: Writer {
 	fn write_le_uint_n(&mut self, x: u64, len: uint) -> IoResult<()> {
@@ -191,13 +208,52 @@ pub trait MyWriter: Writer {
 		try!(self.write_lenenc_int(bytes.len() as u64));
 		self.write(bytes)
 	}
+
+    /// Writes data as mysql packet and returns new seq_id value.
+    fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: uint) -> MyResult<u8> {
+        if data.len() > max_allowed_packet &&
+           max_allowed_packet < consts::MAX_PAYLOAD_LEN {
+            return Err(MyDriverError(PacketTooLarge));
+        }
+        if data.len() == 0 {
+            try_io!(self.write([0u8, 0u8, 0u8, seq_id]));
+            return Ok(seq_id + 1);
+        }
+        let mut last_was_max = false;
+        for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
+            let chunk_len = chunk.len();
+            let mut writer = MemWriter::with_capacity(4 + chunk_len);
+            last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
+            try_io!(writer.write_le_uint_n(chunk_len as u64, 3));
+            try_io!(writer.write_u8(seq_id));
+            seq_id += 1;
+            try_io!(writer.write(chunk));
+            try_io!(self.write(writer.unwrap().as_slice()));
+        }
+        if last_was_max {
+            try_io!(self.write([0u8, 0u8, 0u8, seq_id]));
+            seq_id += 1;
+        }
+        Ok(seq_id)
+    }
 }
 
 impl<T:Writer> MyWriter for T {}
 
+#[cfg(feature = "openssl")]
+pub struct MySslStream(pub ssl::SslStream<PlainStream>);
+
+#[cfg(feature = "openssl")]
+impl Drop for MySslStream {
+    fn drop(&mut self) {
+        let MySslStream(ref mut s) = *self;
+        let _ = s.write_packet([consts::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+    }
+}
+
 pub enum MyStream {
     #[cfg(feature = "openssl")]
-    SecureStream(ssl::SslStream<PlainStream>),
+    SecureStream(MySslStream),
     InsecureStream(PlainStream),
 }
 
@@ -205,7 +261,7 @@ pub enum MyStream {
 impl Reader for MyStream {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
         match *self {
-            SecureStream(ref mut s) => s.read(buf),
+            SecureStream(MySslStream(ref mut s)) => s.read(buf),
             InsecureStream(ref mut s) => s.read(buf),
         }
     }
@@ -224,14 +280,14 @@ impl Reader for MyStream {
 impl Writer for MyStream {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
         match *self {
-            SecureStream(ref mut s) => s.write(buf),
+            SecureStream(MySslStream(ref mut s)) => s.write(buf),
             InsecureStream(ref mut s) => s.write(buf),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         match *self {
-            SecureStream(ref mut s) => s.flush(),
+            SecureStream(MySslStream(ref mut s)) => s.flush(),
             InsecureStream(ref mut s) => s.flush(),
         }
     }
@@ -252,14 +308,27 @@ impl Writer for MyStream {
     }
 }
 
-pub enum PlainStream {
+pub enum TcpOrUnixStream {
     TCPStream(tcp::TcpStream),
     UNIXStream(pipe::UnixStream),
 }
 
+pub struct PlainStream {
+    pub s: TcpOrUnixStream,
+    pub wrapped: bool,
+}
+
+impl Drop for PlainStream {
+    fn drop(&mut self) {
+        if ! self.wrapped {
+            let _ = self.write_packet([consts::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+        }
+    }
+}
+
 impl Reader for PlainStream {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        match *self {
+        match self.s {
             TCPStream(ref mut s) => s.read(buf),
             UNIXStream(ref mut s) => s.read(buf),
         }
@@ -268,14 +337,14 @@ impl Reader for PlainStream {
 
 impl Writer for PlainStream {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        match *self {
+        match self.s {
             TCPStream(ref mut s) => s.write(buf),
             UNIXStream(ref mut s) => s.write(buf),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
-        match *self {
+        match self.s {
             TCPStream(ref mut s) => s.flush(),
             UNIXStream(ref mut s) => s.flush(),
         }

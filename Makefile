@@ -33,11 +33,20 @@ test:
 
 	mkdir $(MYSQL_DATA_DIR)
 
-	mysql_install_db \
-		--no-defaults \
-		--basedir=$(BASEDIR) \
-		--datadir=$(MYSQL_DATA_DIR) \
-		--force
+	bash -c "mysql --version | grep 5.7 > /dev/null; \
+	         if [ $$? -eq 0 ]; \
+	         then \
+	             mysql_install_db \
+				     --no-defaults \
+		             --basedir=$(BASEDIR) \
+		             --datadir=$(MYSQL_DATA_DIR); \
+		     else \
+		         mysql_install_db \
+				     --no-defaults \
+		             --basedir=$(BASEDIR) \
+		             --datadir=$(MYSQL_DATA_DIR) \
+		             --force; \
+	         fi"
 
 	mysqld \
 		--no-defaults \
@@ -57,7 +66,12 @@ test:
 		--ssl-cipher=DHE-RSA-AES256-SHA \
 		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &
 	sleep 10
-	mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'
+	bash -c "if [ -e ~/.mysql_secret ]; \
+	         then \
+	             mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root -p\"`cat ~/.mysql_secret | grep -v Password`\" password 'password'; \
+	         else \
+	             mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'; \
+	         fi"
 
 	bash -c "\
 		if (RUST_TEST_TASKS=1 cargo test);\
