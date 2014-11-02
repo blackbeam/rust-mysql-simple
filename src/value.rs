@@ -890,12 +890,12 @@ mod test {
         assert_eq!(false, from_value::<bool>(&Int(0)));
         assert_eq!(true, from_value::<bool>(&Bytes(b"1".to_vec())));
         assert_eq!(false, from_value::<bool>(&Bytes(b"0".to_vec())));
-        assert_eq!(Timespec{sec: 1404255433 - now().tm_gmtoff as i64, nsec: 0},
-                   from_value::<Timespec>(&Bytes(b"2014-07-01 22:57:13".to_vec())));
-        assert_eq!(Timespec{sec: 1404255433 - now().tm_gmtoff as i64, nsec: 1000},
-                   from_value::<Timespec>(&Date(2014, 7, 1, 22, 57, 13, 1)));
-        assert_eq!(Timespec{sec: 1404172800 - now().tm_gmtoff as i64, nsec: 0},
-                   from_value::<Timespec>(&Bytes(b"2014-07-01".to_vec())));
+        assert_eq!(Timespec {sec: 1414866780 - now().tm_gmtoff as i64, nsec: 0},
+                   from_value::<Timespec>(&Bytes(b"2014-11-01 18:33:00".to_vec())));
+        assert_eq!(Timespec {sec: 1414866780 - now().tm_gmtoff as i64, nsec: 1000},
+                   from_value::<Timespec>(&Date(2014, 11, 1, 18, 33, 00, 1)));
+        assert_eq!(Timespec {sec: 1414800000 - now().tm_gmtoff as i64, nsec: 0},
+                   from_value::<Timespec>(&Bytes(b"2014-11-01".to_vec())));
         assert_eq!(Duration::milliseconds(-433830500),
                    from_value::<Duration>(&Bytes(b"-120:30:30.5".to_vec())));
     }
