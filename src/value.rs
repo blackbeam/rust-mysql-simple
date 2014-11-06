@@ -3,7 +3,6 @@ use std::from_str::{from_str};
 use std::str::{from_utf8};
 use std::num::{Bounded, pow};
 use std::time::{Duration};
-use std::i64::{parse_bytes};
 use time::{Tm, Timespec, now, strptime, at};
 use super::consts;
 use super::conn::{Column};
@@ -765,8 +764,8 @@ impl FromValue for Duration {
                     let xss: Vec<&[u8]> = btss.split(|x| *x == b'.').collect();
                     let ms: i64 = match xss.as_slice() {
                         [_, ms] if ms.len() <= 6 &&
-                                   parse_bytes(ms, 10).is_some() => {
-                            parse_bytes(ms, 10).unwrap() *
+                                   from_utf8(ms).and_then(from_str::<i64>).is_some() => {
+                            from_utf8(ms).and_then(from_str::<i64>).unwrap() *
                             pow::<i64>(10,  6 - ms.len())
                         },
                         [_, []] | [_] => 0,

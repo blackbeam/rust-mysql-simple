@@ -1,7 +1,6 @@
 #[cfg(feature = "openssl")]
 use openssl::{ssl, x509};
 
-use std::{uint};
 use std::default::{Default};
 use std::io::{Reader, File, IoResult, Seek,
               SeekCur, EndOfFile, BufReader, MemWriter};
@@ -11,6 +10,7 @@ use std::io::net::pipe::{UnixStream};
 use std::from_str::FromStr;
 use std::num::{FromPrimitive};
 use std::path::{BytesContainer};
+use std::str::{from_utf8};
 use super::consts;
 use super::io::{MyReader,
                 MyWriter,
@@ -622,8 +622,8 @@ impl MyConn {
         }
         if self.opts.tcp_addr.is_some() {
             match TcpStream::connect(
-                self.opts.tcp_addr.as_ref().unwrap().as_slice(),                     
-                self.opts.tcp_port)
+                (self.opts.tcp_addr.as_ref().unwrap().as_slice(),
+                self.opts.tcp_port))
             {
                 Ok(mut stream) => {
                     // keepalive one hour
@@ -1082,7 +1082,7 @@ impl MyConn {
             let max_allowed_packet = self.get_system_var("max_allowed_packet")
                                          .unwrap_or(NULL)
                                          .unwrap_bytes_or(Vec::with_capacity(0));
-            Ok(uint::parse_bytes(max_allowed_packet.as_slice(), 10).unwrap_or(0))
+            Ok(from_utf8(max_allowed_packet.as_slice()).and_then(from_str::<uint>).unwrap_or(0))
         }).and_then(|max_allowed_packet| {
             if max_allowed_packet == 0 {
                 Err(MyDriverError(SetupError))
