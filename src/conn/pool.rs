@@ -44,7 +44,7 @@ impl MyInnerPool {
 /// It will hold at least `min` connections and will create as many as `max`
 /// connections.
 ///
-/// ```
+/// ```ignore
 /// use mysql::conn::{MyOpts};
 /// use std::default::{Default};
 /// use mysql::conn::pool::{MyPool};
