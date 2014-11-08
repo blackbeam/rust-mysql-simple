@@ -849,7 +849,7 @@ impl MyConn {
         for &id in ids.iter() {
             match params[id as uint] {
                 Bytes(ref x) => {
-                    for chunk in x.as_slice().chunks(self.max_allowed_packet - 7) {
+                    for chunk in x.chunks(self.max_allowed_packet - 7) {
                         let chunk_len = chunk.len() + 7;
                         let mut writer = MemWriter::with_capacity(chunk_len);
                         try_io!(writer.write_le_u32(stmt.statement_id));

@@ -67,7 +67,7 @@ impl Value {
                     Err(_) => {
                         let mut s = String::from_str("0x");
                         for c in x.iter() {
-                            s.extend(format!("{:02X}", *c).as_slice().chars());
+                            s.extend(format!("{:02X}", *c).chars());
                         }
                         s
                     }
@@ -678,7 +678,7 @@ impl FromValue for Vec<u8> {
     }
     fn from_value_opt(v: &Value) -> Option<Vec<u8>> {
         match *v {
-            Bytes(ref bts) => Some(bts.as_slice().to_vec()),
+            Bytes(ref bts) => Some(bts.to_vec()),
             _ => None
         }
     }
