@@ -77,114 +77,133 @@ impl Value {
             }
         }
     }
+    #[inline]
     pub fn is_bytes(&self) -> bool {
         match *self {
             Bytes(..) => true,
             _ => false
         }
     }
+    #[inline]
     pub fn bytes_ref<'a>(&'a self) -> &'a [u8] {
         match *self {
             Bytes(ref x) => x[],
             _ => panic!("Called `Value::bytes_ref()` on non `Bytes` value")
         }
     }
+    #[inline]
     pub fn unwrap_bytes(self) -> Vec<u8> {
         match self {
             Bytes(x) => x,
             _ => panic!("Called `Value::unwrap_bytes()` on non `Bytes` value")
         }
     }
+    #[inline]
     pub fn unwrap_bytes_or(self, y: Vec<u8>) -> Vec<u8> {
         match self {
             Bytes(x) => x,
             _ => y
         }
     }
+    #[inline]
     pub fn is_int(&self) -> bool {
         match *self {
             Int(..) => true,
             _ => false
         }
     }
+    #[inline]
     pub fn get_int(&self) -> i64 {
         match *self {
             Int(x) => x,
             _ => panic!("Called `Value::get_int()` on non `Int` value")
         }
     }
+    #[inline]
     pub fn get_int_or(&self, y: i64) -> i64 {
         match *self {
             Int(x) => x,
             _ => y
         }
     }
+    #[inline]
     pub fn is_uint(&self) -> bool {
         match *self {
             UInt(..) => true,
             _ => false
         }
     }
+    #[inline]
     pub fn get_uint(&self) -> u64 {
         match *self {
             UInt(x) => x,
             _ => panic!("Called `Value::get_uint()` on non `UInt` value")
         }
     }
+    #[inline]
     pub fn get_uint_or(&self, y: u64) -> u64 {
         match *self {
             UInt(x) => x,
             _ => y
         }
     }
+    #[inline]
     pub fn is_float(&self) -> bool {
         match *self {
             Float(..) => true,
             _ => false
         }
     }
+    #[inline]
     pub fn get_float(&self) -> f64 {
         match *self {
             Float(x) => x,
             _ => panic!("Called `Value::get_float()` on non `Float` value")
         }
     }
+    #[inline]
     pub fn get_float_or(&self, y: f64) -> f64 {
         match *self {
             Float(x) => x,
             _ => y
         }
     }
+    #[inline]
     pub fn is_date(&self) -> bool {
         match *self {
             Date(..) => true,
             _ => false
         }
     }
+    #[inline]
     pub fn get_year(&self) -> u16 {
         match *self {
             Date(y, _, _, _, _, _, _) => y,
             _ => panic!("Called `Value::get_year()` on non `Date` value")
         }
     }
+    #[inline]
     pub fn get_month(&self) -> u8 {
         match *self {
             Date(_, m, _, _, _, _, _) => m,
             _ => panic!("Called `Value::get_month()` on non `Date` value")
         }
     }
+    #[inline]
     pub fn get_day(&self) -> u8 {
         match *self {
             Date(_, _, d, _, _, _, _) => d,
             _ => panic!("Called `Value::get_day()` on non `Date` value")
         }
     }
+    #[inline]
     pub fn is_time(&self) -> bool {
         match *self {
             Time(..) => true,
             _ => false
         }
     }
+    #[inline]
     pub fn is_neg(&self) -> bool {
         match *self {
             Time(false, _, _, _, _, _) => false,
@@ -192,12 +211,14 @@ impl Value {
             _ => panic!("Called `Value::is_neg()` on non `Time` value")
         }
     }
+    #[inline]
     pub fn get_days(&self) -> u32 {
         match *self {
             Time(_, d, _, _, _, _) => d,
             _ => panic!("Called `Value::get_days()` on non `Time` value")
         }
     }
+    #[inline]
     pub fn get_hour(&self) -> u8 {
         match *self {
             Date(_, _, _, h, _, _, _) => h,
@@ -205,6 +226,7 @@ impl Value {
             _ => panic!("Called `Value::get_hour()` on non `Date` nor `Time` value")
         }
     }
+    #[inline]
     pub fn get_min(&self) -> u8 {
         match *self {
             Date(_, _, _, _, i, _, _) => i,
@@ -212,6 +234,7 @@ impl Value {
             _ => panic!("Called `Value::get_min()` on non `Date` nor `Time` value")
         }
     }
+    #[inline]
     pub fn get_sec(&self) -> u8 {
         match *self {
             Date(_, _, _, _, _, s, _) => s,
@@ -219,6 +242,7 @@ impl Value {
             _ => panic!("Called `Value::get_sec()` on non `Date` nor `Time` value")
         }
     }
+    #[inline]
     pub fn get_usec(&self) -> u32 {
         match *self {
             Date(_, _, _, _, _, _, u) => u,
@@ -363,6 +387,7 @@ pub trait ToValue {
 }
 
 impl<T:ToValue> ToValue for Option<T> {
+    #[inline]
     fn to_value(&self) -> Value {
         match *self {
             None => NULL,
@@ -374,6 +399,7 @@ impl<T:ToValue> ToValue for Option<T> {
 macro_rules! to_value_impl_num(
     ($t:ty) => (
         impl ToValue for $t {
+            #[inline]
             fn to_value(&self) -> Value { Int(*self as i64) }
         }
     )
@@ -389,10 +415,12 @@ to_value_impl_num!(int)
 to_value_impl_num!(i64)
 
 impl ToValue for u64 {
+    #[inline]
     fn to_value(&self) -> Value { UInt(*self) }
 }
 
 impl ToValue for uint {
+    #[inline]
     fn to_value(&self) -> Value {
         let max: uint = Bounded::max_value();
         if *self as u64 <= max as u64 {
@@ -404,38 +432,47 @@ impl ToValue for uint {
 }
 
 impl ToValue for f32 {
+    #[inline]
     fn to_value(&self) -> Value { Float(*self as f64) }
 }
 
 impl ToValue for f64 {
+    #[inline]
     fn to_value(&self) -> Value { Float(*self) }
 }
 
 impl ToValue for bool {
+    #[inline]
     fn to_value(&self) -> Value { if *self { Int(1) } else { Int(0) }}
 }
 
 impl<'a> ToValue for &'a [u8] {
+    #[inline]
     fn to_value(&self) -> Value { Bytes(self.to_vec()) }
 }
 
 impl ToValue for Vec<u8> {
+    #[inline]
     fn to_value(&self) -> Value { Bytes(self.clone()) }
 }
 
 impl<'a> ToValue for &'a str {
+    #[inline]
     fn to_value(&self) -> Value { Bytes(self.as_bytes().to_vec()) }
 }
 
 impl ToValue for String {
+    #[inline]
     fn to_value(&self) -> Value { Bytes(self.as_bytes().to_vec()) }
 }
 
 impl ToValue for Value {
+    #[inline]
     fn to_value(&self) -> Value { self.clone() }
 }
 
 impl ToValue for Timespec {
+    #[inline]
     fn to_value(&self) -> Value {
         let t = at(*self);
         Date(t.tm_year as u16,
@@ -501,17 +538,21 @@ pub trait FromValue {
 }
 
 impl FromValue for Value {
+    #[inline]
     fn from_value(v: &Value) -> Value { v.clone() }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<Value> { Some(v.clone()) }
 }
 
 impl<T:FromValue> FromValue for Option<T> {
+    #[inline]
     fn from_value(v: &Value) -> Option<T> {
         match *v {
             NULL => None,
             _ => Some(from_value(v))
         }
     }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<Option<T>> {
         match *v {
             NULL => Some(None),
@@ -526,11 +567,13 @@ impl<T:FromValue> FromValue for Option<T> {
 }
 
 /// Will panic if could not retrieve `Self` from `Value`
+#[inline]
 pub fn from_value<T: FromValue>(v: &Value) -> T {
     FromValue::from_value(v)
 }
 
 /// Will return `None` if could not retrieve `Self` from `Value`
+#[inline]
 pub fn from_value_opt<T: FromValue>(v: &Value) -> Option<T> {
     FromValue::from_value_opt(v)
 }
@@ -538,9 +581,11 @@ pub fn from_value_opt<T: FromValue>(v: &Value) -> Option<T> {
 macro_rules! from_value_impl_num(
     ($t:ty) => (
         impl FromValue for $t {
+            #[inline]
             fn from_value(v: &Value) -> $t {
                 from_value_opt(v).expect("Error retrieving $t from value")
             }
+            #[inline]
             fn from_value_opt(v: &Value) -> Option<$t> {
                 let min: $t = Bounded::min_value();
                 let max: $t = Bounded::max_value();
@@ -567,9 +612,11 @@ from_value_impl_num!(int)
 from_value_impl_num!(uint)
 
 impl FromValue for i64 {
+    #[inline]
     fn from_value(v: &Value) -> i64 {
         from_value_opt(v).expect("Error retrieving i64 from value")
     }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<i64> {
         let max: i64 = Bounded::max_value();
         match *v {
@@ -584,9 +631,11 @@ impl FromValue for i64 {
 }
 
 impl FromValue for u64 {
+    #[inline]
     fn from_value(v: &Value) -> u64 {
         from_value_opt(v).expect("Error retrieving u64 from value")
     }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<u64> {
         match *v {
             Int(x) => Some(x as u64),
@@ -600,9 +649,11 @@ impl FromValue for u64 {
 }
 
 impl FromValue for f32 {
+    #[inline]
     fn from_value(v: &Value) -> f32 {
         from_value_opt(v).expect("Error retrieving f32 from value")
     }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<f32> {
         let min: f32 = Bounded::min_value();
         let max: f32 = Bounded::max_value();
@@ -617,9 +668,11 @@ impl FromValue for f32 {
 }
 
 impl FromValue for f64 {
+    #[inline]
     fn from_value(v: &Value) -> f64 {
         from_value_opt(v).expect("Error retrieving f64 from value")
     }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<f64> {
         match *v {
             Float(x) => Some(x),
@@ -632,9 +685,11 @@ impl FromValue for f64 {
 }
 
 impl FromValue for bool {
+    #[inline]
     fn from_value(v: &Value) -> bool {
         from_value_opt(v).expect("Error retrieving bool from value")
     }
+    #[inline]
     fn from_value_opt(v:&Value) -> Option<bool> {
         match *v {
             Int(x) if x == 0 => Some(false),
@@ -647,9 +702,11 @@ impl FromValue for bool {
 }
 
 impl FromValue for Vec<u8> {
+    #[inline]
     fn from_value(v: &Value) -> Vec<u8> {
         from_value_opt(v).expect("Error retrieving Vec<u8> from value")
     }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<Vec<u8>> {
         match *v {
             Bytes(ref bts) => Some(bts.to_vec()),
@@ -659,9 +716,11 @@ impl FromValue for Vec<u8> {
 }
 
 impl FromValue for String {
+    #[inline]
     fn from_value(v: &Value) -> String {
         from_value_opt(v).expect("Error retrieving String from value")
     }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<String> {
         match *v {
             Bytes(ref bts) => {
@@ -673,9 +732,11 @@ impl FromValue for String {
 }
 
 impl FromValue for Timespec {
+    #[inline]
     fn from_value(v: &Value) -> Timespec {
         from_value_opt(v).expect("Error retrieving Timespec from value")
     }
+    #[inline]
     fn from_value_opt(v: &Value) -> Option<Timespec> {
         match *v {
             Date(y, m, d, h, i, s, u) => {
