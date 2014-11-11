@@ -31,6 +31,7 @@
 #![feature(unsafe_destructor)]
 #![feature(phase)]
 #![feature(if_let)]
+#![feature(slicing_syntax)]
 
 
 #![allow(dead_code)]

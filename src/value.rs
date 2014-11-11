@@ -12,25 +12,6 @@ use super::io::{MyWriter, MyReader};
 lazy_static! {
     static ref TM_GMTOFF: i32 = now().tm_gmtoff;
     static ref TM_ISDST: i32 = now().tm_isdst;
-    static ref MIN_I8: i8 = Bounded::min_value();
-    static ref MAX_I8: i8 = Bounded::max_value();
-    static ref MIN_I16: i16 = Bounded::min_value();
-    static ref MAX_I16: i16 = Bounded::max_value();
-    static ref MIN_I32: i32 = Bounded::min_value();
-    static ref MAX_I32: i32 = Bounded::max_value();
-    static ref MIN_U8: u8 = Bounded::min_value();
-    static ref MAX_U8: u8 = Bounded::max_value();
-    static ref MIN_U16: u16 = Bounded::min_value();
-    static ref MAX_U16: u16 = Bounded::max_value();
-    static ref MIN_U32: u32 = Bounded::min_value();
-    static ref MAX_U32: u32 = Bounded::max_value();
-    static ref MIN_INT: int = Bounded::min_value();
-    static ref MAX_INT: int = Bounded::max_value();
-    static ref MIN_UINT: uint = Bounded::min_value();
-    static ref MAX_UINT: uint = Bounded::max_value();
-    static ref MAX_I64: i64 = Bounded::max_value();
-    static ref MIN_F32: f32 = Bounded::min_value();
-    static ref MAX_F32: f32 = Bounded::max_value();
 }
 
 
@@ -51,36 +32,33 @@ impl Value {
     /// Get correct string representation of a mysql value
     pub fn into_str(&self) -> String {
         match *self {
-            NULL => String::from_str("NULL"),
+            NULL => "NULL".into_string(),
             Bytes(ref x) => {
-                match String::from_utf8(x.clone()) {
-                    Ok(s) => {
-                        let replaced = s.replace("\x5c", "\x5c\x5c")
-                                        .replace("\x00", "\x5c\x00")
-                                        .replace("\n", "\x5c\n")
-                                        .replace("\r", "\x5c\r")
-                                        .replace("'", "\x5c'")
-                                        .replace("\"", "\x5c\"")
-                                        .replace("\x1a", "\x5c\x1a");
-                        format!("'{:s}'", replaced)
-                    },
-                    Err(_) => {
-                        let mut s = String::from_str("0x");
-                        for c in x.iter() {
-                            s.extend(format!("{:02X}", *c).chars());
-                        }
-                        s
+                String::from_utf8(x.clone()).ok().map_or_else(|| {
+                    let mut s = "0x".into_string();
+                    for c in x.iter() {
+                        s.extend(format!("{:02X}", *c).chars());
                     }
-                }
+                    s
+                }, |s: String| {
+                    let replaced = s.replace("\x5c", "\x5c\x5c")
+                                    .replace("\x00", "\x5c\x00")
+                                    .replace("\n", "\x5c\n")
+                                    .replace("\r", "\x5c\r")
+                                    .replace("'", "\x5c'")
+                                    .replace("\"", "\x5c\"")
+                                    .replace("\x1a", "\x5c\x1a");
+                    format!("'{:s}'", replaced)
+                })
             },
             Int(x) => format!("{:d}", x),
             UInt(x) => format!("{:u}", x),
             Float(x) => format!("{:f}", x),
-            Date(0, 0, 0, 0, 0, 0, 0) => "''".to_string(),
+            Date(0, 0, 0, 0, 0, 0, 0) => "''".into_string(),
             Date(y, m, d, 0, 0, 0, 0) => format!("'{:04u}-{:02u}-{:02u}'", y, m, d),
             Date(y, m, d, h, i, s, 0) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}'", y, m, d, h, i, s),
             Date(y, m, d, h, i, s, u) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}.{:06u}'", y, m, d, h, i, s, u),
-            Time(_, 0, 0, 0, 0, 0) => "''".to_string(),
+            Time(_, 0, 0, 0, 0, 0) => "''".into_string(),
             Time(neg, d, h, i, s, 0) => {
                 if neg {
                     format!("'-{:03u}:{:02u}:{:02u}'", d * 24 + h as u32, i, s)
@@ -107,7 +85,7 @@ impl Value {
     }
     pub fn bytes_ref<'a>(&'a self) -> &'a [u8] {
         match *self {
-            Bytes(ref x) => x.as_slice(),
+            Bytes(ref x) => x[],
             _ => panic!("Called `Value::bytes_ref()` on non `Bytes` value")
         }
     }
@@ -253,7 +231,7 @@ impl Value {
         match *self {
             NULL => (),
             Bytes(ref x) => {
-                try!(writer.write_lenenc_bytes(x.as_slice()));
+                try!(writer.write_lenenc_bytes(x[]));
             },
             Int(x) => {
                 try!(writer.write_le_i64(x));
@@ -314,12 +292,12 @@ impl Value {
         Ok(writer.unwrap())
     }
     pub fn from_payload(pld: &[u8], columns_count: uint) -> IoResult<Vec<Value>> {
-        let mut output: Vec<Value> = Vec::with_capacity(columns_count);
+        let mut output = Vec::with_capacity(columns_count);
         let mut reader = BufReader::new(pld);
         loop {
             if reader.eof() {
                 break;
-            } else if { let pos = try!(reader.tell()); pld[pos as uint] == 0xfb_u8 } {
+            } else if pld[try!(reader.tell()) as uint] == 0xfb {
                 try!(reader.seek(1, SeekCur));
                 output.push(NULL);
             } else {
@@ -331,12 +309,12 @@ impl Value {
     pub fn from_bin_payload(pld: &[u8], columns: &[Column]) -> IoResult<Vec<Value>> {
         let bit_offset = 2; // http://dev.mysql.com/doc/internals/en/null-bitmap.html
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
-        let mut bitmap: Vec<u8> = Vec::with_capacity(bitmap_len);
-        let mut values: Vec<Value> = Vec::with_capacity(columns.len());
+        let mut bitmap = Vec::with_capacity(bitmap_len);
+        let mut values = Vec::with_capacity(columns.len());
         for i in range(0, bitmap_len) {
             bitmap.push(pld[i+1]);
         }
-        let mut reader = BufReader::new(pld.slice_from(1 + bitmap_len));
+        let mut reader = BufReader::new(pld[1 + bitmap_len..]);
         for i in range(0, columns.len()) {
             let c = &columns[i];
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
@@ -351,7 +329,7 @@ impl Value {
     // (NULL-bitmap, values, ids of fields to send throwgh send_long_data)
     pub fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: uint) -> IoResult<(Vec<u8>, Vec<u8>, Option<Vec<u16>>)> {
         let bitmap_len = (params.len() + 7) / 8;
-        let mut large_ids: Vec<u16> = Vec::new();
+        let mut large_ids = Vec::new();
         let mut writer = MemWriter::new();
         let mut bitmap = Vec::from_elem(bitmap_len, 0u8);
         let mut i = 0u16;
@@ -364,7 +342,7 @@ impl Value {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
                         written += val.len();
-                        try!(writer.write(val.as_slice()));
+                        try!(writer.write(val[]));
                     } else {
                         large_ids.push(i);
                     }
@@ -416,7 +394,8 @@ impl ToValue for u64 {
 
 impl ToValue for uint {
     fn to_value(&self) -> Value {
-        if *self as u64 <= *MAX_I64 as u64 {
+        let max: uint = Bounded::max_value();
+        if *self as u64 <= max as u64 {
             Int(*self as i64)
         } else {
             UInt(*self as u64)
@@ -557,19 +536,19 @@ pub fn from_value_opt<T: FromValue>(v: &Value) -> Option<T> {
 }
 
 macro_rules! from_value_impl_num(
-    ($t:ty, $min:ident, $max:ident) => (
+    ($t:ty) => (
         impl FromValue for $t {
             fn from_value(v: &Value) -> $t {
                 from_value_opt(v).expect("Error retrieving $t from value")
             }
             fn from_value_opt(v: &Value) -> Option<$t> {
+                let min: $t = Bounded::min_value();
+                let max: $t = Bounded::max_value();
                 match *v {
-                    Int(x) if x >= *$min as i64 && x <= *$max as i64 => Some(x as $t),
-                    UInt(x) if x <= *$max as u64 => Some(x as $t),
+                    Int(x) if x >= min as i64 && x <= max as i64 => Some(x as $t),
+                    UInt(x) if x <= max as u64 => Some(x as $t),
                     Bytes(ref bts) => {
-                        from_utf8(bts.as_slice()).and_then(|s| {
-                            from_str::<$t>(s)
-                        })
+                        from_utf8(bts[]).and_then(from_str::<$t>)
                     },
                     _ => None
                 }
@@ -578,27 +557,26 @@ macro_rules! from_value_impl_num(
     )
 )
 
-from_value_impl_num!(i8, MIN_I8, MAX_I8)
-from_value_impl_num!(u8, MIN_U8, MAX_U8)
-from_value_impl_num!(i16, MIN_I16, MAX_I16)
-from_value_impl_num!(u16, MIN_U16, MAX_U16)
-from_value_impl_num!(i32, MIN_I32, MAX_I32)
-from_value_impl_num!(u32, MIN_U32, MAX_U32)
-from_value_impl_num!(int, MIN_INT, MAX_INT)
-from_value_impl_num!(uint, MIN_UINT, MAX_UINT)
+from_value_impl_num!(i8)
+from_value_impl_num!(u8)
+from_value_impl_num!(i16)
+from_value_impl_num!(u16)
+from_value_impl_num!(i32)
+from_value_impl_num!(u32)
+from_value_impl_num!(int)
+from_value_impl_num!(uint)
 
 impl FromValue for i64 {
     fn from_value(v: &Value) -> i64 {
         from_value_opt(v).expect("Error retrieving i64 from value")
     }
     fn from_value_opt(v: &Value) -> Option<i64> {
+        let max: i64 = Bounded::max_value();
         match *v {
             Int(x) => Some(x),
-            UInt(x) if x <= *MAX_I64 as u64 => Some(x as i64),
+            UInt(x) if x <= max as u64 => Some(x as i64),
             Bytes(ref bts) => {
-                from_utf8(bts.as_slice()).and_then(|s| {
-                    from_str::<i64>(s)
-                })
+                from_utf8(bts[]).and_then(from_str::<i64>)
             },
             _ => None
         }
@@ -614,9 +592,7 @@ impl FromValue for u64 {
             Int(x) => Some(x as u64),
             UInt(x) => Some(x),
             Bytes(ref bts) => {
-                from_utf8(bts.as_slice()).and_then(|s| {
-                    from_str::<u64>(s)
-                })
+                from_utf8(bts[]).and_then(from_str::<u64>)
             },
             _ => None
         }
@@ -628,12 +604,12 @@ impl FromValue for f32 {
         from_value_opt(v).expect("Error retrieving f32 from value")
     }
     fn from_value_opt(v: &Value) -> Option<f32> {
+        let min: f32 = Bounded::min_value();
+        let max: f32 = Bounded::max_value();
         match *v {
-            Float(x) if x >= *MIN_F32 as f64 && x <= *MAX_F32 as f64 => Some(x as f32),
+            Float(x) if x >= min as f64 && x <= max as f64 => Some(x as f32),
             Bytes(ref bts) => {
-                from_utf8(bts.as_slice()).and_then(|s| {
-                    from_str::<f32>(s)
-                })
+                from_utf8(bts[]).and_then(from_str::<f32>)
             },
             _ => None
         }
@@ -648,9 +624,7 @@ impl FromValue for f64 {
         match *v {
             Float(x) => Some(x),
             Bytes(ref bts) => {
-                from_utf8(bts.as_slice()).and_then(|s| {
-                    from_str::<f64>(s)
-                })
+                from_utf8(bts[]).and_then(from_str::<f64>)
             },
             _ => None
         }
@@ -691,9 +665,7 @@ impl FromValue for String {
     fn from_value_opt(v: &Value) -> Option<String> {
         match *v {
             Bytes(ref bts) => {
-                from_utf8(bts.as_slice()).and_then(|s| {
-                    Some(String::from_str(s))
-                })
+                String::from_utf8(bts.clone()).ok()
             },
             _ => None
         }
@@ -722,7 +694,7 @@ impl FromValue for Timespec {
                     }.to_timespec())
             },
             Bytes(ref bts) => {
-                from_utf8(bts.as_slice()).and_then(|s| {
+                from_utf8(bts[]).and_then(|s| {
                     strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).and_then(|mut tm| {
                     tm.tm_gmtoff = *TM_GMTOFF;
@@ -755,20 +727,23 @@ impl FromValue for Duration {
                 }
             },
             Bytes(ref bts) => {
-                let mut btss = bts.as_slice();
+                let mut btss = bts[];
                 let neg = btss[0] == b'-';
                 if neg {
-                    btss = bts.slice_from(1);
+                    btss = bts[1..];
                 }
                 let ms: i64 = {
                     let xss: Vec<&[u8]> = btss.split(|x| *x == b'.').collect();
-                    let ms: i64 = match xss.as_slice() {
-                        [_, ms] if ms.len() <= 6 &&
-                                   from_utf8(ms).and_then(from_str::<i64>).is_some() => {
-                            from_utf8(ms).and_then(from_str::<i64>).unwrap() *
-                            pow::<i64>(10,  6 - ms.len())
-                        },
+                    let ms: i64 = match xss[] {
                         [_, []] | [_] => 0,
+                        [_, ms] if ms.len() <= 6 => {
+                            let x = from_utf8(ms).and_then(from_str::<i64>);
+                            if x.is_some() {
+                                x.unwrap() * pow::<i64>(10,  6 - ms.len())
+                            } else {
+                                return None;
+                            }
+                        },
                         _ => {
                             return None;
                         }
