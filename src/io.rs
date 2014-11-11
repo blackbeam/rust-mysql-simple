@@ -4,8 +4,7 @@ use super::consts;
 use super::error::{MyResult,
                    MyDriverError,
                    PacketTooLarge,
-                   PacketOutOfSync,
-                   MyIoError};
+                   PacketOutOfSync};
 use std::io::net::{tcp, pipe};
 #[cfg(feature = "openssl")]
 use openssl::ssl;
@@ -150,8 +149,8 @@ pub trait MyReader: Reader {
         let mut output = Vec::new();
         let mut pos = 0;
         loop {
-            let payload_len = try_io!(self.read_le_uint_n(3)) as uint;
-            let srv_seq_id = try_io!(self.read_u8());
+            let payload_len = try!(self.read_le_uint_n(3)) as uint;
+            let srv_seq_id = try!(self.read_u8());
             if srv_seq_id != seq_id {
                 return Err(MyDriverError(PacketOutOfSync));
             }
@@ -159,7 +158,7 @@ pub trait MyReader: Reader {
             if payload_len == consts::MAX_PAYLOAD_LEN {
                 output.reserve(pos + consts::MAX_PAYLOAD_LEN);
                 unsafe { output.set_len(pos + consts::MAX_PAYLOAD_LEN); }
-                try_io!(self.read_at_least(consts::MAX_PAYLOAD_LEN,
+                try!(self.read_at_least(consts::MAX_PAYLOAD_LEN,
                                            output.slice_from_mut(pos)));
                 pos += consts::MAX_PAYLOAD_LEN;
             } else if payload_len == 0 {
@@ -167,7 +166,7 @@ pub trait MyReader: Reader {
             } else {
                 output.reserve(pos + payload_len);
                 unsafe { output.set_len(pos + payload_len); }
-                try_io!(self.read_at_least(payload_len,
+                try!(self.read_at_least(payload_len,
                                            output.slice_from_mut(pos)));
                 break;
             }
@@ -216,7 +215,7 @@ pub trait MyWriter: Writer {
             return Err(MyDriverError(PacketTooLarge));
         }
         if data.len() == 0 {
-            try_io!(self.write([0u8, 0u8, 0u8, seq_id]));
+            try!(self.write([0u8, 0u8, 0u8, seq_id]));
             return Ok(seq_id + 1);
         }
         let mut last_was_max = false;
@@ -224,14 +223,14 @@ pub trait MyWriter: Writer {
             let chunk_len = chunk.len();
             let mut writer = MemWriter::with_capacity(4 + chunk_len);
             last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
-            try_io!(writer.write_le_uint_n(chunk_len as u64, 3));
-            try_io!(writer.write_u8(seq_id));
+            try!(writer.write_le_uint_n(chunk_len as u64, 3));
+            try!(writer.write_u8(seq_id));
             seq_id += 1;
-            try_io!(writer.write(chunk));
-            try_io!(self.write(writer.unwrap().as_slice()));
+            try!(writer.write(chunk));
+            try!(self.write(writer.unwrap().as_slice()));
         }
         if last_was_max {
-            try_io!(self.write([0u8, 0u8, 0u8, seq_id]));
+            try!(self.write([0u8, 0u8, 0u8, seq_id]));
             seq_id += 1;
         }
         Ok(seq_id)

@@ -4,7 +4,6 @@ use regex::Regex;
 use super::io::{MyReader};
 use super::consts;
 use super::error;
-use super::error::{MyIoError};
 
 #[deriving(Clone, Eq, PartialEq)]
 pub struct OkPacket {
@@ -121,36 +120,36 @@ impl HandshakePacket {
         let mut status_flags = consts::StatusFlags::empty();
         let payload_len = pld.len();
         let mut reader = BufReader::new(pld);
-        let protocol_version = try_io!(reader.read_u8());
-        let version_bytes = try_io!(reader.read_to_null());
+        let protocol_version = try!(reader.read_u8());
+        let version_bytes = try!(reader.read_to_null());
         let server_version = try!(parse_version(version_bytes.as_slice()));
-        let connection_id = try_io!(reader.read_le_u32());
-        try_io!(reader.push(8, &mut auth_plugin_data));
+        let connection_id = try!(reader.read_le_u32());
+        try!(reader.push(8, &mut auth_plugin_data));
         // skip filler
-        try_io!(reader.seek(1, SeekCur));
-        let lower_cf = try_io!(reader.read_le_u16());
+        try!(reader.seek(1, SeekCur));
+        let lower_cf = try!(reader.read_le_u16());
         let mut capability_flags = consts::CapabilityFlags::from_bits_truncate(lower_cf as u32);
-        if try_io!(reader.tell()) != payload_len as u64 {
-            character_set = try_io!(reader.read_u8());
-            status_flags = consts::StatusFlags::from_bits_truncate(try_io!(reader.read_le_u16()));
-            let upper_cf = try_io!(reader.read_le_u16());
+        if try!(reader.tell()) != payload_len as u64 {
+            character_set = try!(reader.read_u8());
+            status_flags = consts::StatusFlags::from_bits_truncate(try!(reader.read_le_u16()));
+            let upper_cf = try!(reader.read_le_u16());
             capability_flags.insert(consts::CapabilityFlags::from_bits_truncate((upper_cf as u32) << 16));
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                length_of_auth_plugin_data = try_io!(reader.read_u8()) as i16;
+                length_of_auth_plugin_data = try!(reader.read_u8()) as i16;
             } else {
-                try_io!(reader.seek(1, SeekCur));
+                try!(reader.seek(1, SeekCur));
             }
-            try_io!(reader.seek(10, SeekCur));
+            try!(reader.seek(10, SeekCur));
             if capability_flags.contains(consts::CLIENT_SECURE_CONNECTION) {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
-                try_io!(reader.push(len as uint, &mut auth_plugin_data));
+                try!(reader.push(len as uint, &mut auth_plugin_data));
                 if auth_plugin_data[auth_plugin_data.len() - 1] == 0u8 {
                     auth_plugin_data.pop();
                 }
             }
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                auth_plugin_name = try_io!(reader.read_to_end());
+                auth_plugin_name = try!(reader.read_to_end());
                 if auth_plugin_name[auth_plugin_name.len() - 1] == 0u8 {
                     auth_plugin_name.pop();
                 }

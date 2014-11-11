@@ -1,18 +1,69 @@
-#![macro_escape]
-
 #[cfg(feature = "openssl")]
 use openssl::ssl::error::{SslError};
 use core::fmt;
-use std::io::{IoError};
-pub use super::packet::{ErrPacket};
+use std::io;
+use std::error;
+pub use super::packet;
 
 #[deriving(Eq, PartialEq)]
 pub enum MyError {
-	MyIoError(IoError),
-	MySqlError(ErrPacket),
+	MyIoError(io::IoError),
+	MySqlError(packet::ErrPacket),
 	MyDriverError(DriverError),
 	#[cfg(feature = "openssl")]
 	MySslError(SslError),
+}
+
+impl error::Error for MyError {
+	#[cfg(feature = "ssl")]
+	fn description(&self) -> &str {
+		match *self {
+			MyIoError(_) => "I/O Error",
+			MySqlError(_) => "MySql server error",
+			MyDriverError(_) => "driver error",
+			MySslError(_) => "ssl error",
+		}
+	}
+
+	#[cfg(not(feature = "ssl"))]
+	fn description(&self) -> &str {
+		match *self {
+			MyIoError(_) => "I/O Error",
+			MySqlError(_) => "MySql server error",
+			MyDriverError(_) => "driver error",
+		}
+	}
+
+	fn detail(&self) -> Option<String> {
+		Some(format!("{}", self))
+	}
+
+	fn cause(&self) -> Option<&error::Error> {
+		match *self {
+			MyIoError(ref err) => Some(err as &error::Error),
+			MyDriverError(ref err) => Some(err as &error::Error),
+			_ => None
+		}
+	}
+}
+
+impl error::FromError<io::IoError> for MyError {
+	fn from_error(err: io::IoError) -> MyError {
+		MyIoError(err)
+	}
+}
+
+impl error::FromError<DriverError> for MyError {
+	fn from_error(err: DriverError) -> MyError {
+		MyDriverError(err)
+	}
+}
+
+#[cfg(feature = "openssl")]
+impl error::FromError<SslError> for MyError {
+	fn from_error(err: SslError) -> MyError {
+		MySslError(err)
+	}
 }
 
 #[cfg(feature = "ssl")]
@@ -38,26 +89,6 @@ impl fmt::Show for MyError {
 	}
 }
 
-#[macro_export]
-macro_rules! try_io(
-	($code:expr) => (
-		match $code {
-			Ok(x) => x,
-			Err(e) => return Err(MyIoError(e))
-		}
-	)
-)
-
-#[macro_export]
-macro_rules! try_ssl(
-	($code:expr) => (
-		match $code {
-			Ok(x) => x,
-			Err(e) => return Err(MySslError(e)),
-		}
-	)
-)
-
 #[deriving(Eq, PartialEq)]
 pub enum DriverError {
 	CouldNotConnect(Option<String>),
@@ -71,6 +102,16 @@ pub enum DriverError {
 	SetupError,
 	SslNotSupported,
 	CouldNotParseVersion,
+}
+
+impl error::Error for DriverError {
+	fn description(&self) -> &str {
+		"MySql driver error"
+	}
+
+	fn detail(&self) -> Option<String> {
+		Some(format!("{}", self))
+	}
 }
 
 impl fmt::Show for DriverError {

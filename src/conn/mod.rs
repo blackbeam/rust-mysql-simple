@@ -32,7 +32,7 @@ use super::error::{MyIoError,
                    SetupError,
                    MyResult};
 #[cfg(feature = "ssl")]
-use super::error::{MySslError, SslNotSupported};
+use super::error::{SslNotSupported};
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
 use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time, ToValue};
@@ -497,13 +497,13 @@ impl MyConn {
             .and_then(|pld| {
                 match pld[0] {
                     0 => {
-                        let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+                        let ok = try!(OkPacket::from_payload(pld.as_slice()));
                         self.handle_ok(&ok);
                         self.last_command = 0;
                         Ok(())
                     },
                     _ => {
-                        let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
+                        let err = try!(ErrPacket::from_payload(pld.as_slice()));
                         Err(MySqlError(err))
                     }
                 }
@@ -537,13 +537,13 @@ impl MyConn {
             .and_then(|pld| {
                 match pld[0] {
                     0 => {
-                        let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+                        let ok = try!(OkPacket::from_payload(pld.as_slice()));
                         self.handle_ok(&ok);
                         self.last_command = 0;
                         Ok(())
                     },
                     _ => {
-                        let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
+                        let err = try!(ErrPacket::from_payload(pld.as_slice()));
                         Err(MySqlError(err))
                     }
                 }
@@ -575,7 +575,7 @@ impl MyConn {
         let stream = self.stream.take().unwrap();
         match stream {
             InsecureStream(mut s) => {
-                let mut ctx = try_ssl!(ssl::SslContext::new(ssl::Tlsv1));
+                let mut ctx = try!(ssl::SslContext::new(ssl::Tlsv1));
                 if self.opts.verify_peer {
                     ctx.set_verify(ssl::SslVerifyPeer, None);
                 } else {
@@ -593,7 +593,7 @@ impl MyConn {
                     _ => { panic!("unreachable") }
                 }
                 s.wrapped = true;
-                self.stream = Some(SecureStream(MySslStream(try_ssl!(ssl::SslStream::new(&ctx, s)))));
+                self.stream = Some(SecureStream(MySslStream(try!(ssl::SslStream::new(&ctx, s)))));
                 self.ssl_context = Some(ctx);
             },
             s => {
@@ -628,7 +628,7 @@ impl MyConn {
                 Ok(mut stream) => {
                     // keepalive one hour
                     let keepalive_timeout = self.opts.keepalive_timeout.clone();
-                    try_io!(stream.set_keepalive(keepalive_timeout));
+                    try!(stream.set_keepalive(keepalive_timeout));
                     self.stream = Some(InsecureStream(PlainStream{s: TCPStream(stream), wrapped: false}));
                     return Ok(());
                 },
@@ -690,12 +690,12 @@ impl MyConn {
         }).and_then(|pld| {
             match pld[0] {
                 0u8 => {
-                    let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+                    let ok = try!(OkPacket::from_payload(pld.as_slice()));
                     self.handle_ok(&ok);
                     Ok(())
                 },
                 0xffu8 => {
-                    let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
+                    let err = try!(ErrPacket::from_payload(pld.as_slice()));
                     Err(MySqlError(err))
                 },
                 _ => Err(MyDriverError(UnexpectedPacket))
@@ -730,12 +730,12 @@ impl MyConn {
         }).and_then(|pld| {
             match pld[0] {
                 0u8 => {
-                    let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+                    let ok = try!(OkPacket::from_payload(pld.as_slice()));
                     self.handle_ok(&ok);
                     Ok(())
                 },
                 0xffu8 => {
-                    let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
+                    let err = try!(ErrPacket::from_payload(pld.as_slice()));
                     Err(MySqlError(err))
                 },
                 _ => Err(MyDriverError(UnexpectedPacket))
@@ -786,10 +786,10 @@ impl MyConn {
     fn do_ssl_request(&mut self) -> MyResult<()> {
         let client_flags = self.get_client_flags();
         let mut writer = MemWriter::with_capacity(4 + 4 + 1 + 23);
-        try_io!(writer.write_le_u32(client_flags.bits()));
-        try_io!(writer.write([0u8, ..4]));
-        try_io!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try_io!(writer.write([0u8, ..23]));
+        try!(writer.write_le_u32(client_flags.bits()));
+        try!(writer.write([0u8, ..4]));
+        try!(writer.write_u8(consts::UTF8_GENERAL_CI));
+        try!(writer.write([0u8, ..23]));
         self.write_packet(&writer.unwrap())
     }
 
@@ -803,19 +803,19 @@ impl MyConn {
             payload_len += self.opts.get_db_name().len() + 1;
         }
         let mut writer = MemWriter::with_capacity(payload_len);
-        try_io!(writer.write_le_u32(client_flags.bits()));
-        try_io!(writer.write([0u8, ..4]));
-        try_io!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try_io!(writer.write([0u8, ..23]));
-        try_io!(writer.write_str(self.opts.get_user().as_slice()));
-        try_io!(writer.write_u8(0u8));
-        try_io!(writer.write_u8(scramble_buf_len as u8));
+        try!(writer.write_le_u32(client_flags.bits()));
+        try!(writer.write([0u8, ..4]));
+        try!(writer.write_u8(consts::UTF8_GENERAL_CI));
+        try!(writer.write([0u8, ..23]));
+        try!(writer.write_str(self.opts.get_user().as_slice()));
+        try!(writer.write_u8(0u8));
+        try!(writer.write_u8(scramble_buf_len as u8));
         if scramble_buf.is_some() {
-            try_io!(writer.write(scramble_buf.unwrap().as_slice()));
+            try!(writer.write(scramble_buf.unwrap().as_slice()));
         }
         if self.opts.get_db_name().len() > 0 {
-            try_io!(writer.write_str(self.opts.get_db_name().as_slice()));
-            try_io!(writer.write_u8(0u8));
+            try!(writer.write_str(self.opts.get_db_name().as_slice()));
+            try!(writer.write_u8(0u8));
         }
         self.write_packet(&writer.unwrap())
     }
@@ -852,9 +852,9 @@ impl MyConn {
                     for chunk in x.chunks(self.max_allowed_packet - 7) {
                         let chunk_len = chunk.len() + 7;
                         let mut writer = MemWriter::with_capacity(chunk_len);
-                        try_io!(writer.write_le_u32(stmt.statement_id));
-                        try_io!(writer.write_le_u16(id));
-                        try_io!(writer.write(chunk));
+                        try!(writer.write_le_u32(stmt.statement_id));
+                        try!(writer.write_le_u16(id));
+                        try!(writer.write(chunk));
                         try!(self.write_command_data(consts::COM_STMT_SEND_LONG_DATA,
                                                      writer.unwrap().as_slice()));
                     }
@@ -873,7 +873,7 @@ impl MyConn {
         match stmt.params {
             Some(ref sparams) => {
                 let (bitmap, values, large_ids) =
-                    try_io!(Value::to_bin_payload(sparams.as_slice(),
+                    try!(Value::to_bin_payload(sparams.as_slice(),
                                                   params,
                                                   self.max_allowed_packet));
                 match large_ids {
@@ -883,42 +883,42 @@ impl MyConn {
                 writer = MemWriter::with_capacity(9 + bitmap.len() + 1 +
                                                   params.len() * 2 +
                                                   values.len());
-                try_io!(writer.write_le_u32(stmt.statement_id));
-                try_io!(writer.write_u8(0u8));
-                try_io!(writer.write_le_u32(1u32));
-                try_io!(writer.write(bitmap.as_slice()));
-                try_io!(writer.write_u8(1u8));
+                try!(writer.write_le_u32(stmt.statement_id));
+                try!(writer.write_u8(0u8));
+                try!(writer.write_le_u32(1u32));
+                try!(writer.write(bitmap.as_slice()));
+                try!(writer.write_u8(1u8));
                 for i in range(0, params.len()) {
                     match params[i] {
-                        NULL => try_io!(writer.write(
+                        NULL => try!(writer.write(
                             [sparams[i].column_type as u8, 0u8])),
-                        Bytes(..) => try_io!(
+                        Bytes(..) => try!(
                             writer.write([consts::MYSQL_TYPE_VAR_STRING as u8,
                                           0u8])),
-                        Int(..) => try_io!(
+                        Int(..) => try!(
                             writer.write([consts::MYSQL_TYPE_LONGLONG as u8,
                                           0u8])),
-                        UInt(..) => try_io!(
+                        UInt(..) => try!(
                             writer.write([consts::MYSQL_TYPE_LONGLONG as u8,
                                           128u8])),
-                        Float(..) => try_io!(
+                        Float(..) => try!(
                             writer.write([consts::MYSQL_TYPE_DOUBLE as u8,
                                           0u8])),
-                        Date(..) => try_io!(
+                        Date(..) => try!(
                             writer.write([consts::MYSQL_TYPE_DATE as u8,
                                           0u8])),
-                        Time(..) => try_io!(
+                        Time(..) => try!(
                             writer.write([consts::MYSQL_TYPE_TIME as u8,
                                           0u8]))
                     }
                 }
-                try_io!(writer.write(values.as_slice()));
+                try!(writer.write(values.as_slice()));
             },
             None => {
                 writer = MemWriter::with_capacity(4 + 1 + 4);
-                try_io!(writer.write_le_u32(stmt.statement_id));
-                try_io!(writer.write_u8(0u8));
-                try_io!(writer.write_le_u32(1u32));
+                try!(writer.write_le_u32(stmt.statement_id));
+                try!(writer.write_u8(0u8));
+                try!(writer.write_le_u32(1u32));
             }
         }
         try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
@@ -939,7 +939,7 @@ impl MyConn {
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
         let path = Path::new(file_name);
-        let mut file = try_io!(File::open(&path));
+        let mut file = try!(File::open(&path));
         let mut chunk = Vec::from_elem(self.max_allowed_packet, 0u8);
         let mut r = file.read(chunk.as_mut_slice());
         loop {
@@ -960,7 +960,7 @@ impl MyConn {
         try!(self.write_packet(&Vec::new()));
         let pld = try!(self.read_packet());
         if pld[0] == 0u8 {
-            let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+            let ok = try!(OkPacket::from_payload(pld.as_slice()));
             self.handle_ok(&ok);
             return Ok(Some(ok));
         }
@@ -971,30 +971,30 @@ impl MyConn {
         let pld = try!(self.read_packet());
         match pld[0] {
             0x00 => {
-                let ok = try_io!(OkPacket::from_payload(pld.as_slice()));
+                let ok = try!(OkPacket::from_payload(pld.as_slice()));
                 self.handle_ok(&ok);
                 Ok((Vec::new(), Some(ok)))
             },
             0xfb => {
                 let mut reader = BufReader::new(pld.as_slice());
-                try_io!(reader.seek(1, SeekCur));
-                let file_name = try_io!(reader.read_to_end());
+                try!(reader.seek(1, SeekCur));
+                let file_name = try!(reader.read_to_end());
                 match self.send_local_infile(file_name.as_slice()) {
                     Ok(x) => Ok((Vec::new(), x)),
                     Err(err) => Err(err)
                 }
             },
             0xff => {
-                let err = try_io!(ErrPacket::from_payload(pld.as_slice()));
+                let err = try!(ErrPacket::from_payload(pld.as_slice()));
                 Err(MySqlError(err))
             },
             _ => {
                 let mut reader = BufReader::new(pld.as_slice());
-                let column_count = try_io!(reader.read_lenenc_int());
+                let column_count = try!(reader.read_lenenc_int());
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
                 for _ in range(0, column_count) {
                     let pld = try!(self.read_packet());
-                    columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
+                    columns.push(try!(Column::from_payload(self.last_command, pld.as_slice())));
                 }
                 // skip eof packet
                 try!(self.read_packet());
@@ -1031,16 +1031,16 @@ impl MyConn {
         let pld = try!(self.read_packet());
         match pld[0] {
             0xff => {
-                let err =  try_io!(ErrPacket::from_payload(pld.as_slice()));
+                let err =  try!(ErrPacket::from_payload(pld.as_slice()));
                 Err(MySqlError(err))
             },
             _ => {
-                let mut stmt = try_io!(InnerStmt::from_payload(pld.as_slice()));
+                let mut stmt = try!(InnerStmt::from_payload(pld.as_slice()));
                 if stmt.num_params > 0 {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as uint);
                     for _ in range(0, stmt.num_params) {
                         let pld = try!(self.read_packet());
-                        params.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
+                        params.push(try!(Column::from_payload(self.last_command, pld.as_slice())));
                     }
                     stmt.params = Some(params);
                     try!(self.read_packet());
@@ -1049,7 +1049,7 @@ impl MyConn {
                     let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as uint);
                     for _ in range(0, stmt.num_columns) {
                         let pld = try!(self.read_packet());
-                        columns.push(try_io!(Column::from_payload(self.last_command, pld.as_slice())));
+                        columns.push(try!(Column::from_payload(self.last_command, pld.as_slice())));
                     }
                     stmt.columns = Some(columns);
                     try!(self.read_packet());
@@ -1118,7 +1118,7 @@ impl MyConn {
         let x = pld[0];
         if x == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
-            let p = try_io!(EOFPacket::from_payload(pld.as_slice()));
+            let p = try!(EOFPacket::from_payload(pld.as_slice()));
             self.handle_eof(&p);
             return Ok(None);
         }
@@ -1147,7 +1147,7 @@ impl MyConn {
         if (x == 0xfe || x == 0xff) && pld.len() < 0xfe {
             self.has_results = false;
             if x == 0xfe {
-                let p = try_io!(EOFPacket::from_payload(pld.as_slice()));
+                let p = try!(EOFPacket::from_payload(pld.as_slice()));
                 self.handle_eof(&p);
                 return Ok(None);
             } else /* x == 0xff */ {
