@@ -8,12 +8,20 @@ use super::consts;
 use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
 
-
 lazy_static! {
     static ref TM_GMTOFF: i32 = now().tm_gmtoff;
     static ref TM_ISDST: i32 = now().tm_isdst;
 }
 
+#[inline]
+fn min_value<T: Bounded>() -> T {
+    Bounded::min_value()
+}
+
+#[inline]
+fn max_value<T: Bounded>() -> T {
+    Bounded::max_value()
+}
 
 #[deriving(Clone, PartialEq, PartialOrd, Show)]
 pub enum Value {
@@ -422,8 +430,7 @@ impl ToValue for u64 {
 impl ToValue for uint {
     #[inline]
     fn to_value(&self) -> Value {
-        let max: uint = Bounded::max_value();
-        if *self as u64 <= max as u64 {
+        if *self as u64 <= max_value::<uint>() as u64 {
             Int(*self as i64)
         } else {
             UInt(*self as u64)
@@ -587,11 +594,9 @@ macro_rules! from_value_impl_num(
             }
             #[inline]
             fn from_value_opt(v: &Value) -> Option<$t> {
-                let min: $t = Bounded::min_value();
-                let max: $t = Bounded::max_value();
                 match *v {
-                    Int(x) if x >= min as i64 && x <= max as i64 => Some(x as $t),
-                    UInt(x) if x <= max as u64 => Some(x as $t),
+                    Int(x) if x >= min_value::<$t>() as i64 && x <= max_value::<$t>() as i64 => Some(x as $t),
+                    UInt(x) if x <= max_value::<$t>() as u64 => Some(x as $t),
                     Bytes(ref bts) => {
                         from_utf8(bts[]).and_then(from_str::<$t>)
                     },
@@ -618,10 +623,9 @@ impl FromValue for i64 {
     }
     #[inline]
     fn from_value_opt(v: &Value) -> Option<i64> {
-        let max: i64 = Bounded::max_value();
         match *v {
             Int(x) => Some(x),
-            UInt(x) if x <= max as u64 => Some(x as i64),
+            UInt(x) if x <= max_value::<i64> as u64 => Some(x as i64),
             Bytes(ref bts) => {
                 from_utf8(bts[]).and_then(from_str::<i64>)
             },
@@ -655,10 +659,8 @@ impl FromValue for f32 {
     }
     #[inline]
     fn from_value_opt(v: &Value) -> Option<f32> {
-        let min: f32 = Bounded::min_value();
-        let max: f32 = Bounded::max_value();
         match *v {
-            Float(x) if x >= min as f64 && x <= max as f64 => Some(x as f32),
+            Float(x) if x >= min_value::<f32>() as f64 && x <= max_value::<f32>() as f64 => Some(x as f32),
             Bytes(ref bts) => {
                 from_utf8(bts[]).and_then(from_str::<f32>)
             },
