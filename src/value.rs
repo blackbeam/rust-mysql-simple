@@ -1,7 +1,6 @@
 use std::io::{MemWriter, BufReader, IoResult, SeekCur};
-use std::from_str::{from_str};
-use std::str::{from_utf8};
-use std::num::{Bounded, pow};
+use std::str::{from_utf8, from_str};
+use std::num::{pow, Int, Float};
 use std::time::{Duration};
 use time::{Tm, Timespec, now, strptime, at};
 use super::consts;
@@ -14,13 +13,23 @@ lazy_static! {
 }
 
 #[inline]
-fn min_value<T: Bounded>() -> T {
-    Bounded::min_value()
+fn int_min_value<T: Int>() -> T {
+    Int::min_value()
 }
 
 #[inline]
-fn max_value<T: Bounded>() -> T {
-    Bounded::max_value()
+fn float_min_value<T: Float>() -> T {
+    Float::min_value()
+}
+
+#[inline]
+fn int_max_value<T: Int>() -> T {
+    Int::max_value()
+}
+
+#[inline]
+fn float_max_value<T: Float>() -> T {
+    Float::max_value()
 }
 
 #[deriving(Clone, PartialEq, PartialOrd, Show)]
@@ -40,8 +49,8 @@ impl Value {
     /// Get correct string representation of a mysql value
     pub fn into_str(&self) -> String {
         match *self {
-            NULL => "NULL".into_string(),
-            Bytes(ref x) => {
+            Value::NULL => "NULL".into_string(),
+            Value::Bytes(ref x) => {
                 String::from_utf8(x.clone()).ok().map_or_else(|| {
                     let mut s = "0x".into_string();
                     for c in x.iter() {
@@ -59,22 +68,22 @@ impl Value {
                     format!("'{:s}'", replaced)
                 })
             },
-            Int(x) => format!("{:d}", x),
-            UInt(x) => format!("{:u}", x),
-            Float(x) => format!("{:f}", x),
-            Date(0, 0, 0, 0, 0, 0, 0) => "''".into_string(),
-            Date(y, m, d, 0, 0, 0, 0) => format!("'{:04u}-{:02u}-{:02u}'", y, m, d),
-            Date(y, m, d, h, i, s, 0) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}'", y, m, d, h, i, s),
-            Date(y, m, d, h, i, s, u) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}.{:06u}'", y, m, d, h, i, s, u),
-            Time(_, 0, 0, 0, 0, 0) => "''".into_string(),
-            Time(neg, d, h, i, s, 0) => {
+            Value::Int(x) => format!("{:d}", x),
+            Value::UInt(x) => format!("{:u}", x),
+            Value::Float(x) => format!("{:f}", x),
+            Value::Date(0, 0, 0, 0, 0, 0, 0) => "''".into_string(),
+            Value::Date(y, m, d, 0, 0, 0, 0) => format!("'{:04u}-{:02u}-{:02u}'", y, m, d),
+            Value::Date(y, m, d, h, i, s, 0) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}'", y, m, d, h, i, s),
+            Value::Date(y, m, d, h, i, s, u) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}.{:06u}'", y, m, d, h, i, s, u),
+            Value::Time(_, 0, 0, 0, 0, 0) => "''".into_string(),
+            Value::Time(neg, d, h, i, s, 0) => {
                 if neg {
                     format!("'-{:03u}:{:02u}:{:02u}'", d * 24 + h as u32, i, s)
                 } else {
                     format!("'{:03u}:{:02u}:{:02u}'", d * 24 + h as u32, i, s)
                 }
             },
-            Time(neg, d, h, i, s, u) => {
+            Value::Time(neg, d, h, i, s, u) => {
                 if neg {
                     format!("'-{:03u}:{:02u}:{:02u}.{:06u}'",
                             d * 24 + h as u32, i, s, u)
@@ -88,202 +97,202 @@ impl Value {
     #[inline]
     pub fn is_bytes(&self) -> bool {
         match *self {
-            Bytes(..) => true,
+            Value::Bytes(..) => true,
             _ => false
         }
     }
     #[inline]
     pub fn bytes_ref<'a>(&'a self) -> &'a [u8] {
         match *self {
-            Bytes(ref x) => x[],
+            Value::Bytes(ref x) => x[],
             _ => panic!("Called `Value::bytes_ref()` on non `Bytes` value")
         }
     }
     #[inline]
     pub fn unwrap_bytes(self) -> Vec<u8> {
         match self {
-            Bytes(x) => x,
+            Value::Bytes(x) => x,
             _ => panic!("Called `Value::unwrap_bytes()` on non `Bytes` value")
         }
     }
     #[inline]
     pub fn unwrap_bytes_or(self, y: Vec<u8>) -> Vec<u8> {
         match self {
-            Bytes(x) => x,
+            Value::Bytes(x) => x,
             _ => y
         }
     }
     #[inline]
     pub fn is_int(&self) -> bool {
         match *self {
-            Int(..) => true,
+            Value::Int(..) => true,
             _ => false
         }
     }
     #[inline]
     pub fn get_int(&self) -> i64 {
         match *self {
-            Int(x) => x,
+            Value::Int(x) => x,
             _ => panic!("Called `Value::get_int()` on non `Int` value")
         }
     }
     #[inline]
     pub fn get_int_or(&self, y: i64) -> i64 {
         match *self {
-            Int(x) => x,
+            Value::Int(x) => x,
             _ => y
         }
     }
     #[inline]
     pub fn is_uint(&self) -> bool {
         match *self {
-            UInt(..) => true,
+            Value::UInt(..) => true,
             _ => false
         }
     }
     #[inline]
     pub fn get_uint(&self) -> u64 {
         match *self {
-            UInt(x) => x,
+            Value::UInt(x) => x,
             _ => panic!("Called `Value::get_uint()` on non `UInt` value")
         }
     }
     #[inline]
     pub fn get_uint_or(&self, y: u64) -> u64 {
         match *self {
-            UInt(x) => x,
+            Value::UInt(x) => x,
             _ => y
         }
     }
     #[inline]
     pub fn is_float(&self) -> bool {
         match *self {
-            Float(..) => true,
+            Value::Float(..) => true,
             _ => false
         }
     }
     #[inline]
     pub fn get_float(&self) -> f64 {
         match *self {
-            Float(x) => x,
+            Value::Float(x) => x,
             _ => panic!("Called `Value::get_float()` on non `Float` value")
         }
     }
     #[inline]
     pub fn get_float_or(&self, y: f64) -> f64 {
         match *self {
-            Float(x) => x,
+            Value::Float(x) => x,
             _ => y
         }
     }
     #[inline]
     pub fn is_date(&self) -> bool {
         match *self {
-            Date(..) => true,
+            Value::Date(..) => true,
             _ => false
         }
     }
     #[inline]
     pub fn get_year(&self) -> u16 {
         match *self {
-            Date(y, _, _, _, _, _, _) => y,
+            Value::Date(y, _, _, _, _, _, _) => y,
             _ => panic!("Called `Value::get_year()` on non `Date` value")
         }
     }
     #[inline]
     pub fn get_month(&self) -> u8 {
         match *self {
-            Date(_, m, _, _, _, _, _) => m,
+            Value::Date(_, m, _, _, _, _, _) => m,
             _ => panic!("Called `Value::get_month()` on non `Date` value")
         }
     }
     #[inline]
     pub fn get_day(&self) -> u8 {
         match *self {
-            Date(_, _, d, _, _, _, _) => d,
+            Value::Date(_, _, d, _, _, _, _) => d,
             _ => panic!("Called `Value::get_day()` on non `Date` value")
         }
     }
     #[inline]
     pub fn is_time(&self) -> bool {
         match *self {
-            Time(..) => true,
+            Value::Time(..) => true,
             _ => false
         }
     }
     #[inline]
     pub fn is_neg(&self) -> bool {
         match *self {
-            Time(false, _, _, _, _, _) => false,
-            Time(true, _, _, _, _, _) => true,
+            Value::Time(false, _, _, _, _, _) => false,
+            Value::Time(true, _, _, _, _, _) => true,
             _ => panic!("Called `Value::is_neg()` on non `Time` value")
         }
     }
     #[inline]
     pub fn get_days(&self) -> u32 {
         match *self {
-            Time(_, d, _, _, _, _) => d,
+            Value::Time(_, d, _, _, _, _) => d,
             _ => panic!("Called `Value::get_days()` on non `Time` value")
         }
     }
     #[inline]
     pub fn get_hour(&self) -> u8 {
         match *self {
-            Date(_, _, _, h, _, _, _) => h,
-            Time(_, _, h, _, _, _) => h,
+            Value::Date(_, _, _, h, _, _, _) => h,
+            Value::Time(_, _, h, _, _, _) => h,
             _ => panic!("Called `Value::get_hour()` on non `Date` nor `Time` value")
         }
     }
     #[inline]
     pub fn get_min(&self) -> u8 {
         match *self {
-            Date(_, _, _, _, i, _, _) => i,
-            Time(_, _, _, i, _, _) => i,
+            Value::Date(_, _, _, _, i, _, _) => i,
+            Value::Time(_, _, _, i, _, _) => i,
             _ => panic!("Called `Value::get_min()` on non `Date` nor `Time` value")
         }
     }
     #[inline]
     pub fn get_sec(&self) -> u8 {
         match *self {
-            Date(_, _, _, _, _, s, _) => s,
-            Time(_, _, _, _, s, _) => s,
+            Value::Date(_, _, _, _, _, s, _) => s,
+            Value::Time(_, _, _, _, s, _) => s,
             _ => panic!("Called `Value::get_sec()` on non `Date` nor `Time` value")
         }
     }
     #[inline]
     pub fn get_usec(&self) -> u32 {
         match *self {
-            Date(_, _, _, _, _, _, u) => u,
-            Time(_, _, _, _, _, u) => u,
+            Value::Date(_, _, _, _, _, _, u) => u,
+            Value::Time(_, _, _, _, _, u) => u,
             _ => panic!("Called `Value::get_usec()` on non `Date` nor `Time` value")
         }
     }
     pub fn to_bin(&self) -> IoResult<Vec<u8>> {
         let mut writer = MemWriter::with_capacity(256);
         match *self {
-            NULL => (),
-            Bytes(ref x) => {
+            Value::NULL => (),
+            Value::Bytes(ref x) => {
                 try!(writer.write_lenenc_bytes(x[]));
             },
-            Int(x) => {
+            Value::Int(x) => {
                 try!(writer.write_le_i64(x));
             },
-            UInt(x) => {
+            Value::UInt(x) => {
                 try!(writer.write_le_u64(x));
             },
-            Float(x) => {
+            Value::Float(x) => {
                 try!(writer.write_le_f64(x));
             },
-            Date(0u16, 0u8, 0u8, 0u8, 0u8, 0u8, 0u32) => {
+            Value::Date(0u16, 0u8, 0u8, 0u8, 0u8, 0u8, 0u32) => {
                 try!(writer.write_u8(0u8));
             },
-            Date(y, m, d, 0u8, 0u8, 0u8, 0u32) => {
+            Value::Date(y, m, d, 0u8, 0u8, 0u8, 0u32) => {
                 try!(writer.write_u8(4u8));
                 try!(writer.write_le_u16(y));
                 try!(writer.write_u8(m));
                 try!(writer.write_u8(d));
             },
-            Date(y, m, d, h, i, s, 0u32) => {
+            Value::Date(y, m, d, h, i, s, 0u32) => {
                 try!(writer.write_u8(7u8));
                 try!(writer.write_le_u16(y));
                 try!(writer.write_u8(m));
@@ -292,7 +301,7 @@ impl Value {
                 try!(writer.write_u8(i));
                 try!(writer.write_u8(s));
             },
-            Date(y, m, d, h, i, s, u) => {
+            Value::Date(y, m, d, h, i, s, u) => {
                 try!(writer.write_u8(11u8));
                 try!(writer.write_le_u16(y));
                 try!(writer.write_u8(m));
@@ -302,8 +311,8 @@ impl Value {
                 try!(writer.write_u8(s));
                 try!(writer.write_le_u32(u));
             },
-            Time(_, 0u32, 0u8, 0u8, 0u8, 0u32) => try!(writer.write_u8(0u8)),
-            Time(neg, d, h, m, s, 0u32) => {
+            Value::Time(_, 0u32, 0u8, 0u8, 0u8, 0u32) => try!(writer.write_u8(0u8)),
+            Value::Time(neg, d, h, m, s, 0u32) => {
                 try!(writer.write_u8(8u8));
                 try!(writer.write_u8(if neg {1u8} else {0u8}));
                 try!(writer.write_le_u32(d));
@@ -311,7 +320,7 @@ impl Value {
                 try!(writer.write_u8(m));
                 try!(writer.write_u8(s));
             },
-            Time(neg, d, h, m, s, u) => {
+            Value::Time(neg, d, h, m, s, u) => {
                 try!(writer.write_u8(12u8));
                 try!(writer.write_u8(if neg {1u8} else {0u8}));
                 try!(writer.write_le_u32(d));
@@ -331,9 +340,9 @@ impl Value {
                 break;
             } else if pld[try!(reader.tell()) as uint] == 0xfb {
                 try!(reader.seek(1, SeekCur));
-                output.push(NULL);
+                output.push(Value::NULL);
             } else {
-                output.push(Bytes(try!(reader.read_lenenc_bytes())));
+                output.push(Value::Bytes(try!(reader.read_lenenc_bytes())));
             }
         }
         Ok(output)
@@ -353,7 +362,7 @@ impl Value {
                 values.push(try!(reader.read_bin_value(c.column_type,
                                                        c.flags.contains(consts::UNSIGNED_FLAG))));
             } else {
-                values.push(NULL);
+                values.push(Value::NULL);
             }
         }
         Ok(values)
@@ -369,7 +378,7 @@ impl Value {
         let cap = max_allowed_packet - bitmap_len - values.len() * 8;
         for value in values.iter() {
             match *value {
-                NULL => bitmap[i as uint / 8] |= 1 << ((i % 8u16) as uint),
+                Value::NULL => bitmap[i as uint / 8] |= 1 << ((i % 8u16) as uint),
                 _ => {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
@@ -398,7 +407,7 @@ impl<T:ToValue> ToValue for Option<T> {
     #[inline]
     fn to_value(&self) -> Value {
         match *self {
-            None => NULL,
+            None => Value::NULL,
             Some(ref x) => x.to_value()
         }
     }
@@ -408,7 +417,7 @@ macro_rules! to_value_impl_num(
     ($t:ty) => (
         impl ToValue for $t {
             #[inline]
-            fn to_value(&self) -> Value { Int(*self as i64) }
+            fn to_value(&self) -> Value { Value::Int(*self as i64) }
         }
     )
 )
@@ -424,53 +433,53 @@ to_value_impl_num!(i64)
 
 impl ToValue for u64 {
     #[inline]
-    fn to_value(&self) -> Value { UInt(*self) }
+    fn to_value(&self) -> Value { Value::UInt(*self) }
 }
 
 impl ToValue for uint {
     #[inline]
     fn to_value(&self) -> Value {
-        if *self as u64 <= max_value::<uint>() as u64 {
-            Int(*self as i64)
+        if *self as u64 <= int_max_value::<uint>() as u64 {
+            Value::Int(*self as i64)
         } else {
-            UInt(*self as u64)
+            Value::UInt(*self as u64)
         }
     }
 }
 
 impl ToValue for f32 {
     #[inline]
-    fn to_value(&self) -> Value { Float(*self as f64) }
+    fn to_value(&self) -> Value { Value::Float(*self as f64) }
 }
 
 impl ToValue for f64 {
     #[inline]
-    fn to_value(&self) -> Value { Float(*self) }
+    fn to_value(&self) -> Value { Value::Float(*self) }
 }
 
 impl ToValue for bool {
     #[inline]
-    fn to_value(&self) -> Value { if *self { Int(1) } else { Int(0) }}
+    fn to_value(&self) -> Value { if *self { Value::Int(1) } else { Value::Int(0) }}
 }
 
 impl<'a> ToValue for &'a [u8] {
     #[inline]
-    fn to_value(&self) -> Value { Bytes(self.to_vec()) }
+    fn to_value(&self) -> Value { Value::Bytes(self.to_vec()) }
 }
 
 impl ToValue for Vec<u8> {
     #[inline]
-    fn to_value(&self) -> Value { Bytes(self.clone()) }
+    fn to_value(&self) -> Value { Value::Bytes(self.clone()) }
 }
 
 impl<'a> ToValue for &'a str {
     #[inline]
-    fn to_value(&self) -> Value { Bytes(self.as_bytes().to_vec()) }
+    fn to_value(&self) -> Value { Value::Bytes(self.as_bytes().to_vec()) }
 }
 
 impl ToValue for String {
     #[inline]
-    fn to_value(&self) -> Value { Bytes(self.as_bytes().to_vec()) }
+    fn to_value(&self) -> Value { Value::Bytes(self.as_bytes().to_vec()) }
 }
 
 impl ToValue for Value {
@@ -482,7 +491,7 @@ impl ToValue for Timespec {
     #[inline]
     fn to_value(&self) -> Value {
         let t = at(*self);
-        Date(t.tm_year as u16,
+        Value::Date(t.tm_year as u16,
              (t.tm_mon + 1) as u8,
              t.tm_mday as u8,
              t.tm_hour as u8,
@@ -532,7 +541,7 @@ impl ToValue for Duration {
         } else {
             mics = 0 - mics
         }
-        Time(neg, days as u32, hrs as u8, mins as u8, secs as u8, mics as u32)
+        Value::Time(neg, days as u32, hrs as u8, mins as u8, secs as u8, mics as u32)
     }
 }
 
@@ -555,14 +564,14 @@ impl<T:FromValue> FromValue for Option<T> {
     #[inline]
     fn from_value(v: &Value) -> Option<T> {
         match *v {
-            NULL => None,
+            Value::NULL => None,
             _ => Some(from_value(v))
         }
     }
     #[inline]
     fn from_value_opt(v: &Value) -> Option<Option<T>> {
         match *v {
-            NULL => Some(None),
+            Value::NULL => Some(None),
             _ => {
                 match from_value_opt(v) {
                     None => None,
@@ -595,9 +604,9 @@ macro_rules! from_value_impl_num(
             #[inline]
             fn from_value_opt(v: &Value) -> Option<$t> {
                 match *v {
-                    Int(x) if x >= min_value::<$t>() as i64 && x <= max_value::<$t>() as i64 => Some(x as $t),
-                    UInt(x) if x <= max_value::<$t>() as u64 => Some(x as $t),
-                    Bytes(ref bts) => {
+                    Value::Int(x) if x >= int_min_value::<$t>() as i64 && x <= int_max_value::<$t>() as i64 => Some(x as $t),
+                    Value::UInt(x) if x <= int_max_value::<$t>() as u64 => Some(x as $t),
+                    Value::Bytes(ref bts) => {
                         from_utf8(bts[]).and_then(from_str::<$t>)
                     },
                     _ => None
@@ -624,9 +633,9 @@ impl FromValue for i64 {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<i64> {
         match *v {
-            Int(x) => Some(x),
-            UInt(x) if x <= max_value::<i64> as u64 => Some(x as i64),
-            Bytes(ref bts) => {
+            Value::Int(x) => Some(x),
+            Value::UInt(x) if x <= int_max_value::<i64> as u64 => Some(x as i64),
+            Value::Bytes(ref bts) => {
                 from_utf8(bts[]).and_then(from_str::<i64>)
             },
             _ => None
@@ -642,9 +651,9 @@ impl FromValue for u64 {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<u64> {
         match *v {
-            Int(x) => Some(x as u64),
-            UInt(x) => Some(x),
-            Bytes(ref bts) => {
+            Value::Int(x) => Some(x as u64),
+            Value::UInt(x) => Some(x),
+            Value::Bytes(ref bts) => {
                 from_utf8(bts[]).and_then(from_str::<u64>)
             },
             _ => None
@@ -660,8 +669,8 @@ impl FromValue for f32 {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<f32> {
         match *v {
-            Float(x) if x >= min_value::<f32>() as f64 && x <= max_value::<f32>() as f64 => Some(x as f32),
-            Bytes(ref bts) => {
+            Value::Float(x) if x >= float_min_value::<f32>() as f64 && x <= float_max_value::<f32>() as f64 => Some(x as f32),
+            Value::Bytes(ref bts) => {
                 from_utf8(bts[]).and_then(from_str::<f32>)
             },
             _ => None
@@ -677,8 +686,8 @@ impl FromValue for f64 {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<f64> {
         match *v {
-            Float(x) => Some(x),
-            Bytes(ref bts) => {
+            Value::Float(x) => Some(x),
+            Value::Bytes(ref bts) => {
                 from_utf8(bts[]).and_then(from_str::<f64>)
             },
             _ => None
@@ -694,10 +703,10 @@ impl FromValue for bool {
     #[inline]
     fn from_value_opt(v:&Value) -> Option<bool> {
         match *v {
-            Int(x) if x == 0 => Some(false),
-            Int(x) if x == 1 => Some(true),
-            Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x30 => Some(false),
-            Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x31 => Some(true),
+            Value::Int(x) if x == 0 => Some(false),
+            Value::Int(x) if x == 1 => Some(true),
+            Value::Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x30 => Some(false),
+            Value::Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x31 => Some(true),
             _ => None
         }
     }
@@ -711,7 +720,7 @@ impl FromValue for Vec<u8> {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<Vec<u8>> {
         match *v {
-            Bytes(ref bts) => Some(bts.to_vec()),
+            Value::Bytes(ref bts) => Some(bts.to_vec()),
             _ => None
         }
     }
@@ -725,7 +734,7 @@ impl FromValue for String {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<String> {
         match *v {
-            Bytes(ref bts) => {
+            Value::Bytes(ref bts) => {
                 String::from_utf8(bts.clone()).ok()
             },
             _ => None
@@ -741,7 +750,7 @@ impl FromValue for Timespec {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<Timespec> {
         match *v {
-            Date(y, m, d, h, i, s, u) => {
+            Value::Date(y, m, d, h, i, s, u) => {
                 Some(Tm{
                         tm_year: y as i32 - 1_900,
                         tm_mon: m as i32 - 1,
@@ -756,7 +765,7 @@ impl FromValue for Timespec {
                         tm_isdst: *TM_ISDST,
                     }.to_timespec())
             },
-            Bytes(ref bts) => {
+            Value::Bytes(ref bts) => {
                 from_utf8(bts[]).and_then(|s| {
                     strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).and_then(|mut tm| {
@@ -777,7 +786,7 @@ impl FromValue for Duration {
 
     fn from_value_opt(v: &Value) -> Option<Duration> {
         match *v {
-            Time(neg, d, h, m, s, u) => {
+            Value::Time(neg, d, h, m, s, u) => {
                 let microseconds = u as i64 + 
                     (s as i64 * 1_000_000) + 
                     (m as i64 * 60 * 1_000_000) +
@@ -789,7 +798,7 @@ impl FromValue for Duration {
                     Some(Duration::microseconds(microseconds))
                 }
             },
-            Bytes(ref bts) => {
+            Value::Bytes(ref bts) => {
                 let mut btss = bts[];
                 let neg = btss[0] == b'-';
                 if neg {
@@ -875,7 +884,8 @@ impl FromValue for Duration {
 
 #[cfg(test)]
 mod test {
-    use super::{Bytes, Int, UInt, Date, Time, Float, NULL, from_value, ToValue};
+    use super::{ToValue, from_value};
+    use super::Value::{Bytes, Int, UInt, Date, Time, Float, NULL};
     use time::{Timespec, now};
     use std::time::{Duration};
 

@@ -1,5 +1,5 @@
 use sync::{Arc, Mutex};
-use super::super::error::{MyDriverError, InvalidPoolConstraints};
+use super::super::error::{MyError, DriverError};
 use super::{MyConn, MyOpts, Stmt, QueryResult};
 use super::super::error::{MyResult};
 
@@ -14,7 +14,7 @@ struct MyInnerPool {
 impl MyInnerPool {
     fn new(min: uint, max: uint, opts: MyOpts) -> MyResult<MyInnerPool> {
         if min > max || max == 0 {
-            return Err(MyDriverError(InvalidPoolConstraints));
+            return Err(MyError::MyDriverError(DriverError::InvalidPoolConstraints));
         }
         let mut pool = MyInnerPool {
             opts: opts,
@@ -226,7 +226,7 @@ mod test {
     use conn::{MyOpts};
     use std::default::{Default};
     use super::{MyPool};
-    use super::super::super::value::{Bytes, Int};
+    use super::super::super::value::Value::{Bytes, Int};
 
     static USER: &'static str = "root";
     static PASS: &'static str = "password";

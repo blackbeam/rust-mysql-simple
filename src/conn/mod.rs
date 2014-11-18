@@ -7,35 +7,42 @@ use std::io::{Reader, File, IoResult, Seek,
 use std::io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::pipe::{UnixStream};
-use std::from_str::FromStr;
 use std::num::{FromPrimitive};
 use std::path::{BytesContainer};
-use std::str::{from_utf8};
+use std::str::{from_utf8, FromStr};
 use super::consts;
-use super::io::{MyReader,
-                MyWriter,
-                InsecureStream,
-                PlainStream,
-                TCPStream,
-                UNIXStream,
-                MyStream};
+use super::consts::Command;
+use super::consts::ColumnType;
+use super::io::MyStream;
+use super::io::{
+    MyReader,
+    MyWriter,
+    PlainStream
+};
+use super::io::TcpOrUnixStream::{TCPStream, UNIXStream};
 #[cfg(feature = "ssl")]
-use super::io::{SecureStream, MySslStream};
-use super::error::{MyIoError,
-                   MySqlError,
-                   MyDriverError,
-                   CouldNotConnect,
-                   UnsupportedProtocol,
-                   Protocol41NotSet,
-                   UnexpectedPacket,
-                   MismatchedStmtParams,
-                   SetupError,
-                   MyResult};
+use super::io::{MySslStream};
+use super::error::MyError::{
+    MyIoError,
+    MySqlError,
+    MyDriverError
+};
+use super::error::DriverError::{
+    CouldNotConnect,
+    UnsupportedProtocol,
+    Protocol41NotSet,
+    UnexpectedPacket,
+    MismatchedStmtParams,
+    SetupError
+};
+use super::error::MyResult;
 #[cfg(feature = "ssl")]
-use super::error::{SslNotSupported};
+use super::error::DriverError::SslNotSupported;
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
-use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time, ToValue};
+use super::value::Value;
+use super::value::ToValue;
+use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 pub mod pool;
 
@@ -154,10 +161,10 @@ impl<'a> Drop for Stmt<'a> {
                     ((self.stmt.statement_id & 0xFF000000) >> 24) as u8,];
         if self.conn.is_some() {
             let conn = self.conn.as_mut().unwrap();
-            let _ = conn.write_command_data(consts::COM_STMT_CLOSE, data);
+            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, data);
         } else {
             let conn = self.pooled_conn.as_mut().unwrap().as_mut();
-            let _ = conn.write_command_data(consts::COM_STMT_CLOSE, data);
+            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, data);
         }
     }
 }
@@ -224,7 +231,7 @@ impl Column {
         // skip filler
         try!(reader.seek(2, SeekCur));
         let mut default_values = Vec::with_capacity(0);
-        if command == consts::COM_FIELD_LIST as u8 {
+        if command == Command::COM_FIELD_LIST as u8 {
             let len = try!(reader.read_lenenc_int());
             default_values = try!(reader.read_exact(len as uint));
         }
@@ -492,7 +499,7 @@ impl MyConn {
     /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
         if self.server_version > (5, 7, 2) {
-            try!(self.write_command(consts::COM_RESET_CONNECTION));
+            try!(self.write_command(Command::COM_RESET_CONNECTION));
             self.read_packet()
             .and_then(|pld| {
                 match pld[0] {
@@ -532,7 +539,7 @@ impl MyConn {
     /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
         if self.server_version > (5, 7, 2) {
-            try!(self.write_command(consts::COM_RESET_CONNECTION));
+            try!(self.write_command(Command::COM_RESET_CONNECTION));
             self.read_packet()
             .and_then(|pld| {
                 match pld[0] {
@@ -574,7 +581,7 @@ impl MyConn {
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         let stream = self.stream.take().unwrap();
         match stream {
-            InsecureStream(mut s) => {
+            MyStream::InsecureStream(mut s) => {
                 let mut ctx = try!(ssl::SslContext::new(ssl::Tlsv1));
                 if self.opts.verify_peer {
                     ctx.set_verify(ssl::SslVerifyPeer, None);
@@ -593,7 +600,7 @@ impl MyConn {
                     _ => { panic!("unreachable") }
                 }
                 s.wrapped = true;
-                self.stream = Some(SecureStream(MySslStream(try!(ssl::SslStream::new(&ctx, s)))));
+                self.stream = Some(MyStream::SecureStream(MySslStream(try!(ssl::SslStream::new(&ctx, s)))));
                 self.ssl_context = Some(ctx);
             },
             s => {
@@ -607,7 +614,7 @@ impl MyConn {
         if self.opts.unix_addr.is_some() {
             match UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
                 Ok(stream) => {
-                    self.stream = Some(InsecureStream(PlainStream{s: UNIXStream(stream), wrapped: false}));
+                    self.stream = Some(MyStream::InsecureStream(PlainStream{s: UNIXStream(stream), wrapped: false}));
                     return Ok(());
                 },
                 _ => {
@@ -629,7 +636,7 @@ impl MyConn {
                     // keepalive one hour
                     let keepalive_timeout = self.opts.keepalive_timeout.clone();
                     try!(stream.set_keepalive(keepalive_timeout));
-                    self.stream = Some(InsecureStream(PlainStream{s: TCPStream(stream), wrapped: false}));
+                    self.stream = Some(MyStream::InsecureStream(PlainStream{s: TCPStream(stream), wrapped: false}));
                     return Ok(());
                 },
                 _ => {
@@ -715,7 +722,7 @@ impl MyConn {
             }
             self.handle_handshake(&handshake);
             if self.opts.ssl_opts.is_some() {
-                if let Some(InsecureStream(PlainStream{s: TCPStream(_), ..})) = self.stream {
+                if let Some(MyStream::InsecureStream(PlainStream{s: TCPStream(_), ..})) = self.stream {
                     if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
                         return Err(MyDriverError(SslNotSupported));
                     } else {
@@ -757,7 +764,7 @@ impl MyConn {
         if self.opts.get_db_name().len() > 0 {
             client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
         }
-        if let Some(InsecureStream(_)) = self.stream {
+        if let Some(MyStream::InsecureStream(_)) = self.stream {
             if let Some(_) = self.opts.ssl_opts {
                 client_flags.insert(consts::CLIENT_SSL);
             }
@@ -835,7 +842,7 @@ impl MyConn {
     /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
     /// on `MyConn`. Return `true` on success or `false` on error.
     pub fn ping(&mut self) -> bool {
-        match self.write_command(consts::COM_PING) {
+        match self.write_command(Command::COM_PING) {
             Ok(_) => {
                 // ommit ok packet
                 let _ = self.read_packet();
@@ -855,7 +862,7 @@ impl MyConn {
                         try!(writer.write_le_u32(stmt.statement_id));
                         try!(writer.write_le_u16(id));
                         try!(writer.write(chunk));
-                        try!(self.write_command_data(consts::COM_STMT_SEND_LONG_DATA,
+                        try!(self.write_command_data(Command::COM_STMT_SEND_LONG_DATA,
                                                      writer.unwrap().as_slice()));
                     }
                 },
@@ -893,22 +900,22 @@ impl MyConn {
                         NULL => try!(writer.write(
                             [sparams[i].column_type as u8, 0u8])),
                         Bytes(..) => try!(
-                            writer.write([consts::MYSQL_TYPE_VAR_STRING as u8,
+                            writer.write([ColumnType::MYSQL_TYPE_VAR_STRING as u8,
                                           0u8])),
                         Int(..) => try!(
-                            writer.write([consts::MYSQL_TYPE_LONGLONG as u8,
+                            writer.write([ColumnType::MYSQL_TYPE_LONGLONG as u8,
                                           0u8])),
                         UInt(..) => try!(
-                            writer.write([consts::MYSQL_TYPE_LONGLONG as u8,
+                            writer.write([ColumnType::MYSQL_TYPE_LONGLONG as u8,
                                           128u8])),
                         Float(..) => try!(
-                            writer.write([consts::MYSQL_TYPE_DOUBLE as u8,
+                            writer.write([ColumnType::MYSQL_TYPE_DOUBLE as u8,
                                           0u8])),
                         Date(..) => try!(
-                            writer.write([consts::MYSQL_TYPE_DATE as u8,
+                            writer.write([ColumnType::MYSQL_TYPE_DATE as u8,
                                           0u8])),
                         Time(..) => try!(
-                            writer.write([consts::MYSQL_TYPE_TIME as u8,
+                            writer.write([ColumnType::MYSQL_TYPE_TIME as u8,
                                           0u8]))
                     }
                 }
@@ -921,7 +928,7 @@ impl MyConn {
                 try!(writer.write_le_u32(1u32));
             }
         }
-        try!(self.write_command_data(consts::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
+        try!(self.write_command_data(Command::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
         self.handle_result_set()
     }
 
@@ -1005,7 +1012,7 @@ impl MyConn {
     }
 
     fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
-        try!(self.write_command_data(consts::COM_QUERY, query.as_bytes()));
+        try!(self.write_command_data(Command::COM_QUERY, query.as_bytes()));
         self.handle_result_set()
     }
 
@@ -1027,7 +1034,7 @@ impl MyConn {
     }
 
     fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
-        try!(self.write_command_data(consts::COM_STMT_PREPARE, query.as_bytes()));
+        try!(self.write_command_data(Command::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match pld[0] {
             0xff => {
@@ -1409,7 +1416,8 @@ mod test {
     use std::os::{getcwd};
     use std::io::fs::{File, unlink};
     use super::{MyConn, MyOpts};
-    use super::super::value::{NULL, Int, Bytes, Date, ToValue, from_value};
+    use super::super::value::{ToValue, from_value};
+    use super::super::value::Value::{NULL, Int, Bytes, Date};
     use time::{Tm, now};
 
     static USER: &'static str = "root";

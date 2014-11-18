@@ -4,6 +4,8 @@ use regex::Regex;
 use super::io::{MyReader};
 use super::consts;
 use super::error;
+use super::error::DriverError;
+use super::error::MyError::MyDriverError;
 
 #[deriving(Clone, Eq, PartialEq)]
 pub struct OkPacket {
@@ -96,7 +98,7 @@ fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
         } else {
             Some(version)
         }
-    }).ok_or(error::MyDriverError(error::CouldNotParseVersion))
+    }).ok_or(MyDriverError(DriverError::CouldNotParseVersion))
 }
 
 #[deriving(Clone, Eq, PartialEq)]

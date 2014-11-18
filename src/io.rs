@@ -1,10 +1,12 @@
 use std::io::{IoResult, Reader, Writer, MemWriter};
-use super::value::{Value, NULL, Int, UInt, Float, Bytes, Date, Time};
+use super::value::Value;
+use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
-use super::error::{MyResult,
-                   MyDriverError,
-                   PacketTooLarge,
-                   PacketOutOfSync};
+use super::consts::Command;
+use super::consts::ColumnType;
+use super::error::MyError::{MyDriverError};
+use super::error::DriverError::{PacketTooLarge, PacketOutOfSync};
+use super::error::MyResult;
 use std::io::net::{tcp, pipe};
 #[cfg(feature = "openssl")]
 use openssl::ssl;
@@ -43,60 +45,60 @@ pub trait MyReader: Reader {
 
 	fn read_bin_value(&mut self, column_type: consts::ColumnType, unsigned: bool) -> IoResult<Value> {
 		match column_type {
-            consts::MYSQL_TYPE_STRING |
-            consts::MYSQL_TYPE_VAR_STRING |
-            consts::MYSQL_TYPE_BLOB |
-            consts::MYSQL_TYPE_TINY_BLOB |
-            consts::MYSQL_TYPE_MEDIUM_BLOB |
-            consts::MYSQL_TYPE_LONG_BLOB |
-            consts::MYSQL_TYPE_SET |
-            consts::MYSQL_TYPE_ENUM |
-            consts::MYSQL_TYPE_DECIMAL |
-            consts::MYSQL_TYPE_VARCHAR |
-            consts::MYSQL_TYPE_BIT |
-            consts::MYSQL_TYPE_NEWDECIMAL |
-            consts::MYSQL_TYPE_GEOMETRY => {
+            ColumnType::MYSQL_TYPE_STRING |
+            ColumnType::MYSQL_TYPE_VAR_STRING |
+            ColumnType::MYSQL_TYPE_BLOB |
+            ColumnType::MYSQL_TYPE_TINY_BLOB |
+            ColumnType::MYSQL_TYPE_MEDIUM_BLOB |
+            ColumnType::MYSQL_TYPE_LONG_BLOB |
+            ColumnType::MYSQL_TYPE_SET |
+            ColumnType::MYSQL_TYPE_ENUM |
+            ColumnType::MYSQL_TYPE_DECIMAL |
+            ColumnType::MYSQL_TYPE_VARCHAR |
+            ColumnType::MYSQL_TYPE_BIT |
+            ColumnType::MYSQL_TYPE_NEWDECIMAL |
+            ColumnType::MYSQL_TYPE_GEOMETRY => {
                 Ok(Bytes(try!(self.read_lenenc_bytes())))
             },
-            consts::MYSQL_TYPE_TINY => {
+            ColumnType::MYSQL_TYPE_TINY => {
                 if unsigned {
                     Ok(Int(try!(self.read_u8()) as i64))
                 } else {
                     Ok(Int(try!(self.read_i8()) as i64))
                 }
             },
-            consts::MYSQL_TYPE_SHORT |
-            consts::MYSQL_TYPE_YEAR => {
+            ColumnType::MYSQL_TYPE_SHORT |
+            ColumnType::MYSQL_TYPE_YEAR => {
                 if unsigned {
                     Ok(Int(try!(self.read_le_u16()) as i64))
                 } else {
                     Ok(Int(try!(self.read_le_i16()) as i64))
                 }
             },
-            consts::MYSQL_TYPE_LONG |
-            consts::MYSQL_TYPE_INT24 => {
+            ColumnType::MYSQL_TYPE_LONG |
+            ColumnType::MYSQL_TYPE_INT24 => {
                 if unsigned {
                     Ok(Int(try!(self.read_le_u32()) as i64))
                 } else {
                     Ok(Int(try!(self.read_le_i32()) as i64))
                 }
             },
-            consts::MYSQL_TYPE_LONGLONG => {
+            ColumnType::MYSQL_TYPE_LONGLONG => {
                 if unsigned {
                     Ok(UInt(try!(self.read_le_u64())))
                 } else {
                     Ok(Int(try!(self.read_le_i64()) as i64))
                 }
             },
-            consts::MYSQL_TYPE_FLOAT => {
+            ColumnType::MYSQL_TYPE_FLOAT => {
                 Ok(Float(try!(self.read_le_f32()) as f64))
             },
-            consts::MYSQL_TYPE_DOUBLE => {
+            ColumnType::MYSQL_TYPE_DOUBLE => {
                 Ok(Float(try!(self.read_le_f64())))
             },
-            consts::MYSQL_TYPE_TIMESTAMP |
-            consts::MYSQL_TYPE_DATE |
-            consts::MYSQL_TYPE_DATETIME => {
+            ColumnType::MYSQL_TYPE_TIMESTAMP |
+            ColumnType::MYSQL_TYPE_DATE |
+            ColumnType::MYSQL_TYPE_DATETIME => {
                 let len = try!(self.read_u8());
                 let mut year = 0u16;
                 let mut month = 0u8;
@@ -120,7 +122,7 @@ pub trait MyReader: Reader {
                 }
                 Ok(Date(year, month, day, hour, minute, second, micro_second))
             },
-            consts::MYSQL_TYPE_TIME => {
+            ColumnType::MYSQL_TYPE_TIME => {
                 let len = try!(self.read_u8());
                 let mut is_negative = false;
                 let mut days = 0u32;
@@ -246,7 +248,7 @@ pub struct MySslStream(pub ssl::SslStream<PlainStream>);
 impl Drop for MySslStream {
     fn drop(&mut self) {
         let MySslStream(ref mut s) = *self;
-        let _ = s.write_packet([consts::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+        let _ = s.write_packet([Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
     }
 }
 
@@ -260,8 +262,8 @@ pub enum MyStream {
 impl Reader for MyStream {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
         match *self {
-            SecureStream(MySslStream(ref mut s)) => s.read(buf),
-            InsecureStream(ref mut s) => s.read(buf),
+            MyStream::SecureStream(MySslStream(ref mut s)) => s.read(buf),
+            MyStream::InsecureStream(ref mut s) => s.read(buf),
         }
     }
 }
@@ -270,7 +272,7 @@ impl Reader for MyStream {
 impl Reader for MyStream {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
         match *self {
-            InsecureStream(ref mut s) => s.read(buf),
+            MyStream::InsecureStream(ref mut s) => s.read(buf),
         }
     }
 }
@@ -279,15 +281,15 @@ impl Reader for MyStream {
 impl Writer for MyStream {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
         match *self {
-            SecureStream(MySslStream(ref mut s)) => s.write(buf),
-            InsecureStream(ref mut s) => s.write(buf),
+            MyStream::SecureStream(MySslStream(ref mut s)) => s.write(buf),
+            MyStream::InsecureStream(ref mut s) => s.write(buf),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         match *self {
-            SecureStream(MySslStream(ref mut s)) => s.flush(),
-            InsecureStream(ref mut s) => s.flush(),
+            MyStream::SecureStream(MySslStream(ref mut s)) => s.flush(),
+            MyStream::InsecureStream(ref mut s) => s.flush(),
         }
     }
 }
@@ -296,13 +298,13 @@ impl Writer for MyStream {
 impl Writer for MyStream {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
         match *self {
-            InsecureStream(ref mut s) => s.write(buf),
+            MyStream::InsecureStream(ref mut s) => s.write(buf),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         match *self {
-            InsecureStream(ref mut s) => s.flush(),
+            MyStream::InsecureStream(ref mut s) => s.flush(),
         }
     }
 }
@@ -320,7 +322,7 @@ pub struct PlainStream {
 impl Drop for PlainStream {
     fn drop(&mut self) {
         if ! self.wrapped {
-            let _ = self.write_packet([consts::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+            let _ = self.write_packet([Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
         }
     }
 }
@@ -328,8 +330,8 @@ impl Drop for PlainStream {
 impl Reader for PlainStream {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
         match self.s {
-            TCPStream(ref mut s) => s.read(buf),
-            UNIXStream(ref mut s) => s.read(buf),
+            TcpOrUnixStream::TCPStream(ref mut s) => s.read(buf),
+            TcpOrUnixStream::UNIXStream(ref mut s) => s.read(buf),
         }
     }
 }
@@ -337,15 +339,15 @@ impl Reader for PlainStream {
 impl Writer for PlainStream {
     fn write(&mut self, buf: &[u8]) -> IoResult<()> {
         match self.s {
-            TCPStream(ref mut s) => s.write(buf),
-            UNIXStream(ref mut s) => s.write(buf),
+            TcpOrUnixStream::TCPStream(ref mut s) => s.write(buf),
+            TcpOrUnixStream::UNIXStream(ref mut s) => s.write(buf),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         match self.s {
-            TCPStream(ref mut s) => s.flush(),
-            UNIXStream(ref mut s) => s.flush(),
+            TcpOrUnixStream::TCPStream(ref mut s) => s.flush(),
+            TcpOrUnixStream::UNIXStream(ref mut s) => s.flush(),
         }
     }
 }

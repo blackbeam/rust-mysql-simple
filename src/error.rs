@@ -18,19 +18,19 @@ impl error::Error for MyError {
 	#[cfg(feature = "ssl")]
 	fn description(&self) -> &str {
 		match *self {
-			MyIoError(_) => "I/O Error",
-			MySqlError(_) => "MySql server error",
-			MyDriverError(_) => "driver error",
-			MySslError(_) => "ssl error",
+			MyError::MyIoError(_) => "I/O Error",
+			MyError::MySqlError(_) => "MySql server error",
+			MyError::MyDriverError(_) => "driver error",
+			MyError::MySslError(_) => "ssl error",
 		}
 	}
 
 	#[cfg(not(feature = "ssl"))]
 	fn description(&self) -> &str {
 		match *self {
-			MyIoError(_) => "I/O Error",
-			MySqlError(_) => "MySql server error",
-			MyDriverError(_) => "driver error",
+			MyError::MyIoError(_) => "I/O Error",
+			MyError::MySqlError(_) => "MySql server error",
+			MyError::MyDriverError(_) => "driver error",
 		}
 	}
 
@@ -40,8 +40,8 @@ impl error::Error for MyError {
 
 	fn cause(&self) -> Option<&error::Error> {
 		match *self {
-			MyIoError(ref err) => Some(err as &error::Error),
-			MyDriverError(ref err) => Some(err as &error::Error),
+			MyError::MyIoError(ref err) => Some(err as &error::Error),
+			MyError::MyDriverError(ref err) => Some(err as &error::Error),
 			_ => None
 		}
 	}
@@ -49,20 +49,20 @@ impl error::Error for MyError {
 
 impl error::FromError<io::IoError> for MyError {
 	fn from_error(err: io::IoError) -> MyError {
-		MyIoError(err)
+		MyError::MyIoError(err)
 	}
 }
 
 impl error::FromError<DriverError> for MyError {
 	fn from_error(err: DriverError) -> MyError {
-		MyDriverError(err)
+		MyError::MyDriverError(err)
 	}
 }
 
 #[cfg(feature = "openssl")]
 impl error::FromError<SslError> for MyError {
 	fn from_error(err: SslError) -> MyError {
-		MySslError(err)
+		MyError::MySslError(err)
 	}
 }
 
@@ -70,10 +70,10 @@ impl error::FromError<SslError> for MyError {
 impl fmt::Show for MyError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
-			MyIoError(ref io_err) => io_err.fmt(f),
-			MySqlError(ref err_packet) => err_packet.fmt(f),
-			MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
-			MySslError(ref ssl_error) => ssl_error.fmt(f),
+			MyError::MyIoError(ref io_err) => io_err.fmt(f),
+			MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
+			MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
+			MyError::MySslError(ref ssl_error) => ssl_error.fmt(f),
 		}
 	}
 }
@@ -82,9 +82,9 @@ impl fmt::Show for MyError {
 impl fmt::Show for MyError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
-			MyIoError(ref io_err) => io_err.fmt(f),
-			MySqlError(ref err_packet) => err_packet.fmt(f),
-			MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
+			MyError::MyIoError(ref io_err) => io_err.fmt(f),
+			MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
+			MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
 		}
 	}
 }
@@ -117,41 +117,41 @@ impl error::Error for DriverError {
 impl fmt::Show for DriverError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
-			CouldNotConnect(None) => {
+			DriverError::CouldNotConnect(None) => {
 				write!(f, "Could not connect: address not specified")
 			}
-			CouldNotConnect(Some(ref addr)) => {
+			DriverError::CouldNotConnect(Some(ref addr)) => {
 				write!(f, "Could not connect to address: {}", addr)
 			}
-			UnsupportedProtocol(proto_version) => {
+			DriverError::UnsupportedProtocol(proto_version) => {
 				write!(f, "Unsupported protocol version {:u}", proto_version)
 			}
-			PacketOutOfSync => {
+			DriverError::PacketOutOfSync => {
 				write!(f, "Packet out of sync")
 			}
-			PacketTooLarge => {
+			DriverError::PacketTooLarge => {
 				write!(f, "Packet too large")
 			}
-			Protocol41NotSet => {
+			DriverError::Protocol41NotSet => {
 				write!(f, "Server must set CLIENT_PROTOCOL_41 flag")
 			}
-			UnexpectedPacket => {
+			DriverError::UnexpectedPacket => {
 				write!(f, "Unexpected packet")
 			}
-			MismatchedStmtParams(exp, prov) => {
+			DriverError::MismatchedStmtParams(exp, prov) => {
 				write!(f, "Statement takes {:u} parameters but {:u} was supplied", exp, prov)
 			}
-			InvalidPoolConstraints => {
+			DriverError::InvalidPoolConstraints => {
 				write!(f, "Invalid pool constraints")
 			},
-			SetupError => {
+			DriverError::SetupError => {
 				write!(f, "Could not setup connection")
 			},
-			SslNotSupported => {
+			DriverError::SslNotSupported => {
 				write!(f, "Client requires secure connection but server \
 					       does not have this capability")
 			},
-			CouldNotParseVersion => {
+			DriverError::CouldNotParseVersion => {
 				write!(f, "Could not parse MySQL version")
 			},
 		}
