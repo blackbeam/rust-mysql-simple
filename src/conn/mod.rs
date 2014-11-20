@@ -161,10 +161,10 @@ impl<'a> Drop for Stmt<'a> {
                     ((self.stmt.statement_id & 0xFF000000) >> 24) as u8,];
         if self.conn.is_some() {
             let conn = self.conn.as_mut().unwrap();
-            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, data);
+            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, &data);
         } else {
             let conn = self.pooled_conn.as_mut().unwrap().as_mut();
-            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, data);
+            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, &data);
         }
     }
 }
@@ -794,9 +794,9 @@ impl MyConn {
         let client_flags = self.get_client_flags();
         let mut writer = MemWriter::with_capacity(4 + 4 + 1 + 23);
         try!(writer.write_le_u32(client_flags.bits()));
-        try!(writer.write([0u8, ..4]));
+        try!(writer.write(&[0u8, ..4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write([0u8, ..23]));
+        try!(writer.write(&[0u8, ..23]));
         self.write_packet(&writer.unwrap())
     }
 
@@ -811,9 +811,9 @@ impl MyConn {
         }
         let mut writer = MemWriter::with_capacity(payload_len);
         try!(writer.write_le_u32(client_flags.bits()));
-        try!(writer.write([0u8, ..4]));
+        try!(writer.write(&[0u8, ..4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write([0u8, ..23]));
+        try!(writer.write(&[0u8, ..23]));
         try!(writer.write_str(self.opts.get_user().as_slice()));
         try!(writer.write_u8(0u8));
         try!(writer.write_u8(scramble_buf_len as u8));
@@ -898,24 +898,24 @@ impl MyConn {
                 for i in range(0, params.len()) {
                     match params[i] {
                         NULL => try!(writer.write(
-                            [sparams[i].column_type as u8, 0u8])),
+                            &[sparams[i].column_type as u8, 0u8])),
                         Bytes(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_VAR_STRING as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8,
                                           0u8])),
                         Int(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_LONGLONG as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_LONGLONG as u8,
                                           0u8])),
                         UInt(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_LONGLONG as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_LONGLONG as u8,
                                           128u8])),
                         Float(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_DOUBLE as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_DOUBLE as u8,
                                           0u8])),
                         Date(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_DATE as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_DATE as u8,
                                           0u8])),
                         Time(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_TIME as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_TIME as u8,
                                           0u8]))
                     }
                 }

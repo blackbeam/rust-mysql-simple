@@ -1,6 +1,6 @@
 use std::io::{MemWriter, BufReader, IoResult, SeekCur};
 use std::str::{from_utf8, from_str};
-use std::num::{pow, Int, Float};
+use std::num::{Int, Float};
 use std::time::{Duration};
 use time::{Tm, Timespec, now, strptime, at};
 use super::consts;
@@ -8,7 +8,7 @@ use super::conn::{Column};
 use super::io::{MyWriter, MyReader};
 
 lazy_static! {
-    static ref TM_GMTOFF: i32 = now().tm_gmtoff;
+    static ref TM_UTCOFF: i32 = now().tm_utcoff;
     static ref TM_ISDST: i32 = now().tm_isdst;
 }
 
@@ -759,7 +759,7 @@ impl FromValue for Timespec {
                         tm_min: i as i32,
                         tm_sec: s as i32,
                         tm_nsec: u as i32 * 1_000,
-                        tm_gmtoff: *TM_GMTOFF,
+                        tm_utcoff: *TM_UTCOFF,
                         tm_wday: 0,
                         tm_yday: 0,
                         tm_isdst: *TM_ISDST,
@@ -769,7 +769,7 @@ impl FromValue for Timespec {
                 from_utf8(bts[]).and_then(|s| {
                     strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).and_then(|mut tm| {
-                    tm.tm_gmtoff = *TM_GMTOFF;
+                    tm.tm_utcoff = *TM_UTCOFF;
                     tm.tm_isdst = *TM_ISDST;
                     Some(tm.to_timespec())
                 })
@@ -811,7 +811,7 @@ impl FromValue for Duration {
                         [_, ms] if ms.len() <= 6 => {
                             let x = from_utf8(ms).and_then(from_str::<i64>);
                             if x.is_some() {
-                                x.unwrap() * pow::<i64>(10,  6 - ms.len())
+                                x.unwrap() * 10i64.pow(6 - ms.len())
                             } else {
                                 return None;
                             }

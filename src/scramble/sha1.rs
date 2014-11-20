@@ -97,7 +97,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
 
     let mut output = [0u8, ..20];
     {
-        let mut writer = BufWriter::new(output);
+        let mut writer = BufWriter::new(&mut output);
         writer.write_be_u32(hash[0]);
         writer.write_be_u32(hash[1]);
         writer.write_be_u32(hash[2]);

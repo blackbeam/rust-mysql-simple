@@ -217,7 +217,7 @@ pub trait MyWriter: Writer {
             return Err(MyDriverError(PacketTooLarge));
         }
         if data.len() == 0 {
-            try!(self.write([0u8, 0u8, 0u8, seq_id]));
+            try!(self.write(&[0u8, 0u8, 0u8, seq_id]));
             return Ok(seq_id + 1);
         }
         let mut last_was_max = false;
@@ -232,7 +232,7 @@ pub trait MyWriter: Writer {
             try!(self.write(writer.unwrap().as_slice()));
         }
         if last_was_max {
-            try!(self.write([0u8, 0u8, 0u8, seq_id]));
+            try!(self.write(&[0u8, 0u8, 0u8, seq_id]));
             seq_id += 1;
         }
         Ok(seq_id)
@@ -248,7 +248,7 @@ pub struct MySslStream(pub ssl::SslStream<PlainStream>);
 impl Drop for MySslStream {
     fn drop(&mut self) {
         let MySslStream(ref mut s) = *self;
-        let _ = s.write_packet([Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+        let _ = s.write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
     }
 }
 
@@ -322,7 +322,7 @@ pub struct PlainStream {
 impl Drop for PlainStream {
     fn drop(&mut self) {
         if ! self.wrapped {
-            let _ = self.write_packet([Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+            let _ = self.write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
         }
     }
 }
