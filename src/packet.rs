@@ -172,7 +172,7 @@ mod test {
     #[test]
     fn test_ok_packet() {
         let payload = [0u8, 1u8, 2u8, 8u8, 0u8, 4u8, 0u8, 32u8];
-        let ok_packet = OkPacket::from_payload(payload);
+        let ok_packet = OkPacket::from_payload(&payload);
         assert!(ok_packet.is_ok());
         let ok_packet = ok_packet.unwrap();
         assert_eq!(ok_packet.affected_rows, 1);
@@ -185,7 +185,7 @@ mod test {
     #[test]
     fn test_err_packet() {
         let payload = [255u8, 1u8, 0u8, 35u8, 51u8, 68u8, 48u8, 48u8, 48u8, 32u8, 32u8];
-        let err_packet = ErrPacket::from_payload(payload);
+        let err_packet = ErrPacket::from_payload(&payload);
         assert!(err_packet.is_ok());
         let err_packet = err_packet.unwrap();
         assert_eq!(err_packet.error_code, 1);
@@ -196,7 +196,7 @@ mod test {
     #[test]
     fn test_eof_packet() {
         let payload = [0xfe_u8, 1u8, 0u8, 8u8, 0u8];
-        let eof_packet = EOFPacket::from_payload(payload);
+        let eof_packet = EOFPacket::from_payload(&payload);
         assert!(eof_packet.is_ok());
         let eof_packet = eof_packet.unwrap();
         assert_eq!(eof_packet.warnings, 1);

@@ -161,10 +161,10 @@ impl<'a> Drop for Stmt<'a> {
                     ((self.stmt.statement_id & 0xFF000000) >> 24) as u8,];
         if self.conn.is_some() {
             let conn = self.conn.as_mut().unwrap();
-            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, data);
+            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, &data);
         } else {
             let conn = self.pooled_conn.as_mut().unwrap().as_mut();
-            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, data);
+            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, &data);
         }
     }
 }
@@ -794,9 +794,9 @@ impl MyConn {
         let client_flags = self.get_client_flags();
         let mut writer = MemWriter::with_capacity(4 + 4 + 1 + 23);
         try!(writer.write_le_u32(client_flags.bits()));
-        try!(writer.write([0u8, ..4]));
+        try!(writer.write(&[0u8, ..4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write([0u8, ..23]));
+        try!(writer.write(&[0u8, ..23]));
         self.write_packet(&writer.unwrap())
     }
 
@@ -811,9 +811,9 @@ impl MyConn {
         }
         let mut writer = MemWriter::with_capacity(payload_len);
         try!(writer.write_le_u32(client_flags.bits()));
-        try!(writer.write([0u8, ..4]));
+        try!(writer.write(&[0u8, ..4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write([0u8, ..23]));
+        try!(writer.write(&[0u8, ..23]));
         try!(writer.write_str(self.opts.get_user().as_slice()));
         try!(writer.write_u8(0u8));
         try!(writer.write_u8(scramble_buf_len as u8));
@@ -898,24 +898,24 @@ impl MyConn {
                 for i in range(0, params.len()) {
                     match params[i] {
                         NULL => try!(writer.write(
-                            [sparams[i].column_type as u8, 0u8])),
+                            &[sparams[i].column_type as u8, 0u8])),
                         Bytes(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_VAR_STRING as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8,
                                           0u8])),
                         Int(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_LONGLONG as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_LONGLONG as u8,
                                           0u8])),
                         UInt(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_LONGLONG as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_LONGLONG as u8,
                                           128u8])),
                         Float(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_DOUBLE as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_DOUBLE as u8,
                                           0u8])),
                         Date(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_DATE as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_DATE as u8,
                                           0u8])),
                         Time(..) => try!(
-                            writer.write([ColumnType::MYSQL_TYPE_TIME as u8,
+                            writer.write(&[ColumnType::MYSQL_TYPE_TIME as u8,
                                           0u8]))
                     }
                 }
@@ -1533,7 +1533,7 @@ mod test {
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
             let mut i = 0i;
-            for row in &mut stmt.execute([]) {
+            for row in &mut stmt.execute(&[]) {
                 assert!(row.is_ok());
                 let row = row.unwrap();
                 if i == 0 {
@@ -1554,7 +1554,7 @@ mod test {
         }
         let stmt = conn.prepare("SELECT REPEAT('A', 20000000);");
         let mut stmt = stmt.unwrap();
-        for row in &mut stmt.execute([]) {
+        for row in &mut stmt.execute(&[]) {
             assert!(row.is_ok());
             let row = row.unwrap();
             let val= row[0].bytes_ref();
@@ -1609,7 +1609,7 @@ mod test {
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a TEXT)").is_ok());
-        let mut path = getcwd();
+        let mut path = getcwd().unwrap();
         path.push("local_infile.txt".to_string());
         {
             let mut file = File::create(&path).unwrap();
@@ -1683,7 +1683,7 @@ mod test {
     fn bench_prepared_exec(bench: &mut Bencher) {
         let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("DO 1").unwrap();
-        bench.iter(|| { stmt.execute([]); })
+        bench.iter(|| { stmt.execute(&[]); })
     }
 
     #[bench]
@@ -1698,7 +1698,7 @@ mod test {
     fn bench_simple_prepared_query_row(bench: &mut Bencher) {
         let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("SELECT 1").unwrap();
-        bench.iter(|| { stmt.execute([]); })
+        bench.iter(|| { stmt.execute(&[]); })
     }
 
     #[bench]
@@ -1731,7 +1731,7 @@ mod test {
     fn bench_select_prepared_large_string(bench: &mut Bencher) {
         let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
-        bench.iter(|| { stmt.execute([]); })
+        bench.iter(|| { stmt.execute(&[]); })
     }
 }
 
