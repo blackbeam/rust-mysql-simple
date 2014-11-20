@@ -302,7 +302,7 @@ mod test {
                 let stmt = conn.prepare("SELECT 1");
                 assert!(stmt.is_ok());
                 let mut stmt = stmt.unwrap();
-                assert!(stmt.execute([]).is_ok());
+                assert!(stmt.execute(&[]).is_ok());
             });
         }
     }
@@ -319,7 +319,7 @@ mod test {
                 assert!(stmt.is_ok());
                 let mut stmt = stmt.unwrap();
                 for _ in range(0u, 5u) {
-                    let result = stmt.execute([]);
+                    let result = stmt.execute(&[]);
                     assert!(result.is_ok());
                     let mut result = result.unwrap();
                     assert_eq!(result.next(), Some(Ok(vec![Int(1)])));

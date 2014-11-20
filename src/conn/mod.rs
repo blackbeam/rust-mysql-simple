@@ -1533,7 +1533,7 @@ mod test {
             assert!(stmt.is_ok());
             let mut stmt = stmt.unwrap();
             let mut i = 0i;
-            for row in &mut stmt.execute([]) {
+            for row in &mut stmt.execute(&[]) {
                 assert!(row.is_ok());
                 let row = row.unwrap();
                 if i == 0 {
@@ -1554,7 +1554,7 @@ mod test {
         }
         let stmt = conn.prepare("SELECT REPEAT('A', 20000000);");
         let mut stmt = stmt.unwrap();
-        for row in &mut stmt.execute([]) {
+        for row in &mut stmt.execute(&[]) {
             assert!(row.is_ok());
             let row = row.unwrap();
             let val= row[0].bytes_ref();
@@ -1609,7 +1609,7 @@ mod test {
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a TEXT)").is_ok());
-        let mut path = getcwd();
+        let mut path = getcwd().unwrap();
         path.push("local_infile.txt".to_string());
         {
             let mut file = File::create(&path).unwrap();
@@ -1683,7 +1683,7 @@ mod test {
     fn bench_prepared_exec(bench: &mut Bencher) {
         let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("DO 1").unwrap();
-        bench.iter(|| { stmt.execute([]); })
+        bench.iter(|| { stmt.execute(&[]); })
     }
 
     #[bench]
@@ -1698,7 +1698,7 @@ mod test {
     fn bench_simple_prepared_query_row(bench: &mut Bencher) {
         let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("SELECT 1").unwrap();
-        bench.iter(|| { stmt.execute([]); })
+        bench.iter(|| { stmt.execute(&[]); })
     }
 
     #[bench]
@@ -1731,7 +1731,7 @@ mod test {
     fn bench_select_prepared_large_string(bench: &mut Bencher) {
         let mut conn = MyConn::new(get_opts()).unwrap();
         let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
-        bench.iter(|| { stmt.execute([]); })
+        bench.iter(|| { stmt.execute(&[]); })
     }
 }
 
