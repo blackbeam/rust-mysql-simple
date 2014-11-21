@@ -1102,7 +1102,7 @@ impl MyConn {
     }
 
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
-        for row in &mut self.query(format!("SELECT @@{:s};", name).as_slice()) {
+        for row in &mut self.query(format!("SELECT @@{};", name).as_slice()) {
             match row {
                 Ok(mut r) => return r.remove(0),
                 _ => ()
@@ -1570,7 +1570,7 @@ mod test {
         assert!(conn.query("CREATE DATABASE test").is_ok());
         assert!(conn.query("USE test").is_ok());
         assert!(conn.query("CREATE TABLE tbl(a LONGBLOB)").is_ok());
-        let query = format!("INSERT INTO tbl(a) VALUES('{:s}')", String::from_chars(Vec::from_elem(20000000, 'A').as_slice()));
+        let query = format!("INSERT INTO tbl(a) VALUES('{}')", String::from_chars(Vec::from_elem(20000000, 'A').as_slice()));
         assert!(conn.query(query.as_slice()).is_ok());
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
@@ -1617,7 +1617,7 @@ mod test {
             file.write_line("BBBBBB");
             file.write_line("CCCCCC");
         }
-        let query = format!("LOAD DATA LOCAL INFILE '{:s}' INTO TABLE tbl", str::from_utf8(path.clone().into_vec().as_slice()).unwrap());
+        let query = format!("LOAD DATA LOCAL INFILE '{}' INTO TABLE tbl", str::from_utf8(path.clone().into_vec().as_slice()).unwrap());
         assert!(conn.query(query.as_slice()).is_ok());
         let mut count = 0;
         for row in &mut conn.query("SELECT * FROM tbl") {

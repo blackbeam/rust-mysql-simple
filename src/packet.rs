@@ -54,7 +54,7 @@ impl ErrPacket {
 impl fmt::Show for ErrPacket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f,
-               "ERROR {:u} ({:s}): {:s}",
+               "ERROR {} ({}): {}",
                self.error_code,
                str::from_utf8(self.sql_state.as_slice()).unwrap(),
                str::from_utf8(self.error_message.as_slice()).unwrap())
