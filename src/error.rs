@@ -124,7 +124,7 @@ impl fmt::Show for DriverError {
 				write!(f, "Could not connect to address: {}", addr)
 			}
 			DriverError::UnsupportedProtocol(proto_version) => {
-				write!(f, "Unsupported protocol version {:u}", proto_version)
+				write!(f, "Unsupported protocol version {}", proto_version)
 			}
 			DriverError::PacketOutOfSync => {
 				write!(f, "Packet out of sync")
@@ -139,7 +139,7 @@ impl fmt::Show for DriverError {
 				write!(f, "Unexpected packet")
 			}
 			DriverError::MismatchedStmtParams(exp, prov) => {
-				write!(f, "Statement takes {:u} parameters but {:u} was supplied", exp, prov)
+				write!(f, "Statement takes {} parameters but {} was supplied", exp, prov)
 			}
 			DriverError::InvalidPoolConstraints => {
 				write!(f, "Invalid pool constraints")

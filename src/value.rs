@@ -65,30 +65,30 @@ impl Value {
                                     .replace("'", "\x5c'")
                                     .replace("\"", "\x5c\"")
                                     .replace("\x1a", "\x5c\x1a");
-                    format!("'{:s}'", replaced)
+                    format!("'{}'", replaced)
                 })
             },
-            Value::Int(x) => format!("{:d}", x),
-            Value::UInt(x) => format!("{:u}", x),
-            Value::Float(x) => format!("{:f}", x),
+            Value::Int(x) => format!("{}", x),
+            Value::UInt(x) => format!("{}", x),
+            Value::Float(x) => format!("{}", x),
             Value::Date(0, 0, 0, 0, 0, 0, 0) => "''".into_string(),
-            Value::Date(y, m, d, 0, 0, 0, 0) => format!("'{:04u}-{:02u}-{:02u}'", y, m, d),
-            Value::Date(y, m, d, h, i, s, 0) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}'", y, m, d, h, i, s),
-            Value::Date(y, m, d, h, i, s, u) => format!("'{:04u}-{:02u}-{:02u} {:02u}:{:02u}:{:02u}.{:06u}'", y, m, d, h, i, s, u),
+            Value::Date(y, m, d, 0, 0, 0, 0) => format!("'{:04}-{:02}-{:02}'", y, m, d),
+            Value::Date(y, m, d, h, i, s, 0) => format!("'{:04}-{:02}-{:02} {:02}:{:02}:{:02}'", y, m, d, h, i, s),
+            Value::Date(y, m, d, h, i, s, u) => format!("'{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}'", y, m, d, h, i, s, u),
             Value::Time(_, 0, 0, 0, 0, 0) => "''".into_string(),
             Value::Time(neg, d, h, i, s, 0) => {
                 if neg {
-                    format!("'-{:03u}:{:02u}:{:02u}'", d * 24 + h as u32, i, s)
+                    format!("'-{:03}:{:02}:{:02}'", d * 24 + h as u32, i, s)
                 } else {
-                    format!("'{:03u}:{:02u}:{:02u}'", d * 24 + h as u32, i, s)
+                    format!("'{:03}:{:02}:{:02}'", d * 24 + h as u32, i, s)
                 }
             },
             Value::Time(neg, d, h, i, s, u) => {
                 if neg {
-                    format!("'-{:03u}:{:02u}:{:02u}.{:06u}'",
+                    format!("'-{:03}:{:02}:{:02}.{:06}'",
                             d * 24 + h as u32, i, s, u)
                 } else {
-                    format!("'{:03u}:{:02u}:{:02u}.{:06u}'",
+                    format!("'{:03}:{:02}:{:02}.{:06}'",
                             d * 24 + h as u32, i, s, u)
                 }
             }
