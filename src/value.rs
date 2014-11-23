@@ -1,4 +1,4 @@
-use std::io::{MemWriter, BufReader, IoResult, SeekCur};
+use std::io::{BufReader, IoResult, SeekCur};
 use std::str::{from_utf8, from_str};
 use std::num::{Int, Float};
 use std::time::{Duration};
@@ -268,7 +268,7 @@ impl Value {
         }
     }
     pub fn to_bin(&self) -> IoResult<Vec<u8>> {
-        let mut writer = MemWriter::with_capacity(256);
+        let mut writer = Vec::with_capacity(256);
         match *self {
             Value::NULL => (),
             Value::Bytes(ref x) => {
@@ -330,7 +330,7 @@ impl Value {
                 try!(writer.write_le_u32(u));
             }
         };
-        Ok(writer.unwrap())
+        Ok(writer)
     }
     pub fn from_payload(pld: &[u8], columns_count: uint) -> IoResult<Vec<Value>> {
         let mut output = Vec::with_capacity(columns_count);
@@ -371,7 +371,7 @@ impl Value {
     pub fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: uint) -> IoResult<(Vec<u8>, Vec<u8>, Option<Vec<u16>>)> {
         let bitmap_len = (params.len() + 7) / 8;
         let mut large_ids = Vec::new();
-        let mut writer = MemWriter::new();
+        let mut writer = Vec::new();
         let mut bitmap = Vec::from_elem(bitmap_len, 0u8);
         let mut i = 0u16;
         let mut written = 0;
@@ -392,9 +392,9 @@ impl Value {
             i += 1;
         }
         if large_ids.len() == 0 {
-            Ok((bitmap, writer.unwrap(), None))
+            Ok((bitmap, writer, None))
         } else {
-            Ok((bitmap, writer.unwrap(), Some(large_ids)))
+            Ok((bitmap, writer, Some(large_ids)))
         }
     }
 }
@@ -787,8 +787,8 @@ impl FromValue for Duration {
     fn from_value_opt(v: &Value) -> Option<Duration> {
         match *v {
             Value::Time(neg, d, h, m, s, u) => {
-                let microseconds = u as i64 + 
-                    (s as i64 * 1_000_000) + 
+                let microseconds = u as i64 +
+                    (s as i64 * 1_000_000) +
                     (m as i64 * 60 * 1_000_000) +
                     (h as i64 * 60 * 60 * 1_000_000) +
                     (d as i64 * 24 * 60 * 60 * 1_000_000);

@@ -1,4 +1,4 @@
-use std::io::{IoResult, Reader, Writer, MemWriter};
+use std::io::{IoResult, Reader, Writer};
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
@@ -223,13 +223,13 @@ pub trait MyWriter: Writer {
         let mut last_was_max = false;
         for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
             let chunk_len = chunk.len();
-            let mut writer = MemWriter::with_capacity(4 + chunk_len);
+            let mut writer = Vec::with_capacity(4 + chunk_len);
             last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
             try!(writer.write_le_uint_n(chunk_len as u64, 3));
             try!(writer.write_u8(seq_id));
             seq_id += 1;
             try!(writer.write(chunk));
-            try!(self.write(writer.unwrap().as_slice()));
+            try!(self.write(writer.as_slice()));
         }
         if last_was_max {
             try!(self.write(&[0u8, 0u8, 0u8, seq_id]));

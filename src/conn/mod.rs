@@ -4,7 +4,7 @@ use openssl::{ssl, x509};
 use std::fmt;
 use std::default::{Default};
 use std::io::{Reader, File, IoResult, Seek,
-              SeekCur, EndOfFile, BufReader, MemWriter};
+              SeekCur, EndOfFile, BufReader};
 use std::io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::pipe::{UnixStream};
@@ -155,17 +155,17 @@ impl<'a> Drop for Transaction<'a> {
 }
 
 /***
- *     .d8888b.  888                  888    
- *    d88P  Y88b 888                  888    
- *    Y88b.      888                  888    
- *     "Y888b.   888888 88888b.d88b.  888888 
- *        "Y88b. 888    888 "888 "88b 888    
- *          "888 888    888  888  888 888    
- *    Y88b  d88P Y88b.  888  888  888 Y88b.  
- *     "Y8888P"   "Y888 888  888  888  "Y888 
- *                                           
- *                                           
- *                                           
+ *     .d8888b.  888                  888
+ *    d88P  Y88b 888                  888
+ *    Y88b.      888                  888
+ *     "Y888b.   888888 88888b.d88b.  888888
+ *        "Y88b. 888    888 "888 "88b 888
+ *          "888 888    888  888  888 888
+ *    Y88b  d88P Y88b.  888  888  888 Y88b.
+ *     "Y8888P"   "Y888 888  888  888  "Y888
+ *
+ *
+ *
  */
 #[deriving(Eq, PartialEq)]
 struct InnerStmt {
@@ -278,17 +278,17 @@ impl<'a> Drop for Stmt<'a> {
 }
 
 /***
- *     .d8888b.           888                                 
- *    d88P  Y88b          888                                 
- *    888    888          888                                 
- *    888         .d88b.  888 888  888 88888b.d88b.  88888b.  
- *    888        d88""88b 888 888  888 888 "888 "88b 888 "88b 
- *    888    888 888  888 888 888  888 888  888  888 888  888 
- *    Y88b  d88P Y88..88P 888 Y88b 888 888  888  888 888  888 
- *     "Y8888P"   "Y88P"  888  "Y88888 888  888  888 888  888 
- *                                                            
- *                                                            
- *                                                            
+ *     .d8888b.           888
+ *    d88P  Y88b          888
+ *    888    888          888
+ *    888         .d88b.  888 888  888 88888b.d88b.  88888b.
+ *    888        d88""88b 888 888  888 888 "888 "88b 888 "88b
+ *    888    888 888  888 888 888  888 888  888  888 888  888
+ *    Y88b  d88P Y88..88P 888 Y88b 888 888  888  888 888  888
+ *     "Y8888P"   "Y88P"  888  "Y88888 888  888  888 888  888
+ *
+ *
+ *
  */
 
 /// Mysql
@@ -358,17 +358,17 @@ impl Column {
 }
 
 /***
- *    888b     d888           .d88888b.           888             
- *    8888b   d8888          d88P" "Y88b          888             
- *    88888b.d88888          888     888          888             
- *    888Y88888P888 888  888 888     888 88888b.  888888 .d8888b  
- *    888 Y888P 888 888  888 888     888 888 "88b 888    88K      
- *    888  Y8P  888 888  888 888     888 888  888 888    "Y8888b. 
- *    888   "   888 Y88b 888 Y88b. .d88P 888 d88P Y88b.       X88 
- *    888       888  "Y88888  "Y88888P"  88888P"   "Y888  88888P' 
- *                       888             888                      
- *                  Y8b d88P             888                      
- *                   "Y88P"              888                      
+ *    888b     d888           .d88888b.           888
+ *    8888b   d8888          d88P" "Y88b          888
+ *    88888b.d88888          888     888          888
+ *    888Y88888P888 888  888 888     888 88888b.  888888 .d8888b
+ *    888 Y888P 888 888  888 888     888 888 "88b 888    88K
+ *    888  Y8P  888 888  888 888     888 888  888 888    "Y8888b.
+ *    888   "   888 Y88b 888 Y88b. .d88P 888 d88P Y88b.       X88
+ *    888       888  "Y88888  "Y88888P"  88888P"   "Y888  88888P'
+ *                       888             888
+ *                  Y8b d88P             888
+ *                   "Y88P"              888
  */
 /// Mysql connection options.
 ///
@@ -474,17 +474,17 @@ impl Default for MyOpts {
 }
 
 /***
- *    888b     d888           .d8888b.                             
- *    8888b   d8888          d88P  Y88b                            
- *    88888b.d88888          888    888                            
- *    888Y88888P888 888  888 888         .d88b.  88888b.  88888b.  
- *    888 Y888P 888 888  888 888        d88""88b 888 "88b 888 "88b 
- *    888  Y8P  888 888  888 888    888 888  888 888  888 888  888 
- *    888   "   888 Y88b 888 Y88b  d88P Y88..88P 888  888 888  888 
- *    888       888  "Y88888  "Y8888P"   "Y88P"  888  888 888  888 
- *                       888                                       
- *                  Y8b d88P                                       
- *                   "Y88P"                                        
+ *    888b     d888           .d8888b.
+ *    8888b   d8888          d88P  Y88b
+ *    88888b.d88888          888    888
+ *    888Y88888P888 888  888 888         .d88b.  88888b.  88888b.
+ *    888 Y888P 888 888  888 888        d88""88b 888 "88b 888 "88b
+ *    888  Y8P  888 888  888 888    888 888  888 888  888 888  888
+ *    888   "   888 Y88b 888 Y88b  d88P Y88..88P 888  888 888  888
+ *    888       888  "Y88888  "Y8888P"   "Y88P"  888  888 888  888
+ *                       888
+ *                  Y8b d88P
+ *                   "Y88P"
  */
 
 /// Mysql connection.
@@ -900,12 +900,12 @@ impl MyConn {
     #[cfg(feature = "ssl")]
     fn do_ssl_request(&mut self) -> MyResult<()> {
         let client_flags = self.get_client_flags();
-        let mut writer = MemWriter::with_capacity(4 + 4 + 1 + 23);
+        let mut writer = Vec::with_capacity(4 + 4 + 1 + 23);
         try!(writer.write_le_u32(client_flags.bits()));
         try!(writer.write(&[0u8, ..4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try!(writer.write(&[0u8, ..23]));
-        self.write_packet(&writer.unwrap())
+        self.write_packet(&writer)
     }
 
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
@@ -917,7 +917,7 @@ impl MyConn {
         if self.opts.get_db_name().len() > 0 {
             payload_len += self.opts.get_db_name().len() + 1;
         }
-        let mut writer = MemWriter::with_capacity(payload_len);
+        let mut writer = Vec::with_capacity(payload_len);
         try!(writer.write_le_u32(client_flags.bits()));
         try!(writer.write(&[0u8, ..4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
@@ -932,7 +932,7 @@ impl MyConn {
             try!(writer.write_str(self.opts.get_db_name().as_slice()));
             try!(writer.write_u8(0u8));
         }
-        self.write_packet(&writer.unwrap())
+        self.write_packet(&writer)
     }
 
     fn write_command(&mut self, cmd: consts::Command) -> MyResult<()> {
@@ -966,12 +966,12 @@ impl MyConn {
                 Bytes(ref x) => {
                     for chunk in x.chunks(self.max_allowed_packet - 7) {
                         let chunk_len = chunk.len() + 7;
-                        let mut writer = MemWriter::with_capacity(chunk_len);
+                        let mut writer = Vec::with_capacity(chunk_len);
                         try!(writer.write_le_u32(stmt.statement_id));
                         try!(writer.write_le_u16(id));
                         try!(writer.write(chunk));
                         try!(self.write_command_data(Command::COM_STMT_SEND_LONG_DATA,
-                                                     writer.unwrap().as_slice()));
+                                                     writer.as_slice()));
                     }
                 },
                 _ => (/* quite strange so do nothing */)
@@ -984,7 +984,7 @@ impl MyConn {
         if stmt.num_params != params.len() as u16 {
             return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, params.len())));
         }
-        let mut writer: MemWriter;
+        let mut writer: Vec<u8>;
         match stmt.params {
             Some(ref sparams) => {
                 let (bitmap, values, large_ids) =
@@ -995,7 +995,7 @@ impl MyConn {
                     Some(ids) => try!(self.send_long_data(stmt, params, ids)),
                     _ => ()
                 }
-                writer = MemWriter::with_capacity(9 + bitmap.len() + 1 +
+                writer = Vec::with_capacity(9 + bitmap.len() + 1 +
                                                   params.len() * 2 +
                                                   values.len());
                 try!(writer.write_le_u32(stmt.statement_id));
@@ -1030,13 +1030,13 @@ impl MyConn {
                 try!(writer.write(values.as_slice()));
             },
             None => {
-                writer = MemWriter::with_capacity(4 + 1 + 4);
+                writer = Vec::with_capacity(4 + 1 + 4);
                 try!(writer.write_le_u32(stmt.statement_id));
                 try!(writer.write_u8(0u8));
                 try!(writer.write_le_u32(1u32));
             }
         }
-        try!(self.write_command_data(Command::COM_STMT_EXECUTE, writer.unwrap().as_slice()));
+        try!(self.write_command_data(Command::COM_STMT_EXECUTE, writer.as_slice()));
         self.handle_result_set()
     }
 
@@ -1322,17 +1322,17 @@ impl MyConn {
 }
 
 /***
- *    888b     d888          8888888b.                             888 888    
- *    8888b   d8888          888   Y88b                            888 888    
- *    88888b.d88888          888    888                            888 888    
- *    888Y88888P888 888  888 888   d88P  .d88b.  .d8888b  888  888 888 888888 
- *    888 Y888P 888 888  888 8888888P"  d8P  Y8b 88K      888  888 888 888    
- *    888  Y8P  888 888  888 888 T88b   88888888 "Y8888b. 888  888 888 888    
- *    888   "   888 Y88b 888 888  T88b  Y8b.          X88 Y88b 888 888 Y88b.  
- *    888       888  "Y88888 888   T88b  "Y8888   88888P'  "Y88888 888  "Y888 
- *                       888                                                  
- *                  Y8b d88P                                                  
- *                   "Y88P"                                                   
+ *    888b     d888          8888888b.                             888 888
+ *    8888b   d8888          888   Y88b                            888 888
+ *    88888b.d88888          888    888                            888 888
+ *    888Y88888P888 888  888 888   d88P  .d88b.  .d8888b  888  888 888 888888
+ *    888 Y888P 888 888  888 8888888P"  d8P  Y8b 88K      888  888 888 888
+ *    888  Y8P  888 888  888 888 T88b   88888888 "Y8888b. 888  888 888 888
+ *    888   "   888 Y88b 888 888  T88b  Y8b.          X88 Y88b 888 888 Y88b.
+ *    888       888  "Y88888 888   T88b  "Y8888   88888P'  "Y88888 888  "Y888
+ *                       888
+ *                  Y8b d88P
+ *                   "Y88P"
  */
 
 /// Mysql result set for text and binary protocols.
@@ -1540,17 +1540,17 @@ impl<'a> Iterator<MyResult<Vec<Value>>> for &'a mut MyResult<QueryResult<'a>> {
 }
 
 /***
- *    88888888888                   888             
- *        888                       888             
- *        888                       888             
- *        888      .d88b.  .d8888b  888888 .d8888b  
- *        888     d8P  Y8b 88K      888    88K      
- *        888     88888888 "Y8888b. 888    "Y8888b. 
- *        888     Y8b.          X88 Y88b.       X88 
- *        888      "Y8888   88888P'  "Y888  88888P' 
- *                                                  
- *                                                  
- *                                                  
+ *    88888888888                   888
+ *        888                       888
+ *        888                       888
+ *        888      .d88b.  .d8888b  888888 .d8888b
+ *        888     d8P  Y8b 88K      888    88K
+ *        888     88888888 "Y8888b. 888    "Y8888b.
+ *        888     Y8b.          X88 Y88b.       X88
+ *        888      "Y8888   88888P'  "Y888  88888P'
+ *
+ *
+ *
  */
 
 #[cfg(test)]
