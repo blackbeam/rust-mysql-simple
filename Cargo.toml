@@ -7,6 +7,7 @@ description = "Mysql client library implemented in rust"
 license = "MIT"
 documentation = "http://blackbeam.org/doc/mysql/index.html"
 repository = "https://github.com/blackbeam/rust-mysql-simple"
+keywords = ["database", "sql"]
 exclude = ["tests/*", ".*", "Makefile"]
 
 [lib]
