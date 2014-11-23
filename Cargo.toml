@@ -45,8 +45,7 @@ default = ["ssl"]
 ssl = ["openssl"]
 
 [dependencies.lazy_static]
-
-git = "https://github.com/Kimundi/lazy-static.rs"
+lazy_static = "~0.1.1"
 
 [dependencies.openssl]
 
@@ -54,4 +53,4 @@ git = "https://github.com/sfackler/rust-openssl"
 optional = true
 
 [dependencies.time]
-git = "http://github.com/rust-lang/time"
+time = "~0.0.3"
