@@ -1,6 +1,7 @@
 #[cfg(feature = "openssl")]
 use openssl::{ssl, x509};
 
+use std::fmt;
 use std::default::{Default};
 use std::io::{Reader, File, IoResult, Seek,
               SeekCur, EndOfFile, BufReader, MemWriter};
@@ -33,7 +34,8 @@ use super::error::DriverError::{
     Protocol41NotSet,
     UnexpectedPacket,
     MismatchedStmtParams,
-    SetupError
+    SetupError,
+    ReadOnlyTransNotSupported,
 };
 use super::error::MyResult;
 #[cfg(feature = "ssl")]
@@ -45,6 +47,112 @@ use super::value::ToValue;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 pub mod pool;
+
+pub enum IsolationLevel {
+    ReadUncommied,
+    ReadCommited,
+    RepeaableRead,
+    Serializable,
+}
+
+impl fmt::Show for IsolationLevel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            IsolationLevel::ReadUncommied => write!(f, "READ UNCOMMITTED"),
+            IsolationLevel::ReadCommited => write!(f, "READ COMMITTED"),
+            IsolationLevel::RepeaableRead => write!(f, "REPEATABLE READ"),
+            IsolationLevel::Serializable => write!(f, "SERIALIZABLE"),
+        }
+    }
+}
+
+pub struct Transaction<'a> {
+    conn: Option<&'a mut MyConn>,
+    pooled_conn: Option<pool::MyPooledConn>,
+    committed: bool,
+    rollbacked: bool,
+}
+
+impl<'a> Transaction<'a> {
+    fn new<'a>(conn: &'a mut MyConn) -> Transaction<'a> {
+        Transaction {
+            conn: Some(conn),
+            pooled_conn: None,
+            committed: false,
+            rollbacked: false,
+        }
+    }
+
+    fn new_pooled(conn: pool::MyPooledConn) -> Transaction<'a> {
+        Transaction {
+            conn: None,
+            pooled_conn: Some(conn),
+            committed: false,
+            rollbacked: false,
+        }
+    }
+
+    /// See [`MyConn#query`](struct.MyConn.html#method.query).
+    pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
+        if let Some(ref mut conn) = self.conn {
+            conn.query(query)
+        } else if let Some(ref mut conn) = self.pooled_conn {
+            conn.query(query)
+        } else {
+            unreachable!()
+        }
+    }
+
+    /// See [`MyConn#prepare`](struct.MyConn.html#method.prepare).
+    pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+        if let Some(ref mut conn) = self.conn {
+            conn.prepare(query)
+        } else if let Some(ref mut conn) = self.pooled_conn {
+            conn.prepare(query)
+        } else {
+            unreachable!()
+        }
+    }
+
+    /// Will consume and commit transaction.
+    pub fn commit(mut self) -> MyResult<()> {
+        if let Some(ref mut conn) = self.conn {
+            try!(conn.query("COMMIT"));
+        } else if let Some(ref mut conn) = self.pooled_conn {
+            try!(conn.query("COMMIT"));
+        } else {
+            unreachable!()
+        }
+        self.committed = true;
+        Ok(())
+    }
+
+    /// Will consume and rollback transaction. You also can rely on `Drop` implementation but it
+    /// will swallow errors.
+    pub fn rollback(mut self) -> MyResult<()> {
+        if let Some(ref mut conn) = self.conn {
+            let _ = try!(conn.query("ROLLBACK"));
+        } else if let Some(ref mut conn) = self.pooled_conn {
+            let _ = try!(conn.query("ROLLBACK"));
+        }
+        self.rollbacked = true;
+        Ok(())
+    }
+}
+
+#[unsafe_destructor]
+impl<'a> Drop for Transaction<'a> {
+    /// Will rollback transaction.
+    fn drop(&mut self) {
+        if ! self.committed && ! self.rollbacked {
+            if let Some(ref mut conn) = self.conn {
+                let _ = conn.query("ROLLBACK");
+            } else if let Some(ref mut conn) = self.pooled_conn {
+                let _ = conn.query("ROLLBACK");
+            }
+        }
+    }
+}
 
 /***
  *     .d8888b.  888                  888    
@@ -597,7 +705,7 @@ impl MyConn {
                         ctx.set_certificate_file(client_cert, x509::PEM);
                         ctx.set_private_key_file(client_key, x509::PEM);
                     },
-                    _ => { panic!("unreachable") }
+                    _ => { unreachable!() }
                 }
                 s.wrapped = true;
                 self.stream = Some(MyStream::SecureStream(MySslStream(try!(ssl::SslStream::new(&ctx, s)))));
@@ -942,6 +1050,43 @@ impl MyConn {
                                                        ok_packet: ok_packet}),
             Err(err) => Err(err)
         }
+    }
+
+    fn _start_transaction(&mut self,
+                          consistent_snapshot: bool,
+                          isolation_level: Option<IsolationLevel>,
+                          readonly: Option<bool>) -> MyResult<()> {
+        if let Some(i_level) = isolation_level {
+            let _ = try!(self.query(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level)[]));
+        }
+        if let Some(readonly) = readonly {
+            if self.server_version < (5, 6, 5) {
+                return Err(MyDriverError(ReadOnlyTransNotSupported));
+            }
+            let _ = if readonly {
+                try!(self.query("SET TRANSACTION READ ONLY"))
+            } else {
+                try!(self.query("SET TRANSACTION READ WRITE"))
+            };
+        }
+        let _ = if consistent_snapshot {
+            try!(self.query("START TRANSACTION WITH CONSISTENT SNAPSHOT"))
+        } else {
+            try!(self.query("START TRANSACTION"))
+        };
+        Ok(())
+    }
+
+    /// Starts new transaction with provided options.
+    /// `readonly` is only available since MySQL 5.6.5.
+    pub fn start_transaction<'a>(&'a mut self,
+                                 consistent_snapshot: bool,
+                                 isolation_level: Option<IsolationLevel>,
+                                 readonly: Option<bool>) -> MyResult<Transaction<'a>> {
+        let _ = try!(self._start_transaction(consistent_snapshot,
+                                             isolation_level,
+                                             readonly));
+        Ok(Transaction::new(self))
     }
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
@@ -1557,9 +1702,49 @@ mod test {
         for row in &mut stmt.execute(&[]) {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let val= row[0].bytes_ref();
+            let val = row[0].bytes_ref();
             assert_eq!(val.len(), 20000000);
             assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
+        }
+    }
+
+    #[test]
+    fn test_transactions() {
+        let mut conn = MyConn::new(get_opts()).unwrap();
+        let _ = conn.query("DROP DATABASE IF EXISTS test");
+        let _ = conn.query("CREATE DATABASE test");
+        let _ = conn.query("USE test");
+        let _ = conn.query("CREATE TABLE tbl(a INT)");
+        assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
+            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
+            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
+            t.commit()
+        }).is_ok());
+        for x in &mut conn.query("SELECT COUNT(a) FROM tbl") {
+            let x = x.unwrap();
+            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+        }
+        let _ = conn.start_transaction(false, None, Some(true)).and_then(|mut t| {
+            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
+            Ok(())
+        });
+        assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
+            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
+            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
+            t.rollback()
+        }).is_ok());
+        for x in &mut conn.query("SELECT COUNT(a) FROM tbl") {
+            let x = x.unwrap();
+            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+        }
+        assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
+            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
+            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
+            Ok(())
+        }).is_ok());
+        for x in &mut conn.query("SELECT COUNT(a) FROM tbl") {
+            let x = x.unwrap();
+            assert_eq!(from_value::<u8>(&x[0]), 2u8);
         }
     }
 

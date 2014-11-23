@@ -1,4 +1,6 @@
 use sync::{Arc, Mutex};
+use super::IsolationLevel;
+use super::Transaction;
 use super::super::error::{MyError, DriverError};
 use super::{MyConn, MyOpts, Stmt, QueryResult};
 use super::super::error::{MyResult};
@@ -122,7 +124,7 @@ impl MyPool {
         Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
     }
 
-    /// You can call `query` and `prepare` directly on a pool but be aware of
+    /// You can call `query`, `prepare` and `start_transaction` directly on a pool but be aware of
     /// the fact that you can't guarantee that query will be called on concrete
     /// connection.
     ///
@@ -151,6 +153,14 @@ impl MyPool {
     pub fn prepare<'a>(&'a self, query: &'a str) -> MyResult<Stmt<'a>> {
         let conn = try!(self.get_conn());
         conn.pooled_prepare(query)
+    }
+
+    /// Shortcut for `try!(pool.get_conn()).start_transaction(..)`.
+    pub fn start_transaction(&self,
+                             consistent_snapshot: bool,
+                             isolation_level: Option<IsolationLevel>,
+                             readonly: Option<bool>) -> MyResult<Transaction> {
+        (try!(self.get_conn())).pooled_start_transaction(consistent_snapshot, isolation_level, readonly)
     }
 }
 
@@ -186,6 +196,17 @@ impl MyPooledConn {
         self.conn.as_mut().unwrap().prepare(query)
     }
 
+    /// Redirects to
+    /// [`MyConn#start_transaction`](../struct.MyConn.html#method.start_transaction)
+    pub fn start_transaction<'a>(&'a mut self,
+                                 consistent_snapshot: bool,
+                                 isolation_level: Option<IsolationLevel>,
+                                 readonly: Option<bool>) -> MyResult<Transaction<'a>> {
+        self.conn.as_mut().unwrap().start_transaction(consistent_snapshot,
+                                                      isolation_level,
+                                                      readonly)
+    }
+
     /// Gives mutable reference to the wrapped
     /// [`MyConn`](../struct.MyConn.html).
     pub fn as_mut<'a>(&'a mut self) -> &'a mut MyConn {
@@ -219,6 +240,16 @@ impl MyPooledConn {
             Err(err) => Err(err)
         }
     }
+
+    fn pooled_start_transaction<'a>(mut self,
+                                    consistent_snapshot: bool,
+                                    isolation_level: Option<IsolationLevel>,
+                                    readonly: Option<bool>) -> MyResult<Transaction<'a>> {
+        let _ = try!(self.as_mut()._start_transaction(consistent_snapshot,
+                                                      isolation_level,
+                                                      readonly));
+        Ok(Transaction::new_pooled(self))
+    }
 }
 
 #[cfg(test)]
@@ -226,6 +257,7 @@ mod test {
     use conn::{MyOpts};
     use std::default::{Default};
     use super::{MyPool};
+    use super::super::super::value::from_value;
     use super::super::super::value::Value::{Bytes, Int};
 
     static USER: &'static str = "root";
@@ -326,6 +358,46 @@ mod test {
                     assert_eq!(result.next(), None);
                 }
             });
+        }
+    }
+
+    #[test]
+    fn test_transactions() {
+        let pool = MyPool::new(get_opts()).unwrap();
+        let _ = pool.query("DROP DATABASE IF EXISTS test");
+        let _ = pool.query("CREATE DATABASE test");
+        let _ = pool.query("USE test");
+        let _ = pool.query("CREATE TABLE tbl(a INT)");
+        assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
+            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
+            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
+            t.commit()
+        }).is_ok());
+        for x in &mut pool.query("SELECT COUNT(a) FROM tbl") {
+            let x = x.unwrap();
+            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+        }
+        let _ = pool.start_transaction(false, None, Some(true)).and_then(|mut t| {
+            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
+            Ok(())
+        });
+        assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
+            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
+            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
+            t.rollback()
+        }).is_ok());
+        for x in &mut pool.query("SELECT COUNT(a) FROM tbl") {
+            let x = x.unwrap();
+            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+        }
+        assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
+            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
+            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
+            Ok(())
+        }).is_ok());
+        for x in &mut pool.query("SELECT COUNT(a) FROM tbl") {
+            let x = x.unwrap();
+            assert_eq!(from_value::<u8>(&x[0]), 2u8);
         }
     }
 }
