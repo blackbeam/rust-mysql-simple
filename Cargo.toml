@@ -51,8 +51,7 @@ ssl = ["openssl"]
 lazy_static = "~0.1.1"
 
 [dependencies.openssl]
-
-git = "https://github.com/sfackler/rust-openssl"
+openssl = "~0.0.2"
 optional = true
 
 [dependencies.time]
