@@ -39,7 +39,6 @@
 
 #[cfg(test)]
 extern crate test;
-extern crate sync;
 extern crate core;
 extern crate time;
 #[cfg(feature = "openssl")]

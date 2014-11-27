@@ -1,4 +1,4 @@
-use sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use super::IsolationLevel;
 use super::Transaction;
 use super::super::error::{MyError, DriverError};
