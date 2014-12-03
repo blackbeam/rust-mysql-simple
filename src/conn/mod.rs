@@ -690,11 +690,11 @@ impl MyConn {
         let stream = self.stream.take().unwrap();
         match stream {
             MyStream::InsecureStream(mut s) => {
-                let mut ctx = try!(ssl::SslContext::new(ssl::Tlsv1));
+                let mut ctx = try!(ssl::SslContext::new(ssl::SslMethod::Tlsv1));
                 if self.opts.verify_peer {
-                    ctx.set_verify(ssl::SslVerifyPeer, None);
+                    ctx.set_verify(ssl::SslVerifyMode::SslVerifyPeer, None);
                 } else {
-                    ctx.set_verify(ssl::SslVerifyNone, None);
+                    ctx.set_verify(ssl::SslVerifyMode::SslVerifyNone, None);
                 }
                 match self.opts.ssl_opts {
                     Some((ref ca_cert, None)) => {
@@ -702,8 +702,8 @@ impl MyConn {
                     },
                     Some((ref ca_cert, Some((ref client_cert, ref client_key)))) => {
                         ctx.set_CA_file(ca_cert);
-                        ctx.set_certificate_file(client_cert, x509::PEM);
-                        ctx.set_private_key_file(client_key, x509::PEM);
+                        ctx.set_certificate_file(client_cert, x509::X509FileType::PEM);
+                        ctx.set_private_key_file(client_key, x509::X509FileType::PEM);
                     },
                     _ => { unreachable!() }
                 }
