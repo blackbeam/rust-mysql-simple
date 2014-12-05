@@ -12,39 +12,39 @@ use std::io::net::{tcp, pipe};
 use openssl::ssl;
 
 pub trait MyReader: Reader {
-	fn read_lenenc_int(&mut self) -> IoResult<u64> {
-		let head_byte = try!(self.read_u8());
-		let mut length;
-		match head_byte {
-			0xfc => length = 2,
-			0xfd => length = 3,
-			0xfe => length = 8,
-			x => return Ok(x as u64)
-		}
-		return self.read_le_uint_n(length);
-	}
+    fn read_lenenc_int(&mut self) -> IoResult<u64> {
+        let head_byte = try!(self.read_u8());
+        let mut length;
+        match head_byte {
+            0xfc => length = 2,
+            0xfd => length = 3,
+            0xfe => length = 8,
+            x => return Ok(x as u64)
+        }
+        return self.read_le_uint_n(length);
+    }
 
-	fn read_lenenc_bytes(&mut self) -> IoResult<Vec<u8>> {
-		let len = try!(self.read_lenenc_int());
-		if len > 0 {
-			self.read_exact(len as uint)
-		} else {
-			Ok(Vec::with_capacity(0))
-		}
-	}
+    fn read_lenenc_bytes(&mut self) -> IoResult<Vec<u8>> {
+        let len = try!(self.read_lenenc_int());
+        if len > 0 {
+            self.read_exact(len as uint)
+        } else {
+            Ok(Vec::with_capacity(0))
+        }
+    }
 
-	fn read_to_null(&mut self) -> IoResult<Vec<u8>> {
-		let mut buf = Vec::new();
-		let mut x = try!(self.read_u8());
-		while x != 0u8 {
-			buf.push(x);
-			x = try!(self.read_u8());
-		}
-		Ok(buf)
-	}
+    fn read_to_null(&mut self) -> IoResult<Vec<u8>> {
+        let mut buf = Vec::new();
+        let mut x = try!(self.read_u8());
+        while x != 0u8 {
+            buf.push(x);
+            x = try!(self.read_u8());
+        }
+        Ok(buf)
+    }
 
-	fn read_bin_value(&mut self, column_type: consts::ColumnType, unsigned: bool) -> IoResult<Value> {
-		match column_type {
+    fn read_bin_value(&mut self, column_type: consts::ColumnType, unsigned: bool) -> IoResult<Value> {
+        match column_type {
             ColumnType::MYSQL_TYPE_STRING |
             ColumnType::MYSQL_TYPE_VAR_STRING |
             ColumnType::MYSQL_TYPE_BLOB |
@@ -144,7 +144,7 @@ pub trait MyReader: Reader {
             }
             _ => Ok(NULL)
         }
-	}
+    }
 
     /// Reads mysql packet payload returns it with new seq_id value.
     fn read_packet(&mut self, mut seq_id: u8) -> MyResult<(Vec<u8>, u8)> {
@@ -180,35 +180,35 @@ pub trait MyReader: Reader {
 impl<T:Reader> MyReader for T {}
 
 pub trait MyWriter: Writer {
-	fn write_le_uint_n(&mut self, x: u64, len: uint) -> IoResult<()> {
-		let mut buf = Vec::from_elem(len, 0u8);
-		let mut offset = 0;
-		while offset < len {
-			buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
-			offset += 1;
-		}
-		self.write(buf.as_slice())
-	}
+    fn write_le_uint_n(&mut self, x: u64, len: uint) -> IoResult<()> {
+        let mut buf = Vec::from_elem(len, 0u8);
+        let mut offset = 0;
+        while offset < len {
+            buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
+            offset += 1;
+        }
+        self.write(buf.as_slice())
+    }
 
-	fn write_lenenc_int(&mut self, x: u64) -> IoResult<()> {
-		if x < 251 {
-			self.write_le_uint_n(x, 1)
-		} else if x < 65_536 {
-			try!(self.write_u8(0xfc));
-			self.write_le_uint_n(x, 2)
-		} else if x < 16_777_216 {
-			try!(self.write_u8(0xfd));
+    fn write_lenenc_int(&mut self, x: u64) -> IoResult<()> {
+        if x < 251 {
+            self.write_le_uint_n(x, 1)
+        } else if x < 65_536 {
+            try!(self.write_u8(0xfc));
+            self.write_le_uint_n(x, 2)
+        } else if x < 16_777_216 {
+            try!(self.write_u8(0xfd));
             self.write_le_uint_n(x, 3)
-		} else {
-			try!(self.write_u8(0xfe));
+        } else {
+            try!(self.write_u8(0xfe));
             self.write_le_uint_n(x, 8)
-		}
-	}
+        }
+    }
 
-	fn write_lenenc_bytes(&mut self, bytes: &[u8]) -> IoResult<()> {
-		try!(self.write_lenenc_int(bytes.len() as u64));
-		self.write(bytes)
-	}
+    fn write_lenenc_bytes(&mut self, bytes: &[u8]) -> IoResult<()> {
+        try!(self.write_lenenc_int(bytes.len() as u64));
+        self.write(bytes)
+    }
 
     /// Writes data as mysql packet and returns new seq_id value.
     fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: uint) -> MyResult<u8> {
