@@ -5,6 +5,7 @@ static K2: u32 = 0x6ED9EBA1u32;
 static K3: u32 = 0x8F1BBCDCu32;
 static K4: u32 = 0xCA62C1D6u32;
 
+#[inline]
 fn circular_shift(bits: u32, word: u32) -> u32 {
     return word << (bits as uint) | word >> ((32u32 - bits) as uint);
 }
@@ -30,12 +31,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             msg.push(0u8);
         }
     }
-    {
-        msg.extend([0u8, ..8].to_vec().into_iter());
-        let len = msg.len();
-        let mut writer = BufWriter::new(msg.slice_from_mut(len - 8));
-        writer.write_be_u64(msg_bit_len as u64);
-    }
+    msg.write_be_u64(msg_bit_len as u64);
 
     for i in range(0, msg.len() * 8 / 512) {
         let mut w = [0u32, ..80];
