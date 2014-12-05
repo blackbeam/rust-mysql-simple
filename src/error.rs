@@ -3,12 +3,14 @@ use openssl::ssl::error::{SslError};
 use core::fmt;
 use std::io;
 use std::error;
-pub use super::packet;
+pub use super::packet::ErrPacket;
+
+
 
 #[deriving(Eq, PartialEq)]
 pub enum MyError {
     MyIoError(io::IoError),
-    MySqlError(packet::ErrPacket),
+    MySqlError(ErrPacket),
     MyDriverError(DriverError),
     #[cfg(feature = "openssl")]
     MySslError(SslError),
