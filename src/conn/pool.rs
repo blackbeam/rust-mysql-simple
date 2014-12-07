@@ -110,8 +110,6 @@ impl MyPool {
                     },
                     Err(err) => return Err(err)
                 }
-            } else {
-                pool.cond.wait();
             }
         }
 
@@ -179,7 +177,6 @@ impl Drop for MyPooledConn {
         } else {
             pool.pool.push(self.conn.take().unwrap());
         }
-        pool.cond.signal();
     }
 }
 
