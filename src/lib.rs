@@ -22,7 +22,7 @@
 //!
 //! Then you can create [`MyPool`](conn/pool/struct.MyPool.html) which should be
 //! enough to work with mysql server.
-#![crate_name="mysql"]	
+#![crate_name="mysql"]
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
