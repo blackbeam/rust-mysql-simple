@@ -1,4 +1,4 @@
-use std::io::{BufReader, BufWriter};
+use std::io::{BufWriter};
 
 static K1: u32 = 0x5A827999u32;
 static K2: u32 = 0x6ED9EBA1u32;
@@ -37,7 +37,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         let mut w = [0u32, ..80];
         let part = msg.slice(i * 64, (i+1) * 64);
         {
-            let mut reader = BufReader::new(part);
+            let mut reader = &mut part[];
             for j in range(0u, 16u) {
                 w[j] = reader.read_be_u32().unwrap();
             }

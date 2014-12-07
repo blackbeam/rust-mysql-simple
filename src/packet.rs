@@ -18,8 +18,8 @@ pub struct OkPacket {
 
 impl OkPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<OkPacket> {
-        let mut reader = BufReader::new(pld);
-        try!(reader.seek(1, SeekCur));
+        let mut reader = &mut pld[];
+        try!(reader.read_u8());
         Ok(OkPacket{
             affected_rows: try!(reader.read_lenenc_int()),
             last_insert_id: try!(reader.read_lenenc_int()),
@@ -39,10 +39,10 @@ pub struct ErrPacket {
 
 impl ErrPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<ErrPacket> {
-        let mut reader = BufReader::new(pld);
-        try!(reader.seek(1, SeekCur));
+        let mut reader = &mut pld[];
+        try!(reader.read_u8());
         let error_code = try!(reader.read_le_u16());
-        try!(reader.seek(1, SeekCur));
+        try!(reader.read_u8());
         Ok(ErrPacket{
             error_code: error_code,
             sql_state: try!(reader.read_exact(5)),
@@ -69,8 +69,8 @@ pub struct EOFPacket {
 
 impl EOFPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<EOFPacket> {
-        let mut reader = BufReader::new(pld);
-        try!(reader.seek(1, SeekCur));
+        let mut reader = &mut pld[];
+        try!(reader.read_u8());
         Ok(EOFPacket{
             warnings: try!(reader.read_le_u16()),
             status_flags: consts::StatusFlags::from_bits_truncate(try!(reader.read_le_u16())),

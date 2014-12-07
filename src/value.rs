@@ -355,7 +355,7 @@ impl Value {
         for i in range(0, bitmap_len) {
             bitmap.push(pld[i+1]);
         }
-        let mut reader = BufReader::new(pld[1 + bitmap_len..]);
+        let mut reader = &mut pld[1 + bitmap_len..];
         for i in range(0, columns.len()) {
             let c = &columns[i];
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {

@@ -3,8 +3,7 @@ use openssl::{ssl, x509};
 
 use std::fmt;
 use std::default::{Default};
-use std::io::{Reader, File, IoResult, Seek,
-              SeekCur, EndOfFile, BufReader};
+use std::io::{Reader, File, IoResult, EndOfFile};
 use std::io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::io::net::tcp::{TcpStream};
 use std::io::net::pipe::{UnixStream};
@@ -179,8 +178,8 @@ struct InnerStmt {
 
 impl InnerStmt {
     fn from_payload(pld: &[u8]) -> IoResult<InnerStmt> {
-        let mut reader = BufReader::new(pld);
-        try!(reader.seek(1, SeekCur));
+        let mut reader = &mut pld[];
+        try!(reader.read_u8());
         let statement_id = try!(reader.read_le_u32());
         let num_columns = try!(reader.read_le_u16());
         let num_params = try!(reader.read_le_u16());
@@ -322,7 +321,7 @@ pub struct Column {
 impl Column {
     #[inline]
     fn from_payload(command: u8, pld: &[u8]) -> IoResult<Column> {
-        let mut reader = BufReader::new(pld);
+        let mut reader = &mut pld[];
         // Skip catalog
         let _ = try!(reader.read_lenenc_bytes());
         let schema = try!(reader.read_lenenc_bytes());
@@ -337,7 +336,7 @@ impl Column {
         let flags = consts::ColumnFlags::from_bits_truncate(try!(reader.read_le_u16()));
         let decimals = try!(reader.read_u8());
         // skip filler
-        try!(reader.seek(2, SeekCur));
+        try!(reader.read_le_u16());
         let mut default_values = Vec::with_capacity(0);
         if command == Command::COM_FIELD_LIST as u8 {
             let len = try!(reader.read_lenenc_int());
@@ -1128,8 +1127,8 @@ impl MyConn {
                 Ok((Vec::new(), Some(ok)))
             },
             0xfb => {
-                let mut reader = BufReader::new(pld.as_slice());
-                try!(reader.seek(1, SeekCur));
+                let mut reader = &mut pld[];
+                try!(reader.read_u8());
                 let file_name = try!(reader.read_to_end());
                 match self.send_local_infile(file_name.as_slice()) {
                     Ok(x) => Ok((Vec::new(), x)),
@@ -1141,7 +1140,7 @@ impl MyConn {
                 Err(MySqlError(err))
             },
             _ => {
-                let mut reader = BufReader::new(pld.as_slice());
+                let mut reader = &mut pld[];
                 let column_count = try!(reader.read_lenenc_int());
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
                 for _ in range(0, column_count) {
