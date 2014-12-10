@@ -9,7 +9,7 @@ use std::io::net::tcp::{TcpStream};
 use std::io::net::pipe::{UnixStream};
 use std::num::{FromPrimitive};
 use std::path::{BytesContainer};
-use std::str::{from_utf8, FromStr};
+use std::str::{FromStr};
 use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
@@ -42,7 +42,7 @@ use super::error::DriverError::SslNotSupported;
 use super::scramble::{scramble};
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
 use super::value::Value;
-use super::value::ToValue;
+use super::value::{ToValue, from_value, from_value_opt};
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 pub mod pool;
@@ -565,7 +565,7 @@ impl MyConn {
                addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
                 match conn.get_system_var("socket") {
                     Some(path) => {
-                        let opts = MyOpts{unix_addr: Some(Path::new(path.unwrap_bytes())),
+                        let opts = MyOpts{unix_addr: Some(Path::new(from_value::<Vec<u8>>(&path))),
                                           ..conn.opts.clone()};
                         return MyConn::new(opts).or(Ok(conn));
                     },
@@ -590,8 +590,10 @@ impl MyConn {
                    addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
                     match conn.get_system_var("socket") {
                         Some(path) => {
-                            let opts = MyOpts{unix_addr: Some(Path::new(path.unwrap_bytes())),
-                                              ..conn.opts.clone()};
+                            let opts = MyOpts{
+                                unix_addr: Some(Path::new(from_value::<Vec<u8>>(&path))),
+                                ..conn.opts.clone()
+                            };
                             return MyConn::new(opts).or(Ok(conn));
                         },
                         _ => return Ok(conn)
@@ -1230,10 +1232,8 @@ impl MyConn {
             return Ok(());
         }
         self.do_handshake().and_then(|_| {
-            let max_allowed_packet = self.get_system_var("max_allowed_packet")
-                                         .unwrap_or(NULL)
-                                         .unwrap_bytes_or(Vec::with_capacity(0));
-            Ok(from_utf8(max_allowed_packet.as_slice()).and_then(from_str::<uint>).unwrap_or(0))
+            Ok(from_value_opt::<uint>(&self.get_system_var("max_allowed_packet").unwrap_or(NULL))
+               .unwrap_or(0))
         }).and_then(|max_allowed_packet| {
             if max_allowed_packet == 0 {
                 Err(MyDriverError(SetupError))
@@ -1603,7 +1603,7 @@ mod test {
         let mut conn = MyConn::new(MyOpts{db_name: Some("mysql".to_string()),
                                           ..get_opts()}).unwrap();
         for x in &mut conn.query("SELECT DATABASE()") {
-            assert_eq!(x.unwrap().remove(0).unwrap().unwrap_bytes(),
+            assert_eq!(from_value::<Vec<u8>>(&x.unwrap().remove(0).unwrap()),
                        b"mysql".to_vec());
         }
     }
@@ -1650,9 +1650,8 @@ mod test {
         for row in &mut conn.query("SELECT REPEAT('A', 20000000)") {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let val= row[0].bytes_ref();
-            assert_eq!(val.len(), 20000000);
-            assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
+            let val = from_value::<Vec<u8>>(&row[0]);
+            assert_eq!(val, Vec::from_elem(20000000, 65u8));
         }
     }
 
@@ -1685,13 +1684,13 @@ mod test {
                     assert_eq!(row[1], Int(-123i64));
                     assert_eq!(row[2], Int(123i64));
                     assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                    assert_eq!(row[4].get_float(), 123.123);
+                    assert_eq!(from_value::<f64>(&row[4]), 123.123);
                 } else {
                     assert_eq!(row[0], Bytes(b"world".to_vec()));
                     assert_eq!(row[1], NULL);
                     assert_eq!(row[2], NULL);
                     assert_eq!(row[3], NULL);
-                    assert_eq!(row[4].get_float(), 321.321);
+                    assert_eq!(from_value::<f64>(&row[4]), 321.321);
                 }
                 i += 1;
             }
@@ -1701,8 +1700,7 @@ mod test {
         for row in &mut stmt.execute(&[]) {
             assert!(row.is_ok());
             let row = row.unwrap();
-            let val = row[0].bytes_ref();
-            assert_eq!(val.len(), 20000000);
+            let val = from_value::<Vec<u8>>(&row[0]);
             assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
         }
     }
@@ -1758,8 +1756,7 @@ mod test {
         assert!(conn.query(query.as_slice()).is_ok());
         let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(x.is_ok());
-        let v: Vec<u8> = x.unwrap().remove(0).unwrap().unwrap_bytes();
-        assert_eq!(v.len(), 20000000);
+        let v = from_value::<Vec<u8>>(&x.unwrap().remove(0).unwrap());
         assert_eq!(v, Vec::from_elem(20000000, 65u8));
     }
 
@@ -1780,8 +1777,7 @@ mod test {
         let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
         assert!(row.is_ok());
         let row = row.unwrap();
-        let val= row[0].bytes_ref();
-        assert_eq!(val.len(), 20000000);
+        let val = from_value::<Vec<u8>>(&row[0]);
         assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
     }
 

@@ -95,6 +95,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated]
     pub fn is_bytes(&self) -> bool {
         match *self {
             Value::Bytes(..) => true,
@@ -102,6 +103,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn bytes_ref<'a>(&'a self) -> &'a [u8] {
         match *self {
             Value::Bytes(ref x) => x[],
@@ -109,6 +111,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated]
     pub fn unwrap_bytes(self) -> Vec<u8> {
         match self {
             Value::Bytes(x) => x,
@@ -116,6 +119,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn unwrap_bytes_or(self, y: Vec<u8>) -> Vec<u8> {
         match self {
             Value::Bytes(x) => x,
@@ -123,6 +127,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated]
     pub fn is_int(&self) -> bool {
         match *self {
             Value::Int(..) => true,
@@ -130,6 +135,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_int(&self) -> i64 {
         match *self {
             Value::Int(x) => x,
@@ -137,6 +143,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_int_or(&self, y: i64) -> i64 {
         match *self {
             Value::Int(x) => x,
@@ -144,6 +151,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated]
     pub fn is_uint(&self) -> bool {
         match *self {
             Value::UInt(..) => true,
@@ -151,6 +159,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_uint(&self) -> u64 {
         match *self {
             Value::UInt(x) => x,
@@ -158,6 +167,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_uint_or(&self, y: u64) -> u64 {
         match *self {
             Value::UInt(x) => x,
@@ -165,6 +175,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated]
     pub fn is_float(&self) -> bool {
         match *self {
             Value::Float(..) => true,
@@ -172,6 +183,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_float(&self) -> f64 {
         match *self {
             Value::Float(x) => x,
@@ -179,6 +191,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_float_or(&self, y: f64) -> f64 {
         match *self {
             Value::Float(x) => x,
@@ -186,6 +199,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated]
     pub fn is_date(&self) -> bool {
         match *self {
             Value::Date(..) => true,
@@ -193,6 +207,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_year(&self) -> u16 {
         match *self {
             Value::Date(y, _, _, _, _, _, _) => y,
@@ -200,6 +215,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_month(&self) -> u8 {
         match *self {
             Value::Date(_, m, _, _, _, _, _) => m,
@@ -207,6 +223,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_day(&self) -> u8 {
         match *self {
             Value::Date(_, _, d, _, _, _, _) => d,
@@ -214,6 +231,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated]
     pub fn is_time(&self) -> bool {
         match *self {
             Value::Time(..) => true,
@@ -221,6 +239,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn is_neg(&self) -> bool {
         match *self {
             Value::Time(false, _, _, _, _, _) => false,
@@ -229,6 +248,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_days(&self) -> u32 {
         match *self {
             Value::Time(_, d, _, _, _, _) => d,
@@ -236,6 +256,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_hour(&self) -> u8 {
         match *self {
             Value::Date(_, _, _, h, _, _, _) => h,
@@ -244,6 +265,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_min(&self) -> u8 {
         match *self {
             Value::Date(_, _, _, _, i, _, _) => i,
@@ -252,6 +274,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_sec(&self) -> u8 {
         match *self {
             Value::Date(_, _, _, _, _, s, _) => s,
@@ -260,6 +283,7 @@ impl Value {
         }
     }
     #[inline]
+    #[deprecated = "Use mysql::value::FromValue"]
     pub fn get_usec(&self) -> u32 {
         match *self {
             Value::Date(_, _, _, _, _, _, u) => u,
