@@ -51,7 +51,7 @@ ssl = ["openssl"]
 lazy_static = "~0.1.1"
 
 [dependencies.openssl]
-openssl = "0.2.2"
+openssl = "0.2.3"
 optional = true
 
 [dependencies.time]
