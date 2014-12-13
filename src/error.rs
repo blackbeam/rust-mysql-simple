@@ -7,7 +7,7 @@ pub use super::packet::ErrPacket;
 
 
 
-#[deriving(Eq, PartialEq)]
+#[deriving(Eq, PartialEq, Clone)]
 pub enum MyError {
     MyIoError(io::IoError),
     MySqlError(ErrPacket),
@@ -91,7 +91,7 @@ impl fmt::Show for MyError {
     }
 }
 
-#[deriving(Eq, PartialEq)]
+#[deriving(Eq, PartialEq, Clone)]
 pub enum DriverError {
     CouldNotConnect(Option<String>),
     UnsupportedProtocol(u8),
@@ -169,7 +169,7 @@ pub type MyResult<T> = Result<T, MyError>;
 
 /// Server error codes (u16)
 #[allow(non_camel_case_types)]
-#[deriving(Clone, FromPrimitive, Eq, PartialEq)]
+#[deriving(Clone, FromPrimitive, Eq, PartialEq, Show, Copy)]
 #[repr(u16)]
 pub enum ServerError {
     ER_HASHCHK = 1000u16,

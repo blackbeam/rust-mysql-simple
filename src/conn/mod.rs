@@ -47,6 +47,7 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 pub mod pool;
 
+#[deriving(PartialEq, Eq, Clone, Copy)]
 pub enum IsolationLevel {
     ReadUncommied,
     ReadCommited,
@@ -166,7 +167,7 @@ impl<'a> Drop for Transaction<'a> {
  *
  *
  */
-#[deriving(Eq, PartialEq)]
+#[deriving(Eq, PartialEq, Clone)]
 struct InnerStmt {
     params: Option<Vec<Column>>,
     columns: Option<Vec<Column>>,
