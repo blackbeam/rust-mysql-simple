@@ -317,7 +317,7 @@ impl ToValue for Value {
 impl ToValue for Timespec {
     #[inline]
     fn to_value(&self) -> Value {
-        let t = at(*self);
+        let t = at(self.clone());
         Value::Date(t.tm_year as u16,
              (t.tm_mon + 1) as u8,
              t.tm_mday as u8,
