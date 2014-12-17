@@ -63,7 +63,7 @@ impl MyInnerPool {
 ///     let pool = pool.unwrap();
 ///     for _ in range(0u, 100) {
 ///         let pool = pool.clone();
-///         spawn(proc() {
+///         spawn(move || {
 ///             let conn = pool.get_conn();
 ///             assert!(conn.is_ok());
 ///             let mut conn = conn.unwrap();
@@ -292,7 +292,7 @@ mod test {
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
             let pool = pool.clone();
-            spawn(proc() {
+            spawn(move || {
                 let conn = pool.get_conn();
                 assert!(conn.is_ok());
                 let mut conn = conn.unwrap();
@@ -308,7 +308,7 @@ mod test {
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
             let pool = pool.clone();
-            spawn(proc() {
+            spawn(move || {
                 let result = pool.query("SELECT 1");
                 assert!(result.is_ok());
                 let mut result = result.unwrap();
@@ -324,7 +324,7 @@ mod test {
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
             let pool = pool.clone();
-            spawn(proc() {
+            spawn(move || {
                 let conn = pool.get_conn();
                 assert!(conn.is_ok());
                 let mut conn = conn.unwrap();
@@ -343,7 +343,7 @@ mod test {
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
             let pool = pool.clone();
-            spawn(proc() {
+            spawn(move || {
                 let stmt = pool.prepare("SELECT 1");
                 assert!(stmt.is_ok());
                 let mut stmt = stmt.unwrap();
