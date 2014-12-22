@@ -74,7 +74,7 @@ pub struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
-    fn new<'a>(conn: &'a mut MyConn) -> Transaction<'a> {
+    fn new(conn: &'a mut MyConn) -> Transaction<'a> {
         Transaction {
             conn: Some(conn),
             pooled_conn: None,
@@ -93,7 +93,7 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`MyConn#query`](struct.MyConn.html#method.query).
-    pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
+    pub fn query<'c>(&'c mut self, query: &str) -> MyResult<QueryResult<'c>> {
         if let Some(ref mut conn) = self.conn {
             conn.query(query)
         } else if let Some(ref mut conn) = self.pooled_conn {
@@ -104,7 +104,7 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`MyConn#prepare`](struct.MyConn.html#method.prepare).
-    pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+    pub fn prepare(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
         if let Some(ref mut conn) = self.conn {
             conn.prepare(query)
         } else if let Some(ref mut conn) = self.pooled_conn {
@@ -203,7 +203,7 @@ pub struct Stmt<'a> {
 }
 
 impl<'a> Stmt<'a> {
-    fn new<'a>(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
+    fn new(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
         Stmt{stmt: stmt, conn: Some(conn), pooled_conn: None}
     }
 
@@ -249,9 +249,9 @@ impl<'a> Stmt<'a> {
     /// Executes prepared statement with an arguments passed as a slice of a
     /// references to a [`ToValue`](../value/trait.ToValue.html) trait
     /// implementors.
-    pub fn execute<'a>(&'a mut self, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
+    pub fn execute<'s>(&'s mut self, params: &[&ToValue]) -> MyResult<QueryResult<'s>> {
         if self.conn.is_some() {
-            let conn_ref: &'a mut &mut MyConn = self.conn.as_mut().unwrap();
+            let conn_ref = self.conn.as_mut().unwrap();
             conn_ref.execute(&self.stmt, params)
         } else {
             let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
@@ -1345,10 +1345,10 @@ pub struct QueryResult<'a> {
 }
 
 impl<'a> QueryResult<'a> {
-    fn new<'a>(conn: &'a mut MyConn,
-                   columns: Vec<Column>,
-                   ok_packet: Option<OkPacket>,
-                   is_bin: bool) -> QueryResult<'a> {
+    fn new(conn: &'a mut MyConn,
+           columns: Vec<Column>,
+           ok_packet: Option<OkPacket>,
+           is_bin: bool) -> QueryResult<'a> {
         QueryResult{pooled_conn: None,
                     columns: columns,
                     conn: Some(conn),
