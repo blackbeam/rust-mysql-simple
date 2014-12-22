@@ -247,16 +247,16 @@ macro_rules! to_value_impl_num(
             fn to_value(&self) -> Value { Value::Int(*self as i64) }
         }
     )
-)
+);
 
-to_value_impl_num!(i8)
-to_value_impl_num!(u8)
-to_value_impl_num!(i16)
-to_value_impl_num!(u16)
-to_value_impl_num!(i32)
-to_value_impl_num!(u32)
-to_value_impl_num!(int)
-to_value_impl_num!(i64)
+to_value_impl_num!(i8);
+to_value_impl_num!(u8);
+to_value_impl_num!(i16);
+to_value_impl_num!(u16);
+to_value_impl_num!(i32);
+to_value_impl_num!(u32);
+to_value_impl_num!(int);
+to_value_impl_num!(i64);
 
 impl ToValue for u64 {
     #[inline]
@@ -441,16 +441,16 @@ macro_rules! from_value_impl_num(
             }
         }
     )
-)
+);
 
-from_value_impl_num!(i8)
-from_value_impl_num!(u8)
-from_value_impl_num!(i16)
-from_value_impl_num!(u16)
-from_value_impl_num!(i32)
-from_value_impl_num!(u32)
-from_value_impl_num!(int)
-from_value_impl_num!(uint)
+from_value_impl_num!(i8);
+from_value_impl_num!(u8);
+from_value_impl_num!(i16);
+from_value_impl_num!(u16);
+from_value_impl_num!(i32);
+from_value_impl_num!(u32);
+from_value_impl_num!(int);
+from_value_impl_num!(uint);
 
 impl FromValue for i64 {
     #[inline]

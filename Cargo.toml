@@ -48,7 +48,7 @@ default = ["ssl"]
 ssl = ["openssl"]
 
 [dependencies.lazy_static]
-lazy_static = "~0.1.1"
+git = "https://github.com/Kimundi/lazy-static.rs"
 
 [dependencies.openssl]
 openssl = "0.2.5"
