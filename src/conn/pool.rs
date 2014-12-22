@@ -51,6 +51,7 @@ impl MyInnerPool {
 /// use std::default::{Default};
 /// use mysql::conn::pool::{MyPool};
 /// use mysql::value::{ToValue};
+/// use std::thread::Thread;
 ///
 /// fn main() {
 ///     # let opts = MyOpts{user: Some("root".to_string()),
@@ -63,7 +64,7 @@ impl MyInnerPool {
 ///     let pool = pool.unwrap();
 ///     for _ in range(0u, 100) {
 ///         let pool = pool.clone();
-///         spawn(move || {
+///         Thread::spawn(move || {
 ///             let conn = pool.get_conn();
 ///             assert!(conn.is_ok());
 ///             let mut conn = conn.unwrap();
@@ -71,7 +72,7 @@ impl MyInnerPool {
 ///             assert!(result.is_ok());
 ///             let mut result = result.unwrap();
 ///             assert_eq!(result.next(), Some(Ok(vec!["1".to_value()])));
-///         });
+///         }).detach();
 ///     }
 /// }
 /// ```
@@ -253,6 +254,7 @@ impl MyPooledConn {
 mod test {
     use conn::{MyOpts};
     use std::default::{Default};
+    use std::thread::Thread;
     use super::{MyPool};
     use super::super::super::value::from_value;
     use super::super::super::value::Value::{Bytes, Int};
@@ -292,12 +294,12 @@ mod test {
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
             let pool = pool.clone();
-            spawn(move || {
+            Thread::spawn(move || {
                 let conn = pool.get_conn();
                 assert!(conn.is_ok());
                 let mut conn = conn.unwrap();
                 assert!(conn.query("SELECT 1").is_ok());
-            });
+            }).detach();
         }
     }
 
@@ -308,12 +310,12 @@ mod test {
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
             let pool = pool.clone();
-            spawn(move || {
+            Thread::spawn(move || {
                 let result = pool.query("SELECT 1");
                 assert!(result.is_ok());
                 let mut result = result.unwrap();
                 assert_eq!(result.next(), Some(Ok(vec![Bytes(vec![0x31u8])])));
-            });
+            }).detach();
         }
     }
 
@@ -324,7 +326,7 @@ mod test {
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
             let pool = pool.clone();
-            spawn(move || {
+            Thread::spawn(move || {
                 let conn = pool.get_conn();
                 assert!(conn.is_ok());
                 let mut conn = conn.unwrap();
@@ -332,7 +334,7 @@ mod test {
                 assert!(stmt.is_ok());
                 let mut stmt = stmt.unwrap();
                 assert!(stmt.execute(&[]).is_ok());
-            });
+            }).detach();
         }
     }
 
@@ -343,7 +345,7 @@ mod test {
         let pool = pool.unwrap();
         for _ in range(0u, 10u) {
             let pool = pool.clone();
-            spawn(move || {
+            Thread::spawn(move || {
                 let stmt = pool.prepare("SELECT 1");
                 assert!(stmt.is_ok());
                 let mut stmt = stmt.unwrap();
@@ -354,7 +356,7 @@ mod test {
                     assert_eq!(result.next(), Some(Ok(vec![Int(1)])));
                     assert_eq!(result.next(), None);
                 }
-            });
+            }).detach();
         }
     }
 
