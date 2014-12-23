@@ -396,7 +396,7 @@ pub struct MyOpts {
     pub pass: Option<String>,
     /// Database name (defaults to `None`).
     pub db_name: Option<String>,
-    /// Prefer socet connection (defaults to `true`).
+    /// Prefer socket connection (defaults to `true`).
     ///
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
     pub prefer_socket: bool,
