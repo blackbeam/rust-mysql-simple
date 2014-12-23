@@ -74,7 +74,7 @@ test:
 	         fi"
 
 	bash -c "\
-		if (RUST_TEST_TASKS=1 cargo test);\
+		if (cargo test --no-default-features);\
 		then \
 			exit 0;\
 		else\
@@ -84,7 +84,7 @@ test:
 		fi"
 
 	bash -c "\
-		if (RUST_TEST_TASKS=1 cargo test --no-default-features);\
+		if (cargo test);\
 		then \
 			exit 0;\
 		else\
@@ -150,9 +150,8 @@ bench:
 	             mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'; \
 	         fi"
 
-
 	bash -c "\
-		if (RUST_TEST_TASKS=1 cargo bench);\
+		if (cargo bench --no-default-features);\
 		then \
 			exit 0;\
 		else\
@@ -162,7 +161,7 @@ bench:
 		fi"
 
 	bash -c "\
-		if (RUST_TEST_TASKS=1 cargo bench --no-default-features);\
+		if (cargo bench);\
 		then \
 			exit 0;\
 		else\
@@ -173,7 +172,6 @@ bench:
 
 	kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`
 	rm -rf $(MYSQL_DATA_DIR)
-	
 
 clean:
 	cargo clean

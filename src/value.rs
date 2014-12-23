@@ -711,91 +711,90 @@ impl FromValue for Duration {
 
 #[cfg(test)]
 mod test {
-    use super::{ToValue, from_value};
-    use super::Value::{Bytes, Int, UInt, Date, Time, Float, NULL};
-    use time::{Timespec, now};
-    use std::time::{Duration};
+    pub use super::{ToValue, from_value};
+    pub use super::Value::{Bytes, Int, UInt, Date, Time, Float, NULL};
+    pub use time::{Timespec, now};
+    pub use std::time::Duration;
 
-    #[test]
-    fn test_value_into_str() {
-        let v = NULL;
-        assert_eq!(v.into_str(), "NULL".to_string());
-        let v = Bytes(b"hello".to_vec());
-        assert_eq!(v.into_str(), "'hello'".to_string());
-        let v = Bytes(b"h\x5c'e'l'l'o".to_vec());
-        assert_eq!(v.into_str(), "'h\x5c\x5c\x5c'e\x5c'l\x5c'l\x5c'o'".to_string());
-        let v = Bytes(vec!(0, 1, 2, 3, 4, 255));
-        assert_eq!(v.into_str(), "0x0001020304FF".to_string());
-        let v = Int(-65536);
-        assert_eq!(v.into_str(), "-65536".to_string());
-        let v = UInt(4294967296);
-        assert_eq!(v.into_str(), "4294967296".to_string());
-        let v = Float(686.868);
-        assert_eq!(v.into_str(), "686.868".to_string());
-        let v = Date(0, 0, 0, 0, 0, 0, 0);
-        assert_eq!(v.into_str(), "''".to_string());
-        let v = Date(2014, 2, 20, 0, 0, 0, 0);
-        assert_eq!(v.into_str(), "'2014-02-20'".to_string());
-        let v = Date(2014, 2, 20, 22, 0, 0, 0);
-        assert_eq!(v.into_str(), "'2014-02-20 22:00:00'".to_string());
-        let v = Date(2014, 2, 20, 22, 0, 0, 1);
-        assert_eq!(v.into_str(), "'2014-02-20 22:00:00.000001'".to_string());
-        let v = Time(false, 0, 0, 0, 0, 0);
-        assert_eq!(v.into_str(), "''".to_string());
-        let v = Time(true, 34, 3, 2, 1, 0);
-        assert_eq!(v.into_str(), "'-819:02:01'".to_string());
-        let v = Time(false, 10, 100, 20, 30, 40);
-        assert_eq!(v.into_str(), "'340:20:30.000040'".to_string());
+    describe! into_str {
+        it "should convert NULL to mysql string" {
+            assert_eq!(NULL.into_str(), "NULL".to_string());
+        }
+        it "should convert Bytes to mysql string" {
+            assert_eq!(Bytes(b"hello".to_vec()).into_str(),
+                       "'hello'".to_string());
+        }
+        it "should escape specials while converting Bytes" {
+            assert_eq!(Bytes(b"h\x5c'e'l'l'o".to_vec()).into_str(),
+                       "'h\x5c\x5c\x5c'e\x5c'l\x5c'l\x5c'o'".to_string());
+        }
+        it "should use hex literals for binary Bytes" {
+            assert_eq!(Bytes(b"\x00\x01\x02\x03\x04\xFF".to_vec()).into_str(),
+                       "0x0001020304FF".to_string());
+        }
+        it "should convert Int to mysql string" {
+            assert_eq!(Int(-65536).into_str(), "-65536".to_string());
+        }
+        it "should convert UInt to mysql string" {
+            assert_eq!(UInt(4294967296).into_str(), "4294967296".to_string());
+        }
+        it "should convert Float to mysql string" {
+            assert_eq!(Float(686.868).into_str(), "686.868".to_string());
+        }
+        it "should convert Date to mysql string" {
+            assert_eq!(Date(0, 0, 0, 0, 0, 0, 0).into_str(),
+                       "''".to_string());
+            assert_eq!(Date(2014, 2, 20, 0, 0, 0, 0).into_str(),
+                       "'2014-02-20'".to_string());
+            assert_eq!(Date(2014, 2, 20, 22, 20, 10, 0).into_str(),
+                       "'2014-02-20 22:20:10'".to_string());
+            assert_eq!(Date(2014, 2, 20, 22, 20, 10, 1).into_str(),
+                       "'2014-02-20 22:20:10.000001'".to_string())
+        }
+        it "should convert Time to mysql string" {
+            assert_eq!(Time(false, 0, 0, 0, 0, 0).into_str(),
+                       "''".to_string());
+            assert_eq!(Time(true, 34, 3, 2, 1, 0).into_str(),
+                       "'-819:02:01'".to_string());
+            assert_eq!(Time(false, 10, 100, 20, 30, 40).into_str(),
+                       "'340:20:30.000040'".to_string());
+        }
     }
 
-    #[test]
-    fn test_from_value() {
-        assert_eq!(-100i8, from_value::<i8>(&Int(-100i64)));
-        assert_eq!(100i8, from_value::<i8>(&UInt(100u64)));
-        assert_eq!(100i8, from_value::<i8>(&Bytes(b"100".to_vec())));
-        assert_eq!(Some(100i8),
-                   from_value::<Option<i8>>(&Bytes(b"100".to_vec())));
-        assert_eq!(None, from_value::<Option<i8>>(&NULL));
-        assert_eq!(b"test".to_vec(),
-                   from_value::<Vec<u8>>(&Bytes(b"test".to_vec())));
-        assert_eq!("test".to_string(),
-                   from_value::<String>(&Bytes(b"test".to_vec())));
-        assert_eq!(true, from_value::<bool>(&Int(1)));
-        assert_eq!(false, from_value::<bool>(&Int(0)));
-        assert_eq!(true, from_value::<bool>(&Bytes(b"1".to_vec())));
-        assert_eq!(false, from_value::<bool>(&Bytes(b"0".to_vec())));
-        assert_eq!(Timespec {sec: 1414866780 - now().tm_utcoff as i64, nsec: 0},
-                   from_value::<Timespec>(&Bytes(b"2014-11-01 18:33:00".to_vec())));
-        assert_eq!(Timespec {sec: 1414866780 - now().tm_utcoff as i64, nsec: 1000},
-                   from_value::<Timespec>(&Date(2014, 11, 1, 18, 33, 00, 1)));
-        assert_eq!(Timespec {sec: 1414800000 - now().tm_utcoff as i64, nsec: 0},
-                   from_value::<Timespec>(&Bytes(b"2014-11-01".to_vec())));
-        assert_eq!(Duration::milliseconds(-433830500),
-                   from_value::<Duration>(&Bytes(b"-120:30:30.5".to_vec())));
+    describe! from_value {
+        it "should convert Bytes to Timespec" {
+            assert_eq!(
+                Timespec { sec: 1414866780 - now().tm_utcoff as i64,nsec: 0 },
+                from_value::<Timespec>(&Bytes(b"2014-11-01 18:33:00".to_vec()))
+            );
+            assert_eq!(
+                Timespec {
+                    sec: 1414866780 - now().tm_utcoff as i64,
+                    nsec: 1000,
+                },
+                from_value::<Timespec>(&Date(2014, 11, 1, 18, 33, 00, 1)));
+            assert_eq!(
+                Timespec { sec: 1414800000 - now().tm_utcoff as i64, nsec: 0 },
+                from_value::<Timespec>(&Bytes(b"2014-11-01".to_vec())));
+        }
+        it "should convert Bytes to Duration" {
+            assert_eq!(
+                Duration::milliseconds(-433830500),
+                from_value::<Duration>(&Bytes(b"-120:30:30.5".to_vec())));
+        }
     }
 
-    #[test]
-    fn test_to_value() {
-        assert_eq!(Duration::milliseconds(-433830500).to_value(),
-                   Time(true, 5, 0, 30, 30, 500000));
-    }
-
-    #[test]
-    #[should_fail]
-    fn test_from_value_panic_i8_1() {
-        from_value::<i8>(&Int(500i64));
-    }
-
-    #[test]
-    #[should_fail]
-    fn test_from_value_panic_i8_2() {
-        from_value::<i8>(&Bytes(b"500".to_vec()));
-    }
-
-    #[test]
-    #[should_fail]
-    #[allow(non_snake_case)]
-    fn test_from_value_panic_Timespec() {
-        from_value::<Timespec>(&Bytes(b"2014-50-01".to_vec()));
+    describe! to_value {
+        it "should convert Time to Date" {
+            let ts = Timespec {
+                sec: 1414866780 - now().tm_utcoff as i64,
+                nsec: 1000,
+            };
+            assert_eq!(ts.to_value(), Date(2014, 11, 1, 18, 33, 00, 1));
+        }
+        it "should convert Duration to Time" {
+            assert_eq!(Duration::milliseconds(-433830500).to_value(),
+                       Time(true, 5, 0, 30, 30, 500000));
+        }
     }
 }

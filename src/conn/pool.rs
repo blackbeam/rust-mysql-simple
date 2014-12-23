@@ -252,20 +252,20 @@ impl MyPooledConn {
 
 #[cfg(test)]
 mod test {
-    use conn::{MyOpts};
-    use std::default::{Default};
-    use std::thread::Thread;
-    use super::{MyPool};
-    use super::super::super::value::from_value;
-    use super::super::super::value::Value::{Bytes, Int};
+    pub use conn::{MyOpts};
+    pub use std::default::{Default};
+    pub use std::thread::Thread;
+    pub use super::{MyPool};
+    pub use super::super::super::value::from_value;
+    pub use super::super::super::value::Value::{Bytes, Int};
 
-    static USER: &'static str = "root";
-    static PASS: &'static str = "password";
-    static ADDR: &'static str = "127.0.0.1";
-    static PORT: u16          = 3307;
+    pub static USER: &'static str = "root";
+    pub static PASS: &'static str = "password";
+    pub static ADDR: &'static str = "127.0.0.1";
+    pub static PORT: u16          = 3307;
 
     #[cfg(feature = "openssl")]
-    fn get_opts() -> MyOpts {
+    pub fn get_opts() -> MyOpts {
         MyOpts {
             user: Some(USER.to_string()),
             pass: Some(PASS.to_string()),
@@ -277,7 +277,7 @@ mod test {
     }
 
     #[cfg(not(feature = "ssl"))]
-    fn get_opts() -> MyOpts {
+    pub fn get_opts() -> MyOpts {
         MyOpts {
             user: Some(USER.to_string()),
             pass: Some(PASS.to_string()),
@@ -287,116 +287,130 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_query() {
-        let pool = MyPool::new(get_opts());
-        assert!(pool.is_ok());
-        let pool = pool.unwrap();
-        for _ in range(0u, 10u) {
-            let pool = pool.clone();
-            Thread::spawn(move || {
-                let conn = pool.get_conn();
-                assert!(conn.is_ok());
-                let mut conn = conn.unwrap();
-                assert!(conn.query("SELECT 1").is_ok());
-            }).detach();
+    describe! pool {
+        before_each {
+            let pool = MyPool::new(get_opts()).unwrap();
         }
-    }
 
-    #[test]
-    fn test_pooled_query() {
-        let pool = MyPool::new(get_opts());
-        assert!(pool.is_ok());
-        let pool = pool.unwrap();
-        for _ in range(0u, 10u) {
-            let pool = pool.clone();
-            Thread::spawn(move || {
-                let result = pool.query("SELECT 1");
-                assert!(result.is_ok());
-                let mut result = result.unwrap();
-                assert_eq!(result.next(), Some(Ok(vec![Bytes(vec![0x31u8])])));
-            }).detach();
+        it "should execute queryes on MyPooledConn" {
+            let mut threads = Vec::new();
+            for _ in range(0u, 10) {
+                let pool = pool.clone();
+                threads.push(Thread::spawn(move || {
+                    let conn = pool.get_conn();
+                    assert!(conn.is_ok());
+                    let mut conn = conn.unwrap();
+                    assert!(conn.query("SELECT 1").is_ok());
+                }));
+            }
+            for t in threads.into_iter() {
+                assert!(t.join().is_ok());
+            }
         }
-    }
 
-    #[test]
-    fn test_prepared_query() {
-        let pool = MyPool::new(get_opts());
-        assert!(pool.is_ok());
-        let pool = pool.unwrap();
-        for _ in range(0u, 10u) {
-            let pool = pool.clone();
-            Thread::spawn(move || {
-                let conn = pool.get_conn();
-                assert!(conn.is_ok());
-                let mut conn = conn.unwrap();
-                let stmt = conn.prepare("SELECT 1");
-                assert!(stmt.is_ok());
-                let mut stmt = stmt.unwrap();
-                assert!(stmt.execute(&[]).is_ok());
-            }).detach();
+        it "should execute queryes on MyPool" {
+            let mut threads = Vec::new();
+            for _ in range(0u, 10) {
+                let pool = pool.clone();
+                threads.push(Thread::spawn(move || {
+                    assert!(pool.query("SELECT 1").is_ok());
+                }));
+            }
+            for t in threads.into_iter() {
+                assert!(t.join().is_ok());
+            }
         }
-    }
 
-    #[test]
-    fn test_pooled_prepared_query() {
-        let pool = MyPool::new(get_opts());
-        assert!(pool.is_ok());
-        let pool = pool.unwrap();
-        for _ in range(0u, 10u) {
-            let pool = pool.clone();
-            Thread::spawn(move || {
-                let stmt = pool.prepare("SELECT 1");
-                assert!(stmt.is_ok());
-                let mut stmt = stmt.unwrap();
-                for _ in range(0u, 5u) {
-                    let result = stmt.execute(&[]);
-                    assert!(result.is_ok());
-                    let mut result = result.unwrap();
-                    assert_eq!(result.next(), Some(Ok(vec![Int(1)])));
-                    assert_eq!(result.next(), None);
-                }
-            }).detach();
+        it "should execute statements on MyPooledConn" {
+            let mut threads = Vec::new();
+            for _ in range(0u, 10) {
+                let pool = pool.clone();
+                threads.push(Thread::spawn(move || {
+                    let mut conn = pool.get_conn().unwrap();
+                    let mut stmt = conn.prepare("SELECT 1").unwrap();
+                    assert!(stmt.execute(&[]).is_ok());
+                }));
+            }
+            for t in threads.into_iter() {
+                assert!(t.join().is_ok());
+            }
         }
-    }
 
-    #[test]
-    fn test_transactions() {
-        let pool = MyPool::new(get_opts()).unwrap();
-        let _ = pool.query("DROP DATABASE IF EXISTS test");
-        let _ = pool.query("CREATE DATABASE test");
-        let _ = pool.query("USE test");
-        let _ = pool.query("CREATE TABLE tbl(a INT)");
-        assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
-            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
-            t.commit()
-        }).is_ok());
-        for x in &mut pool.query("SELECT COUNT(a) FROM tbl") {
-            let x = x.unwrap();
-            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+        it "should execute statements on MyPool" {
+            let mut threads = Vec::new();
+            for _ in range(0u, 10) {
+                let pool = pool.clone();
+                threads.push(Thread::spawn(move || {
+                    let mut stmt = pool.prepare("SELECT 1").unwrap();
+                    assert!(stmt.execute(&[]).is_ok());
+                }));
+            }
+            for t in threads.into_iter() {
+                assert!(t.join().is_ok());
+            }
         }
-        let _ = pool.start_transaction(false, None, Some(true)).and_then(|mut t| {
-            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
-            Ok(())
-        });
-        assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
-            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
-            t.rollback()
-        }).is_ok());
-        for x in &mut pool.query("SELECT COUNT(a) FROM tbl") {
-            let x = x.unwrap();
-            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+
+        it "should start transaction on MyPool" {
+            assert!(pool.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
+            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                t.commit()
+            }).is_ok());
+            for x in &mut pool.query("SELECT COUNT(a) FROM x.tbl") {
+                let x = x.unwrap();
+                assert_eq!(from_value::<u8>(&x[0]), 2u8);
+            }
+            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                t.rollback()
+            }).is_ok());
+            for x in &mut pool.query("SELECT COUNT(a) FROM x.tbl") {
+                let x = x.unwrap();
+                assert_eq!(from_value::<u8>(&x[0]), 2u8);
+            }
+            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                Ok(())
+            }).is_ok());
+            for x in &mut pool.query("SELECT COUNT(a) FROM x.tbl") {
+                let x = x.unwrap();
+                assert_eq!(from_value::<u8>(&x[0]), 2u8);
+            }
         }
-        assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
-            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
-            Ok(())
-        }).is_ok());
-        for x in &mut pool.query("SELECT COUNT(a) FROM tbl") {
-            let x = x.unwrap();
-            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+
+        it "should start transaction on MyPooledConn" {
+            let mut conn = pool.get_conn().unwrap();
+            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
+            assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                t.commit()
+            }).is_ok());
+            for x in &mut conn.query("SELECT COUNT(a) FROM x.tbl") {
+                let x = x.unwrap();
+                assert_eq!(from_value::<u8>(&x[0]), 2u8);
+            }
+            assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                t.rollback()
+            }).is_ok());
+            for x in &mut conn.query("SELECT COUNT(a) FROM x.tbl") {
+                let x = x.unwrap();
+                assert_eq!(from_value::<u8>(&x[0]), 2u8);
+            }
+            assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                Ok(())
+            }).is_ok());
+            for x in &mut conn.query("SELECT COUNT(a) FROM x.tbl") {
+                let x = x.unwrap();
+                assert_eq!(from_value::<u8>(&x[0]), 2u8);
+            }
         }
     }
 }

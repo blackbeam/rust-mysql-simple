@@ -104,7 +104,7 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`MyConn#prepare`](struct.MyConn.html#method.prepare).
-    pub fn prepare(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+    pub fn prepare<'c>(&'c mut self, query: &str) -> MyResult<Stmt<'c>> {
         if let Some(ref mut conn) = self.conn {
             conn.prepare(query)
         } else if let Some(ref mut conn) = self.pooled_conn {
@@ -1555,23 +1555,23 @@ impl<'a> Iterator<MyResult<Vec<Value>>> for &'a mut MyResult<QueryResult<'a>> {
 
 #[cfg(test)]
 mod test {
-    use test::{Bencher};
-    use std::default::{Default};
-    use std::{str};
-    use std::os::{getcwd};
-    use std::io::fs::{File, unlink};
-    use super::{MyConn, MyOpts};
-    use super::super::value::{ToValue, from_value};
-    use super::super::value::Value::{NULL, Int, Bytes, Date};
-    use time::{Tm, now};
+    pub use test::{Bencher};
+    pub use std::default::{Default};
+    pub use std::{str};
+    pub use std::os::{getcwd};
+    pub use std::io::fs::{File, unlink};
+    pub use super::{MyConn, MyOpts};
+    pub use super::super::value::{ToValue, from_value};
+    pub use super::super::value::Value::{NULL, Int, Bytes, Date};
+    pub use time::{Tm, now};
 
-    static USER: &'static str = "root";
-    static PASS: &'static str = "password";
-    static ADDR: &'static str = "127.0.0.1";
-    static PORT: u16          = 3307;
+    pub static USER: &'static str = "root";
+    pub static PASS: &'static str = "password";
+    pub static ADDR: &'static str = "127.0.0.1";
+    pub static PORT: u16          = 3307;
 
     #[cfg(feature = "openssl")]
-    fn get_opts() -> MyOpts {
+    pub fn get_opts() -> MyOpts {
         MyOpts {
             user: Some(USER.to_string()),
             pass: Some(PASS.to_string()),
@@ -1583,7 +1583,7 @@ mod test {
     }
 
     #[cfg(not(feature = "ssl"))]
-    fn get_opts() -> MyOpts {
+    pub fn get_opts() -> MyOpts {
         MyOpts {
             user: Some(USER.to_string()),
             pass: Some(PASS.to_string()),
@@ -1593,326 +1593,286 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_connect() {
-        let conn = MyConn::new(get_opts());
-        assert!(conn.is_ok());
-    }
-
-    #[test]
-    fn test_connect_with_db() {
-        let mut conn = MyConn::new(MyOpts{db_name: Some("mysql".to_string()),
-                                          ..get_opts()}).unwrap();
-        for x in &mut conn.query("SELECT DATABASE()") {
-            assert_eq!(from_value::<Vec<u8>>(&x.unwrap().remove(0).unwrap()),
-                       b"mysql".to_vec());
+    describe! my_conn {
+        it "should connect" {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            assert!(conn.ping());
         }
-    }
-
-    #[test]
-    fn test_query() {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        assert!(conn.ping());
-        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
-        assert!(conn.query("CREATE DATABASE test").is_ok());
-        assert!(conn.query("USE test").is_ok());
-        assert!(conn.query("CREATE TABLE tbl(a TEXT, b INT, c INT UNSIGNED, d DATE, e FLOAT)").is_ok());
-        assert!(conn.query("INSERT INTO tbl(a, b, c, d, e) VALUES ('hello', -123, 123, '2014-05-05', 123.123)").is_ok());
-        assert!(conn.query("INSERT INTO tbl(a, b, c, d, e) VALUES ('world', -321, 321, '2014-06-06', 321.321)").is_ok());
-        assert!(conn.query("SELECT * FROM unexisted").is_err());
-        assert!(conn.query("SELECT * FROM tbl").is_ok());
-        // Drop
-        assert!(conn.query("SELECT * FROM tbl").is_ok());
-        assert!(conn.query("UPDATE tbl SET a = 'foo';").is_ok());
-        assert_eq!(conn.affected_rows, 2);
-        for _ in &mut conn.query("SELECT * FROM tbl WHERE a = 'bar'") {
-            assert!(false);
+        it "should connect with database" {
+            let mut conn = MyConn::new(MyOpts {
+                db_name: Some("mysql".to_string()),
+                ..get_opts()
+            }).unwrap();
+            assert_eq!(conn.query("SELECT DATABASE()").unwrap().next(),
+                       Some(Ok(vec![Bytes(b"mysql".to_vec())])));
         }
-        let mut count = 0;
-        for row in &mut conn.query("SELECT * FROM tbl") {
-            assert!(row.is_ok());
-            let row = row.unwrap();
-            if count == 0 {
-                assert_eq!(row[0], Bytes(b"foo".to_vec()));
-                assert_eq!(row[1], Bytes(b"-123".to_vec()));
-                assert_eq!(row[2], Bytes(b"123".to_vec()));
-                assert_eq!(row[3], Bytes(b"2014-05-05".to_vec()));
-                assert_eq!(row[4], Bytes(b"123.123".to_vec()));
-            } else {
-                assert_eq!(row[0], Bytes(b"foo".to_vec()));
-                assert_eq!(row[1], Bytes(b"-321".to_vec()));
-                assert_eq!(row[2], Bytes(b"321".to_vec()));
-                assert_eq!(row[3], Bytes(b"2014-06-06".to_vec()));
-                assert_eq!(row[4], Bytes(b"321.321".to_vec()));
-            }
-            count += 1;
-        }
-        assert_eq!(count, 2u);
-        for row in &mut conn.query("SELECT REPEAT('A', 20000000)") {
-            assert!(row.is_ok());
-            let row = row.unwrap();
-            let val = from_value::<Vec<u8>>(&row[0]);
-            assert_eq!(val, Vec::from_elem(20000000, 65u8));
-        }
-    }
-
-    #[test]
-    fn test_prepared_statemenst() {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
-        assert!(conn.query("CREATE DATABASE test").is_ok());
-        assert!(conn.query("USE test").is_ok());
-        assert!(conn.query("CREATE TABLE tbl(a TEXT, b INT, c INT UNSIGNED, d DATE, e DOUBLE)").is_ok());
-        {
-            let stmt = conn.prepare("INSERT INTO tbl(a, b, c, d, e) VALUES (?, ?, ?, ?, ?)");
-            assert!(stmt.is_ok());
-            let mut stmt = stmt.unwrap();
-            let t = Tm{tm_year: 2014, tm_mon: 4, tm_mday: 5,
-                       tm_hour: 0,    tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now()};
-            assert!(stmt.execute(&[&b"hello".to_vec(), &-123i, &123i, &(t.to_timespec()), &123.123f64]).is_ok());
-            assert!(stmt.execute(&[&b"world".to_vec(), &NULL, &NULL, &NULL, &321.321f64]).is_ok());
-        }
-        {
-            let stmt = conn.prepare("SELECT * FROM tbl");
-            assert!(stmt.is_ok());
-            let mut stmt = stmt.unwrap();
-            let mut i = 0i;
-            for row in &mut stmt.execute(&[]) {
-                assert!(row.is_ok());
+        it "should execute queryes and parse results" {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(\
+                                    a TEXT,\
+                                    b INT,\
+                                    c INT UNSIGNED,\
+                                    d DATE,\
+                                    e FLOAT
+                                )").is_ok());
+            assert!(conn.query("INSERT INTO x.tbl(a, b, c, d, e) VALUES (\
+                                    'hello',\
+                                    -123,\
+                                    123,\
+                                    '2014-05-05',\
+                                    123.123\
+                                )").is_ok());
+            assert!(conn.query("INSERT INTO x.tbl(a, b, c, d, e) VALUES (\
+                                    'world',\
+                                    -321,\
+                                    321,\
+                                    '2014-06-06',\
+                                    321.321\
+                                )").is_ok());
+            assert!(conn.query("SELECT * FROM unexisted").is_err());
+            assert!(conn.query("SELECT * FROM x.tbl").is_ok());
+            // Drop
+            assert!(conn.query("UPDATE x.tbl SET a = 'foo'").is_ok());
+            assert_eq!(conn.affected_rows, 2);
+            assert_eq!(conn.query("SELECT * FROM x.tbl \
+                                   WHERE a = 'bar'").unwrap().next(), None);
+            for (i, row) in conn.query("SELECT * FROM x.tbl")
+                                .unwrap().enumerate() {
                 let row = row.unwrap();
                 if i == 0 {
-                    assert_eq!(row[0], Bytes(b"hello".to_vec()));
-                    assert_eq!(row[1], Int(-123i64));
-                    assert_eq!(row[2], Int(123i64));
-                    assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                    assert_eq!(from_value::<f64>(&row[4]), 123.123);
+                    assert_eq!(row[0], Bytes(b"foo".to_vec()));
+                    assert_eq!(row[1], Bytes(b"-123".to_vec()));
+                    assert_eq!(row[2], Bytes(b"123".to_vec()));
+                    assert_eq!(row[3], Bytes(b"2014-05-05".to_vec()));
+                    assert_eq!(row[4], Bytes(b"123.123".to_vec()));
+                } else if i == 1 {
+                    assert_eq!(row[0], Bytes(b"foo".to_vec()));
+                    assert_eq!(row[1], Bytes(b"-321".to_vec()));
+                    assert_eq!(row[2], Bytes(b"321".to_vec()));
+                    assert_eq!(row[3], Bytes(b"2014-06-06".to_vec()));
+                    assert_eq!(row[4], Bytes(b"321.321".to_vec()));
                 } else {
-                    assert_eq!(row[0], Bytes(b"world".to_vec()));
-                    assert_eq!(row[1], NULL);
-                    assert_eq!(row[2], NULL);
-                    assert_eq!(row[3], NULL);
-                    assert_eq!(from_value::<f64>(&row[4]), 321.321);
+                    unreachable!();
                 }
-                i += 1;
             }
         }
-        let stmt = conn.prepare("SELECT REPEAT('A', 20000000);");
-        let mut stmt = stmt.unwrap();
-        for row in &mut stmt.execute(&[]) {
-            assert!(row.is_ok());
-            let row = row.unwrap();
-            let val = from_value::<Vec<u8>>(&row[0]);
-            assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
+        it "should parse large text result" {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            assert_eq!(
+                conn.query("SELECT REPEAT('A', 20000000)").unwrap().next(),
+                Some(Ok(vec![Bytes(Vec::from_elem(20000000, b'A'))]))
+            );
         }
-    }
-
-    #[test]
-    fn test_transactions() {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        let _ = conn.query("DROP DATABASE IF EXISTS test");
-        let _ = conn.query("CREATE DATABASE test");
-        let _ = conn.query("USE test");
-        let _ = conn.query("CREATE TABLE tbl(a INT)");
-        assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
-            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
-            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
-            t.commit()
-        }).is_ok());
-        for x in &mut conn.query("SELECT COUNT(a) FROM tbl") {
-            let x = x.unwrap();
-            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+        it "should execute statements and parse results" {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(\
+                                    a TEXT,\
+                                    b INT,\
+                                    c INT UNSIGNED,\
+                                    d DATE,\
+                                    e DOUBLE\
+                                )").is_ok());
+            conn.prepare("INSERT INTO x.tbl(a, b, c, d, e)\
+                          VALUES (?, ?, ?, ?, ?)")
+            .and_then(|mut stmt| {
+                let tm = Tm { tm_year: 114, tm_mon: 4, tm_mday: 5, tm_hour: 0,
+                              tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now() };
+                assert!(stmt.execute(&[
+                    &b"hello".to_vec(),
+                    &-123i,
+                    &123i,
+                    &(tm.to_timespec()),
+                    &123.123f64
+                ]).is_ok());
+                assert!(stmt.execute(&[
+                    &b"world".to_vec(),
+                    &NULL,
+                    &NULL,
+                    &NULL,
+                    &321.321f64
+                ]).is_ok());
+                Ok(())
+            }).ok().expect("Could not prepare statement");
+            conn.prepare("SELECT * from x.tbl").and_then(|mut stmt| {
+                for (i, row) in stmt.execute(&[]).unwrap().enumerate() {
+                    let row = row.unwrap();
+                    if i == 0 {
+                        assert_eq!(row[0], Bytes(b"hello".to_vec()));
+                        assert_eq!(row[1], Int(-123i64));
+                        assert_eq!(row[2], Int(123i64));
+                        assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
+                        assert_eq!(from_value::<f64>(&row[4]), 123.123);
+                    } else if i == 1 {
+                        assert_eq!(row[0], Bytes(b"world".to_vec()));
+                        assert_eq!(row[1], NULL);
+                        assert_eq!(row[2], NULL);
+                        assert_eq!(row[3], NULL);
+                        assert_eq!(from_value::<f64>(&row[4]), 321.321);
+                    } else {
+                        unreachable!();
+                    }
+                }
+                Ok(())
+            }).ok().expect("Could not prepare statement");
         }
-        let _ = conn.start_transaction(false, None, Some(true)).and_then(|mut t| {
-            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
-            Ok(())
-        });
-        assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
-            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
-            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
-            t.rollback()
-        }).is_ok());
-        for x in &mut conn.query("SELECT COUNT(a) FROM tbl") {
-            let x = x.unwrap();
-            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+        it "should parse large binary result" {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
+            assert_eq!(
+                stmt.execute(&[]).unwrap().next(),
+                Some(Ok(vec![Bytes(Vec::from_elem(20000000, b'A'))]))
+            );
         }
-        assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
-            assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_ok());
-            assert!(t.query("INSERT INTO tbl(a) VALUES(2)").is_ok());
-            Ok(())
-        }).is_ok());
-        for x in &mut conn.query("SELECT COUNT(a) FROM tbl") {
-            let x = x.unwrap();
-            assert_eq!(from_value::<u8>(&x[0]), 2u8);
+        it "should start, commit and rollback transactions" {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
+            conn.start_transaction(false, None, None).and_then(|mut t| {
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                assert!(t.commit().is_ok());
+                Ok(())
+            }).ok().expect("Could not start transaction");
+            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
+                       Some(Ok(vec![Bytes(b"2".to_vec())])));
+            conn.start_transaction(false, None, Some(true)).and_then(|mut t| {
+                assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
+                Ok(())
+                // implicit rollback
+            }).ok().expect("Could not start transaction");
+            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
+                       Some(Ok(vec![Bytes(b"2".to_vec())])));
+            conn.start_transaction(false, None, None).and_then(|mut t| {
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
+                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                assert!(t.rollback().is_ok());
+                Ok(())
+            }).ok().expect("Could not start transaction");
+            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
+                       Some(Ok(vec![Bytes(b"2".to_vec())])));
+            conn.start_transaction(false, None, None).and_then(|mut t| {
+                t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
+                .and_then(|mut stmt| {
+                    assert!(stmt.execute(&[&3u]).is_ok());
+                    assert!(stmt.execute(&[&4u]).is_ok());
+                    Ok(())
+                }).ok().expect("Could not prepare statement on transaction");
+                assert!(t.commit().is_ok());
+                Ok(())
+            }).ok().expect("Could not start transaction");
+            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
+                       Some(Ok(vec![Bytes(b"4".to_vec())])));
         }
-    }
-
-    #[test]
-    fn test_large_insert() {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
-        assert!(conn.query("CREATE DATABASE test").is_ok());
-        assert!(conn.query("USE test").is_ok());
-        assert!(conn.query("CREATE TABLE tbl(a LONGBLOB)").is_ok());
-        let query = format!("INSERT INTO tbl(a) VALUES('{}')", String::from_chars(Vec::from_elem(20000000, 'A').as_slice()));
-        assert!(conn.query(query.as_slice()).is_ok());
-        let x = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
-        assert!(x.is_ok());
-        let v = from_value::<Vec<u8>>(&x.unwrap().remove(0).unwrap());
-        assert_eq!(v, Vec::from_elem(20000000, 65u8));
-    }
-
-    #[test]
-    fn test_large_insert_prepared() {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
-        assert!(conn.query("CREATE DATABASE test").is_ok());
-        assert!(conn.query("USE test").is_ok());
-        assert!(conn.query("CREATE TABLE tbl(a LONGBLOB)").is_ok());
-        {
-            let stmt = conn.prepare("INSERT INTO tbl(a) values ( ? );");
-            assert!(stmt.is_ok());
-            let mut stmt = stmt.unwrap();
-            let val = Vec::from_elem(20000000, 65u8);
-            assert!(stmt.execute(&[&val]).is_ok());
-        }
-        let row = (&mut conn.query("SELECT * FROM tbl")).next().unwrap();
-        assert!(row.is_ok());
-        let row = row.unwrap();
-        let val = from_value::<Vec<u8>>(&row[0]);
-        assert_eq!(val, Vec::from_elem(20000000, 65u8).as_slice());
-    }
-
-    #[test]
-    #[allow(unused_must_use)]
-    fn test_local_infile() {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
-        assert!(conn.query("CREATE DATABASE test").is_ok());
-        assert!(conn.query("USE test").is_ok());
-        assert!(conn.query("CREATE TABLE tbl(a TEXT)").is_ok());
-        let mut path = getcwd().unwrap();
-        path.push("local_infile.txt".to_string());
-        {
-            let mut file = File::create(&path).unwrap();
-            file.write_line("AAAAAA");
-            file.write_line("BBBBBB");
-            file.write_line("CCCCCC");
-        }
-        let query = format!("LOAD DATA LOCAL INFILE '{}' INTO TABLE tbl", str::from_utf8(path.clone().into_vec().as_slice()).unwrap());
-        assert!(conn.query(query.as_slice()).is_ok());
-        let mut count = 0;
-        for row in &mut conn.query("SELECT * FROM tbl") {
-            assert!(row.is_ok());
-            let row = row.unwrap();
-            match count {
-                0 => assert_eq!(row, vec!(Bytes(b"AAAAAA".to_vec()))),
-                1 => assert_eq!(row, vec!(Bytes(b"BBBBBB".to_vec()))),
-                2 => assert_eq!(row, vec!(Bytes(b"CCCCCC".to_vec()))),
-                _ => assert!(false)
+        it "should handle LOCAL INFILE" {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
+            let mut path = getcwd().unwrap();
+            path.push("local_infile.txt".to_string());
+            {
+                let mut file = File::create(&path).unwrap();
+                let _ = file.write_line("AAAAAA");
+                let _ = file.write_line("BBBBBB");
+                let _ = file.write_line("CCCCCC");
             }
-            count += 1;
+            let query = format!("LOAD DATA LOCAL INFILE '{}' INTO TABLE x.tbl",
+                                str::from_utf8(path.clone().into_vec()
+                                                   .as_slice()).unwrap());
+            assert!(conn.query(query.as_slice()).is_ok());
+            for (i, row) in conn.query("SELECT * FROM x.tbl")
+                                .unwrap().enumerate() {
+                let row = row.unwrap();
+                match i {
+                    0 => assert_eq!(row, vec!(Bytes(b"AAAAAA".to_vec()))),
+                    1 => assert_eq!(row, vec!(Bytes(b"BBBBBB".to_vec()))),
+                    2 => assert_eq!(row, vec!(Bytes(b"CCCCCC".to_vec()))),
+                    _ => unreachable!()
+                }
+            }
+            let _ = unlink(&path);
         }
-        assert_eq!(count, 3u);
-        unlink(&path);
-    }
-
-    #[test]
-    fn test_reset() {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        assert!(conn.query("CREATE TEMPORARY TABLE `db`.`test` (`test` VARCHAR(255) NULL);").is_ok());
-        assert!(conn.query("SELECT * FROM `db`.`test`;").is_ok());
-        assert!(conn.reset().is_ok());
-        assert!(conn.query("SELECT * FROM `db`.`test`;").is_err());
-    }
-
-    #[test]
-    fn test_multi_resultset() {
-        let mut conn = MyConn::new(MyOpts{prefer_socket: false,
-                                          ..get_opts()}).unwrap();
-        assert!(conn.query("DROP DATABASE IF EXISTS test").is_ok());
-        assert!(conn.query("CREATE DATABASE test").is_ok());
-        assert!(conn.query("USE test").is_ok());
-        assert!(conn.query("DROP PROCEDURE IF EXISTS multi").is_ok());
-        assert!(conn.query(r#"CREATE PROCEDURE multi() BEGIN
-                                  SELECT 1;
-                                  SELECT 1;
-                              END"#).is_ok());
-        assert!(conn.query("CALL multi();").is_ok());
-        {
+        it "should reset connection" {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            assert!(conn.query("CREATE TEMPORARY TABLE `db`.`test` \
+                                (`test` VARCHAR(255) NULL);").is_ok());
+            assert!(conn.query("SELECT * FROM `db`.`test`;").is_ok());
+            assert!(conn.reset().is_ok());
+            assert!(conn.query("SELECT * FROM `db`.`test`;").is_err());
+        }
+        it "should handle multi resultset" {
+            let mut conn = MyConn::new(MyOpts {
+                prefer_socket: false,
+                db_name: Some("mysql".to_string()),
+                ..get_opts()
+            }).unwrap();
+            assert!(conn.query("DROP PROCEDURE IF EXISTS multi").is_ok());
+            assert!(conn.query(r#"CREATE PROCEDURE multi() BEGIN
+                                      SELECT 1;
+                                      SELECT 1;
+                                  END"#).is_ok());
+            for (i, row) in conn.query("CALL multi()")
+                                .unwrap().enumerate() {
+                match i {
+                    0 | 1 => assert_eq!(row, Ok(vec![Bytes(b"1".to_vec())])),
+                    _ => unreachable!(),
+                }
+            }
             let mut result = conn.query("SELECT 1; SELECT 2; SELECT 3;").unwrap();
-            let mut i: i64 = 1;
-            while result.more_results_exists() {
-                for x in result {
-                    assert_eq!(i, from_value::<i64>(&x.unwrap()[0]));
+            let mut i = 0i;
+            while { i += 1; result.more_results_exists() } {
+                for row in result {
+                    match i {
+                        1 => assert_eq!(row, Ok(vec![Bytes(b"1".to_vec())])),
+                        2 => assert_eq!(row, Ok(vec![Bytes(b"2".to_vec())])),
+                        3 => assert_eq!(row, Ok(vec![Bytes(b"3".to_vec())])),
+                        _ => unreachable!(),
+                    }
                 }
-                i += 1;
             }
-
         }
-        assert!(conn.query("DROP DATABASE test").is_ok());
-    }
 
-    #[bench]
-    #[allow(unused_must_use)]
-    fn bench_simple_exec(bench: &mut Bencher) {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        bench.iter(|| { conn.query("DO 1"); })
-    }
-
-    #[bench]
-    #[allow(unused_must_use)]
-    fn bench_prepared_exec(bench: &mut Bencher) {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        let mut stmt = conn.prepare("DO 1").unwrap();
-        bench.iter(|| { stmt.execute(&[]); })
-    }
-
-    #[bench]
-    #[allow(unused_must_use)]
-    fn bench_simple_query_row(bench: &mut Bencher) {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        bench.iter(|| { (&mut conn.query("SELECT 1")).next(); })
-    }
-
-    #[bench]
-    #[allow(unused_must_use)]
-    fn bench_simple_prepared_query_row(bench: &mut Bencher) {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        let mut stmt = conn.prepare("SELECT 1").unwrap();
-        bench.iter(|| { stmt.execute(&[]); })
-    }
-
-    #[bench]
-    #[allow(unused_must_use)]
-    fn bench_simple_prepared_query_row_param(bench: &mut Bencher) {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        let mut stmt = conn.prepare("SELECT ?").unwrap();
-        let mut i = 0i;
-        bench.iter(|| { stmt.execute(&[&i]); i += 1; })
-    }
-
-    #[bench]
-    #[allow(unused_must_use)]
-    fn bench_prepared_query_row_5param(bench: &mut Bencher) {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-        let params: &[&ToValue] = &[&42i8, &b"123456".to_vec(), &1.618f64, &NULL, &1i8];
-        bench.iter(|| { stmt.execute(params); })
-    }
-
-    #[bench]
-    #[allow(unused_must_use)]
-    fn bench_select_large_string(bench: &mut Bencher) {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        bench.iter(|| { for _ in &mut conn.query("SELECT REPEAT('A', 10000)") {} })
-    }
-
-    #[bench]
-    #[allow(unused_must_use)]
-    fn bench_select_prepared_large_string(bench: &mut Bencher) {
-        let mut conn = MyConn::new(get_opts()).unwrap();
-        let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
-        bench.iter(|| { stmt.execute(&[]); })
+        bench "simple exec" (bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            bencher.iter(|| { let _ = conn.query("DO 1"); })
+        }
+        bench "prepared exec" (bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("DO 1").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(&[]); })
+        }
+        bench "simple query row" (bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            bencher.iter(|| { let _ = conn.query("SELECT 1"); })
+        }
+        bench "simple prepared query row" (bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT 1").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(&[]); })
+        }
+        bench "simple prepared query row with param" (bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT ?").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(&[&0i]); })
+        }
+        bench "simple prepared query row with 5 params" (bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
+            let params: &[&ToValue] = &[
+                &42i8,
+                &b"123456".to_vec(),
+                &1.618f64,
+                &NULL,
+                &1i8
+            ];
+            bencher.iter(|| { let _ = stmt.execute(params); })
+        }
+        bench "select large string" (bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            bencher.iter(|| { let _ = conn.query("SELECT REPEAT('A', 10000)"); })
+        }
+        bench "select prepared large string" (bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(&[]); })
+        }
     }
 }
 
