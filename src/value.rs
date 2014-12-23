@@ -318,7 +318,8 @@ impl ToValue for Timespec {
     #[inline]
     fn to_value(&self) -> Value {
         let t = at(self.clone());
-        Value::Date(t.tm_year as u16,
+        Value::Date(
+             t.tm_year as u16 + 1_900,
              (t.tm_mon + 1) as u8,
              t.tm_mday as u8,
              t.tm_hour as u8,
@@ -572,7 +573,7 @@ impl FromValue for String {
 impl FromValue for Timespec {
     #[inline]
     fn from_value(v: &Value) -> Timespec {
-        from_value_opt(v).expect("Error retrieving Timespec from value")
+        from_value_opt(v).expect("Error retrieving Timespec from Value")
     }
     #[inline]
     fn from_value_opt(v: &Value) -> Option<Timespec> {
