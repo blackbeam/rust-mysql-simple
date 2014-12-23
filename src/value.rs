@@ -1,5 +1,6 @@
 use std::io::{BufReader, IoResult, SeekCur};
-use std::str::{from_utf8, from_str};
+use std::str::{from_utf8};
+use std::borrow::ToOwned;
 use std::num::{Int, Float};
 use std::time::{Duration};
 use time::{Tm, Timespec, now, strptime, at};
@@ -49,10 +50,10 @@ impl Value {
     /// Get correct string representation of a mysql value
     pub fn into_str(&self) -> String {
         match *self {
-            Value::NULL => "NULL".into_string(),
+            Value::NULL => "NULL".to_owned(),
             Value::Bytes(ref x) => {
                 String::from_utf8(x.clone()).ok().map_or_else(|| {
-                    let mut s = "0x".into_string();
+                    let mut s = "0x".to_owned();
                     for c in x.iter() {
                         s.extend(format!("{:02X}", *c).chars());
                     }
@@ -71,11 +72,11 @@ impl Value {
             Value::Int(x) => format!("{}", x),
             Value::UInt(x) => format!("{}", x),
             Value::Float(x) => format!("{}", x),
-            Value::Date(0, 0, 0, 0, 0, 0, 0) => "''".into_string(),
+            Value::Date(0, 0, 0, 0, 0, 0, 0) => "''".to_owned(),
             Value::Date(y, m, d, 0, 0, 0, 0) => format!("'{:04}-{:02}-{:02}'", y, m, d),
             Value::Date(y, m, d, h, i, s, 0) => format!("'{:04}-{:02}-{:02} {:02}:{:02}:{:02}'", y, m, d, h, i, s),
             Value::Date(y, m, d, h, i, s, u) => format!("'{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}'", y, m, d, h, i, s, u),
-            Value::Time(_, 0, 0, 0, 0, 0) => "''".into_string(),
+            Value::Time(_, 0, 0, 0, 0, 0) => "''".to_owned(),
             Value::Time(neg, d, h, i, s, 0) => {
                 if neg {
                     format!("'-{:03}:{:02}:{:02}'", d * 24 + h as u32, i, s)
@@ -435,7 +436,7 @@ macro_rules! from_value_impl_num(
                     Value::Int(x) if x >= int_min_value::<$t>() as i64 && x <= int_max_value::<$t>() as i64 => Some(x as $t),
                     Value::UInt(x) if x <= int_max_value::<$t>() as u64 => Some(x as $t),
                     Value::Bytes(ref bts) => {
-                        from_utf8(bts[]).and_then(from_str::<$t>)
+                        from_utf8(bts[]).ok().and_then(StrExt::parse::<$t>)
                     },
                     _ => None
                 }
@@ -464,7 +465,7 @@ impl FromValue for i64 {
             Value::Int(x) => Some(x),
             Value::UInt(x) if x <= int_max_value::<i64> as u64 => Some(x as i64),
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).and_then(from_str::<i64>)
+                from_utf8(bts[]).ok().and_then(StrExt::parse::<i64>)
             },
             _ => None
         }
@@ -482,7 +483,7 @@ impl FromValue for u64 {
             Value::Int(x) => Some(x as u64),
             Value::UInt(x) => Some(x),
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).and_then(from_str::<u64>)
+                from_utf8(bts[]).ok().and_then(StrExt::parse::<u64>)
             },
             _ => None
         }
@@ -499,7 +500,7 @@ impl FromValue for f32 {
         match *v {
             Value::Float(x) if x >= float_min_value::<f32>() as f64 && x <= float_max_value::<f32>() as f64 => Some(x as f32),
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).and_then(from_str::<f32>)
+                from_utf8(bts[]).ok().and_then(StrExt::parse::<f32>)
             },
             _ => None
         }
@@ -516,7 +517,7 @@ impl FromValue for f64 {
         match *v {
             Value::Float(x) => Some(x),
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).and_then(from_str::<f64>)
+                from_utf8(bts[]).ok().and_then(StrExt::parse::<f64>)
             },
             _ => None
         }
@@ -594,7 +595,7 @@ impl FromValue for Timespec {
                     }.to_timespec())
             },
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).and_then(|s| {
+                from_utf8(bts[]).ok().and_then(|s| {
                     strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).and_then(|mut tm| {
                     tm.tm_utcoff = *TM_UTCOFF;
@@ -637,7 +638,7 @@ impl FromValue for Duration {
                     let ms: i64 = match xss[] {
                         [_, []] | [_] => 0,
                         [_, ms] if ms.len() <= 6 => {
-                            let x = from_utf8(ms).and_then(from_str::<i64>);
+                            let x = from_utf8(ms).ok().and_then(StrExt::parse::<i64>);
                             if x.is_some() {
                                 x.unwrap() * 10i64.pow(6 - ms.len())
                             } else {

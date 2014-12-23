@@ -83,13 +83,13 @@ pub type ServerVersion = (u16, u16, u16);
 static VERSION_RE: Regex = regex!(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)");
 
 fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
-    let ver_str = String::from_utf8_lossy(bytes).into_string();
+    let ver_str = String::from_utf8_lossy(bytes).into_owned();
     VERSION_RE.captures(ver_str.as_slice())
     .and_then(|capts| {
         Some((
-            from_str::<u16>(capts.at(1).unwrap()).unwrap_or(0),
-            from_str::<u16>(capts.at(2).unwrap()).unwrap_or(0),
-            from_str::<u16>(capts.at(3).unwrap()).unwrap_or(0),
+            (capts.at(1).unwrap().parse::<u16>()).unwrap_or(0),
+            (capts.at(2).unwrap().parse::<u16>()).unwrap_or(0),
+            (capts.at(3).unwrap().parse::<u16>()).unwrap_or(0),
         ))
     })
     .and_then(|version| {
