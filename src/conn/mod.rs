@@ -1672,7 +1672,7 @@ mod test {
                                     d DATE,\
                                     e DOUBLE\
                                 )").is_ok());
-            conn.prepare("INSERT INTO x.tbl(a, b, c, d, e)\
+            let _ = conn.prepare("INSERT INTO x.tbl(a, b, c, d, e)\
                           VALUES (?, ?, ?, ?, ?)")
             .and_then(|mut stmt| {
                 let tm = Tm { tm_year: 114, tm_mon: 4, tm_mday: 5, tm_hour: 0,
@@ -1692,8 +1692,8 @@ mod test {
                     &321.321f64
                 ]).is_ok());
                 Ok(())
-            }).ok().expect("Could not prepare statement");
-            conn.prepare("SELECT * from x.tbl").and_then(|mut stmt| {
+            }).unwrap();
+            let _ = conn.prepare("SELECT * from x.tbl").and_then(|mut stmt| {
                 for (i, row) in stmt.execute(&[]).unwrap().enumerate() {
                     let row = row.unwrap();
                     if i == 0 {
@@ -1713,7 +1713,7 @@ mod test {
                     }
                 }
                 Ok(())
-            }).ok().expect("Could not prepare statement");
+            }).unwrap();
         }
         it "should parse large binary result" {
             let mut conn = MyConn::new(get_opts()).unwrap();
@@ -1726,39 +1726,39 @@ mod test {
         it "should start, commit and rollback transactions" {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
-            conn.start_transaction(false, None, None).and_then(|mut t| {
+            let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 assert!(t.commit().is_ok());
                 Ok(())
-            }).ok().expect("Could not start transaction");
+            }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
                        Some(Ok(vec![Bytes(b"2".to_vec())])));
-            conn.start_transaction(false, None, Some(true)).and_then(|mut t| {
+            let _ = conn.start_transaction(false, None, Some(true)).and_then(|mut t| {
                 assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
                 Ok(())
                 // implicit rollback
-            }).ok().expect("Could not start transaction");
+            }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
                        Some(Ok(vec![Bytes(b"2".to_vec())])));
-            conn.start_transaction(false, None, None).and_then(|mut t| {
+            let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 assert!(t.rollback().is_ok());
                 Ok(())
-            }).ok().expect("Could not start transaction");
+            }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
                        Some(Ok(vec![Bytes(b"2".to_vec())])));
-            conn.start_transaction(false, None, None).and_then(|mut t| {
-                t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
+            let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
+                let _ = t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
                 .and_then(|mut stmt| {
                     assert!(stmt.execute(&[&3u]).is_ok());
                     assert!(stmt.execute(&[&4u]).is_ok());
                     Ok(())
-                }).ok().expect("Could not prepare statement on transaction");
+                }).unwrap();
                 assert!(t.commit().is_ok());
                 Ok(())
-            }).ok().expect("Could not start transaction");
+            }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
                        Some(Ok(vec![Bytes(b"4".to_vec())])));
         }
