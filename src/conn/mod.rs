@@ -1734,7 +1734,7 @@ mod test {
             }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
                        Some(Ok(vec![Bytes(b"2".to_vec())])));
-            let _ = conn.start_transaction(false, None, Some(true)).and_then(|mut t| {
+            let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
                 Ok(())
                 // implicit rollback
