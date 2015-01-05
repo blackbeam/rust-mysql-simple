@@ -76,7 +76,7 @@ impl MyInnerPool {
 ///     }
 /// }
 /// ```
-#[deriving(Clone)]
+#[derive(Clone)]
 pub struct MyPool {
     pool: Arc<Mutex<MyInnerPool>>
 }
@@ -100,7 +100,11 @@ impl MyPool {
     /// call [`MyConn#reset`](../struct.MyConn.html#method.reset) if
     /// necessary.
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
-        let mut pool = self.pool.lock();
+        let mut pool = match self.pool.lock() {
+            Ok(mutex) => mutex,
+            _ => return Err(MyError::MyDriverError(
+                            DriverError::PoisonedPoolMutex)),
+        };
 
         while pool.pool.is_empty() {
             if pool.count < pool.max {
@@ -172,7 +176,7 @@ pub struct MyPooledConn {
 
 impl Drop for MyPooledConn {
     fn drop(&mut self) {
-        let mut pool = self.pool.pool.lock();
+        let mut pool = self.pool.pool.lock().unwrap();
         if pool.count > pool.min || self.conn.is_none() {
             pool.count -= 1;
         } else {

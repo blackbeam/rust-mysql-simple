@@ -10,6 +10,7 @@ use std::io::net::pipe::{UnixStream};
 use std::num::{FromPrimitive};
 use std::path::{BytesContainer};
 use std::str::{FromStr};
+use std::iter;
 use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
@@ -47,7 +48,7 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 pub mod pool;
 
-#[deriving(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum IsolationLevel {
     ReadUncommied,
     ReadCommited,
@@ -167,7 +168,7 @@ impl<'a> Drop for Transaction<'a> {
  *
  *
  */
-#[deriving(Eq, PartialEq, Clone)]
+#[derive(Eq, PartialEq, Clone)]
 struct InnerStmt {
     params: Option<Vec<Column>>,
     columns: Option<Vec<Column>>,
@@ -179,7 +180,7 @@ struct InnerStmt {
 
 impl InnerStmt {
     fn from_payload(pld: &[u8]) -> IoResult<InnerStmt> {
-        let mut reader = &mut pld[];
+        let mut reader = pld[];
         try!(reader.read_u8());
         let statement_id = try!(reader.read_le_u32());
         let num_columns = try!(reader.read_le_u16());
@@ -293,7 +294,7 @@ impl<'a> Drop for Stmt<'a> {
 
 /// Mysql
 /// [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition).
-#[deriving(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Column {
     /// Schema name.
     pub schema: Vec<u8>,
@@ -322,7 +323,7 @@ pub struct Column {
 impl Column {
     #[inline]
     fn from_payload(command: u8, pld: &[u8]) -> IoResult<Column> {
-        let mut reader = &mut pld[];
+        let mut reader = pld[];
         // Skip catalog
         let _ = try!(reader.read_lenenc_bytes());
         let schema = try!(reader.read_lenenc_bytes());
@@ -382,7 +383,7 @@ impl Column {
 ///     ..Default::default()
 /// };
 /// ```
-#[deriving(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct MyOpts {
     /// TCP address of mysql server (defaults to `127.0.0.1`).
     pub tcp_addr: Option<String>,
@@ -904,9 +905,9 @@ impl MyConn {
         let client_flags = self.get_client_flags();
         let mut writer = Vec::with_capacity(4 + 4 + 1 + 23);
         try!(writer.write_le_u32(client_flags.bits()));
-        try!(writer.write(&[0u8, ..4]));
+        try!(writer.write(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write(&[0u8, ..23]));
+        try!(writer.write(&[0u8; 23]));
         self.write_packet(&writer)
     }
 
@@ -921,9 +922,9 @@ impl MyConn {
         }
         let mut writer = Vec::with_capacity(payload_len);
         try!(writer.write_le_u32(client_flags.bits()));
-        try!(writer.write(&[0u8, ..4]));
+        try!(writer.write(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write(&[0u8, ..23]));
+        try!(writer.write(&[0u8; 23]));
         try!(writer.write_str(self.opts.get_user().as_slice()));
         try!(writer.write_u8(0u8));
         try!(writer.write_u8(scramble_buf_len as u8));
@@ -1094,7 +1095,9 @@ impl MyConn {
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
         let path = Path::new(file_name);
         let mut file = try!(File::open(&path));
-        let mut chunk = Vec::from_elem(self.max_allowed_packet, 0u8);
+        let mut chunk = iter::repeat(0u8)
+                             .take(self.max_allowed_packet)
+                             .collect::<Vec<u8>>();
         let mut r = file.read(chunk.as_mut_slice());
         loop {
             match r {
@@ -1130,7 +1133,7 @@ impl MyConn {
                 Ok((Vec::new(), Some(ok)))
             },
             0xfb => {
-                let mut reader = &mut pld[];
+                let mut reader = pld[];
                 try!(reader.read_u8());
                 let file_name = try!(reader.read_to_end());
                 match self.send_local_infile(file_name.as_slice()) {
@@ -1143,7 +1146,7 @@ impl MyConn {
                 Err(MySqlError(err))
             },
             _ => {
-                let mut reader = &mut pld[];
+                let mut reader = pld[];
                 let column_count = try!(reader.read_lenenc_int());
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
                 for _ in range(0, column_count) {
@@ -1249,8 +1252,11 @@ impl MyConn {
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
         for row in &mut self.query(format!("SELECT @@{};", name).as_slice()) {
             match row {
-                Ok(mut r) => return r.remove(0),
-                _ => ()
+                Ok(mut r) => match r.len() {
+                    0 => (),
+                    _ => return Some(r.remove(0)),
+                },
+                _ => (),
             }
         }
         return None;
@@ -1483,7 +1489,9 @@ impl<'a> QueryResult<'a> {
     }
 }
 
-impl<'a> Iterator<MyResult<Vec<Value>>> for QueryResult<'a> {
+impl<'a> Iterator for QueryResult<'a> {
+    type Item = MyResult<Vec<Value>>;
+
     fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         let r = if self.is_bin {
             if self.conn.is_some() {
@@ -1529,7 +1537,9 @@ impl<'a> Drop for QueryResult<'a> {
     }
 }
 
-impl<'a> Iterator<MyResult<Vec<Value>>> for &'a mut MyResult<QueryResult<'a>> {
+impl<'a> Iterator for &'a mut MyResult<QueryResult<'a>> {
+    type Item = MyResult<Vec<Value>>;
+
     fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.is_ok() {
             let result = self.as_mut().unwrap();
@@ -1556,6 +1566,7 @@ impl<'a> Iterator<MyResult<Vec<Value>>> for &'a mut MyResult<QueryResult<'a>> {
 #[cfg(test)]
 mod test {
     pub use test::{Bencher};
+    pub use std::iter;
     pub use std::default::{Default};
     pub use std::{str};
     pub use std::os::{getcwd};
@@ -1660,7 +1671,9 @@ mod test {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert_eq!(
                 conn.query("SELECT REPEAT('A', 20000000)").unwrap().next(),
-                Some(Ok(vec![Bytes(Vec::from_elem(20000000, b'A'))]))
+                Some(Ok(
+                    vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
+                ))
             );
         }
         it "should execute statements and parse results" {
@@ -1720,7 +1733,9 @@ mod test {
             let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
             assert_eq!(
                 stmt.execute(&[]).unwrap().next(),
-                Some(Ok(vec![Bytes(Vec::from_elem(20000000, b'A'))]))
+                Some(Ok(
+                     vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
+                ))
             );
         }
         it "should start, commit and rollback transactions" {

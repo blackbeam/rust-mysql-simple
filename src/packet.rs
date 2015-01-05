@@ -7,7 +7,7 @@ use super::error;
 use super::error::DriverError;
 use super::error::MyError::MyDriverError;
 
-#[deriving(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct OkPacket {
     pub affected_rows: u64,
     pub last_insert_id: u64,
@@ -18,7 +18,7 @@ pub struct OkPacket {
 
 impl OkPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<OkPacket> {
-        let mut reader = &mut pld[];
+        let mut reader = pld[];
         try!(reader.read_u8());
         Ok(OkPacket{
             affected_rows: try!(reader.read_lenenc_int()),
@@ -30,7 +30,7 @@ impl OkPacket {
     }
 }
 
-#[deriving(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ErrPacket {
     pub sql_state: Vec<u8>,
     pub error_message: Vec<u8>,
@@ -39,7 +39,7 @@ pub struct ErrPacket {
 
 impl ErrPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<ErrPacket> {
-        let mut reader = &mut pld[];
+        let mut reader = pld[];
         try!(reader.read_u8());
         let error_code = try!(reader.read_le_u16());
         try!(reader.read_u8());
@@ -61,7 +61,7 @@ impl fmt::Show for ErrPacket {
     }
 }
 
-#[deriving(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct EOFPacket {
     pub warnings: u16,
     pub status_flags: consts::StatusFlags,
@@ -69,7 +69,7 @@ pub struct EOFPacket {
 
 impl EOFPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<EOFPacket> {
-        let mut reader = &mut pld[];
+        let mut reader = pld[];
         try!(reader.read_u8());
         Ok(EOFPacket{
             warnings: try!(reader.read_le_u16()),
@@ -101,7 +101,7 @@ fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
     }).ok_or(MyDriverError(DriverError::CouldNotParseVersion))
 }
 
-#[deriving(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct HandshakePacket {
     pub auth_plugin_data: Vec<u8>,
     pub auth_plugin_name: Vec<u8>,
@@ -166,6 +166,7 @@ impl HandshakePacket {
 
 #[cfg(test)]
 mod test {
+    pub use std::iter;
     pub use super::super::consts;
     pub use super::{OkPacket, ErrPacket, EOFPacket, HandshakePacket};
 
@@ -211,7 +212,7 @@ mod test {
             payload.extend(vec!(8u8, 0u8).into_iter());
             payload.extend(vec!(0x08_u8, 0u8).into_iter());
             payload.extend(vec!(0x15_u8).into_iter());
-            payload.extend(Vec::from_elem(10, 0u8).into_iter());
+            payload.extend(iter::repeat(0u8).take(10));
             payload.extend(vec!(0x26_u8, 0x3a_u8, 0x34_u8, 0x34_u8, 0x46_u8,
                                 0x44_u8, 0x63_u8, 0x44_u8, 0x69_u8, 0x63_u8,
                                 0x39_u8, 0x30_u8, 0x00_u8).into_iter());

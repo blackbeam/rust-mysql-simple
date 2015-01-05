@@ -1,4 +1,5 @@
 use std::io::{IoResult, Reader, Writer};
+use std::iter;
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
@@ -181,7 +182,7 @@ impl<T:Reader> MyReader for T {}
 
 pub trait MyWriter: Writer {
     fn write_le_uint_n(&mut self, x: u64, len: uint) -> IoResult<()> {
-        let mut buf = Vec::from_elem(len, 0u8);
+        let mut buf = iter::repeat(0u8).take(len).collect::<Vec<u8>>();
         let mut offset = 0;
         while offset < len {
             buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;

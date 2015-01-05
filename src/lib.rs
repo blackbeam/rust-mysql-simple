@@ -29,7 +29,7 @@
 #![feature(unsafe_destructor)]
 #![feature(phase)]
 #![feature(slicing_syntax)]
-
+#![feature(associated_types)]
 
 #![allow(dead_code)]
 #![feature(macro_rules)]

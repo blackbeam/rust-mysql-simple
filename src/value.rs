@@ -3,6 +3,7 @@ use std::str::{from_utf8};
 use std::borrow::ToOwned;
 use std::num::{Int, Float};
 use std::time::{Duration};
+use std::iter;
 use time::{Tm, Timespec, now, strptime, at};
 use super::consts;
 use super::conn::{Column};
@@ -33,7 +34,7 @@ fn float_max_value<T: Float>() -> T {
     Float::max_value()
 }
 
-#[deriving(Clone, PartialEq, PartialOrd, Show)]
+#[derive(Clone, PartialEq, PartialOrd, Show)]
 pub enum Value {
     NULL,
     Bytes(Vec<u8>),
@@ -183,7 +184,7 @@ impl Value {
         for i in range(0, bitmap_len) {
             bitmap.push(pld[i+1]);
         }
-        let mut reader = &mut pld[1 + bitmap_len..];
+        let mut reader = pld[1 + bitmap_len..];
         for i in range(0, columns.len()) {
             let c = &columns[i];
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
@@ -200,7 +201,7 @@ impl Value {
         let bitmap_len = (params.len() + 7) / 8;
         let mut large_ids = Vec::new();
         let mut writer = Vec::new();
-        let mut bitmap = Vec::from_elem(bitmap_len, 0u8);
+        let mut bitmap = iter::repeat(0u8).take(bitmap_len).collect::<Vec<u8>>();
         let mut i = 0u16;
         let mut written = 0;
         let cap = max_allowed_packet - bitmap_len - values.len() * 8;
