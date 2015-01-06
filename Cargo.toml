@@ -51,6 +51,7 @@ ssl = ["openssl"]
 lazy_static = "~0.1.4"
 time = "~0.1.9"
 regex = "~0.1.7"
+regex_macros = "~0.1.2"
 
 [dependencies.openssl]
 openssl = "0.2.12"
