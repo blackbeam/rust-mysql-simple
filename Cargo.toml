@@ -48,14 +48,14 @@ default = ["ssl"]
 ssl = ["openssl"]
 
 [dependencies]
-lazy_static = "~0.1.4"
-time = "~0.1.9"
-regex = "~0.1.7"
-regex_macros = "~0.1.2"
+lazy_static = "~0.1.5"
+time = "~0.1.11"
+regex = "~0.1.9"
+regex_macros = "~0.1.4"
 
 [dependencies.openssl]
-openssl = "0.2.12"
+openssl = "0.2.14"
 optional = true
 
 [dev-dependencies]
-stainless = "~0.0.8"
+stainless = "~0.0.9"
