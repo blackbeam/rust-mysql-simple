@@ -29,16 +29,15 @@
 #![feature(unsafe_destructor)]
 #![feature(phase)]
 #![feature(slicing_syntax)]
-#![feature(associated_types)]
+#![feature(plugin)]
 
 #![allow(dead_code)]
-#![feature(macro_rules)]
 
 #[cfg(test)]
 extern crate test;
 
 #[cfg(test)]
-#[phase(plugin)]
+#[plugin]
 extern crate stainless;
 
 extern crate core;
@@ -46,10 +45,9 @@ extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;
 extern crate regex;
-#[phase(plugin)]
+#[plugin] #[no_link]
 extern crate regex_macros;
-
-#[phase(plugin)]
+#[macro_use]
 extern crate lazy_static;
 
 mod scramble;
