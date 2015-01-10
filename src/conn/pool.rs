@@ -8,13 +8,13 @@ use super::super::error::{MyResult};
 struct MyInnerPool {
     opts: MyOpts,
     pool: Vec<MyConn>,
-    min: uint,
-    max: uint,
-    count: uint
+    min: usize,
+    max: usize,
+    count: usize
 }
 
 impl MyInnerPool {
-    fn new(min: uint, max: uint, opts: MyOpts) -> MyResult<MyInnerPool> {
+    fn new(min: usize, max: usize, opts: MyOpts) -> MyResult<MyInnerPool> {
         if min > max || max == 0 {
             return Err(MyError::MyDriverError(DriverError::InvalidPoolConstraints));
         }
@@ -25,7 +25,7 @@ impl MyInnerPool {
             min: min,
             count: 0
         };
-        for _ in range(0, min) {
+        for _ in (0..min) {
             try!(pool.new_conn());
         }
         Ok(pool)
@@ -62,7 +62,7 @@ impl MyInnerPool {
 ///     let pool = MyPool::new(opts);
 ///     assert!(pool.is_ok());
 ///     let pool = pool.unwrap();
-///     for _ in range(0u, 100) {
+///     for _ in 0u..100 {
 ///         let pool = pool.clone();
 ///         Thread::spawn(move || {
 ///             let conn = pool.get_conn();
@@ -88,7 +88,7 @@ impl MyPool {
     }
 
     /// Same as `new` but you can set `min` and `max`.
-    pub fn new_manual(min: uint, max: uint, opts: MyOpts) -> MyResult<MyPool> {
+    pub fn new_manual(min: usize, max: usize, opts: MyOpts) -> MyResult<MyPool> {
         let pool = try!(MyInnerPool::new(min, max, opts));
         Ok(MyPool{ pool: Arc::new(Mutex::new(pool)) })
     }
@@ -298,9 +298,9 @@ mod test {
 
         it "should execute queryes on MyPooledConn" {
             let mut threads = Vec::new();
-            for _ in range(0u, 10) {
+            for _ in 0us..10 {
                 let pool = pool.clone();
-                threads.push(Thread::spawn(move || {
+                threads.push(Thread::scoped(move || {
                     let conn = pool.get_conn();
                     assert!(conn.is_ok());
                     let mut conn = conn.unwrap();
@@ -314,9 +314,9 @@ mod test {
 
         it "should execute queryes on MyPool" {
             let mut threads = Vec::new();
-            for _ in range(0u, 10) {
+            for _ in 0us..10 {
                 let pool = pool.clone();
-                threads.push(Thread::spawn(move || {
+                threads.push(Thread::scoped(move || {
                     assert!(pool.query("SELECT 1").is_ok());
                 }));
             }
@@ -327,9 +327,9 @@ mod test {
 
         it "should execute statements on MyPooledConn" {
             let mut threads = Vec::new();
-            for _ in range(0u, 10) {
+            for _ in 0us..10 {
                 let pool = pool.clone();
-                threads.push(Thread::spawn(move || {
+                threads.push(Thread::scoped(move || {
                     let mut conn = pool.get_conn().unwrap();
                     let mut stmt = conn.prepare("SELECT 1").unwrap();
                     assert!(stmt.execute(&[]).is_ok());
@@ -342,9 +342,9 @@ mod test {
 
         it "should execute statements on MyPool" {
             let mut threads = Vec::new();
-            for _ in range(0u, 10) {
+            for _ in 0us..10 {
                 let pool = pool.clone();
-                threads.push(Thread::spawn(move || {
+                threads.push(Thread::scoped(move || {
                     let mut stmt = pool.prepare("SELECT 1").unwrap();
                     assert!(stmt.execute(&[]).is_ok());
                 }));

@@ -7,7 +7,7 @@ static K4: u32 = 0xCA62C1D6u32;
 
 #[inline]
 fn circular_shift(bits: u32, word: u32) -> u32 {
-    return word << (bits as uint) | word >> ((32u32 - bits) as uint);
+    return word << (bits as usize) | word >> ((32u32 - bits) as usize);
 }
 
 #[allow(unused_must_use)]
@@ -22,27 +22,27 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
     let offset = (msg.len() * 8) % 512;
     if offset < 448 {
         msg.push(128u8);
-        for _ in range(0, (448 - (offset + 8)) / 8) {
+        for _ in 0..(448 - (offset + 8)) / 8 {
             msg.push(0u8);
         }
     } else if offset >= 448 {
         msg.push(128u8);
-        for _ in range(0, (512 - (offset + 8)) / 8 + 56) {
+        for _ in 0..(512 - (offset + 8)) / 8 + 56 {
             msg.push(0u8);
         }
     }
     msg.write_be_u64(msg_bit_len as u64);
 
-    for i in range(0, msg.len() * 8 / 512) {
+    for i in 0..(msg.len() * 8 / 512) {
         let mut w = [0u32; 80];
-        let part = msg.slice(i * 64, (i+1) * 64);
+        let part = &msg[i * 64..(i+1) * 64];
         {
-            let mut reader = part[];
-            for j in range(0u, 16u) {
+            let mut reader = &part[];
+            for j in 0us..16 {
                 w[j] = reader.read_be_u32().unwrap();
             }
         }
-        for j in range(16u, 80u) {
+        for j in 16us..80 {
             let val = w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16];
             w[j] = circular_shift(1, val);
         }
@@ -52,7 +52,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         let mut d = hash[3];
         let mut e = hash[4];
         let mut temp: u32;
-        for t in range(0u, 20u) {
+        for t in 0us..20 {
             temp = circular_shift(5, a) + (b & c | !b & d) + e + w[t] + K1;
             e = d;
             d = c;
@@ -60,7 +60,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             b = a;
             a = temp;
         }
-        for t in range(20u, 40u) {
+        for t in 20us..40 {
             temp = circular_shift(5, a) + (b ^ c ^ d) + e + w[t] + K2;
             e = d;
             d = c;
@@ -68,7 +68,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             b = a;
             a = temp;
         }
-        for t in range(40u, 60u) {
+        for t in 40us..60 {
             temp = circular_shift(5, a) + (b & c | b & d | c & d) + e + w[t] + K3;
             e = d;
             d = c;
@@ -76,7 +76,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             b = a;
             a = temp;
         }
-        for t in range(60u, 80u) {
+        for t in 60us..80 {
             temp = circular_shift(5, a) + (b ^ c ^ d) + e + w[t] + K4;
             e = d;
             d = c;

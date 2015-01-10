@@ -28,7 +28,7 @@ pub trait MyReader: Reader {
     fn read_lenenc_bytes(&mut self) -> IoResult<Vec<u8>> {
         let len = try!(self.read_lenenc_int());
         if len > 0 {
-            self.read_exact(len as uint)
+            self.read_exact(len as usize)
         } else {
             Ok(Vec::with_capacity(0))
         }
@@ -152,7 +152,7 @@ pub trait MyReader: Reader {
         let mut output = Vec::new();
         let mut pos = 0;
         loop {
-            let payload_len = try!(self.read_le_uint_n(3)) as uint;
+            let payload_len = try!(self.read_le_uint_n(3)) as usize;
             let srv_seq_id = try!(self.read_u8());
             if srv_seq_id != seq_id {
                 return Err(MyDriverError(PacketOutOfSync));
@@ -181,7 +181,7 @@ pub trait MyReader: Reader {
 impl<T:Reader> MyReader for T {}
 
 pub trait MyWriter: Writer {
-    fn write_le_uint_n(&mut self, x: u64, len: uint) -> IoResult<()> {
+    fn write_le_uint_n(&mut self, x: u64, len: usize) -> IoResult<()> {
         let mut buf = iter::repeat(0u8).take(len).collect::<Vec<u8>>();
         let mut offset = 0;
         while offset < len {
@@ -212,7 +212,7 @@ pub trait MyWriter: Writer {
     }
 
     /// Writes data as mysql packet and returns new seq_id value.
-    fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: uint) -> MyResult<u8> {
+    fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: usize) -> MyResult<u8> {
         if data.len() > max_allowed_packet &&
            max_allowed_packet < consts::MAX_PAYLOAD_LEN {
             return Err(MyDriverError(PacketTooLarge));
@@ -261,7 +261,7 @@ pub enum MyStream {
 
 #[cfg(feature = "ssl")]
 impl Reader for MyStream {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
         match *self {
             MyStream::SecureStream(MySslStream(ref mut s)) => s.read(buf),
             MyStream::InsecureStream(ref mut s) => s.read(buf),
@@ -271,7 +271,7 @@ impl Reader for MyStream {
 
 #[cfg(not(feature = "ssl"))]
 impl Reader for MyStream {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
         match *self {
             MyStream::InsecureStream(ref mut s) => s.read(buf),
         }
@@ -329,7 +329,7 @@ impl Drop for PlainStream {
 }
 
 impl Reader for PlainStream {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
         match self.s {
             TcpOrUnixStream::TCPStream(ref mut s) => s.read(buf),
             TcpOrUnixStream::UNIXStream(ref mut s) => s.read(buf),

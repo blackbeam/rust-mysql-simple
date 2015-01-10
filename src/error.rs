@@ -37,7 +37,7 @@ impl error::Error for MyError {
     }
 
     fn detail(&self) -> Option<String> {
-        Some(format!("{}", self))
+        Some(format!("{:?}", self))
     }
 
     fn cause(&self) -> Option<&error::Error> {
@@ -74,7 +74,7 @@ impl fmt::Show for MyError {
         match *self {
             MyError::MyIoError(ref io_err) => io_err.fmt(f),
             MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
-            MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{:?}", driver_err),
             MyError::MySslError(ref ssl_error) => ssl_error.fmt(f),
         }
     }
@@ -86,7 +86,7 @@ impl fmt::Show for MyError {
         match *self {
             MyError::MyIoError(ref io_err) => io_err.fmt(f),
             MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
-            MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{:?}", driver_err),
         }
     }
 }
@@ -99,7 +99,7 @@ pub enum DriverError {
     PacketTooLarge,
     Protocol41NotSet,
     UnexpectedPacket,
-    MismatchedStmtParams(u16, uint),
+    MismatchedStmtParams(u16, usize),
     InvalidPoolConstraints,
     SetupError,
     SslNotSupported,
@@ -114,7 +114,7 @@ impl error::Error for DriverError {
     }
 
     fn detail(&self) -> Option<String> {
-        Some(format!("{}", self))
+        Some(format!("{:?}", self))
     }
 }
 

@@ -27,7 +27,6 @@
 #![crate_type="dylib"]
 
 #![feature(unsafe_destructor)]
-#![feature(phase)]
 #![feature(slicing_syntax)]
 #![feature(plugin)]
 

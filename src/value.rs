@@ -101,7 +101,7 @@ impl Value {
         match *self {
             Value::NULL => (),
             Value::Bytes(ref x) => {
-                try!(writer.write_lenenc_bytes(x[]));
+                try!(writer.write_lenenc_bytes(&x[]));
             },
             Value::Int(x) => {
                 try!(writer.write_le_i64(x));
@@ -161,13 +161,13 @@ impl Value {
         };
         Ok(writer)
     }
-    pub fn from_payload(pld: &[u8], columns_count: uint) -> IoResult<Vec<Value>> {
+    pub fn from_payload(pld: &[u8], columns_count: usize) -> IoResult<Vec<Value>> {
         let mut output = Vec::with_capacity(columns_count);
         let mut reader = BufReader::new(pld);
         loop {
             if reader.eof() {
                 break;
-            } else if pld[try!(reader.tell()) as uint] == 0xfb {
+            } else if pld[try!(reader.tell()) as usize] == 0xfb {
                 try!(reader.seek(1, SeekCur));
                 output.push(Value::NULL);
             } else {
@@ -181,11 +181,11 @@ impl Value {
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
         let mut bitmap = Vec::with_capacity(bitmap_len);
         let mut values = Vec::with_capacity(columns.len());
-        for i in range(0, bitmap_len) {
+        for i in (0..bitmap_len) {
             bitmap.push(pld[i+1]);
         }
-        let mut reader = pld[1 + bitmap_len..];
-        for i in range(0, columns.len()) {
+        let mut reader = &pld[1 + bitmap_len..];
+        for i in 0..columns.len() {
             let c = &columns[i];
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
                 values.push(try!(reader.read_bin_value(c.column_type,
@@ -197,7 +197,7 @@ impl Value {
         Ok(values)
     }
     // (NULL-bitmap, values, ids of fields to send throwgh send_long_data)
-    pub fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: uint) -> IoResult<(Vec<u8>, Vec<u8>, Option<Vec<u16>>)> {
+    pub fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: usize) -> IoResult<(Vec<u8>, Vec<u8>, Option<Vec<u16>>)> {
         let bitmap_len = (params.len() + 7) / 8;
         let mut large_ids = Vec::new();
         let mut writer = Vec::new();
@@ -207,12 +207,12 @@ impl Value {
         let cap = max_allowed_packet - bitmap_len - values.len() * 8;
         for value in values.iter() {
             match *value {
-                Value::NULL => bitmap[i as uint / 8] |= 1 << ((i % 8u16) as uint),
+                Value::NULL => bitmap[i as usize / 8] |= 1 << ((i % 8u16) as usize),
                 _ => {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
                         written += val.len();
-                        try!(writer.write(val[]));
+                        try!(writer.write(&val[]));
                     } else {
                         large_ids.push(i);
                     }
@@ -257,7 +257,7 @@ to_value_impl_num!(i16);
 to_value_impl_num!(u16);
 to_value_impl_num!(i32);
 to_value_impl_num!(u32);
-to_value_impl_num!(int);
+to_value_impl_num!(isize);
 to_value_impl_num!(i64);
 
 impl ToValue for u64 {
@@ -265,10 +265,10 @@ impl ToValue for u64 {
     fn to_value(&self) -> Value { Value::UInt(*self) }
 }
 
-impl ToValue for uint {
+impl ToValue for usize {
     #[inline]
     fn to_value(&self) -> Value {
-        if *self as u64 <= int_max_value::<uint>() as u64 {
+        if *self as u64 <= int_max_value::<usize>() as u64 {
             Value::Int(*self as i64)
         } else {
             Value::UInt(*self as u64)
@@ -437,7 +437,7 @@ macro_rules! from_value_impl_num(
                     Value::Int(x) if x >= int_min_value::<$t>() as i64 && x <= int_max_value::<$t>() as i64 => Some(x as $t),
                     Value::UInt(x) if x <= int_max_value::<$t>() as u64 => Some(x as $t),
                     Value::Bytes(ref bts) => {
-                        from_utf8(bts[]).ok().and_then(StrExt::parse::<$t>)
+                        from_utf8(&bts[]).ok().and_then(StrExt::parse::<$t>)
                     },
                     _ => None
                 }
@@ -452,8 +452,8 @@ from_value_impl_num!(i16);
 from_value_impl_num!(u16);
 from_value_impl_num!(i32);
 from_value_impl_num!(u32);
-from_value_impl_num!(int);
-from_value_impl_num!(uint);
+from_value_impl_num!(isize);
+from_value_impl_num!(usize);
 
 impl FromValue for i64 {
     #[inline]
@@ -466,7 +466,7 @@ impl FromValue for i64 {
             Value::Int(x) => Some(x),
             Value::UInt(x) if x <= int_max_value::<i64> as u64 => Some(x as i64),
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).ok().and_then(StrExt::parse::<i64>)
+                from_utf8(&bts[]).ok().and_then(StrExt::parse::<i64>)
             },
             _ => None
         }
@@ -484,7 +484,7 @@ impl FromValue for u64 {
             Value::Int(x) => Some(x as u64),
             Value::UInt(x) => Some(x),
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).ok().and_then(StrExt::parse::<u64>)
+                from_utf8(&bts[]).ok().and_then(StrExt::parse::<u64>)
             },
             _ => None
         }
@@ -501,7 +501,7 @@ impl FromValue for f32 {
         match *v {
             Value::Float(x) if x >= float_min_value::<f32>() as f64 && x <= float_max_value::<f32>() as f64 => Some(x as f32),
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).ok().and_then(StrExt::parse::<f32>)
+                from_utf8(&bts[]).ok().and_then(StrExt::parse::<f32>)
             },
             _ => None
         }
@@ -518,7 +518,7 @@ impl FromValue for f64 {
         match *v {
             Value::Float(x) => Some(x),
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).ok().and_then(StrExt::parse::<f64>)
+                from_utf8(&bts[]).ok().and_then(StrExt::parse::<f64>)
             },
             _ => None
         }
@@ -596,7 +596,7 @@ impl FromValue for Timespec {
                     }.to_timespec())
             },
             Value::Bytes(ref bts) => {
-                from_utf8(bts[]).ok().and_then(|s| {
+                from_utf8(&bts[]).ok().and_then(|s| {
                     strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).and_then(|mut tm| {
                     tm.tm_utcoff = *TM_UTCOFF;
@@ -629,14 +629,14 @@ impl FromValue for Duration {
                 }
             },
             Value::Bytes(ref bts) => {
-                let mut btss = bts[];
+                let mut btss = &bts[];
                 let neg = btss[0] == b'-';
                 if neg {
-                    btss = bts[1..];
+                    btss = &bts[1..];
                 }
                 let ms: i64 = {
                     let xss: Vec<&[u8]> = btss.split(|x| *x == b'.').collect();
-                    let ms: i64 = match xss[] {
+                    let ms: i64 = match &xss[] {
                         [_, []] | [_] => 0,
                         [_, ms] if ms.len() <= 6 => {
                             let x = from_utf8(ms).ok().and_then(StrExt::parse::<i64>);

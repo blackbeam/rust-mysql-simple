@@ -18,7 +18,7 @@ pub struct OkPacket {
 
 impl OkPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<OkPacket> {
-        let mut reader = pld[];
+        let mut reader = &pld[];
         try!(reader.read_u8());
         Ok(OkPacket{
             affected_rows: try!(reader.read_lenenc_int()),
@@ -39,7 +39,7 @@ pub struct ErrPacket {
 
 impl ErrPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<ErrPacket> {
-        let mut reader = pld[];
+        let mut reader = &pld[];
         try!(reader.read_u8());
         let error_code = try!(reader.read_le_u16());
         try!(reader.read_u8());
@@ -69,7 +69,7 @@ pub struct EOFPacket {
 
 impl EOFPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<EOFPacket> {
-        let mut reader = pld[];
+        let mut reader = &pld[];
         try!(reader.read_u8());
         Ok(EOFPacket{
             warnings: try!(reader.read_le_u16()),
@@ -145,7 +145,7 @@ impl HandshakePacket {
             if capability_flags.contains(consts::CLIENT_SECURE_CONNECTION) {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
-                try!(reader.push(len as uint, &mut auth_plugin_data));
+                try!(reader.push(len as usize, &mut auth_plugin_data));
                 if auth_plugin_data[auth_plugin_data.len() - 1] == 0u8 {
                     auth_plugin_data.pop();
                 }

@@ -180,7 +180,7 @@ struct InnerStmt {
 
 impl InnerStmt {
     fn from_payload(pld: &[u8]) -> IoResult<InnerStmt> {
-        let mut reader = pld[];
+        let mut reader = &pld[];
         try!(reader.read_u8());
         let statement_id = try!(reader.read_le_u32());
         let num_columns = try!(reader.read_le_u16());
@@ -231,7 +231,7 @@ impl<'a> Stmt<'a> {
     }
 
     /// Returns index of a `Stmt`'s column by name.
-    pub fn column_index<T>(&self, name: T) -> Option<uint>
+    pub fn column_index<T>(&self, name: T) -> Option<usize>
     where T: BytesContainer {
         match self.stmt.columns {
             None => None,
@@ -323,7 +323,7 @@ pub struct Column {
 impl Column {
     #[inline]
     fn from_payload(command: u8, pld: &[u8]) -> IoResult<Column> {
-        let mut reader = pld[];
+        let mut reader = &pld[];
         // Skip catalog
         let _ = try!(reader.read_lenenc_bytes());
         let schema = try!(reader.read_lenenc_bytes());
@@ -342,7 +342,7 @@ impl Column {
         let mut default_values = Vec::with_capacity(0);
         if command == Command::COM_FIELD_LIST as u8 {
             let len = try!(reader.read_lenenc_int());
-            default_values = try!(reader.read_exact(len as uint));
+            default_values = try!(reader.read_exact(len as usize));
         }
         Ok(Column{schema: schema,
                   table: table,
@@ -402,7 +402,7 @@ pub struct MyOpts {
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
     pub prefer_socket: bool,
     /// TCP keepalive timeout in seconds (defaults to one hour).
-    pub keepalive_timeout: Option<uint>,
+    pub keepalive_timeout: Option<usize>,
 
     #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
@@ -495,7 +495,7 @@ pub struct MyConn {
     server_version: ServerVersion,
     affected_rows: u64,
     last_insert_id: u64,
-    max_allowed_packet: uint,
+    max_allowed_packet: usize,
     capability_flags: consts::CapabilityFlags,
     connection_id: u32,
     status_flags: consts::StatusFlags,
@@ -965,7 +965,7 @@ impl MyConn {
 
     fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
         for &id in ids.iter() {
-            match params[id as uint] {
+            match params[id as usize] {
                 Bytes(ref x) => {
                     for chunk in x.chunks(self.max_allowed_packet - 7) {
                         let chunk_len = chunk.len() + 7;
@@ -1006,7 +1006,7 @@ impl MyConn {
                 try!(writer.write_le_u32(1u32));
                 try!(writer.write(bitmap.as_slice()));
                 try!(writer.write_u8(1u8));
-                for i in range(0, params.len()) {
+                for i in 0..params.len() {
                     match params[i] {
                         NULL => try!(writer.write(
                             &[sparams[i].column_type as u8, 0u8])),
@@ -1060,7 +1060,7 @@ impl MyConn {
                           isolation_level: Option<IsolationLevel>,
                           readonly: Option<bool>) -> MyResult<()> {
         if let Some(i_level) = isolation_level {
-            let _ = try!(self.query(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level)[]));
+            let _ = try!(self.query(&format!("SET TRANSACTION ISOLATION LEVEL {:?}", i_level)[]));
         }
         if let Some(readonly) = readonly {
             if self.server_version < (5, 6, 5) {
@@ -1133,7 +1133,7 @@ impl MyConn {
                 Ok((Vec::new(), Some(ok)))
             },
             0xfb => {
-                let mut reader = pld[];
+                let mut reader = &pld[];
                 try!(reader.read_u8());
                 let file_name = try!(reader.read_to_end());
                 match self.send_local_infile(file_name.as_slice()) {
@@ -1146,10 +1146,10 @@ impl MyConn {
                 Err(MySqlError(err))
             },
             _ => {
-                let mut reader = pld[];
+                let mut reader = &pld[];
                 let column_count = try!(reader.read_lenenc_int());
-                let mut columns: Vec<Column> = Vec::with_capacity(column_count as uint);
-                for _ in range(0, column_count) {
+                let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
+                for _ in (0..column_count) {
                     let pld = try!(self.read_packet());
                     columns.push(try!(Column::from_payload(self.last_command, pld.as_slice())));
                 }
@@ -1194,8 +1194,8 @@ impl MyConn {
             _ => {
                 let mut stmt = try!(InnerStmt::from_payload(pld.as_slice()));
                 if stmt.num_params > 0 {
-                    let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as uint);
-                    for _ in range(0, stmt.num_params) {
+                    let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as usize);
+                    for _ in 0..stmt.num_params {
                         let pld = try!(self.read_packet());
                         params.push(try!(Column::from_payload(self.last_command, pld.as_slice())));
                     }
@@ -1203,8 +1203,8 @@ impl MyConn {
                     try!(self.read_packet());
                 }
                 if stmt.num_columns > 0 {
-                    let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as uint);
-                    for _ in range(0, stmt.num_columns) {
+                    let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as usize);
+                    for _ in 0..stmt.num_columns {
                         let pld = try!(self.read_packet());
                         columns.push(try!(Column::from_payload(self.last_command, pld.as_slice())));
                     }
@@ -1236,7 +1236,7 @@ impl MyConn {
             return Ok(());
         }
         self.do_handshake().and_then(|_| {
-            Ok(from_value_opt::<uint>(&self.get_system_var("max_allowed_packet").unwrap_or(NULL))
+            Ok(from_value_opt::<usize>(&self.get_system_var("max_allowed_packet").unwrap_or(NULL))
                .unwrap_or(0))
         }).and_then(|max_allowed_packet| {
             if max_allowed_packet == 0 {
@@ -1290,7 +1290,7 @@ impl MyConn {
         }
     }
 
-    fn next_text(&mut self, col_count: uint) -> MyResult<Option<Vec<Value>>> {
+    fn next_text(&mut self, col_count: usize) -> MyResult<Option<Vec<Value>>> {
         if ! self.has_results {
             return Ok(None);
         }
@@ -1451,7 +1451,7 @@ impl<'a> QueryResult<'a> {
     }
 
     /// Returns index of a `QueryResult`'s column by name.
-    pub fn column_index<T:BytesContainer>(&self, name: T) -> Option<uint> {
+    pub fn column_index<T:BytesContainer>(&self, name: T) -> Option<usize> {
         let name = name.container_as_bytes();
         for (i, c) in self.columns.iter().enumerate() {
             if c.name.as_slice() == name {

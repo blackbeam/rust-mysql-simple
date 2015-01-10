@@ -14,7 +14,7 @@ pub fn scramble(scr: &[u8], password: &[u8]) -> Option<Vec<u8>> {
 
     let mut output = [0u8; 20];
 
-    for i in range(0u, 20u) {
+    for i in 0us..20 {
         output[i] = sha_pass[i] ^ hash[i];
     }
 

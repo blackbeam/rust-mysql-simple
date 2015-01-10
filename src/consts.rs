@@ -1,6 +1,6 @@
-pub static PAYLOAD_OFFSET: uint = 4;
-pub static MAX_PACKET_LEN: uint = 16777219;
-pub static MAX_PAYLOAD_LEN: uint = 16777215;
+pub static PAYLOAD_OFFSET: usize = 4;
+pub static MAX_PACKET_LEN: usize = 16777219;
+pub static MAX_PAYLOAD_LEN: usize = 16777215;
 
 pub static UTF8_GENERAL_CI: u8 = 33u8;
 
