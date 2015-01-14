@@ -1770,8 +1770,8 @@ mod test {
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 let _ = t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
                 .and_then(|mut stmt| {
-                    assert!(stmt.execute(&[&3u]).is_ok());
-                    assert!(stmt.execute(&[&4u]).is_ok());
+                    assert!(stmt.execute(&[&3]).is_ok());
+                    assert!(stmt.execute(&[&4]).is_ok());
                     Ok(())
                 }).unwrap();
                 assert!(t.commit().is_ok());
