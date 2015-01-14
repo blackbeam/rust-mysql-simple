@@ -30,7 +30,7 @@
 #![feature(slicing_syntax)]
 #![feature(plugin)]
 
-#![allow(dead_code)]
+#![allow(dead_code, unstable)]
 
 #[cfg(test)]
 extern crate test;
