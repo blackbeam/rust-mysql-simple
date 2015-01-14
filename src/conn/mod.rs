@@ -1695,8 +1695,8 @@ mod test {
                               tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now() };
                 assert!(stmt.execute(&[
                     &b"hello".to_vec(),
-                    &-123i,
-                    &123i,
+                    &-123,
+                    &123,
                     &(tm.to_timespec()),
                     &123.123f64
                 ]).is_ok());
@@ -1833,7 +1833,7 @@ mod test {
                 }
             }
             let mut result = conn.query("SELECT 1; SELECT 2; SELECT 3;").unwrap();
-            let mut i = 0i;
+            let mut i = 0;
             while { i += 1; result.more_results_exists() } {
                 for row in result {
                     match i {
@@ -1867,7 +1867,7 @@ mod test {
         bench "simple prepared query row with param" (bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[&0i]); })
+            bencher.iter(|| { let _ = stmt.execute(&[&0]); })
         }
         bench "simple prepared query row with 5 params" (bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
