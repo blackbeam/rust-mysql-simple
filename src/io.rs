@@ -162,7 +162,7 @@ pub trait MyReader: Reader {
                 output.reserve(pos + consts::MAX_PAYLOAD_LEN);
                 unsafe { output.set_len(pos + consts::MAX_PAYLOAD_LEN); }
                 try!(self.read_at_least(consts::MAX_PAYLOAD_LEN,
-                                           output.slice_from_mut(pos)));
+                                        &mut output[pos..]));
                 pos += consts::MAX_PAYLOAD_LEN;
             } else if payload_len == 0 {
                 break;
@@ -170,7 +170,7 @@ pub trait MyReader: Reader {
                 output.reserve(pos + payload_len);
                 unsafe { output.set_len(pos + payload_len); }
                 try!(self.read_at_least(payload_len,
-                                           output.slice_from_mut(pos)));
+                                        &mut output[pos..]));
                 break;
             }
         }
@@ -188,7 +188,7 @@ pub trait MyWriter: Writer {
             buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
             offset += 1;
         }
-        self.write(buf.as_slice())
+        self.write(&buf[])
     }
 
     fn write_lenenc_int(&mut self, x: u64) -> IoResult<()> {
@@ -230,7 +230,7 @@ pub trait MyWriter: Writer {
             try!(writer.write_u8(seq_id));
             seq_id += 1;
             try!(writer.write(chunk));
-            try!(self.write(writer.as_slice()));
+            try!(self.write(&writer[]));
         }
         if last_was_max {
             try!(self.write(&[0u8, 0u8, 0u8, seq_id]));
