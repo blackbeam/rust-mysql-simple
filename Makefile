@@ -20,58 +20,58 @@ doc:
 	cargo doc
 
 test:
-	bash -c "if [ -e $(MYSQL_DATA_DIR)/mysqld.pid ]; \
-			 then \
-				 kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`;\
-				 rm -rf $(MYSQL_DATA_DIR);\
-			 fi"
+	@bash -c "if [ -e $(MYSQL_DATA_DIR)/mysqld.pid ]; \
+			  then \
+				  kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`;\
+				  rm -rf $(MYSQL_DATA_DIR);\
+			  fi"
 
-	bash -c "if [ -e $(MYSQL_DATA_DIR) ];\
-			 then\
-				 rm -rf $(MYSQL_DATA_DIR);\
-			 fi"
+	@bash -c "if [ -e $(MYSQL_DATA_DIR) ];\
+			  then\
+				  rm -rf $(MYSQL_DATA_DIR);\
+			  fi"
 
-	mkdir $(MYSQL_DATA_DIR)
+	@mkdir $(MYSQL_DATA_DIR)
 
-	bash -c "mysql --version | grep 5.7 > /dev/null; \
-	         if [ $$? -eq 0 ]; \
-	         then \
-	             mysql_install_db \
-				     --no-defaults \
-		             --basedir=$(BASEDIR) \
-		             --datadir=$(MYSQL_DATA_DIR); \
-		     else \
-		         mysql_install_db \
-				     --no-defaults \
-		             --basedir=$(BASEDIR) \
-		             --datadir=$(MYSQL_DATA_DIR) \
-		             --force; \
-	         fi"
+	@bash -c "mysql --version | grep 5.7 > /dev/null; \
+	          if [ $$? -eq 0 ]; \
+	          then \
+	              mysql_install_db \
+				      --no-defaults \
+		              --basedir=$(BASEDIR) \
+		              --datadir=$(MYSQL_DATA_DIR); \
+		      else \
+		          mysql_install_db \
+				      --no-defaults \
+		              --basedir=$(BASEDIR) \
+		              --datadir=$(MYSQL_DATA_DIR) \
+		              --force; \
+	          fi"
 
-	mysqld \
-		--no-defaults \
-		--basedir=$(BASEDIR) \
-		--bind-address=127.0.0.1 \
-		--datadir=$(MYSQL_DATA_DIR) \
-		--max-allowed-packet=32M \
-		--pid-file=$(MYSQL_DATA_DIR)/mysqld.pid \
-		--port=$(MYSQL_PORT) \
-		--innodb_file_per_table=1 \
-		--innodb_file_format=Barracuda \
-		--innodb_log_file_size=256M \
-		--ssl \
-		--ssl-ca=$(MYSQL_SSL_CA) \
-		--ssl-cert=$(MYSQL_SSL_CERT) \
-		--ssl-key=$(MYSQL_SSL_KEY) \
-		--ssl-cipher=DHE-RSA-AES256-SHA \
-		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &
-	sleep 10
-	bash -c "if [ -e ~/.mysql_secret ]; \
-	         then \
-	             mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root -p\"`cat ~/.mysql_secret | grep -v Password`\" password 'password'; \
-	         else \
-	             mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'; \
-	         fi"
+	@mysqld \
+		 --no-defaults \
+		 --basedir=$(BASEDIR) \
+		 --bind-address=127.0.0.1 \
+		 --datadir=$(MYSQL_DATA_DIR) \
+		 --max-allowed-packet=32M \
+		 --pid-file=$(MYSQL_DATA_DIR)/mysqld.pid \
+		 --port=$(MYSQL_PORT) \
+		 --innodb_file_per_table=1 \
+		 --innodb_file_format=Barracuda \
+		 --innodb_log_file_size=256M \
+		 --ssl \
+		 --ssl-ca=$(MYSQL_SSL_CA) \
+		 --ssl-cert=$(MYSQL_SSL_CERT) \
+		 --ssl-key=$(MYSQL_SSL_KEY) \
+		 --ssl-cipher=DHE-RSA-AES256-SHA \
+		 --socket=$(MYSQL_DATA_DIR)/mysqld.sock &
+	@sleep 10
+	@bash -c "if [ -e ~/.mysql_secret ]; \
+	          then \
+	              mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root -p\"`cat ~/.mysql_secret | grep -v Password`\" password 'password'; \
+	          else \
+	              mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'; \
+	          fi"
 
 	bash -c "\
 		if (cargo test --no-default-features);\
@@ -93,62 +93,62 @@ test:
 			exit 1;\
 		fi"
 
-	kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`
-	rm -rf $(MYSQL_DATA_DIR)
+	@kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`
+	@rm -rf $(MYSQL_DATA_DIR)
 
 bench:
-	bash -c "if [ -e $(MYSQL_DATA_DIR)/mysqld.pid ]; \
-			 then \
-				 kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`;\
-				 rm -rf $(MYSQL_DATA_DIR);\
-			 fi"
+	@bash -c "if [ -e $(MYSQL_DATA_DIR)/mysqld.pid ]; \
+			  then \
+				  kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`;\
+				  rm -rf $(MYSQL_DATA_DIR);\
+			  fi"
 
-	bash -c "if [ -e $(MYSQL_DATA_DIR) ];\
-			 then\
-				 rm -rf $(MYSQL_DATA_DIR);\
-			 fi"
+	@bash -c "if [ -e $(MYSQL_DATA_DIR) ];\
+			  then\
+				  rm -rf $(MYSQL_DATA_DIR);\
+			  fi"
 
-	mkdir $(MYSQL_DATA_DIR)
+	@mkdir $(MYSQL_DATA_DIR)
 
-	bash -c "mysql --version | grep 5.7 > /dev/null; \
-	         if [ $$? -eq 0 ]; \
-	         then \
-	             mysql_install_db \
-				     --no-defaults \
-		             --basedir=$(BASEDIR) \
-		             --datadir=$(MYSQL_DATA_DIR); \
-		     else \
-		         mysql_install_db \
-				     --no-defaults \
-		             --basedir=$(BASEDIR) \
-		             --datadir=$(MYSQL_DATA_DIR) \
-		             --force; \
-	         fi"
+	@bash -c "mysql --version | grep 5.7 > /dev/null; \
+	          if [ $$? -eq 0 ]; \
+	          then \
+	              mysql_install_db \
+				      --no-defaults \
+		              --basedir=$(BASEDIR) \
+		              --datadir=$(MYSQL_DATA_DIR); \
+		      else \
+		          mysql_install_db \
+				      --no-defaults \
+		              --basedir=$(BASEDIR) \
+		              --datadir=$(MYSQL_DATA_DIR) \
+		              --force; \
+	          fi"
 
-	mysqld \
-		--no-defaults \
-		--basedir=$(BASEDIR) \
-		--bind-address=127.0.0.1 \
-		--datadir=$(MYSQL_DATA_DIR) \
-		--max-allowed-packet=32M \
-		--pid-file=$(MYSQL_DATA_DIR)/mysqld.pid \
-		--port=$(MYSQL_PORT) \
-		--innodb_file_per_table=1 \
-		--innodb_file_format=Barracuda \
-		--innodb_log_file_size=256M \
-		--ssl \
-		--ssl-ca=$(MYSQL_SSL_CA) \
-		--ssl-cert=$(MYSQL_SSL_CERT) \
-		--ssl-key=$(MYSQL_SSL_KEY) \
-		--ssl-cipher=DHE-RSA-AES256-SHA \
-		--socket=$(MYSQL_DATA_DIR)/mysqld.sock &
-	sleep 10
-	bash -c "if [ -e ~/.mysql_secret ]; \
-	         then \
-	             mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root -p\"`cat ~/.mysql_secret | grep -v Password`\" password 'password'; \
-	         else \
-	             mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'; \
-	         fi"
+	@mysqld \
+		 --no-defaults \
+		 --basedir=$(BASEDIR) \
+		 --bind-address=127.0.0.1 \
+		 --datadir=$(MYSQL_DATA_DIR) \
+		 --max-allowed-packet=32M \
+		 --pid-file=$(MYSQL_DATA_DIR)/mysqld.pid \
+		 --port=$(MYSQL_PORT) \
+		 --innodb_file_per_table=1 \
+		 --innodb_file_format=Barracuda \
+		 --innodb_log_file_size=256M \
+		 --ssl \
+		 --ssl-ca=$(MYSQL_SSL_CA) \
+		 --ssl-cert=$(MYSQL_SSL_CERT) \
+		 --ssl-key=$(MYSQL_SSL_KEY) \
+		 --ssl-cipher=DHE-RSA-AES256-SHA \
+		 --socket=$(MYSQL_DATA_DIR)/mysqld.sock &
+	@sleep 10
+	@bash -c "if [ -e ~/.mysql_secret ]; \
+	          then \
+	              mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root -p\"`cat ~/.mysql_secret | grep -v Password`\" password 'password'; \
+	          else \
+	              mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'; \
+	          fi"
 
 	bash -c "\
 		if (cargo bench --no-default-features);\
@@ -170,8 +170,8 @@ bench:
 			exit 1;\
 		fi"
 
-	kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`
-	rm -rf $(MYSQL_DATA_DIR)
+	@kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`
+	@rm -rf $(MYSQL_DATA_DIR)
 
 clean:
 	cargo clean
