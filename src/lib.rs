@@ -48,6 +48,8 @@ extern crate regex;
 extern crate regex_macros;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate bitflags;
 
 mod scramble;
 pub mod consts;
