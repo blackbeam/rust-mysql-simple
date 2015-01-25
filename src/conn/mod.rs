@@ -56,7 +56,7 @@ pub enum IsolationLevel {
     Serializable,
 }
 
-impl fmt::Show for IsolationLevel {
+impl fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             IsolationLevel::ReadUncommied => write!(f, "READ UNCOMMITTED"),
@@ -1063,7 +1063,7 @@ impl MyConn {
                           isolation_level: Option<IsolationLevel>,
                           readonly: Option<bool>) -> MyResult<()> {
         if let Some(i_level) = isolation_level {
-            let _ = try!(self.query(&format!("SET TRANSACTION ISOLATION LEVEL {:?}", i_level)[]));
+            let _ = try!(self.query(&format!("SET TRANSACTION ISOLATION LEVEL {}", i_level)[]));
         }
         if let Some(readonly) = readonly {
             if self.server_version < (5, 6, 5) {

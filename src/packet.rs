@@ -51,7 +51,7 @@ impl ErrPacket {
     }
 }
 
-impl fmt::Show for ErrPacket {
+impl fmt::Display for ErrPacket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f,
                "ERROR {} ({}): {}",

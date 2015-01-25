@@ -1,6 +1,6 @@
 #[cfg(feature = "openssl")]
 use openssl::ssl::error::{SslError};
-use core::fmt;
+use core::fmt::{Display, self};
 use std::io;
 use std::error;
 pub use super::packet::ErrPacket;
@@ -36,10 +36,6 @@ impl error::Error for MyError {
         }
     }
 
-    fn detail(&self) -> Option<String> {
-        Some(format!("{:?}", self))
-    }
-
     fn cause(&self) -> Option<&error::Error> {
         match *self {
             MyError::MyIoError(ref err) => Some(err as &error::Error),
@@ -69,19 +65,19 @@ impl error::FromError<SslError> for MyError {
 }
 
 #[cfg(feature = "ssl")]
-impl fmt::Show for MyError {
+impl fmt::Display for MyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             MyError::MyIoError(ref io_err) => io_err.fmt(f),
             MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
-            MyError::MyDriverError(ref driver_err) => write!(f, "{:?}", driver_err),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
             MyError::MySslError(ref ssl_error) => ssl_error.fmt(f),
         }
     }
 }
 
 #[cfg(not(feature = "ssl"))]
-impl fmt::Show for MyError {
+impl fmt::Display for MyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             MyError::MyIoError(ref io_err) => io_err.fmt(f),
@@ -112,13 +108,9 @@ impl error::Error for DriverError {
     fn description(&self) -> &str {
         "MySql driver error"
     }
-
-    fn detail(&self) -> Option<String> {
-        Some(format!("{:?}", self))
-    }
 }
 
-impl fmt::Show for DriverError {
+impl fmt::Display for DriverError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             DriverError::CouldNotConnect(None) => {
