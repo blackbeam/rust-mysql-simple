@@ -1,4 +1,4 @@
-use std::io::{IoResult, Reader, Writer};
+use std::old_io::{IoResult, Reader, Writer};
 use std::iter;
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
@@ -8,7 +8,7 @@ use super::consts::ColumnType;
 use super::error::MyError::{MyDriverError};
 use super::error::DriverError::{PacketTooLarge, PacketOutOfSync};
 use super::error::MyResult;
-use std::io::net::{tcp, pipe};
+use std::old_io::net::{tcp, pipe};
 #[cfg(feature = "openssl")]
 use openssl::ssl;
 
@@ -188,7 +188,7 @@ pub trait MyWriter: Writer {
             buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
             offset += 1;
         }
-        self.write(&buf[])
+        self.write_all(&buf[])
     }
 
     fn write_lenenc_int(&mut self, x: u64) -> IoResult<()> {
@@ -208,7 +208,7 @@ pub trait MyWriter: Writer {
 
     fn write_lenenc_bytes(&mut self, bytes: &[u8]) -> IoResult<()> {
         try!(self.write_lenenc_int(bytes.len() as u64));
-        self.write(bytes)
+        self.write_all(bytes)
     }
 
     /// Writes data as mysql packet and returns new seq_id value.
@@ -218,7 +218,7 @@ pub trait MyWriter: Writer {
             return Err(MyDriverError(PacketTooLarge));
         }
         if data.len() == 0 {
-            try!(self.write(&[0u8, 0u8, 0u8, seq_id]));
+            try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
             return Ok(seq_id + 1);
         }
         let mut last_was_max = false;
@@ -229,11 +229,11 @@ pub trait MyWriter: Writer {
             try!(writer.write_le_uint_n(chunk_len as u64, 3));
             try!(writer.write_u8(seq_id));
             seq_id += 1;
-            try!(writer.write(chunk));
-            try!(self.write(&writer[]));
+            try!(writer.write_all(chunk));
+            try!(self.write_all(&writer[]));
         }
         if last_was_max {
-            try!(self.write(&[0u8, 0u8, 0u8, seq_id]));
+            try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
             seq_id += 1;
         }
         Ok(seq_id)
@@ -280,10 +280,10 @@ impl Reader for MyStream {
 
 #[cfg(feature = "ssl")]
 impl Writer for MyStream {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
         match *self {
-            MyStream::SecureStream(MySslStream(ref mut s)) => s.write(buf),
-            MyStream::InsecureStream(ref mut s) => s.write(buf),
+            MyStream::SecureStream(MySslStream(ref mut s)) => s.write_all(buf),
+            MyStream::InsecureStream(ref mut s) => s.write_all(buf),
         }
     }
 
@@ -297,9 +297,9 @@ impl Writer for MyStream {
 
 #[cfg(not(feature = "ssl"))]
 impl Writer for MyStream {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
         match *self {
-            MyStream::InsecureStream(ref mut s) => s.write(buf),
+            MyStream::InsecureStream(ref mut s) => s.write_all(buf),
         }
     }
 
@@ -338,10 +338,10 @@ impl Reader for PlainStream {
 }
 
 impl Writer for PlainStream {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
         match self.s {
-            TcpOrUnixStream::TCPStream(ref mut s) => s.write(buf),
-            TcpOrUnixStream::UNIXStream(ref mut s) => s.write(buf),
+            TcpOrUnixStream::TCPStream(ref mut s) => s.write_all(buf),
+            TcpOrUnixStream::UNIXStream(ref mut s) => s.write_all(buf),
         }
     }
 

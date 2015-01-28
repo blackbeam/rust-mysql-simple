@@ -3,10 +3,10 @@ use openssl::{ssl, x509};
 
 use std::fmt;
 use std::default::{Default};
-use std::io::{Reader, File, IoResult, EndOfFile};
-use std::io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::io::net::tcp::{TcpStream};
-use std::io::net::pipe::{UnixStream};
+use std::old_io::{Reader, File, IoResult, EndOfFile};
+use std::old_io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::old_io::net::tcp::{TcpStream};
+use std::old_io::net::pipe::{UnixStream};
 use std::num::{FromPrimitive};
 use std::path::{BytesContainer};
 use std::str::{FromStr};
@@ -905,9 +905,9 @@ impl MyConn {
         let client_flags = self.get_client_flags();
         let mut writer = Vec::with_capacity(4 + 4 + 1 + 23);
         try!(writer.write_le_u32(client_flags.bits()));
-        try!(writer.write(&[0u8; 4]));
+        try!(writer.write_all(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write(&[0u8; 23]));
+        try!(writer.write_all(&[0u8; 23]));
         self.write_packet(&writer[])
     }
 
@@ -922,14 +922,14 @@ impl MyConn {
         }
         let mut writer = Vec::with_capacity(payload_len);
         try!(writer.write_le_u32(client_flags.bits()));
-        try!(writer.write(&[0u8; 4]));
+        try!(writer.write_all(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write(&[0u8; 23]));
+        try!(writer.write_all(&[0u8; 23]));
         try!(writer.write_str(&self.opts.get_user()[]));
         try!(writer.write_u8(0u8));
         try!(writer.write_u8(scramble_buf_len as u8));
         if scramble_buf.is_some() {
-            try!(writer.write(&scramble_buf.unwrap()[]));
+            try!(writer.write_all(&scramble_buf.unwrap()[]));
         }
         if self.opts.get_db_name().len() > 0 {
             try!(writer.write_str(&self.opts.get_db_name()[]));
@@ -949,7 +949,7 @@ impl MyConn {
         self.last_command = cmd as u8;
         let mut writer = Vec::with_capacity(buf.len() + 1);
         let _ = writer.write_u8(cmd as u8);
-        let _ = writer.write(buf);
+        let _ = writer.write_all(buf);
         self.write_packet(&writer[])
     }
 
@@ -975,7 +975,7 @@ impl MyConn {
                         let mut writer = Vec::with_capacity(chunk_len);
                         try!(writer.write_le_u32(stmt.statement_id));
                         try!(writer.write_le_u16(id));
-                        try!(writer.write(chunk));
+                        try!(writer.write_all(chunk));
                         try!(self.write_command_data(Command::COM_STMT_SEND_LONG_DATA,
                                                      &writer[]));
                     }
@@ -1007,33 +1007,33 @@ impl MyConn {
                 try!(writer.write_le_u32(stmt.statement_id));
                 try!(writer.write_u8(0u8));
                 try!(writer.write_le_u32(1u32));
-                try!(writer.write(&bitmap[]));
+                try!(writer.write_all(&bitmap[]));
                 try!(writer.write_u8(1u8));
                 for i in 0..params.len() {
                     match params[i] {
-                        NULL => try!(writer.write(
+                        NULL => try!(writer.write_all(
                             &[sparams[i].column_type as u8, 0u8])),
                         Bytes(..) => try!(
-                            writer.write(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8,
+                            writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8,
                                           0u8])),
                         Int(..) => try!(
-                            writer.write(&[ColumnType::MYSQL_TYPE_LONGLONG as u8,
+                            writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8,
                                           0u8])),
                         UInt(..) => try!(
-                            writer.write(&[ColumnType::MYSQL_TYPE_LONGLONG as u8,
+                            writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8,
                                           128u8])),
                         Float(..) => try!(
-                            writer.write(&[ColumnType::MYSQL_TYPE_DOUBLE as u8,
+                            writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8,
                                           0u8])),
                         Date(..) => try!(
-                            writer.write(&[ColumnType::MYSQL_TYPE_DATE as u8,
+                            writer.write_all(&[ColumnType::MYSQL_TYPE_DATE as u8,
                                           0u8])),
                         Time(..) => try!(
-                            writer.write(&[ColumnType::MYSQL_TYPE_TIME as u8,
+                            writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8,
                                           0u8]))
                     }
                 }
-                try!(writer.write(&values[]));
+                try!(writer.write_all(&values[]));
             },
             None => {
                 writer = Vec::with_capacity(4 + 1 + 4);

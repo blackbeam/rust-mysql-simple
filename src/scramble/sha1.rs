@@ -1,4 +1,4 @@
-use std::io::{BufWriter};
+use std::old_io::{BufWriter};
 
 static K1: u32 = 0x5A827999u32;
 static K2: u32 = 0x6ED9EBA1u32;

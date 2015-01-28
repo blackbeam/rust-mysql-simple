@@ -1,5 +1,5 @@
 use std::{fmt, str};
-use std::io::{IoResult, BufReader, SeekCur};
+use std::old_io::{IoResult, BufReader, SeekCur};
 use regex::Regex;
 use super::io::{MyReader};
 use super::consts;

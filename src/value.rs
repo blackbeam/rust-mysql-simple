@@ -1,4 +1,4 @@
-use std::io::{BufReader, IoResult, SeekCur};
+use std::old_io::{BufReader, IoResult, SeekCur};
 use std::str::{from_utf8};
 use std::borrow::ToOwned;
 use std::num::{Int, Float};
@@ -212,7 +212,7 @@ impl Value {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
                         written += val.len();
-                        try!(writer.write(&val[]));
+                        try!(writer.write_all(&val[]));
                     } else {
                         large_ids.push(i);
                     }

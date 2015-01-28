@@ -1,7 +1,7 @@
 #[cfg(feature = "openssl")]
 use openssl::ssl::error::{SslError};
 use core::fmt::{Display, self};
-use std::io;
+use std::old_io;
 use std::error;
 pub use super::packet::ErrPacket;
 
@@ -9,7 +9,7 @@ pub use super::packet::ErrPacket;
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum MyError {
-    MyIoError(io::IoError),
+    MyIoError(old_io::IoError),
     MySqlError(ErrPacket),
     MyDriverError(DriverError),
     #[cfg(feature = "openssl")]
@@ -45,8 +45,8 @@ impl error::Error for MyError {
     }
 }
 
-impl error::FromError<io::IoError> for MyError {
-    fn from_error(err: io::IoError) -> MyError {
+impl error::FromError<old_io::IoError> for MyError {
+    fn from_error(err: old_io::IoError) -> MyError {
         MyError::MyIoError(err)
     }
 }
@@ -81,6 +81,29 @@ impl fmt::Display for MyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             MyError::MyIoError(ref io_err) => io_err.fmt(f),
+            MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{:?}", driver_err),
+        }
+    }
+}
+
+#[cfg(feature = "ssl")]
+impl fmt::Debug for MyError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
+            MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
+            MyError::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
+        }
+    }
+}
+
+#[cfg(not(feature = "ssl"))]
+impl fmt::Debug for MyError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
             MyError::MyDriverError(ref driver_err) => write!(f, "{:?}", driver_err),
         }
