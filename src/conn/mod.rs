@@ -1544,11 +1544,10 @@ impl<'a> Iterator for &'a mut MyResult<QueryResult<'a>> {
     type Item = MyResult<Vec<Value>>;
 
     fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
-        if self.is_ok() {
-            let result = self.as_mut().unwrap();
-            return result.next();
+        match self.as_mut() {
+            Ok( result ) => result.next(),
+            Err( _ ) => None
         }
-        return None;
     }
 }
 

@@ -87,7 +87,7 @@ impl fmt::Display for MyError {
     }
 }
 
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub enum DriverError {
     CouldNotConnect(Option<String>),
     UnsupportedProtocol(u8),
