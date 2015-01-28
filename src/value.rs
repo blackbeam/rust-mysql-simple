@@ -713,38 +713,43 @@ impl FromValue for Duration {
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod test {
-    pub use super::{ToValue, from_value};
-    pub use super::Value::{Bytes, Int, UInt, Date, Time, Float, NULL};
-    pub use time::{Timespec, now};
-    pub use std::time::Duration;
-
-    describe! into_str {
-        it "should convert NULL to mysql string" {
+    mod into_str {
+        use super::super::Value::{Bytes, Int, UInt, Date, Time, Float, NULL};
+        #[test]
+        fn should_convert_NULL_to_mysql_string() {
             assert_eq!(NULL.into_str(), "NULL".to_string());
         }
-        it "should convert Bytes to mysql string" {
+        #[test]
+        fn should_convert_Bytes_to_mysql_string() {
             assert_eq!(Bytes(b"hello".to_vec()).into_str(),
                        "'hello'".to_string());
         }
-        it "should escape specials while converting Bytes" {
+        #[test]
+        fn should_escape_specials_while_converting_Bytes() {
             assert_eq!(Bytes(b"h\x5c'e'l'l'o".to_vec()).into_str(),
                        "'h\x5c\x5c\x5c'e\x5c'l\x5c'l\x5c'o'".to_string());
         }
-        it "should use hex literals for binary Bytes" {
+        #[test]
+        fn should_use_hex_literals_for_binary_Bytes() {
             assert_eq!(Bytes(b"\x00\x01\x02\x03\x04\xFF".to_vec()).into_str(),
                        "0x0001020304FF".to_string());
         }
-        it "should convert Int to mysql string" {
+        #[test]
+        fn should_convert_Int_to_mysql_string() {
             assert_eq!(Int(-65536).into_str(), "-65536".to_string());
         }
-        it "should convert UInt to mysql string" {
+        #[test]
+        fn should_convert_UInt_to_mysql_string() {
             assert_eq!(UInt(4294967296).into_str(), "4294967296".to_string());
         }
-        it "should convert Float to mysql string" {
+        #[test]
+        fn should_convert_Float_to_mysql_string() {
             assert_eq!(Float(686.868).into_str(), "686.868".to_string());
         }
-        it "should convert Date to mysql string" {
+        #[test]
+        fn should_convert_Date_to_mysql_string() {
             assert_eq!(Date(0, 0, 0, 0, 0, 0, 0).into_str(),
                        "''".to_string());
             assert_eq!(Date(2014, 2, 20, 0, 0, 0, 0).into_str(),
@@ -754,7 +759,8 @@ mod test {
             assert_eq!(Date(2014, 2, 20, 22, 20, 10, 1).into_str(),
                        "'2014-02-20 22:20:10.000001'".to_string())
         }
-        it "should convert Time to mysql string" {
+        #[test]
+        fn should_convert_Time_to_mysql_string() {
             assert_eq!(Time(false, 0, 0, 0, 0, 0).into_str(),
                        "''".to_string());
             assert_eq!(Time(true, 34, 3, 2, 1, 0).into_str(),
@@ -764,8 +770,13 @@ mod test {
         }
     }
 
-    describe! from_value {
-        it "should convert Bytes to Timespec" {
+    mod from_value {
+        use super::super::from_value;
+        use super::super::Value::{Bytes, Date};
+        use time::{Timespec, now};
+        use std::time::Duration;
+        #[test]
+        fn should_convert_Bytes_to_Timespec() {
             assert_eq!(
                 Timespec { sec: 1414866780 - now().tm_utcoff as i64,nsec: 0 },
                 from_value::<Timespec>(&Bytes(b"2014-11-01 18:33:00".to_vec()))
@@ -780,22 +791,29 @@ mod test {
                 Timespec { sec: 1414800000 - now().tm_utcoff as i64, nsec: 0 },
                 from_value::<Timespec>(&Bytes(b"2014-11-01".to_vec())));
         }
-        it "should convert Bytes to Duration" {
+        #[test]
+        fn should_convert_Bytes_to_Duration() {
             assert_eq!(
                 Duration::milliseconds(-433830500),
                 from_value::<Duration>(&Bytes(b"-120:30:30.5".to_vec())));
         }
     }
 
-    describe! to_value {
-        it "should convert Time to Date" {
+    mod to_value {
+        use super::super::ToValue;
+        use super::super::Value::{Date, Time};
+        use time::{Timespec, now};
+        use std::time::Duration;
+        #[test]
+        fn should_convert_Time_to_Date() {
             let ts = Timespec {
                 sec: 1414866780 - now().tm_utcoff as i64,
                 nsec: 1000,
             };
             assert_eq!(ts.to_value(), Date(2014, 11, 1, 18, 33, 00, 1));
         }
-        it "should convert Duration to Time" {
+        #[test]
+        fn should_convert_Duration_to_Time() {
             assert_eq!(Duration::milliseconds(-433830500).to_value(),
                        Time(true, 5, 0, 30, 30, 500000));
         }

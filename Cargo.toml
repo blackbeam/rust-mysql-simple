@@ -58,5 +58,3 @@ bitflags = "0.1"
 openssl = "0.2.14"
 optional = true
 
-[dev-dependencies]
-stainless = "~0.0.9"

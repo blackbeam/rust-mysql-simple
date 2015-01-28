@@ -35,10 +35,6 @@
 #[cfg(test)]
 extern crate test;
 
-#[cfg(test)]
-#[plugin]
-extern crate stainless;
-
 extern crate core;
 extern crate time;
 #[cfg(feature = "openssl")]

@@ -1566,22 +1566,15 @@ impl<'a> Iterator for &'a mut MyResult<QueryResult<'a>> {
  */
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod test {
-    pub use test::{Bencher};
-    pub use std::iter;
-    pub use std::default::{Default};
-    pub use std::{str};
-    pub use std::os::{getcwd};
-    pub use std::io::fs::{File, unlink};
-    pub use super::{MyConn, MyOpts};
-    pub use super::super::value::{ToValue, from_value};
-    pub use super::super::value::Value::{NULL, Int, Bytes, Date};
-    pub use time::{Tm, now};
+    use std::default::Default;
+    use super::MyOpts;
 
-    pub static USER: &'static str = "root";
-    pub static PASS: &'static str = "password";
-    pub static ADDR: &'static str = "127.0.0.1";
-    pub static PORT: u16          = 3307;
+    static USER: &'static str = "root";
+    static PASS: &'static str = "password";
+    static ADDR: &'static str = "127.0.0.1";
+    static PORT: u16          = 3307;
 
     #[cfg(feature = "openssl")]
     pub fn get_opts() -> MyOpts {
@@ -1606,12 +1599,25 @@ mod test {
         }
     }
 
-    describe! my_conn {
-        it "should connect" {
+    mod my_conn {
+        use test;
+        use std::iter;
+        use std::{str};
+        use std::os::{getcwd};
+        use std::old_io::fs::{File, unlink};
+        use time::{Tm, now};
+        use super::super::{MyConn, MyOpts};
+        use super::super::super::value::{ToValue, from_value};
+        use super::super::super::value::Value::{NULL, Int, Bytes, Date};
+        use super::get_opts;
+
+        #[test]
+        fn should_connect() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.ping());
         }
-        it "should connect with database" {
+        #[test]
+        fn should_connect_with_database() {
             let mut conn = MyConn::new(MyOpts {
                 db_name: Some("mysql".to_string()),
                 ..get_opts()
@@ -1619,7 +1625,8 @@ mod test {
             assert_eq!(conn.query("SELECT DATABASE()").unwrap().next(),
                        Some(Ok(vec![Bytes(b"mysql".to_vec())])));
         }
-        it "should execute queryes and parse results" {
+        #[test]
+        fn should_execute_queryes_and_parse_results() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(\
                                     a TEXT,\
@@ -1669,7 +1676,8 @@ mod test {
                 }
             }
         }
-        it "should parse large text result" {
+        #[test]
+        fn should_parse_large_text_result() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert_eq!(
                 conn.query("SELECT REPEAT('A', 20000000)").unwrap().next(),
@@ -1678,7 +1686,8 @@ mod test {
                 ))
             );
         }
-        it "should execute statements and parse results" {
+        #[test]
+        fn should_execute_statements_and_parse_results() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(\
                                     a TEXT,\
@@ -1730,7 +1739,8 @@ mod test {
                 Ok(())
             }).unwrap();
         }
-        it "should parse large binary result" {
+        #[test]
+        fn should_parse_large_binary_result() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
             assert_eq!(
@@ -1740,7 +1750,8 @@ mod test {
                 ))
             );
         }
-        it "should start, commit and rollback transactions" {
+        #[test]
+        fn should_start_commit_and_rollback_transactions() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
@@ -1779,7 +1790,8 @@ mod test {
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
                        Some(Ok(vec![Bytes(b"4".to_vec())])));
         }
-        it "should handle LOCAL INFILE" {
+        #[test]
+        fn should_handle_LOCAL_INFILE() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
             let mut path = getcwd().unwrap();
@@ -1805,7 +1817,8 @@ mod test {
             }
             let _ = unlink(&path);
         }
-        it "should reset connection" {
+        #[test]
+        fn should_reset_connection() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE `db`.`test` \
                                 (`test` VARCHAR(255) NULL);").is_ok());
@@ -1813,7 +1826,8 @@ mod test {
             assert!(conn.reset().is_ok());
             assert!(conn.query("SELECT * FROM `db`.`test`;").is_err());
         }
-        it "should handle multi resultset" {
+        #[test]
+        fn should_handle_multi_resultset() {
             let mut conn = MyConn::new(MyOpts {
                 prefer_socket: false,
                 db_name: Some("mysql".to_string()),
@@ -1845,30 +1859,36 @@ mod test {
             }
         }
 
-        bench "simple exec" (bencher) {
+        #[bench]
+        fn simple_exec(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             bencher.iter(|| { let _ = conn.query("DO 1"); })
         }
-        bench "prepared exec" (bencher) {
+        #[bench]
+        fn prepared_exec(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("DO 1").unwrap();
             bencher.iter(|| { let _ = stmt.execute(&[]); })
         }
-        bench "simple query row" (bencher) {
+        #[bench]
+        fn simple_query_row(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             bencher.iter(|| { let _ = conn.query("SELECT 1"); })
         }
-        bench "simple prepared query row" (bencher) {
+        #[bench]
+        fn simple_prepared_query_row(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT 1").unwrap();
             bencher.iter(|| { let _ = stmt.execute(&[]); })
         }
-        bench "simple prepared query row with param" (bencher) {
+        #[bench]
+        fn simple_prepared_query_row_with_param(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?").unwrap();
             bencher.iter(|| { let _ = stmt.execute(&[&0]); })
         }
-        bench "simple prepared query row with 5 params" (bencher) {
+        #[bench]
+        fn simple_prepared_query_row_with_5_params(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
             let params: &[&ToValue] = &[
@@ -1880,11 +1900,13 @@ mod test {
             ];
             bencher.iter(|| { let _ = stmt.execute(params); })
         }
-        bench "select large string" (bencher) {
+        #[bench]
+        fn select_large_string(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             bencher.iter(|| { let _ = conn.query("SELECT REPEAT('A', 10000)"); })
         }
-        bench "select prepared large string" (bencher) {
+        #[bench]
+        fn select_prepared_large_string(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
             bencher.iter(|| { let _ = stmt.execute(&[]); })

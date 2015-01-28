@@ -255,13 +255,10 @@ impl MyPooledConn {
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod test {
-    pub use conn::{MyOpts};
-    pub use std::default::{Default};
-    pub use std::thread::Thread;
-    pub use super::{MyPool};
-    pub use super::super::super::value::from_value;
-    pub use super::super::super::value::Value::{Bytes, Int};
+    use conn::MyOpts;
+    use std::default::Default;
 
     pub static USER: &'static str = "root";
     pub static PASS: &'static str = "password";
@@ -291,12 +288,14 @@ mod test {
         }
     }
 
-    describe! pool {
-        before_each {
+    mod pool {
+        use super::get_opts;
+        use std::thread::Thread;
+        use super::super::MyPool;
+        use super::super::super::super::value::from_value;
+        #[test]
+        fn should_execute_queryes_on_MyPooledConn() {
             let pool = MyPool::new(get_opts()).unwrap();
-        }
-
-        it "should execute queryes on MyPooledConn" {
             let mut threads = Vec::new();
             for _ in 0us..10 {
                 let pool = pool.clone();
@@ -311,8 +310,9 @@ mod test {
                 assert!(t.join().is_ok());
             }
         }
-
-        it "should execute queryes on MyPool" {
+        #[test]
+        fn should_execute_queryes_on_MyPool() {
+            let pool = MyPool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0us..10 {
                 let pool = pool.clone();
@@ -324,8 +324,9 @@ mod test {
                 assert!(t.join().is_ok());
             }
         }
-
-        it "should execute statements on MyPooledConn" {
+        #[test]
+        fn should_execute_statements_on_MyPooledConn() {
+            let pool = MyPool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0us..10 {
                 let pool = pool.clone();
@@ -339,8 +340,9 @@ mod test {
                 assert!(t.join().is_ok());
             }
         }
-
-        it "should execute statements on MyPool" {
+        #[test]
+        fn should_execute_statements_on_MyPool() {
+            let pool = MyPool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0us..10 {
                 let pool = pool.clone();
@@ -353,8 +355,9 @@ mod test {
                 assert!(t.join().is_ok());
             }
         }
-
-        it "should start transaction on MyPool" {
+        #[test]
+        fn should_start_transaction_on_MyPool() {
+            let pool = MyPool::new(get_opts()).unwrap();
             assert!(pool.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
             assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
@@ -384,8 +387,9 @@ mod test {
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
         }
-
-        it "should start transaction on MyPooledConn" {
+        #[test]
+        fn should_start_transaction_on_MyPooledConn() {
+            let pool = MyPool::new(get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
             assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
