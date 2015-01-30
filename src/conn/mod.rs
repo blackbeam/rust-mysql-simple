@@ -1049,11 +1049,9 @@ impl MyConn {
     fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
         let _params: Vec<Value> = params.iter().map(|x| x.to_value() ).collect();
         match self._execute(stmt, &_params[]) {
-            Ok((columns, ok_packet)) => Ok(QueryResult{pooled_conn: None,
-                                                       conn: Some(self),
-                                                       columns: columns,
-                                                       is_bin: true,
-                                                       ok_packet: ok_packet}),
+            Ok((columns, ok_packet)) => {
+                Ok(QueryResult::new(self, columns, ok_packet, true))
+            },
             Err(err) => Err(err)
         }
     }
@@ -1175,11 +1173,9 @@ impl MyConn {
     /// will borrow `MyConn` until the end of its scope.
     pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
         match self._query(query) {
-            Ok((columns, ok_packet)) => Ok(QueryResult{pooled_conn: None,
-                                                       conn: Some(self),
-                                                       columns: columns,
-                                                       is_bin: false,
-                                                       ok_packet: ok_packet}),
+            Ok((columns, ok_packet)) => {
+                Ok(QueryResult::new(self, columns, ok_packet, false))
+            },
             Err(err) => {
                 Err(err)
             }

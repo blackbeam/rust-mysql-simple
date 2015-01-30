@@ -34,7 +34,7 @@ fn float_max_value<T: Float>() -> T {
     Float::max_value()
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Show)]
+#[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Value {
     NULL,
     Bytes(Vec<u8>),

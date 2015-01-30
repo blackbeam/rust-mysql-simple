@@ -26,11 +26,15 @@
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
-#![feature(unsafe_destructor)]
-#![feature(slicing_syntax)]
-#![feature(plugin)]
-
-#![allow(dead_code, unstable)]
+#![feature(unsafe_destructor,
+           slicing_syntax,
+           plugin,
+           io,
+           core,
+           hash,
+           collections,
+           path,
+           std_misc)]
 
 #[cfg(test)]
 extern crate test;
