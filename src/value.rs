@@ -437,7 +437,9 @@ macro_rules! from_value_impl_num(
                     Value::Int(x) if x >= int_min_value::<$t>() as i64 && x <= int_max_value::<$t>() as i64 => Some(x as $t),
                     Value::UInt(x) if x <= int_max_value::<$t>() as u64 => Some(x as $t),
                     Value::Bytes(ref bts) => {
-                        from_utf8(&bts[]).ok().and_then(StrExt::parse::<$t>)
+                        from_utf8(&bts[]).ok().and_then(|x| {
+                            StrExt::parse::<$t>(x).ok()
+                        })
                     },
                     _ => None
                 }
@@ -466,7 +468,9 @@ impl FromValue for i64 {
             Value::Int(x) => Some(x),
             Value::UInt(x) if x <= int_max_value::<i64> as u64 => Some(x as i64),
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(StrExt::parse::<i64>)
+                from_utf8(&bts[]).ok().and_then(|x| {
+                    StrExt::parse::<i64>(x).ok()
+                })
             },
             _ => None
         }
@@ -484,7 +488,9 @@ impl FromValue for u64 {
             Value::Int(x) => Some(x as u64),
             Value::UInt(x) => Some(x),
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(StrExt::parse::<u64>)
+                from_utf8(&bts[]).ok().and_then(|x| {
+                    StrExt::parse::<u64>(x).ok()
+                })
             },
             _ => None
         }
@@ -501,7 +507,9 @@ impl FromValue for f32 {
         match *v {
             Value::Float(x) if x >= float_min_value::<f32>() as f64 && x <= float_max_value::<f32>() as f64 => Some(x as f32),
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(StrExt::parse::<f32>)
+                from_utf8(&bts[]).ok().and_then(|x| {
+                    StrExt::parse::<f32>(x).ok()
+                })
             },
             _ => None
         }
@@ -518,7 +526,9 @@ impl FromValue for f64 {
         match *v {
             Value::Float(x) => Some(x),
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(StrExt::parse::<f64>)
+                from_utf8(&bts[]).ok().and_then(|x| {
+                    StrExt::parse::<f64>(x).ok()
+                })
             },
             _ => None
         }
@@ -639,7 +649,9 @@ impl FromValue for Duration {
                     let ms: i64 = match &xss[] {
                         [_, []] | [_] => 0,
                         [_, ms] if ms.len() <= 6 => {
-                            let x = from_utf8(ms).ok().and_then(StrExt::parse::<i64>);
+                            let x = from_utf8(ms).ok().and_then(|x| {
+                                StrExt::parse::<i64>(x).ok()
+                            });
                             if x.is_some() {
                                 x.unwrap() * 10i64.pow(6 - ms.len())
                             } else {

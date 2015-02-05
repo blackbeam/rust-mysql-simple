@@ -562,7 +562,7 @@ impl MyConn {
         try!(conn.connect());
         if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
             let addr: Option<IpAddr> = FromStr::from_str(
-                &conn.opts.tcp_addr.as_ref().unwrap()[]);
+                &conn.opts.tcp_addr.as_ref().unwrap()[]).ok();
             if addr == Some(Ipv4Addr(127, 0, 0, 1)) ||
                addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
                 match conn.get_system_var("socket") {
@@ -587,7 +587,7 @@ impl MyConn {
         if let None = conn.opts.ssl_opts {
             if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
                 let addr: Option<IpAddr> = FromStr::from_str(
-                    &conn.opts.tcp_addr.as_ref().unwrap()[]);
+                    &conn.opts.tcp_addr.as_ref().unwrap()[]).ok();
                 if addr == Some(Ipv4Addr(127, 0, 0, 1)) ||
                    addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
                     match conn.get_system_var("socket") {
@@ -1526,11 +1526,11 @@ impl<'a> Drop for QueryResult<'a> {
     fn drop(&mut self) {
         if self.conn.is_some() {
             while self.conn.as_ref().unwrap().more_results_exists() {
-                for _ in *self {}
+                while let Some(_) = self.next() {}
             }
         } else {
             while self.pooled_conn.as_ref().unwrap().as_ref().more_results_exists() {
-                for _ in *self {}
+                while let Some(_) = self.next() {}
             }
         }
     }
@@ -1844,7 +1844,7 @@ mod test {
             let mut result = conn.query("SELECT 1; SELECT 2; SELECT 3;").unwrap();
             let mut i = 0;
             while { i += 1; result.more_results_exists() } {
-                for row in result {
+                for row in result.by_ref() {
                     match i {
                         1 => assert_eq!(row, Ok(vec![Bytes(b"1".to_vec())])),
                         2 => assert_eq!(row, Ok(vec![Bytes(b"2".to_vec())])),
