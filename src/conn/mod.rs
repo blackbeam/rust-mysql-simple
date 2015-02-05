@@ -8,7 +8,7 @@ use std::old_io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::old_io::net::tcp::{TcpStream};
 use std::old_io::net::pipe::{UnixStream};
 use std::num::{FromPrimitive};
-use std::path::{BytesContainer};
+use std::old_path::{BytesContainer};
 use std::str::{FromStr};
 use std::iter;
 use super::consts;
