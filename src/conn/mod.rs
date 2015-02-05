@@ -1473,7 +1473,7 @@ impl<'a> QueryResult<'a> {
     ///            "#);
     /// let mut result = conn.query("CALL multi()").unwrap();
     /// while result.more_results_exists() {
-    ///     for x in result {
+    ///     for x in result.by_ref() {
     ///         // On first iteration of `while` you will get result set from
     ///         // SELECT 1 and from SELECT 2 on second.
     ///     }
