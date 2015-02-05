@@ -147,6 +147,8 @@ impl MyPool {
     ///                                                 // be available until the end of
     ///                                                 // its scope.
     /// ```
+    #[deprecated(since = "0.2.14",
+                 reason = "Leads to unintuitive borrow checker errors")]
     pub fn query<'a>(&'a self, query: &'a str) -> MyResult<QueryResult<'a>> {
         let conn = try!(self.get_conn());
         conn.pooled_query(query)
