@@ -39,10 +39,11 @@ fn float_max_value<T: Float>() -> T {
 /// or `Value::Bytes` from mysql you should use prepared statements.
 ///
 /// If you want to get something more useful from `Value` you should implement
-/// [`FromValue`](../trait.FromValue.html) on it.
+/// [`FromValue`](trait.FromValue.html) on it. To get `T: FromValue` from
+/// nullable value you should rely on `FromValue` implemented on `Option<T>`.
 ///
 /// To convert something to `Value` you should implement
-/// [`ToValue`](../trait.ToValue.html) on it.
+/// [`ToValue`](trait.ToValue.html) on it.
 ///
 /// ```rust
 /// # use mysql::conn::pool;
