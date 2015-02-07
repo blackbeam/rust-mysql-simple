@@ -134,6 +134,8 @@ impl Value {
             }
         }
     }
+
+    #[doc(hidden)]
     pub fn to_bin(&self) -> IoResult<Vec<u8>> {
         let mut writer = Vec::with_capacity(256);
         match *self {
@@ -199,6 +201,8 @@ impl Value {
         };
         Ok(writer)
     }
+
+    #[doc(hidden)]
     pub fn from_payload(pld: &[u8], columns_count: usize) -> IoResult<Vec<Value>> {
         let mut output = Vec::with_capacity(columns_count);
         let mut reader = BufReader::new(pld);
@@ -214,6 +218,8 @@ impl Value {
         }
         Ok(output)
     }
+
+    #[doc(hidden)]
     pub fn from_bin_payload(pld: &[u8], columns: &[Column]) -> IoResult<Vec<Value>> {
         let bit_offset = 2; // http://dev.mysql.com/doc/internals/en/null-bitmap.html
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
@@ -234,7 +240,9 @@ impl Value {
         }
         Ok(values)
     }
+
     // (NULL-bitmap, values, ids of fields to send throwgh send_long_data)
+    #[doc(hidden)]
     pub fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: usize) -> IoResult<(Vec<u8>, Vec<u8>, Option<Vec<u16>>)> {
         let bitmap_len = (params.len() + 7) / 8;
         let mut large_ids = Vec::new();
