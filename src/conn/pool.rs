@@ -41,41 +41,48 @@ impl MyInnerPool {
     }
 }
 
-/// Pool which is holding mysql connections.
+/// `MyPool` serves to provide you with a [`MyPooledConn`](struct.MyPooledConn.html)'s.
+/// However you can prepare statements directly on `MyPool` without
+/// invoking [`MyPool::get_conn`](struct.MyPool.html#method.get_conn).
 ///
-/// It will hold at least `min` connections and will create as many as `max`
-/// connections.
+/// Example of multithreaded `MyPool` usage:
 ///
-/// ```ignore
-/// use mysql::conn::{MyOpts};
-/// use std::default::{Default};
-/// use mysql::conn::pool::{MyPool};
-/// use mysql::value::{ToValue};
+/// ```rust
+/// use mysql::conn::pool;
+/// use std::default::Default;
+/// use mysql::conn::MyOpts;
+/// use mysql::value::ToValue;
 /// use std::thread::Thread;
 ///
-/// fn main() {
-///     # let opts = MyOpts{user: Some("root".to_string()),
-///     #                   pass: Some("password".to_string()),
-///     #                   tcp_addr: Some("127.0.0.1".to_string()),
-///     #                   tcp_port: 3307,
-///     #                   ..Default::default()};
-///     let pool = MyPool::new(opts);
-///     assert!(pool.is_ok());
-///     let pool = pool.unwrap();
-///     for _ in 0u..100 {
-///         let pool = pool.clone();
-///         Thread::spawn(move || {
-///             let conn = pool.get_conn();
-///             assert!(conn.is_ok());
-///             let mut conn = conn.unwrap();
-///             let result = conn.query("SELECT 1");
-///             assert!(result.is_ok());
-///             let mut result = result.unwrap();
-///             assert_eq!(result.next(), Some(Ok(vec!["1".to_value()])));
-///         }).detach();
-///     }
+/// fn get_opts() -> MyOpts {
+///     // ...
+/// #     MyOpts {
+/// #         user: Some("root".to_string()),
+/// #         pass: Some("password".to_string()),
+/// #         tcp_addr: Some("127.0.0.1".to_string()),
+/// #         tcp_port: 3307,
+/// #         ..Default::default()
+/// #     }
+/// }
+///
+/// let opts = get_opts();
+/// let pool = pool::MyPool::new(opts).unwrap();
+/// let mut threads = Vec::new();
+/// for _ in 0..100 {
+///     let pool = pool.clone();
+///     threads.push(Thread::scoped(move || {
+///         let mut stmt = pool.prepare("SELECT 1").unwrap();
+///         let mut result = stmt.execute(&[]).unwrap();
+///         assert_eq!(result.next(), Some(Ok(vec![1.to_value()])))
+///     }));
+/// }
+/// for t in threads.into_iter() {
+///     assert!(t.join().is_ok());
 /// }
 /// ```
+///
+/// For more info on how to work with mysql connection please look at
+/// [`MyPooledConn`](struct.MyPooledConn.html) documentation.
 #[derive(Clone)]
 pub struct MyPool {
     pool: Arc<Mutex<MyInnerPool>>
@@ -96,8 +103,8 @@ impl MyPool {
     /// Gives you a [`MyPooledConn`](struct.MyPooledConn.html).
     ///
     /// `MyPool` will check that connection is alive via
-    /// [`MyConn#ping`](../struct.MyConn.html#method.ping) and will
-    /// call [`MyConn#reset`](../struct.MyConn.html#method.reset) if
+    /// [`MyConn::ping`](../struct.MyConn.html#method.ping) and will
+    /// call [`MyConn::reset`](../struct.MyConn.html#method.reset) if
     /// necessary.
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
         let mut pool = match self.pool.lock() {
@@ -170,7 +177,42 @@ impl MyPool {
 }
 
 /// Pooled mysql connection which will return to the pool at the end of its
-/// scope.
+/// lifetime.
+///
+/// You should prefer using `prepare` instead of `query` where possible because
+/// of speed and security. `query` is a part of mysql text protocol, so you will
+/// always receive `Value::Bytes` as a result.
+///
+/// ```rust
+/// # use mysql::conn::pool;
+/// # use mysql::conn::MyOpts;
+/// # use mysql::value::Value;
+/// # use std::thread::Thread;
+/// # use std::default::Default;
+/// # fn get_opts() -> MyOpts {
+/// #     MyOpts {
+/// #         user: Some("root".to_string()),
+/// #         pass: Some("password".to_string()),
+/// #         tcp_addr: Some("127.0.0.1".to_string()),
+/// #         tcp_port: 3307,
+/// #         ..Default::default()
+/// #     }
+/// # }
+/// # let opts = get_opts();
+/// # let pool = pool::MyPool::new(opts).unwrap();
+/// let mut conn = pool.get_conn().unwrap();
+///
+/// conn.query("SELECT 42").map(|mut result| {
+///     assert_eq!(result.next(), Some(Ok(vec![Value::Bytes(b"42".to_vec())])));
+/// });
+/// conn.prepare("SELECT 42").map(|mut stmt| {
+///     let mut result = stmt.execute(&[]).unwrap();
+///     assert_eq!(result.next(), Some(Ok(vec![Value::Int(42)])));
+/// });
+/// ```
+///
+/// For more info on how to work with query results please look at
+/// [`QueryResult`](../struct.QueryResult.html) documentation.
 pub struct MyPooledConn {
     pool: MyPool,
     conn: Option<MyConn>

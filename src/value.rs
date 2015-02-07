@@ -34,6 +34,43 @@ fn float_max_value<T: Float>() -> T {
     Float::max_value()
 }
 
+/// `Value` enumerates possible values in mysql cells. Also `Value` used to fill
+/// prepared statements. Note that to receive something other than `Value::NULL`
+/// or `Value::Bytes` from mysql you should use prepared statements.
+///
+/// If you want to get something more useful from `Value` you should implement
+/// [`FromValue`](../trait.FromValue.html) on it.
+///
+/// To convert something to `Value` you should implement
+/// [`ToValue`](../trait.ToValue.html) on it.
+///
+/// ```rust
+/// # use mysql::conn::pool;
+/// # use mysql::conn::MyOpts;
+/// use mysql::value::from_value;
+/// # use std::thread::Thread;
+/// # use std::default::Default;
+/// # fn get_opts() -> MyOpts {
+/// #     MyOpts {
+/// #         user: Some("root".to_string()),
+/// #         pass: Some("password".to_string()),
+/// #         tcp_addr: Some("127.0.0.1".to_string()),
+/// #         tcp_port: 3307,
+/// #         ..Default::default()
+/// #     }
+/// # }
+/// # let opts = get_opts();
+/// # let pool = pool::MyPool::new(opts).unwrap();
+/// let mut conn = pool.get_conn().unwrap();
+///
+/// conn.prepare("SELECT ? * ?").map(|mut stmt| {
+///     let mut result = stmt.execute(&[&20i32, &0.8f32]).unwrap();
+///     for row in result {
+///         let row = row.unwrap();
+///         assert_eq!(from_value(&row[0]), 16.0f32);
+///     }
+/// });
+/// ```
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Value {
     NULL,

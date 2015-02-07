@@ -1341,6 +1341,46 @@ impl MyConn {
  */
 
 /// Mysql result set for text and binary protocols.
+///
+/// If you want to get rows from `QueryReult` you should rely on implementation
+/// of `Iterator` over `MyResult<Vec<Value>>` on `&mut MyResult<QueryResult>` or
+/// directly on `QueryResult`. `Vec<Value>` is the current row representation.
+///
+/// ```rust
+/// # use mysql::conn::pool;
+/// # use mysql::conn::MyOpts;
+/// # use mysql::value::Value;
+/// # use std::thread::Thread;
+/// # use std::default::Default;
+/// # fn get_opts() -> MyOpts {
+/// #     MyOpts {
+/// #         user: Some("root".to_string()),
+/// #         pass: Some("password".to_string()),
+/// #         tcp_addr: Some("127.0.0.1".to_string()),
+/// #         tcp_port: 3307,
+/// #         ..Default::default()
+/// #     }
+/// # }
+/// # let opts = get_opts();
+/// # let pool = pool::MyPool::new(opts).unwrap();
+/// let mut conn = pool.get_conn().unwrap();
+///
+/// conn.prepare("SELECT 42").map(|mut stmt| {
+///     // Over &mut MyResult<QueryResult>..
+///     for row in &mut stmt.execute(&[]) {
+///         assert_eq!(row.unwrap(), vec![Value::Int(42)]);
+///     }
+///
+///     // Over QueryResult..
+///     let mut result = stmt.execute(&[]).unwrap();
+///     for row in result {
+///         assert_eq!(row.unwrap(), vec![Value::Int(42)]);
+///     }
+/// });
+/// ```
+///
+/// For more info on how to work with values please look at
+/// [`Value`](../value/enum.Value.html) documentation.
 pub struct QueryResult<'a> {
     pooled_conn: Option<pool::MyPooledConn>,
     conn: Option<&'a mut MyConn>,
