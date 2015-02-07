@@ -13,7 +13,6 @@ exclude = ["tests/*", ".*", "Makefile"]
 [lib]
 
 name = "mysql"
-crate_type = ["rlib", "dylib"]
 path = "src/lib.rs"
 
 [profile.dev]
