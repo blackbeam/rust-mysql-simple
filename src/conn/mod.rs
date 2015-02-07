@@ -1639,7 +1639,7 @@ mod test {
         use test;
         use std::iter;
         use std::{str};
-        use std::os::{getcwd};
+        use std::env;
         use std::old_io::fs::{File, unlink};
         use time::{Tm, now};
         use super::super::{MyConn, MyOpts};
@@ -1830,7 +1830,7 @@ mod test {
         fn should_handle_LOCAL_INFILE() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
-            let mut path = getcwd().unwrap();
+            let mut path = env::current_dir().unwrap();
             path.push("local_infile.txt".to_string());
             {
                 let mut file = File::create(&path).unwrap();
