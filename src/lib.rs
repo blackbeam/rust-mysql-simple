@@ -36,6 +36,8 @@
            path,
            std_misc)]
 
+#![plugin(regex_macros)]
+
 #[cfg(test)]
 extern crate test;
 
@@ -44,8 +46,6 @@ extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;
 extern crate regex;
-#[plugin] #[no_link]
-extern crate regex_macros;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
