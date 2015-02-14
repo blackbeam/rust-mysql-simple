@@ -408,7 +408,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.commit()
             }).is_ok());
-            for x in &mut pool.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in pool.query("SELECT COUNT(a) FROM x.tbl") {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -417,7 +417,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.rollback()
             }).is_ok());
-            for x in &mut pool.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in pool.query("SELECT COUNT(a) FROM x.tbl") {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -426,7 +426,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 Ok(())
             }).is_ok());
-            for x in &mut pool.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in pool.query("SELECT COUNT(a) FROM x.tbl") {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -441,7 +441,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.commit()
             }).is_ok());
-            for x in &mut conn.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in conn.query("SELECT COUNT(a) FROM x.tbl") {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -450,7 +450,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.rollback()
             }).is_ok());
-            for x in &mut conn.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in conn.query("SELECT COUNT(a) FROM x.tbl") {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -459,7 +459,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 Ok(())
             }).is_ok());
-            for x in &mut conn.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in conn.query("SELECT COUNT(a) FROM x.tbl") {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }

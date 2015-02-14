@@ -1249,7 +1249,7 @@ impl MyConn {
     }
 
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
-        for row in &mut self.query(&format!("SELECT @@{};", name)[]) {
+        for row in self.query(&format!("SELECT @@{};", name)[]) {
             match row {
                 Ok(mut r) => match r.len() {
                     0 => (),
@@ -1343,7 +1343,7 @@ impl MyConn {
 /// Mysql result set for text and binary protocols.
 ///
 /// If you want to get rows from `QueryReult` you should rely on implementation
-/// of `Iterator` over `MyResult<Vec<Value>>` on `&mut MyResult<QueryResult>` or
+/// of `Iterator` over `MyResult<Vec<Value>>` on `MyResult<QueryResult>` or
 /// directly on `QueryResult`. `Vec<Value>` is the current row representation.
 ///
 /// ```rust
@@ -1366,8 +1366,8 @@ impl MyConn {
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.prepare("SELECT 42").map(|mut stmt| {
-///     // Over &mut MyResult<QueryResult>..
-///     for row in &mut stmt.execute(&[]) {
+///     // Over MyResult<QueryResult>..
+///     for row in stmt.execute(&[]) {
 ///         assert_eq!(row.unwrap(), vec![Value::Int(42)]);
 ///     }
 ///
@@ -1576,7 +1576,7 @@ impl<'a> Drop for QueryResult<'a> {
     }
 }
 
-impl<'a> Iterator for &'a mut MyResult<QueryResult<'a>> {
+impl<'a> Iterator for MyResult<QueryResult<'a>> {
     type Item = MyResult<Vec<Value>>;
 
     fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
