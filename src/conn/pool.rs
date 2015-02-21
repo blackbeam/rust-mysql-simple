@@ -52,7 +52,7 @@ impl MyInnerPool {
 /// use std::default::Default;
 /// use mysql::conn::MyOpts;
 /// use mysql::value::ToValue;
-/// use std::thread::Thread;
+/// use std::thread;
 ///
 /// fn get_opts() -> MyOpts {
 ///     // ...
@@ -70,7 +70,7 @@ impl MyInnerPool {
 /// let mut threads = Vec::new();
 /// for _ in 0..100 {
 ///     let pool = pool.clone();
-///     threads.push(Thread::scoped(move || {
+///     threads.push(thread::spawn(move || {
 ///         let mut stmt = pool.prepare("SELECT 1").unwrap();
 ///         let mut result = stmt.execute(&[]).unwrap();
 ///         assert_eq!(result.next(), Some(Ok(vec![1.to_value()])))
@@ -334,16 +334,16 @@ mod test {
 
     mod pool {
         use super::get_opts;
-        use std::thread::Thread;
+        use std::thread;
         use super::super::MyPool;
         use super::super::super::super::value::from_value;
         #[test]
         fn should_execute_queryes_on_MyPooledConn() {
             let pool = MyPool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
-            for _ in 0us..10 {
+            for _ in 0usize..10 {
                 let pool = pool.clone();
-                threads.push(Thread::scoped(move || {
+                threads.push(thread::spawn(move || {
                     let conn = pool.get_conn();
                     assert!(conn.is_ok());
                     let mut conn = conn.unwrap();
@@ -358,9 +358,9 @@ mod test {
         fn should_execute_queryes_on_MyPool() {
             let pool = MyPool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
-            for _ in 0us..10 {
+            for _ in 0usize..10 {
                 let pool = pool.clone();
-                threads.push(Thread::scoped(move || {
+                threads.push(thread::spawn(move || {
                     assert!(pool.query("SELECT 1").is_ok());
                 }));
             }
@@ -372,9 +372,9 @@ mod test {
         fn should_execute_statements_on_MyPooledConn() {
             let pool = MyPool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
-            for _ in 0us..10 {
+            for _ in 0usize..10 {
                 let pool = pool.clone();
-                threads.push(Thread::scoped(move || {
+                threads.push(thread::spawn(move || {
                     let mut conn = pool.get_conn().unwrap();
                     let mut stmt = conn.prepare("SELECT 1").unwrap();
                     assert!(stmt.execute(&[]).is_ok());
@@ -388,9 +388,9 @@ mod test {
         fn should_execute_statements_on_MyPool() {
             let pool = MyPool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
-            for _ in 0us..10 {
+            for _ in 0usize..10 {
                 let pool = pool.clone();
-                threads.push(Thread::scoped(move || {
+                threads.push(thread::spawn(move || {
                     let mut stmt = pool.prepare("SELECT 1").unwrap();
                     assert!(stmt.execute(&[]).is_ok());
                 }));

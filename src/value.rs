@@ -141,7 +141,7 @@ impl Value {
         match *self {
             Value::NULL => (),
             Value::Bytes(ref x) => {
-                try!(writer.write_lenenc_bytes(&x[]));
+                try!(writer.write_lenenc_bytes(&x[..]));
             },
             Value::Int(x) => {
                 try!(writer.write_le_i64(x));
@@ -258,7 +258,7 @@ impl Value {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
                         written += val.len();
-                        try!(writer.write_all(&val[]));
+                        try!(writer.write_all(&val[..]));
                     } else {
                         large_ids.push(i);
                     }
@@ -483,7 +483,7 @@ macro_rules! from_value_impl_num(
                     Value::Int(x) if x >= int_min_value::<$t>() as i64 && x <= int_max_value::<$t>() as i64 => Some(x as $t),
                     Value::UInt(x) if x <= int_max_value::<$t>() as u64 => Some(x as $t),
                     Value::Bytes(ref bts) => {
-                        from_utf8(&bts[]).ok().and_then(|x| {
+                        from_utf8(&bts[..]).ok().and_then(|x| {
                             StrExt::parse::<$t>(x).ok()
                         })
                     },
@@ -514,7 +514,7 @@ impl FromValue for i64 {
             Value::Int(x) => Some(x),
             Value::UInt(x) if x <= int_max_value::<i64> as u64 => Some(x as i64),
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(|x| {
+                from_utf8(&bts[..]).ok().and_then(|x| {
                     StrExt::parse::<i64>(x).ok()
                 })
             },
@@ -534,7 +534,7 @@ impl FromValue for u64 {
             Value::Int(x) => Some(x as u64),
             Value::UInt(x) => Some(x),
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(|x| {
+                from_utf8(&bts[..]).ok().and_then(|x| {
                     StrExt::parse::<u64>(x).ok()
                 })
             },
@@ -553,7 +553,7 @@ impl FromValue for f32 {
         match *v {
             Value::Float(x) if x >= float_min_value::<f32>() as f64 && x <= float_max_value::<f32>() as f64 => Some(x as f32),
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(|x| {
+                from_utf8(&bts[..]).ok().and_then(|x| {
                     StrExt::parse::<f32>(x).ok()
                 })
             },
@@ -572,7 +572,7 @@ impl FromValue for f64 {
         match *v {
             Value::Float(x) => Some(x),
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(|x| {
+                from_utf8(&bts[..]).ok().and_then(|x| {
                     StrExt::parse::<f64>(x).ok()
                 })
             },
@@ -652,7 +652,7 @@ impl FromValue for Timespec {
                     }.to_timespec())
             },
             Value::Bytes(ref bts) => {
-                from_utf8(&bts[]).ok().and_then(|s| {
+                from_utf8(&bts[..]).ok().and_then(|s| {
                     strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).and_then(|mut tm| {
                     tm.tm_utcoff = *TM_UTCOFF;
@@ -685,14 +685,14 @@ impl FromValue for Duration {
                 }
             },
             Value::Bytes(ref bts) => {
-                let mut btss = &bts[];
+                let mut btss = &bts[..];
                 let neg = btss[0] == b'-';
                 if neg {
                     btss = &bts[1..];
                 }
                 let ms: i64 = {
                     let xss: Vec<&[u8]> = btss.split(|x| *x == b'.').collect();
-                    let ms: i64 = match &xss[] {
+                    let ms: i64 = match &xss[..] {
                         [_, []] | [_] => 0,
                         [_, ms] if ms.len() <= 6 => {
                             let x = from_utf8(ms).ok().and_then(|x| {

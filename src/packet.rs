@@ -18,7 +18,7 @@ pub struct OkPacket {
 
 impl OkPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<OkPacket> {
-        let mut reader = &pld[];
+        let mut reader = &pld[..];
         try!(reader.read_u8());
         Ok(OkPacket{
             affected_rows: try!(reader.read_lenenc_int()),
@@ -39,7 +39,7 @@ pub struct ErrPacket {
 
 impl ErrPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<ErrPacket> {
-        let mut reader = &pld[];
+        let mut reader = &pld[..];
         try!(reader.read_u8());
         let error_code = try!(reader.read_le_u16());
         try!(reader.read_u8());
@@ -56,8 +56,8 @@ impl fmt::Display for ErrPacket {
         write!(f,
                "ERROR {} ({}): {}",
                self.error_code,
-               str::from_utf8(&self.sql_state[]).unwrap(),
-               str::from_utf8(&self.error_message[]).unwrap())
+               str::from_utf8(&self.sql_state[..]).unwrap(),
+               str::from_utf8(&self.error_message[..]).unwrap())
     }
 }
 
@@ -69,7 +69,7 @@ pub struct EOFPacket {
 
 impl EOFPacket {
     pub fn from_payload(pld: &[u8]) -> IoResult<EOFPacket> {
-        let mut reader = &pld[];
+        let mut reader = &pld[..];
         try!(reader.read_u8());
         Ok(EOFPacket{
             warnings: try!(reader.read_le_u16()),
@@ -84,7 +84,7 @@ static VERSION_RE: Regex = regex!(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)");
 
 fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
     let ver_str = String::from_utf8_lossy(bytes).into_owned();
-    VERSION_RE.captures(&ver_str[])
+    VERSION_RE.captures(&ver_str[..])
     .and_then(|capts| {
         Some((
             (capts.at(1).unwrap().parse::<u16>()).unwrap_or(0),
@@ -124,7 +124,7 @@ impl HandshakePacket {
         let mut reader = BufReader::new(pld);
         let protocol_version = try!(reader.read_u8());
         let version_bytes = try!(reader.read_to_null());
-        let server_version = try!(parse_version(&version_bytes[]));
+        let server_version = try!(parse_version(&version_bytes[..]));
         let connection_id = try!(reader.read_le_u32());
         try!(reader.push(8, &mut auth_plugin_data));
         // skip filler
@@ -222,7 +222,7 @@ mod test {
                             0x39_u8, 0x30_u8, 0x00_u8).into_iter());
         payload.extend(vec!(1u8, 2u8, 3u8, 4u8, 5u8, 0u8).into_iter());
         let handshake_packet =
-            HandshakePacket::from_payload(&payload[]).unwrap();
+            HandshakePacket::from_payload(&payload[..]).unwrap();
         assert_eq!(handshake_packet.protocol_version, 0x0a);
         assert_eq!(handshake_packet.connection_id, 1);
         assert_eq!(

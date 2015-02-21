@@ -180,7 +180,7 @@ struct InnerStmt {
 
 impl InnerStmt {
     fn from_payload(pld: &[u8]) -> IoResult<InnerStmt> {
-        let mut reader = &pld[];
+        let mut reader = &pld[..];
         try!(reader.read_u8());
         let statement_id = try!(reader.read_le_u32());
         let num_columns = try!(reader.read_le_u16());
@@ -216,7 +216,7 @@ impl<'a> Stmt<'a> {
     /// `Stmt`'s params if any.
     pub fn params_ref(&self) -> Option<&[Column]> {
         match self.stmt.params {
-            Some(ref params) => Some(&params[]),
+            Some(ref params) => Some(&params[..]),
             None => None
         }
     }
@@ -225,7 +225,7 @@ impl<'a> Stmt<'a> {
     /// `Stmt`'s columns if any.
     pub fn columns_ref(&self) -> Option<&[Column]> {
         match self.stmt.columns {
-            Some(ref columns) => Some(&columns[]),
+            Some(ref columns) => Some(&columns[..]),
             None => None
         }
     }
@@ -238,7 +238,7 @@ impl<'a> Stmt<'a> {
             Some(ref columns) => {
                 let name = name.container_as_bytes();
                 for (i, c) in columns.iter().enumerate() {
-                    if &c.name[] == name {
+                    if &c.name[..] == name {
                         return Some(i)
                     }
                 }
@@ -323,7 +323,7 @@ pub struct Column {
 impl Column {
     #[inline]
     fn from_payload(command: u8, pld: &[u8]) -> IoResult<Column> {
-        let mut reader = &pld[];
+        let mut reader = &pld[..];
         // Skip catalog
         let _ = try!(reader.read_lenenc_bytes());
         let schema = try!(reader.read_lenenc_bytes());
@@ -562,7 +562,7 @@ impl MyConn {
         try!(conn.connect());
         if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
             let addr: Option<IpAddr> = FromStr::from_str(
-                &conn.opts.tcp_addr.as_ref().unwrap()[]).ok();
+                &conn.opts.tcp_addr.as_ref().unwrap()[..]).ok();
             if addr == Some(Ipv4Addr(127, 0, 0, 1)) ||
                addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
                 match conn.get_system_var("socket") {
@@ -587,7 +587,7 @@ impl MyConn {
         if let None = conn.opts.ssl_opts {
             if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
                 let addr: Option<IpAddr> = FromStr::from_str(
-                    &conn.opts.tcp_addr.as_ref().unwrap()[]).ok();
+                    &conn.opts.tcp_addr.as_ref().unwrap()[..]).ok();
                 if addr == Some(Ipv4Addr(127, 0, 0, 1)) ||
                    addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
                     match conn.get_system_var("socket") {
@@ -615,13 +615,13 @@ impl MyConn {
             .and_then(|pld| {
                 match pld[0] {
                     0 => {
-                        let ok = try!(OkPacket::from_payload(&pld[]));
+                        let ok = try!(OkPacket::from_payload(&pld[..]));
                         self.handle_ok(&ok);
                         self.last_command = 0;
                         Ok(())
                     },
                     _ => {
-                        let err = try!(ErrPacket::from_payload(&pld[]));
+                        let err = try!(ErrPacket::from_payload(&pld[..]));
                         Err(MySqlError(err))
                     }
                 }
@@ -655,13 +655,13 @@ impl MyConn {
             .and_then(|pld| {
                 match pld[0] {
                     0 => {
-                        let ok = try!(OkPacket::from_payload(&pld[]));
+                        let ok = try!(OkPacket::from_payload(&pld[..]));
                         self.handle_ok(&ok);
                         self.last_command = 0;
                         Ok(())
                     },
                     _ => {
-                        let err = try!(ErrPacket::from_payload(&pld[]));
+                        let err = try!(ErrPacket::from_payload(&pld[..]));
                         Err(MySqlError(err))
                     }
                 }
@@ -740,7 +740,7 @@ impl MyConn {
         }
         if self.opts.tcp_addr.is_some() {
             match TcpStream::connect(
-                (&self.opts.tcp_addr.as_ref().unwrap()[],
+                (&self.opts.tcp_addr.as_ref().unwrap()[..],
                 self.opts.tcp_port))
             {
                 Ok(mut stream) => {
@@ -794,7 +794,7 @@ impl MyConn {
     #[cfg(not(feature = "ssl"))]
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
-            let handshake = try!(HandshakePacket::from_payload(&pld[]));
+            let handshake = try!(HandshakePacket::from_payload(&pld[..]));
             if handshake.protocol_version != 10u8 {
                 return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
             }
@@ -808,12 +808,12 @@ impl MyConn {
         }).and_then(|pld| {
             match pld[0] {
                 0u8 => {
-                    let ok = try!(OkPacket::from_payload(&pld[]));
+                    let ok = try!(OkPacket::from_payload(&pld[..]));
                     self.handle_ok(&ok);
                     Ok(())
                 },
                 0xffu8 => {
-                    let err = try!(ErrPacket::from_payload(&pld[]));
+                    let err = try!(ErrPacket::from_payload(&pld[..]));
                     Err(MySqlError(err))
                 },
                 _ => Err(MyDriverError(UnexpectedPacket))
@@ -824,7 +824,7 @@ impl MyConn {
     #[cfg(feature = "ssl")]
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
-            let handshake = try!(HandshakePacket::from_payload(&pld[]));
+            let handshake = try!(HandshakePacket::from_payload(&pld[..]));
             if handshake.protocol_version != 10u8 {
                 return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
             }
@@ -848,12 +848,12 @@ impl MyConn {
         }).and_then(|pld| {
             match pld[0] {
                 0u8 => {
-                    let ok = try!(OkPacket::from_payload(&pld[]));
+                    let ok = try!(OkPacket::from_payload(&pld[..]));
                     self.handle_ok(&ok);
                     Ok(())
                 },
                 0xffu8 => {
-                    let err = try!(ErrPacket::from_payload(&pld[]));
+                    let err = try!(ErrPacket::from_payload(&pld[..]));
                     Err(MySqlError(err))
                 },
                 _ => Err(MyDriverError(UnexpectedPacket))
@@ -908,12 +908,12 @@ impl MyConn {
         try!(writer.write_all(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try!(writer.write_all(&[0u8; 23]));
-        self.write_packet(&writer[])
+        self.write_packet(&writer[..])
     }
 
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let client_flags = self.get_client_flags();
-        let scramble_buf = scramble(&hp.auth_plugin_data[],
+        let scramble_buf = scramble(&hp.auth_plugin_data[..],
                                     self.opts.get_pass().as_bytes());
         let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
         let mut payload_len = 4 + 4 + 1 + 23 + self.opts.get_user().len() + 1 + 1 + scramble_buf_len;
@@ -925,17 +925,17 @@ impl MyConn {
         try!(writer.write_all(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try!(writer.write_all(&[0u8; 23]));
-        try!(writer.write_str(&self.opts.get_user()[]));
+        try!(writer.write_str(&self.opts.get_user()[..]));
         try!(writer.write_u8(0u8));
         try!(writer.write_u8(scramble_buf_len as u8));
         if scramble_buf.is_some() {
-            try!(writer.write_all(&scramble_buf.unwrap()[]));
+            try!(writer.write_all(&scramble_buf.unwrap()[..]));
         }
         if self.opts.get_db_name().len() > 0 {
-            try!(writer.write_str(&self.opts.get_db_name()[]));
+            try!(writer.write_str(&self.opts.get_db_name()[..]));
             try!(writer.write_u8(0u8));
         }
-        self.write_packet(&writer[])
+        self.write_packet(&writer[..])
     }
 
     fn write_command(&mut self, cmd: consts::Command) -> MyResult<()> {
@@ -950,7 +950,7 @@ impl MyConn {
         let mut writer = Vec::with_capacity(buf.len() + 1);
         let _ = writer.write_u8(cmd as u8);
         let _ = writer.write_all(buf);
-        self.write_packet(&writer[])
+        self.write_packet(&writer[..])
     }
 
     /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
@@ -977,7 +977,7 @@ impl MyConn {
                         try!(writer.write_le_u16(id));
                         try!(writer.write_all(chunk));
                         try!(self.write_command_data(Command::COM_STMT_SEND_LONG_DATA,
-                                                     &writer[]));
+                                                     &writer[..]));
                     }
                 },
                 _ => (/* quite strange so do nothing */)
@@ -994,7 +994,7 @@ impl MyConn {
         match stmt.params {
             Some(ref sparams) => {
                 let (bitmap, values, large_ids) =
-                    try!(Value::to_bin_payload(&sparams[],
+                    try!(Value::to_bin_payload(&sparams[..],
                                                params,
                                                self.max_allowed_packet));
                 match large_ids {
@@ -1007,7 +1007,7 @@ impl MyConn {
                 try!(writer.write_le_u32(stmt.statement_id));
                 try!(writer.write_u8(0u8));
                 try!(writer.write_le_u32(1u32));
-                try!(writer.write_all(&bitmap[]));
+                try!(writer.write_all(&bitmap[..]));
                 try!(writer.write_u8(1u8));
                 for i in 0..params.len() {
                     match params[i] {
@@ -1033,7 +1033,7 @@ impl MyConn {
                                           0u8]))
                     }
                 }
-                try!(writer.write_all(&values[]));
+                try!(writer.write_all(&values[..]));
             },
             None => {
                 writer = Vec::with_capacity(4 + 1 + 4);
@@ -1042,13 +1042,13 @@ impl MyConn {
                 try!(writer.write_le_u32(1u32));
             }
         }
-        try!(self.write_command_data(Command::COM_STMT_EXECUTE, &writer[]));
+        try!(self.write_command_data(Command::COM_STMT_EXECUTE, &writer[..]));
         self.handle_result_set()
     }
 
     fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
         let _params: Vec<Value> = params.iter().map(|x| x.to_value() ).collect();
-        match self._execute(stmt, &_params[]) {
+        match self._execute(stmt, &_params[..]) {
             Ok((columns, ok_packet)) => {
                 Ok(QueryResult::new(self, columns, ok_packet, true))
             },
@@ -1061,7 +1061,7 @@ impl MyConn {
                           isolation_level: Option<IsolationLevel>,
                           readonly: Option<bool>) -> MyResult<()> {
         if let Some(i_level) = isolation_level {
-            let _ = try!(self.query(&format!("SET TRANSACTION ISOLATION LEVEL {}", i_level)[]));
+            let _ = try!(self.query(&format!("SET TRANSACTION ISOLATION LEVEL {}", i_level)[..]));
         }
         if let Some(readonly) = readonly {
             if self.server_version < (5, 6, 5) {
@@ -1099,7 +1099,7 @@ impl MyConn {
         let mut chunk = iter::repeat(0u8)
                              .take(self.max_allowed_packet)
                              .collect::<Vec<u8>>();
-        let mut r = file.read(&mut chunk[]);
+        let mut r = file.read(&mut chunk[..]);
         loop {
             match r {
                 Ok(cnt) => {
@@ -1113,12 +1113,12 @@ impl MyConn {
                     }
                 }
             }
-            r = file.read(&mut chunk[]);
+            r = file.read(&mut chunk[..]);
         }
         try!(self.write_packet(&[]));
         let pld = try!(self.read_packet());
         if pld[0] == 0u8 {
-            let ok = try!(OkPacket::from_payload(&pld[]));
+            let ok = try!(OkPacket::from_payload(&pld[..]));
             self.handle_ok(&ok);
             return Ok(Some(ok));
         }
@@ -1129,30 +1129,30 @@ impl MyConn {
         let pld = try!(self.read_packet());
         match pld[0] {
             0x00 => {
-                let ok = try!(OkPacket::from_payload(&pld[]));
+                let ok = try!(OkPacket::from_payload(&pld[..]));
                 self.handle_ok(&ok);
                 Ok((Vec::new(), Some(ok)))
             },
             0xfb => {
-                let mut reader = &pld[];
+                let mut reader = &pld[..];
                 try!(reader.read_u8());
                 let file_name = try!(reader.read_to_end());
-                match self.send_local_infile(&file_name[]) {
+                match self.send_local_infile(&file_name[..]) {
                     Ok(x) => Ok((Vec::new(), x)),
                     Err(err) => Err(err)
                 }
             },
             0xff => {
-                let err = try!(ErrPacket::from_payload(&pld[]));
+                let err = try!(ErrPacket::from_payload(&pld[..]));
                 Err(MySqlError(err))
             },
             _ => {
-                let mut reader = &pld[];
+                let mut reader = &pld[..];
                 let column_count = try!(reader.read_lenenc_int());
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
                 for _ in (0..column_count) {
                     let pld = try!(self.read_packet());
-                    columns.push(try!(Column::from_payload(self.last_command, &pld[])));
+                    columns.push(try!(Column::from_payload(self.last_command, &pld[..])));
                 }
                 // skip eof packet
                 try!(self.read_packet());
@@ -1187,16 +1187,16 @@ impl MyConn {
         let pld = try!(self.read_packet());
         match pld[0] {
             0xff => {
-                let err =  try!(ErrPacket::from_payload(&pld[]));
+                let err =  try!(ErrPacket::from_payload(&pld[..]));
                 Err(MySqlError(err))
             },
             _ => {
-                let mut stmt = try!(InnerStmt::from_payload(&pld[]));
+                let mut stmt = try!(InnerStmt::from_payload(&pld[..]));
                 if stmt.num_params > 0 {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as usize);
                     for _ in 0..stmt.num_params {
                         let pld = try!(self.read_packet());
-                        params.push(try!(Column::from_payload(self.last_command, &pld[])));
+                        params.push(try!(Column::from_payload(self.last_command, &pld[..])));
                     }
                     stmt.params = Some(params);
                     try!(self.read_packet());
@@ -1205,7 +1205,7 @@ impl MyConn {
                     let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as usize);
                     for _ in 0..stmt.num_columns {
                         let pld = try!(self.read_packet());
-                        columns.push(try!(Column::from_payload(self.last_command, &pld[])));
+                        columns.push(try!(Column::from_payload(self.last_command, &pld[..])));
                     }
                     stmt.columns = Some(columns);
                     try!(self.read_packet());
@@ -1249,7 +1249,7 @@ impl MyConn {
     }
 
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
-        for row in self.query(&format!("SELECT @@{};", name)[]) {
+        for row in self.query(&format!("SELECT @@{};", name)[..]) {
             match row {
                 Ok(mut r) => match r.len() {
                     0 => (),
@@ -1275,11 +1275,11 @@ impl MyConn {
         let x = pld[0];
         if x == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
-            let p = try!(EOFPacket::from_payload(&pld[]));
+            let p = try!(EOFPacket::from_payload(&pld[..]));
             self.handle_eof(&p);
             return Ok(None);
         }
-        let res = Value::from_bin_payload(&pld[], &columns[]);
+        let res = Value::from_bin_payload(&pld[..], &columns[..]);
         match res {
             Ok(p) => Ok(Some(p)),
             Err(e) => {
@@ -1304,18 +1304,18 @@ impl MyConn {
         if (x == 0xfe || x == 0xff) && pld.len() < 0xfe {
             self.has_results = false;
             if x == 0xfe {
-                let p = try!(EOFPacket::from_payload(&pld[]));
+                let p = try!(EOFPacket::from_payload(&pld[..]));
                 self.handle_eof(&p);
                 return Ok(None);
             } else /* x == 0xff */ {
-                let p = ErrPacket::from_payload(&pld[]);
+                let p = ErrPacket::from_payload(&pld[..]);
                 match p {
                     Ok(p) => return Err(MySqlError(p)),
                     Err(err) => return Err(MyIoError(err))
                 }
             }
         }
-        let res = Value::from_payload(&pld[], col_count);
+        let res = Value::from_payload(&pld[..], col_count);
         match res {
             Ok(p) => Ok(Some(p)),
             Err(err) => {
@@ -1493,7 +1493,7 @@ impl<'a> QueryResult<'a> {
     pub fn column_index<T:BytesContainer>(&self, name: T) -> Option<usize> {
         let name = name.container_as_bytes();
         for (i, c) in self.columns.iter().enumerate() {
-            if &c.name[] == name {
+            if &c.name[..] == name {
                 return Some(i)
             }
         }
@@ -1840,7 +1840,7 @@ mod test {
             }
             let query = format!("LOAD DATA LOCAL INFILE '{}' INTO TABLE x.tbl",
                                 str::from_utf8(path.as_vec()).unwrap());
-            assert!(conn.query(&query[]).is_ok());
+            assert!(conn.query(&query[..]).is_ok());
             for (i, row) in conn.query("SELECT * FROM x.tbl")
                                 .unwrap().enumerate() {
                 let row = row.unwrap();

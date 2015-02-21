@@ -37,12 +37,12 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         let mut w = [0u32; 80];
         let part = &msg[i * 64..(i+1) * 64];
         {
-            let mut reader = &part[];
-            for j in 0us..16 {
+            let mut reader = &part[..];
+            for j in 0usize..16 {
                 w[j] = reader.read_be_u32().unwrap();
             }
         }
-        for j in 16us..80 {
+        for j in 16usize..80 {
             let val = w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16];
             w[j] = circular_shift(1, val);
         }
@@ -52,7 +52,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         let mut d = hash[3];
         let mut e = hash[4];
         let mut temp: u32;
-        for t in 0us..20 {
+        for t in 0usize..20 {
             temp = circular_shift(5, a) + (b & c | !b & d) + e + w[t] + K1;
             e = d;
             d = c;
@@ -60,7 +60,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             b = a;
             a = temp;
         }
-        for t in 20us..40 {
+        for t in 20usize..40 {
             temp = circular_shift(5, a) + (b ^ c ^ d) + e + w[t] + K2;
             e = d;
             d = c;
@@ -68,7 +68,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             b = a;
             a = temp;
         }
-        for t in 40us..60 {
+        for t in 40usize..60 {
             temp = circular_shift(5, a) + (b & c | b & d | c & d) + e + w[t] + K3;
             e = d;
             d = c;
@@ -76,7 +76,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             b = a;
             a = temp;
         }
-        for t in 60us..80 {
+        for t in 60usize..80 {
             temp = circular_shift(5, a) + (b ^ c ^ d) + e + w[t] + K4;
             e = d;
             d = c;

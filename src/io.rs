@@ -188,7 +188,7 @@ pub trait MyWriter: Writer {
             buf[offset] = (((0xff << (offset * 8)) & x) >> (offset * 8)) as u8;
             offset += 1;
         }
-        self.write_all(&buf[])
+        self.write_all(&buf[..])
     }
 
     fn write_lenenc_int(&mut self, x: u64) -> IoResult<()> {
@@ -230,7 +230,7 @@ pub trait MyWriter: Writer {
             try!(writer.write_u8(seq_id));
             seq_id += 1;
             try!(writer.write_all(chunk));
-            try!(self.write_all(&writer[]));
+            try!(self.write_all(&writer[..]));
         }
         if last_was_max {
             try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));

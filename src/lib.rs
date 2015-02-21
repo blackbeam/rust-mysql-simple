@@ -27,14 +27,13 @@
 #![crate_type="dylib"]
 
 #![feature(unsafe_destructor,
-           slicing_syntax,
            plugin,
            io,
            core,
-           hash,
            collections,
-           path,
-           std_misc)]
+           std_misc,
+           old_io,
+           old_path)]
 
 #![plugin(regex_macros)]
 
