@@ -512,7 +512,7 @@ impl FromValue for i64 {
     fn from_value_opt(v: &Value) -> Option<i64> {
         match *v {
             Value::Int(x) => Some(x),
-            Value::UInt(x) if x <= int_max_value::<i64> as u64 => Some(x as i64),
+            Value::UInt(x) if x <= {let m: i64 = Int::max_value(); m as u64} => Some(x as i64),
             Value::Bytes(ref bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
                     StrExt::parse::<i64>(x).ok()
