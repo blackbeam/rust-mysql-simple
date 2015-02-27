@@ -1638,9 +1638,10 @@ mod test {
     mod my_conn {
         use test;
         use std::iter;
-        use std::{str};
         use std::env;
-        use std::old_io::fs::{File, unlink};
+        use std::borrow::ToOwned;
+        use std::fs;
+        use std::io::Write;
         use time::{Tm, now};
         use super::super::{MyConn, MyOpts};
         use super::super::super::value::{ToValue, from_value};
@@ -1831,15 +1832,15 @@ mod test {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
             let mut path = env::current_dir().unwrap();
-            path.push("local_infile.txt".to_string());
+            path.push("local_infile.txt");
             {
-                let mut file = File::create(&path).unwrap();
-                let _ = file.write_line("AAAAAA");
-                let _ = file.write_line("BBBBBB");
-                let _ = file.write_line("CCCCCC");
+                let mut file = fs::File::create(&path).unwrap();
+                let _ = file.write(b"AAAAAA\n");
+                let _ = file.write(b"BBBBBB\n");
+                let _ = file.write(b"CCCCCC\n");
             }
             let query = format!("LOAD DATA LOCAL INFILE '{}' INTO TABLE x.tbl",
-                                str::from_utf8(path.as_vec()).unwrap());
+                                path.to_str().unwrap().to_owned());
             assert!(conn.query(&query[..]).is_ok());
             for (i, row) in conn.query("SELECT * FROM x.tbl")
                                 .unwrap().enumerate() {
@@ -1851,7 +1852,7 @@ mod test {
                     _ => unreachable!()
                 }
             }
-            let _ = unlink(&path);
+            let _ = fs::remove_file(&path);
         }
         #[test]
         fn should_reset_connection() {
