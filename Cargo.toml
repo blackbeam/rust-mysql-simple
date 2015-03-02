@@ -54,6 +54,6 @@ regex_macros = "~0.1.4"
 bitflags = "0.1"
 
 [dependencies.openssl]
-openssl = "0.2.14"
+version = "<0.5.0"
 optional = true
 
