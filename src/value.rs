@@ -699,7 +699,7 @@ impl FromValue for Duration {
                                 StrExt::parse::<i64>(x).ok()
                             });
                             if x.is_some() {
-                                x.unwrap() * 10i64.pow(6 - ms.len())
+                                x.unwrap() * 10i64.pow(6 - ms.len() as u32)
                             } else {
                                 return None;
                             }
