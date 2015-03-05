@@ -1,13 +1,18 @@
-use std::old_io::{BufReader, IoResult, SeekCur};
 use std::str::{from_utf8};
 use std::borrow::ToOwned;
 use std::num::{Int, Float};
 use std::time::{Duration};
 use std::iter;
+use std::io;
+use std::io::Seek;
 use time::{Tm, Timespec, now, strptime, at};
+
 use super::consts;
 use super::conn::{Column};
-use super::io::{MyWriter, MyReader};
+use super::io::{Write, Read};
+
+use byteorder::LittleEndian as LE;
+use byteorder::{ByteOrder, WriteBytesExt};
 
 lazy_static! {
     static ref TM_UTCOFF: i32 = now().tm_utcoff;
@@ -136,7 +141,7 @@ impl Value {
     }
 
     #[doc(hidden)]
-    pub fn to_bin(&self) -> IoResult<Vec<u8>> {
+    pub fn to_bin(&self) -> io::Result<Vec<u8>> {
         let mut writer = Vec::with_capacity(256);
         match *self {
             Value::NULL => (),
@@ -144,73 +149,73 @@ impl Value {
                 try!(writer.write_lenenc_bytes(&x[..]));
             },
             Value::Int(x) => {
-                try!(writer.write_le_i64(x));
+                try!(writer.write_i64::<LE>(x));
             },
             Value::UInt(x) => {
-                try!(writer.write_le_u64(x));
+                try!(writer.write_u64::<LE>(x));
             },
             Value::Float(x) => {
-                try!(writer.write_le_f64(x));
+                try!(writer.write_f64::<LE>(x));
             },
             Value::Date(0u16, 0u8, 0u8, 0u8, 0u8, 0u8, 0u32) => {
-                try!(writer.write_u8(0u8));
+                try!(WriteBytesExt::write_u8(&mut writer, 0u8));
             },
             Value::Date(y, m, d, 0u8, 0u8, 0u8, 0u32) => {
-                try!(writer.write_u8(4u8));
-                try!(writer.write_le_u16(y));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(d));
+                try!(WriteBytesExt::write_u8(&mut writer, 4u8));
+                try!(writer.write_u16::<LE>(y));
+                try!(WriteBytesExt::write_u8(&mut writer, m));
+                try!(WriteBytesExt::write_u8(&mut writer, d));
             },
             Value::Date(y, m, d, h, i, s, 0u32) => {
-                try!(writer.write_u8(7u8));
-                try!(writer.write_le_u16(y));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(d));
-                try!(writer.write_u8(h));
-                try!(writer.write_u8(i));
-                try!(writer.write_u8(s));
+                try!(WriteBytesExt::write_u8(&mut writer, 7u8));
+                try!(writer.write_u16::<LE>(y));
+                try!(WriteBytesExt::write_u8(&mut writer, m));
+                try!(WriteBytesExt::write_u8(&mut writer, d));
+                try!(WriteBytesExt::write_u8(&mut writer, h));
+                try!(WriteBytesExt::write_u8(&mut writer, i));
+                try!(WriteBytesExt::write_u8(&mut writer, s));
             },
             Value::Date(y, m, d, h, i, s, u) => {
-                try!(writer.write_u8(11u8));
-                try!(writer.write_le_u16(y));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(d));
-                try!(writer.write_u8(h));
-                try!(writer.write_u8(i));
-                try!(writer.write_u8(s));
-                try!(writer.write_le_u32(u));
+                try!(WriteBytesExt::write_u8(&mut writer, 11u8));
+                try!(writer.write_u16::<LE>(y));
+                try!(WriteBytesExt::write_u8(&mut writer, m));
+                try!(WriteBytesExt::write_u8(&mut writer, d));
+                try!(WriteBytesExt::write_u8(&mut writer, h));
+                try!(WriteBytesExt::write_u8(&mut writer, i));
+                try!(WriteBytesExt::write_u8(&mut writer, s));
+                try!(writer.write_u32::<LE>(u));
             },
-            Value::Time(_, 0u32, 0u8, 0u8, 0u8, 0u32) => try!(writer.write_u8(0u8)),
+            Value::Time(_, 0u32, 0u8, 0u8, 0u8, 0u32) => try!(WriteBytesExt::write_u8(&mut writer, 0u8)),
             Value::Time(neg, d, h, m, s, 0u32) => {
-                try!(writer.write_u8(8u8));
-                try!(writer.write_u8(if neg {1u8} else {0u8}));
-                try!(writer.write_le_u32(d));
-                try!(writer.write_u8(h));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(s));
+                try!(WriteBytesExt::write_u8(&mut writer, 8u8));
+                try!(WriteBytesExt::write_u8(&mut writer, if neg {1u8} else {0u8}));
+                try!(writer.write_u32::<LE>(d));
+                try!(WriteBytesExt::write_u8(&mut writer, h));
+                try!(WriteBytesExt::write_u8(&mut writer, m));
+                try!(WriteBytesExt::write_u8(&mut writer, s));
             },
             Value::Time(neg, d, h, m, s, u) => {
-                try!(writer.write_u8(12u8));
-                try!(writer.write_u8(if neg {1u8} else {0u8}));
-                try!(writer.write_le_u32(d));
-                try!(writer.write_u8(h));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(s));
-                try!(writer.write_le_u32(u));
+                try!(WriteBytesExt::write_u8(&mut writer, 12u8));
+                try!(WriteBytesExt::write_u8(&mut writer, if neg {1u8} else {0u8}));
+                try!(writer.write_u32::<LE>(d));
+                try!(WriteBytesExt::write_u8(&mut writer, h));
+                try!(WriteBytesExt::write_u8(&mut writer, m));
+                try!(WriteBytesExt::write_u8(&mut writer, s));
+                try!(writer.write_u32::<LE>(u));
             }
         };
         Ok(writer)
     }
 
     #[doc(hidden)]
-    pub fn from_payload(pld: &[u8], columns_count: usize) -> IoResult<Vec<Value>> {
+    pub fn from_payload(pld: &[u8], columns_count: usize) -> io::Result<Vec<Value>> {
         let mut output = Vec::with_capacity(columns_count);
-        let mut reader = BufReader::new(pld);
+        let mut reader = io::Cursor::new(pld);
         loop {
-            if reader.eof() {
+            if reader.get_ref().len() as u64 == reader.position() {
                 break;
-            } else if pld[try!(reader.tell()) as usize] == 0xfb {
-                try!(reader.seek(1, SeekCur));
+            } else if pld[reader.position() as usize] == 0xfb {
+                try!(reader.seek(io::SeekFrom::Current(1)));
                 output.push(Value::NULL);
             } else {
                 output.push(Value::Bytes(try!(reader.read_lenenc_bytes())));
@@ -220,7 +225,7 @@ impl Value {
     }
 
     #[doc(hidden)]
-    pub fn from_bin_payload(pld: &[u8], columns: &[Column]) -> IoResult<Vec<Value>> {
+    pub fn from_bin_payload(pld: &[u8], columns: &[Column]) -> io::Result<Vec<Value>> {
         let bit_offset = 2; // http://dev.mysql.com/doc/internals/en/null-bitmap.html
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
         let mut bitmap = Vec::with_capacity(bitmap_len);
@@ -243,7 +248,7 @@ impl Value {
 
     // (NULL-bitmap, values, ids of fields to send throwgh send_long_data)
     #[doc(hidden)]
-    pub fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: usize) -> IoResult<(Vec<u8>, Vec<u8>, Option<Vec<u16>>)> {
+    pub fn to_bin_payload(params: &[Column], values: &[Value], max_allowed_packet: usize) -> io::Result<(Vec<u8>, Vec<u8>, Option<Vec<u16>>)> {
         let bitmap_len = (params.len() + 7) / 8;
         let mut large_ids = Vec::new();
         let mut writer = Vec::new();
@@ -258,7 +263,7 @@ impl Value {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
                         written += val.len();
-                        try!(writer.write_all(&val[..]));
+                        try!(io::Write::write_all(&mut writer, &val[..]));
                     } else {
                         large_ids.push(i);
                     }

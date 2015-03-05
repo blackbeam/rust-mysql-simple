@@ -26,14 +26,17 @@
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
-#![feature(unsafe_destructor,
-           plugin,
-           io,
-           core,
-           collections,
-           std_misc,
-           old_io,
-           old_path)]
+#![feature(unsafe_destructor)]
+#![feature(plugin)]
+#![feature(io)]
+#![feature(core)]
+#![feature(net)]
+#![feature(fs)]
+#![feature(path)]
+#![feature(test)]
+#![feature(collections)]
+#![feature(std_misc)]
+#![feature(old_path)]
 
 #![plugin(regex_macros)]
 
@@ -49,6 +52,7 @@ extern crate regex;
 extern crate lazy_static;
 #[macro_use]
 extern crate bitflags;
+extern crate byteorder;
 
 mod scramble;
 pub mod consts;

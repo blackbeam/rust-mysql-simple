@@ -1,4 +1,9 @@
-use std::old_io::{BufWriter};
+use std::num::wrapping::WrappingOps;
+
+use byteorder::ByteOrder;
+use byteorder::ReadBytesExt;
+use byteorder::WriteBytesExt;
+use byteorder::BigEndian as BE;
 
 static K1: u32 = 0x5A827999u32;
 static K2: u32 = 0x6ED9EBA1u32;
@@ -13,10 +18,10 @@ fn circular_shift(bits: u32, word: u32) -> u32 {
 #[allow(unused_must_use)]
 pub fn sha1(message: &[u8]) -> Vec<u8> {
     let mut hash: [u32; 5] = [0x67452301,
-                                0xEFCDAB89,
-                                0x98BADCFE,
-                                0x10325476,
-                                0xC3D2E1F0];
+                              0xEFCDAB89,
+                              0x98BADCFE,
+                              0x10325476,
+                              0xC3D2E1F0];
     let mut msg = message.to_vec();
     let msg_bit_len = msg.len() * 8;
     let offset = (msg.len() * 8) % 512;
@@ -31,7 +36,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             msg.push(0u8);
         }
     }
-    msg.write_be_u64(msg_bit_len as u64);
+    msg.write_u64::<BE>(msg_bit_len as u64);
 
     for i in 0..(msg.len() * 8 / 512) {
         let mut w = [0u32; 80];
@@ -39,7 +44,7 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         {
             let mut reader = &part[..];
             for j in 0usize..16 {
-                w[j] = reader.read_be_u32().unwrap();
+                w[j] = reader.read_u32::<BE>().unwrap();
             }
         }
         for j in 16usize..80 {
@@ -53,7 +58,10 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         let mut e = hash[4];
         let mut temp: u32;
         for t in 0usize..20 {
-            temp = circular_shift(5, a) + (b & c | !b & d) + e + w[t] + K1;
+            temp = circular_shift(5, a).wrapping_add(b & c | !b & d)
+                                       .wrapping_add(e)
+                                       .wrapping_add(w[t])
+                                       .wrapping_add(K1);
             e = d;
             d = c;
             c = circular_shift(30, b);
@@ -61,7 +69,10 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             a = temp;
         }
         for t in 20usize..40 {
-            temp = circular_shift(5, a) + (b ^ c ^ d) + e + w[t] + K2;
+            temp = circular_shift(5, a).wrapping_add(b ^ c ^ d)
+                                       .wrapping_add(e)
+                                       .wrapping_add(w[t])
+                                       .wrapping_add(K2);
             e = d;
             d = c;
             c = circular_shift(30, b);
@@ -69,7 +80,10 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             a = temp;
         }
         for t in 40usize..60 {
-            temp = circular_shift(5, a) + (b & c | b & d | c & d) + e + w[t] + K3;
+            temp = circular_shift(5, a).wrapping_add(b & c | b & d | c & d)
+                                       .wrapping_add(e)
+                                       .wrapping_add(w[t])
+                                       .wrapping_add(K3);
             e = d;
             d = c;
             c = circular_shift(30, b);
@@ -77,30 +91,30 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
             a = temp;
         }
         for t in 60usize..80 {
-            temp = circular_shift(5, a) + (b ^ c ^ d) + e + w[t] + K4;
+            temp = circular_shift(5, a).wrapping_add(b ^ c ^ d)
+                                       .wrapping_add(e)
+                                       .wrapping_add(w[t])
+                                       .wrapping_add(K4);
             e = d;
             d = c;
             c = circular_shift(30, b);
             b = a;
             a = temp;
         }
-        hash[0] += a;
-        hash[1] += b;
-        hash[2] += c;
-        hash[3] += d;
-        hash[4] += e;
+        hash[0] = hash[0].wrapping_add(a);
+        hash[1] = hash[1].wrapping_add(b);
+        hash[2] = hash[2].wrapping_add(c);
+        hash[3] = hash[3].wrapping_add(d);
+        hash[4] = hash[4].wrapping_add(e);
     }
 
-    let mut output = [0u8; 20];
-    {
-        let mut writer = BufWriter::new(&mut output);
-        writer.write_be_u32(hash[0]);
-        writer.write_be_u32(hash[1]);
-        writer.write_be_u32(hash[2]);
-        writer.write_be_u32(hash[3]);
-        writer.write_be_u32(hash[4]);
-    }
-    output.to_vec()
+    let mut output = Vec::with_capacity(20);
+    output.write_u32::<BE>(hash[0]);
+    output.write_u32::<BE>(hash[1]);
+    output.write_u32::<BE>(hash[2]);
+    output.write_u32::<BE>(hash[3]);
+    output.write_u32::<BE>(hash[4]);
+    output
 }
 
 #[cfg(test)]

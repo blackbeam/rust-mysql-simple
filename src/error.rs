@@ -1,15 +1,18 @@
+use std::io;
+use std::fmt;
+use std::fmt::Display;
+use std::error;
+use std::old_io;
+
+use byteorder::Error;
 #[cfg(feature = "openssl")]
 use openssl::ssl::error::{SslError};
-use core::fmt::{Display, self};
-use std::old_io;
-use std::error;
+
 pub use super::packet::ErrPacket;
-
-
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum MyError {
-    MyIoError(old_io::IoError),
+    MyIoError(io::Error),
     MySqlError(ErrPacket),
     MyDriverError(DriverError),
     #[cfg(feature = "openssl")]
@@ -45,9 +48,38 @@ impl error::Error for MyError {
     }
 }
 
+impl error::FromError<io::Error> for MyError {
+    fn from_error(err: io::Error) -> MyError {
+        MyError::MyIoError(err)
+    }
+}
+
 impl error::FromError<old_io::IoError> for MyError {
     fn from_error(err: old_io::IoError) -> MyError {
-        MyError::MyIoError(err)
+        let kind = match err.kind {
+            old_io::IoErrorKind::FileNotFound => io::ErrorKind::FileNotFound,
+            old_io::IoErrorKind::PermissionDenied => io::ErrorKind::PermissionDenied,
+            old_io::IoErrorKind::ConnectionRefused => io::ErrorKind::ConnectionRefused,
+            old_io::IoErrorKind::ConnectionReset => io::ErrorKind::ConnectionReset,
+            old_io::IoErrorKind::ConnectionAborted => io::ErrorKind::ConnectionAborted,
+            old_io::IoErrorKind::NotConnected => io::ErrorKind::NotConnected,
+            old_io::IoErrorKind::BrokenPipe => io::ErrorKind::BrokenPipe,
+            old_io::IoErrorKind::PathAlreadyExists => io::ErrorKind::PathAlreadyExists,
+            old_io::IoErrorKind::PathDoesntExist => io::ErrorKind::PathDoesntExist,
+            old_io::IoErrorKind::MismatchedFileTypeForOperation => io::ErrorKind::MismatchedFileTypeForOperation,
+            old_io::IoErrorKind::ResourceUnavailable => io::ErrorKind::ResourceUnavailable,
+            old_io::IoErrorKind::InvalidInput => io::ErrorKind::InvalidInput,
+            old_io::IoErrorKind::TimedOut => io::ErrorKind::TimedOut,
+            _ => io::ErrorKind::Other,
+        };
+        MyError::MyIoError(io::Error::new(kind, err.desc, err.detail))
+    }
+}
+
+impl error::FromError<Error> for MyError {
+    fn from_error(err: Error) -> MyError {
+        let io_err: io::Error = error::FromError::from_error(err);
+        error::FromError::from_error(io_err)
     }
 }
 

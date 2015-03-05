@@ -52,8 +52,9 @@ time = "~0.1.11"
 regex = "~0.1.9"
 regex_macros = "~0.1.4"
 bitflags = "0.1"
+byteorder = "*"
 
 [dependencies.openssl]
-version = "<0.5.0"
+version = ">=0.5.0"
 optional = true
 

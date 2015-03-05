@@ -1,28 +1,33 @@
 #[cfg(feature = "openssl")]
 use openssl::{ssl, x509};
 
+use std::borrow::Borrow;
+use std::default::Default;
+use std::fs;
 use std::fmt;
-use std::default::{Default};
-use std::old_io::{Reader, File, IoResult, EndOfFile};
-use std::old_io::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::old_io::net::tcp::{TcpStream};
-use std::old_io::net::pipe::{UnixStream};
-use std::num::{FromPrimitive};
-use std::old_path::{BytesContainer};
-use std::str::{FromStr};
-use std::iter;
+use std::io;
+use std::io::Read;
+use std::io::ReadExt;
+use std::io::Write as NewWrite;
+use std::net::IpAddr;
+use std::net::TcpStream;
+use std::num::FromPrimitive;
+use std::old_io::net::pipe::UnixStream;
+use std::old_path::posix::Path as OldPath;
+use std::path;
+use std::str::FromStr;
+
 use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
 use super::io::MyStream;
-use super::io::{
-    MyReader,
-    MyWriter,
-    PlainStream
-};
-use super::io::TcpOrUnixStream::{TCPStream, UNIXStream};
+use super::io::Read as MyRead;
+use super::io::Write;
+use super::io::PlainStream;
+use super::io::TcpOrUnixStream::TCPStream;
+use super::io::TcpOrUnixStream::UNIXStream;
 #[cfg(feature = "ssl")]
-use super::io::{MySslStream};
+use super::io::MySslStream;
 use super::error::MyError::{
     MyIoError,
     MySqlError,
@@ -40,11 +45,14 @@ use super::error::DriverError::{
 use super::error::MyResult;
 #[cfg(feature = "ssl")]
 use super::error::DriverError::SslNotSupported;
-use super::scramble::{scramble};
+use super::scramble::scramble;
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
 use super::value::Value;
 use super::value::{ToValue, from_value, from_value_opt};
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
+
+use byteorder::LittleEndian as LE;
+use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 
 pub mod pool;
 
@@ -179,13 +187,12 @@ struct InnerStmt {
 }
 
 impl InnerStmt {
-    fn from_payload(pld: &[u8]) -> IoResult<InnerStmt> {
-        let mut reader = &pld[..];
-        try!(reader.read_u8());
-        let statement_id = try!(reader.read_le_u32());
-        let num_columns = try!(reader.read_le_u16());
-        let num_params = try!(reader.read_le_u16());
-        let warning_count = try!(reader.read_le_u16());
+    fn from_payload(pld: &[u8]) -> io::Result<InnerStmt> {
+        let mut reader = &pld[1..];
+        let statement_id = try!(reader.read_u32::<LE>());
+        let num_columns = try!(reader.read_u16::<LE>());
+        let num_params = try!(reader.read_u16::<LE>());
+        let warning_count = try!(reader.read_u16::<LE>());
         Ok(InnerStmt{statement_id: statement_id,
                      num_columns: num_columns,
                      num_params: num_params,
@@ -232,11 +239,11 @@ impl<'a> Stmt<'a> {
 
     /// Returns index of a `Stmt`'s column by name.
     pub fn column_index<T>(&self, name: T) -> Option<usize>
-    where T: BytesContainer {
+    where T: Str {
         match self.stmt.columns {
             None => None,
             Some(ref columns) => {
-                let name = name.container_as_bytes();
+                let name = name.as_slice().as_bytes();
                 for (i, c) in columns.iter().enumerate() {
                     if &c.name[..] == name {
                         return Some(i)
@@ -322,7 +329,7 @@ pub struct Column {
 
 impl Column {
     #[inline]
-    fn from_payload(command: u8, pld: &[u8]) -> IoResult<Column> {
+    fn from_payload(command: u8, pld: &[u8]) -> io::Result<Column> {
         let mut reader = &pld[..];
         // Skip catalog
         let _ = try!(reader.read_lenenc_bytes());
@@ -332,17 +339,17 @@ impl Column {
         let name = try!(reader.read_lenenc_bytes());
         let org_name = try!(reader.read_lenenc_bytes());
         let _ = try!(reader.read_lenenc_int());
-        let character_set = try!(reader.read_le_u16());
-        let column_length = try!(reader.read_le_u32());
-        let column_type = try!(reader.read_u8());
-        let flags = consts::ColumnFlags::from_bits_truncate(try!(reader.read_le_u16()));
-        let decimals = try!(reader.read_u8());
+        let character_set = try!(reader.read_u16::<LE>());
+        let column_length = try!(reader.read_u32::<LE>());
+        let column_type = try!(ReadBytesExt::read_u8(&mut reader));
+        let flags = consts::ColumnFlags::from_bits_truncate(try!(reader.read_u16::<LE>()));
+        let decimals = try!(ReadBytesExt::read_u8(&mut reader));
         // skip filler
-        try!(reader.read_le_u16());
-        let mut default_values = Vec::with_capacity(0);
+        try!(reader.read_u16::<LE>());
+        let mut default_values = Vec::with_capacity(reader.len());
         if command == Command::COM_FIELD_LIST as u8 {
             let len = try!(reader.read_lenenc_int());
-            default_values = try!(reader.read_exact(len as usize));
+            try!(reader.take(len).read_to_end(&mut default_values));
         }
         Ok(Column{schema: schema,
                   table: table,
@@ -390,7 +397,7 @@ pub struct MyOpts {
     /// TCP port of mysql server (defaults to `3306`).
     pub tcp_port: u16,
     /// Path to unix socket of mysql server (defaults to `None`).
-    pub unix_addr: Option<Path>,
+    pub unix_addr: Option<path::PathBuf>,
     /// User (defaults to `None`).
     pub user: Option<String>,
     /// Password (defaults to `None`).
@@ -402,7 +409,7 @@ pub struct MyOpts {
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
     pub prefer_socket: bool,
     /// TCP keepalive timeout in seconds (defaults to one hour).
-    pub keepalive_timeout: Option<usize>,
+    pub keepalive_timeout: Option<u32>,
 
     #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
@@ -416,7 +423,7 @@ pub struct MyOpts {
     /// If not None, then ssl connection implied.
     ///
     /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
-    pub ssl_opts: Option<(Path, Option<(Path, Path)>)>
+    pub ssl_opts: Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>
 }
 
 impl MyOpts {
@@ -563,12 +570,19 @@ impl MyConn {
         if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
             let addr: Option<IpAddr> = FromStr::from_str(
                 &conn.opts.tcp_addr.as_ref().unwrap()[..]).ok();
-            if addr == Some(Ipv4Addr(127, 0, 0, 1)) ||
-               addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
+            let is_loopback = match addr {
+                Some(IpAddr::V4(addr)) => addr.is_loopback(),
+                Some(IpAddr::V6(addr)) => addr.is_loopback(),
+                _ => false,
+            };
+            if is_loopback {
                 match conn.get_system_var("socket") {
                     Some(path) => {
-                        let opts = MyOpts{unix_addr: Some(Path::new(from_value::<Vec<u8>>(&path))),
-                                          ..conn.opts.clone()};
+                        let path = from_value::<String>(&path);
+                        let opts = MyOpts{
+                            unix_addr: Some(path::PathBuf::new(path.as_slice())),
+                            ..conn.opts.clone()
+                        };
                         return MyConn::new(opts).or(Ok(conn));
                     },
                     _ => return Ok(conn)
@@ -588,12 +602,17 @@ impl MyConn {
             if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
                 let addr: Option<IpAddr> = FromStr::from_str(
                     &conn.opts.tcp_addr.as_ref().unwrap()[..]).ok();
-                if addr == Some(Ipv4Addr(127, 0, 0, 1)) ||
-                   addr == Some(Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)) {
+                let is_loopback = match addr {
+                    Some(IpAddr::V4(addr)) => addr.is_loopback(),
+                    Some(IpAddr::V6(addr)) => addr.is_loopback(),
+                    _ => false,
+                };
+                if is_loopback {
                     match conn.get_system_var("socket") {
                         Some(path) => {
+                            let path = from_value::<String>(&path);
                             let opts = MyOpts{
-                                unix_addr: Some(Path::new(from_value::<Vec<u8>>(&path))),
+                                unix_addr: Some(path::PathBuf::new(path.as_slice())),
                                 ..conn.opts.clone()
                             };
                             return MyConn::new(opts).or(Ok(conn));
@@ -701,12 +720,12 @@ impl MyConn {
                 }
                 match self.opts.ssl_opts {
                     Some((ref ca_cert, None)) => {
-                        ctx.set_CA_file(ca_cert);
+                        ctx.set_CA_file(&ca_cert);
                     },
                     Some((ref ca_cert, Some((ref client_cert, ref client_key)))) => {
-                        ctx.set_CA_file(ca_cert);
-                        ctx.set_certificate_file(client_cert, x509::X509FileType::PEM);
-                        ctx.set_private_key_file(client_key, x509::X509FileType::PEM);
+                        ctx.set_CA_file(&ca_cert);
+                        ctx.set_certificate_file(&client_cert, x509::X509FileType::PEM);
+                        ctx.set_private_key_file(&client_key, x509::X509FileType::PEM);
                     },
                     _ => { unreachable!() }
                 }
@@ -723,7 +742,10 @@ impl MyConn {
 
     fn connect_stream(&mut self) -> MyResult<()> {
         if self.opts.unix_addr.is_some() {
-            match UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
+            let unix_path_str = self.opts.unix_addr.as_ref().unwrap().to_string_lossy();
+            let unix_path_str: &str = unix_path_str.borrow();
+            let unix_path = OldPath::new(&unix_path_str);
+            match UnixStream::connect(unix_path) {
                 Ok(stream) => {
                     self.stream = Some(MyStream::InsecureStream(PlainStream{s: UNIXStream(stream), wrapped: false}));
                     return Ok(());
@@ -740,10 +762,10 @@ impl MyConn {
         }
         if self.opts.tcp_addr.is_some() {
             match TcpStream::connect(
-                (&self.opts.tcp_addr.as_ref().unwrap()[..],
-                self.opts.tcp_port))
+                &(&self.opts.tcp_addr.as_ref().unwrap()[..],
+                  self.opts.tcp_port))
             {
-                Ok(mut stream) => {
+                Ok(stream) => {
                     // keepalive one hour
                     let keepalive_timeout = self.opts.keepalive_timeout.clone();
                     try!(stream.set_keepalive(keepalive_timeout));
@@ -903,12 +925,12 @@ impl MyConn {
     #[cfg(feature = "ssl")]
     fn do_ssl_request(&mut self) -> MyResult<()> {
         let client_flags = self.get_client_flags();
-        let mut writer = Vec::with_capacity(4 + 4 + 1 + 23);
-        try!(writer.write_le_u32(client_flags.bits()));
+        let mut writer = io::Cursor::new(Vec::with_capacity(4 + 4 + 1 + 23));
+        try!(writer.write_u32::<LE>(client_flags.bits()));
         try!(writer.write_all(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try!(writer.write_all(&[0u8; 23]));
-        self.write_packet(&writer[..])
+        self.write_packet(writer.into_inner().borrow())
     }
 
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
@@ -920,22 +942,22 @@ impl MyConn {
         if self.opts.get_db_name().len() > 0 {
             payload_len += self.opts.get_db_name().len() + 1;
         }
-        let mut writer = Vec::with_capacity(payload_len);
-        try!(writer.write_le_u32(client_flags.bits()));
+        let mut writer = io::Cursor::new(Vec::with_capacity(payload_len));
+        try!(writer.write_u32::<LE>(client_flags.bits()));
         try!(writer.write_all(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try!(writer.write_all(&[0u8; 23]));
-        try!(writer.write_str(&self.opts.get_user()[..]));
+        try!(writer.write_all(&self.opts.get_user()[..].as_bytes()));
         try!(writer.write_u8(0u8));
         try!(writer.write_u8(scramble_buf_len as u8));
         if scramble_buf.is_some() {
             try!(writer.write_all(&scramble_buf.unwrap()[..]));
         }
         if self.opts.get_db_name().len() > 0 {
-            try!(writer.write_str(&self.opts.get_db_name()[..]));
+            try!(writer.write_all(&self.opts.get_db_name()[..].as_bytes()));
             try!(writer.write_u8(0u8));
         }
-        self.write_packet(&writer[..])
+        self.write_packet(writer.into_inner().borrow())
     }
 
     fn write_command(&mut self, cmd: consts::Command) -> MyResult<()> {
@@ -947,10 +969,10 @@ impl MyConn {
     fn write_command_data(&mut self, cmd: consts::Command, buf: &[u8]) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd as u8;
-        let mut writer = Vec::with_capacity(buf.len() + 1);
+        let mut writer = io::Cursor::new(Vec::with_capacity(buf.len() + 1));
         let _ = writer.write_u8(cmd as u8);
         let _ = writer.write_all(buf);
-        self.write_packet(&writer[..])
+        self.write_packet(writer.into_inner().borrow())
     }
 
     /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
@@ -972,12 +994,12 @@ impl MyConn {
                 Bytes(ref x) => {
                     for chunk in x.chunks(self.max_allowed_packet - 7) {
                         let chunk_len = chunk.len() + 7;
-                        let mut writer = Vec::with_capacity(chunk_len);
-                        try!(writer.write_le_u32(stmt.statement_id));
-                        try!(writer.write_le_u16(id));
+                        let mut writer = io::Cursor::new(Vec::with_capacity(chunk_len));
+                        try!(writer.write_u32::<LE>(stmt.statement_id));
+                        try!(writer.write_u16::<LE>(id));
                         try!(writer.write_all(chunk));
                         try!(self.write_command_data(Command::COM_STMT_SEND_LONG_DATA,
-                                                     &writer[..]));
+                                                     writer.into_inner().borrow()));
                     }
                 },
                 _ => (/* quite strange so do nothing */)
@@ -990,7 +1012,7 @@ impl MyConn {
         if stmt.num_params != params.len() as u16 {
             return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, params.len())));
         }
-        let mut writer: Vec<u8>;
+        let mut writer: io::Cursor<_>;
         match stmt.params {
             Some(ref sparams) => {
                 let (bitmap, values, large_ids) =
@@ -1001,12 +1023,12 @@ impl MyConn {
                     Some(ids) => try!(self.send_long_data(stmt, params, ids)),
                     _ => ()
                 }
-                writer = Vec::with_capacity(9 + bitmap.len() + 1 +
-                                                  params.len() * 2 +
-                                                  values.len());
-                try!(writer.write_le_u32(stmt.statement_id));
+                writer = io::Cursor::new(Vec::with_capacity(9 + bitmap.len() + 1 +
+                                                            params.len() * 2 +
+                                                            values.len()));
+                try!(writer.write_u32::<LE>(stmt.statement_id));
                 try!(writer.write_u8(0u8));
-                try!(writer.write_le_u32(1u32));
+                try!(writer.write_u32::<LE>(1u32));
                 try!(writer.write_all(&bitmap[..]));
                 try!(writer.write_u8(1u8));
                 for i in 0..params.len() {
@@ -1036,13 +1058,13 @@ impl MyConn {
                 try!(writer.write_all(&values[..]));
             },
             None => {
-                writer = Vec::with_capacity(4 + 1 + 4);
-                try!(writer.write_le_u32(stmt.statement_id));
+                writer = io::Cursor::new(Vec::with_capacity(4 + 1 + 4));
+                try!(writer.write_u32::<LE>(stmt.statement_id));
                 try!(writer.write_u8(0u8));
-                try!(writer.write_le_u32(1u32));
+                try!(writer.write_u32::<LE>(1u32));
             }
         }
-        try!(self.write_command_data(Command::COM_STMT_EXECUTE, &writer[..]));
+        try!(self.write_command_data(Command::COM_STMT_EXECUTE, writer.into_inner().borrow()));
         self.handle_result_set()
     }
 
@@ -1094,23 +1116,23 @@ impl MyConn {
     }
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
-        let path = Path::new(file_name);
-        let mut file = try!(File::open(&path));
-        let mut chunk = iter::repeat(0u8)
-                             .take(self.max_allowed_packet)
-                             .collect::<Vec<u8>>();
+        use std::os::unix::OsStrExt;
+        let path = ::std::ffi::OsStr::from_bytes(file_name);
+        let path = path::PathBuf::new(path);
+        let mut file = try!(fs::File::open(&path));
+        let mut chunk = vec![0u8; self.max_allowed_packet];
         let mut r = file.read(&mut chunk[..]);
         loop {
             match r {
-                Ok(cnt) => {
-                    try!(self.write_packet(&chunk[..cnt]));
+                Ok(n) => {
+                    if n > 0 {
+                        try!(self.write_packet(&chunk[..n]));
+                    } else {
+                        break;
+                    }
                 },
                 Err(e) => {
-                    if e.kind == EndOfFile {
-                        break;
-                    } else {
-                        return Err(MyIoError(e));
-                    }
+                    return Err(MyIoError(e));
                 }
             }
             r = file.read(&mut chunk[..]);
@@ -1134,9 +1156,9 @@ impl MyConn {
                 Ok((Vec::new(), Some(ok)))
             },
             0xfb => {
-                let mut reader = &pld[..];
-                try!(reader.read_u8());
-                let file_name = try!(reader.read_to_end());
+                let mut reader = &pld[1..];
+                let mut file_name = Vec::with_capacity(reader.len());
+                try!(io::Read::read_to_end(&mut reader, &mut file_name));
                 match self.send_local_infile(&file_name[..]) {
                     Ok(x) => Ok((Vec::new(), x)),
                     Err(err) => Err(err)
@@ -1490,8 +1512,8 @@ impl<'a> QueryResult<'a> {
     }
 
     /// Returns index of a `QueryResult`'s column by name.
-    pub fn column_index<T:BytesContainer>(&self, name: T) -> Option<usize> {
-        let name = name.container_as_bytes();
+    pub fn column_index<T: Str>(&self, name: T) -> Option<usize> {
+        let name = name.as_slice().as_bytes();
         for (i, c) in self.columns.iter().enumerate() {
             if &c.name[..] == name {
                 return Some(i)
@@ -1619,7 +1641,7 @@ mod test {
             pass: Some(PASS.to_string()),
             tcp_addr: Some(ADDR.to_string()),
             tcp_port: PORT,
-            ssl_opts: Some((Path::new("tests/ca-cert.pem"), None)),
+            ssl_opts: Some((::std::path::PathBuf::new("tests/ca-cert.pem"), None)),
             ..Default::default()
         }
     }

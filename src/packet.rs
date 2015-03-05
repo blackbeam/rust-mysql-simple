@@ -1,7 +1,13 @@
 use std::{fmt, str};
-use std::old_io::{IoResult, BufReader, SeekCur};
+use std::io;
+use std::io::{ReadExt, Seek};
+use std::io::Read as NewRead;
+
 use regex::Regex;
-use super::io::{MyReader};
+use byteorder::LittleEndian as LE;
+use byteorder::{ByteOrder, ReadBytesExt};
+
+use super::io::{Read};
 use super::consts;
 use super::error;
 use super::error::DriverError;
@@ -17,15 +23,18 @@ pub struct OkPacket {
 }
 
 impl OkPacket {
-    pub fn from_payload(pld: &[u8]) -> IoResult<OkPacket> {
-        let mut reader = &pld[..];
-        try!(reader.read_u8());
+    pub fn from_payload(pld: &[u8]) -> io::Result<OkPacket> {
+        let mut reader = &pld[1..];
         Ok(OkPacket{
             affected_rows: try!(reader.read_lenenc_int()),
             last_insert_id: try!(reader.read_lenenc_int()),
-            status_flags: consts::StatusFlags::from_bits_truncate(try!(reader.read_le_u16())),
-            warnings: try!(reader.read_le_u16()),
-            info: try!(reader.read_to_end())
+            status_flags: consts::StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>())),
+            warnings: try!(reader.read_u16::<LE>()),
+            info: {
+                let mut info = Vec::with_capacity(reader.len());
+                try!(NewRead::read_to_end(&mut reader, &mut info));
+                info
+            },
         })
     }
 }
@@ -38,15 +47,22 @@ pub struct ErrPacket {
 }
 
 impl ErrPacket {
-    pub fn from_payload(pld: &[u8]) -> IoResult<ErrPacket> {
-        let mut reader = &pld[..];
-        try!(reader.read_u8());
-        let error_code = try!(reader.read_le_u16());
-        try!(reader.read_u8());
+    pub fn from_payload(pld: &[u8]) -> io::Result<ErrPacket> {
+        let mut reader = &pld[1..];
+        let error_code = try!(reader.read_u16::<LE>());
+        try!(ReadBytesExt::read_u8(&mut reader));
         Ok(ErrPacket{
             error_code: error_code,
-            sql_state: try!(reader.read_exact(5)),
-            error_message: try!(reader.read_to_end())
+            sql_state: {
+                let mut sql_state = Vec::with_capacity(5);
+                try!(reader.by_ref().take(5).read_to_end(&mut sql_state));
+                sql_state
+            },
+            error_message: {
+                let mut error_message = Vec::with_capacity(reader.len());
+                try!(NewRead::read_to_end(&mut reader, &mut error_message));
+                error_message
+            },
         })
     }
 }
@@ -68,12 +84,11 @@ pub struct EOFPacket {
 }
 
 impl EOFPacket {
-    pub fn from_payload(pld: &[u8]) -> IoResult<EOFPacket> {
-        let mut reader = &pld[..];
-        try!(reader.read_u8());
+    pub fn from_payload(pld: &[u8]) -> io::Result<EOFPacket> {
+        let mut reader = &pld[1..];
         Ok(EOFPacket{
-            warnings: try!(reader.read_le_u16()),
-            status_flags: consts::StatusFlags::from_bits_truncate(try!(reader.read_le_u16())),
+            warnings: try!(reader.read_u16::<LE>()),
+            status_flags: consts::StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>())),
         })
     }
 }
@@ -121,37 +136,37 @@ impl HandshakePacket {
         let mut character_set = 0u8;
         let mut status_flags = consts::StatusFlags::empty();
         let payload_len = pld.len();
-        let mut reader = BufReader::new(pld);
-        let protocol_version = try!(reader.read_u8());
+        let mut reader = io::Cursor::new(pld);
+        let protocol_version = try!(ReadBytesExt::read_u8(&mut reader));
         let version_bytes = try!(reader.read_to_null());
         let server_version = try!(parse_version(&version_bytes[..]));
-        let connection_id = try!(reader.read_le_u32());
-        try!(reader.push(8, &mut auth_plugin_data));
+        let connection_id = try!(reader.read_u32::<LE>());
+        try!(reader.by_ref().take(8).read_to_end(&mut auth_plugin_data));
         // skip filler
-        try!(reader.seek(1, SeekCur));
-        let lower_cf = try!(reader.read_le_u16());
+        try!(reader.seek(io::SeekFrom::Current(1)));
+        let lower_cf = try!(reader.read_u16::<LE>());
         let mut capability_flags = consts::CapabilityFlags::from_bits_truncate(lower_cf as u32);
-        if try!(reader.tell()) != payload_len as u64 {
-            character_set = try!(reader.read_u8());
-            status_flags = consts::StatusFlags::from_bits_truncate(try!(reader.read_le_u16()));
-            let upper_cf = try!(reader.read_le_u16());
+        if reader.position() != payload_len as u64 {
+            character_set = try!(ReadBytesExt::read_u8(&mut reader));
+            status_flags = consts::StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>()));
+            let upper_cf = try!(reader.read_u16::<LE>());
             capability_flags.insert(consts::CapabilityFlags::from_bits_truncate((upper_cf as u32) << 16));
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                length_of_auth_plugin_data = try!(reader.read_u8()) as i16;
+                length_of_auth_plugin_data = try!(ReadBytesExt::read_u8(&mut reader)) as i16;
             } else {
-                try!(reader.seek(1, SeekCur));
+                try!(reader.seek(io::SeekFrom::Current(1)));
             }
-            try!(reader.seek(10, SeekCur));
+            try!(reader.seek(io::SeekFrom::Current(10)));
             if capability_flags.contains(consts::CLIENT_SECURE_CONNECTION) {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
-                try!(reader.push(len as usize, &mut auth_plugin_data));
+                try!(reader.by_ref().take(len as u64).read_to_end(&mut auth_plugin_data));
                 if auth_plugin_data[auth_plugin_data.len() - 1] == 0u8 {
                     auth_plugin_data.pop();
                 }
             }
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                auth_plugin_name = try!(reader.read_to_end());
+                try!(reader.read_to_end(&mut auth_plugin_name));
                 if auth_plugin_name[auth_plugin_name.len() - 1] == 0u8 {
                     auth_plugin_name.pop();
                 }

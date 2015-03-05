@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+
 use super::IsolationLevel;
 use super::Transaction;
 use super::super::error::{MyError, DriverError};
@@ -316,7 +317,7 @@ mod test {
             pass: Some(PASS.to_string()),
             tcp_addr: Some(ADDR.to_string()),
             tcp_port: PORT,
-            ssl_opts: Some((Path::new("tests/ca-cert.pem"), None)),
+            ssl_opts: Some((::std::path::PathBuf::new("tests/ca-cert.pem"), None)),
             ..Default::default()
         }
     }
