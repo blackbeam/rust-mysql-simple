@@ -410,6 +410,8 @@ pub struct MyOpts {
     pub prefer_socket: bool,
     /// TCP keepalive timeout in seconds (defaults to one hour).
     pub keepalive_timeout: Option<u32>,
+    /// Commands to execute on each new database connection.
+    pub init: Vec<String>,
 
     #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
@@ -459,6 +461,7 @@ impl Default for MyOpts {
             db_name: None,
             prefer_socket: true,
             keepalive_timeout: Some(60 * 60),
+            init: vec![],
             verify_peer: false,
             ssl_opts: None,
         }
@@ -477,6 +480,7 @@ impl Default for MyOpts {
             db_name: None,
             prefer_socket: true,
             keepalive_timeout: Some(60 * 60),
+            init: vec![],
         }
     }
 }
@@ -589,6 +593,9 @@ impl MyConn {
                 }
             }
         }
+        for cmd in conn.opts.init.clone() {
+            try!(conn.query(cmd.as_slice()));
+        }
         return Ok(conn);
     }
 
@@ -621,6 +628,9 @@ impl MyConn {
                     }
                 }
             }
+        }
+        for cmd in conn.opts.init.clone() {
+            try!(conn.query(cmd.as_slice()));
         }
         return Ok(conn);
     }
@@ -1626,6 +1636,7 @@ impl<'a> Iterator for MyResult<QueryResult<'a>> {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
+    use std::borrow::ToOwned;
     use std::default::Default;
     use super::MyOpts;
 
@@ -1641,6 +1652,7 @@ mod test {
             pass: Some(PASS.to_string()),
             tcp_addr: Some(ADDR.to_string()),
             tcp_port: PORT,
+            init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
             ssl_opts: Some((::std::path::PathBuf::new("tests/ca-cert.pem"), None)),
             ..Default::default()
         }
@@ -1653,6 +1665,7 @@ mod test {
             pass: Some(PASS.to_string()),
             tcp_addr: Some(ADDR.to_string()),
             tcp_port: PORT,
+            init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
             ..Default::default()
         }
     }
@@ -1664,6 +1677,8 @@ mod test {
         use std::borrow::ToOwned;
         use std::fs;
         use std::io::Write;
+        use std::str::Pattern;
+        use std::str::StrExt;
         use time::{Tm, now};
         use super::super::{MyConn, MyOpts};
         use super::super::super::value::{ToValue, from_value};
@@ -1673,6 +1688,9 @@ mod test {
         #[test]
         fn should_connect() {
             let mut conn = MyConn::new(get_opts()).unwrap();
+            let mode = conn.query("SELECT @@GLOBAL.sql_mode").next().unwrap().unwrap().remove(0);
+            let mode = from_value::<String>(&mode);
+            assert!(mode.contains("TRADITIONAL"));
             assert!(conn.ping());
         }
         #[test]
