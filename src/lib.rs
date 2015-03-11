@@ -36,7 +36,6 @@
 #![feature(test)]
 #![feature(collections)]
 #![feature(std_misc)]
-#![feature(old_path)]
 
 #![plugin(regex_macros)]
 
@@ -53,6 +52,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate bitflags;
 extern crate byteorder;
+extern crate unix_socket;
 
 mod scramble;
 pub mod consts;

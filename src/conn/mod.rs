@@ -12,8 +12,6 @@ use std::io::Write as NewWrite;
 use std::net::IpAddr;
 use std::net::TcpStream;
 use std::num::FromPrimitive;
-use std::old_io::net::pipe::UnixStream;
-use std::old_path::posix::Path as OldPath;
 use std::path;
 use std::str::FromStr;
 
@@ -53,6 +51,7 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
+use unix_socket::UnixStream;
 
 pub mod pool;
 
@@ -752,20 +751,17 @@ impl MyConn {
 
     fn connect_stream(&mut self) -> MyResult<()> {
         if self.opts.unix_addr.is_some() {
-            let unix_path_str = self.opts.unix_addr.as_ref().unwrap().to_string_lossy();
-            let unix_path_str: &str = unix_path_str.borrow();
-            let unix_path = OldPath::new(&unix_path_str);
-            match UnixStream::connect(unix_path) {
+            match UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
                 Ok(stream) => {
-                    self.stream = Some(MyStream::InsecureStream(PlainStream{s: UNIXStream(stream), wrapped: false}));
+                    self.stream = Some(MyStream::InsecureStream(PlainStream{
+                        s: UNIXStream(stream),
+                        wrapped: false
+                    }));
                     return Ok(());
                 },
                 _ => {
-                    let path_str = format!("{}",
-                                           self.opts.unix_addr.as_ref()
-                                           .unwrap()
-                                           .display()
-                                   ).to_string();
+                    let path_str = format!("{}", self.opts.unix_addr.as_ref().unwrap().display())
+                                   .to_string();
                     return Err(MyDriverError(CouldNotConnect(Some(path_str))));
                 }
             }
@@ -1677,7 +1673,6 @@ mod test {
         use std::borrow::ToOwned;
         use std::fs;
         use std::io::Write;
-        use std::str::Pattern;
         use std::str::StrExt;
         use time::{Tm, now};
         use super::super::{MyConn, MyOpts};

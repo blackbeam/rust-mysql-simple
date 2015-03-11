@@ -3,15 +3,12 @@ use std::io::ReadExt;
 use std::io::Read as NewRead;
 use std::io::Write as NewWrite;
 use std::net;
-use std::error;
-use std::old_io::net::pipe;
 
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
-use super::error::MyError;
 use super::error::MyError::MyDriverError;
 use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
@@ -23,6 +20,7 @@ use byteorder::ByteOrder;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;
+use unix_socket::UnixStream;
 
 pub trait Read: ReadBytesExt {
     fn read_lenenc_int(&mut self) -> io::Result<u64> {
@@ -340,7 +338,7 @@ impl io::Write for MyStream {
 
 pub enum TcpOrUnixStream {
     TCPStream(net::TcpStream),
-    UNIXStream(pipe::UnixStream),
+    UNIXStream(UnixStream),
 }
 
 pub struct PlainStream {
@@ -361,19 +359,7 @@ impl io::Read for PlainStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self.s {
             TcpOrUnixStream::TCPStream(ref mut s) => io::Read::read(s, buf),
-            TcpOrUnixStream::UNIXStream(ref mut s) => {
-                match s.read(buf) {
-                    Ok(count) => Ok(count),
-                    Err(e) => {
-                        let me: MyError = error::FromError::from_error(e);
-                        if let MyError::MyIoError(ioe) = me {
-                            Err(ioe)
-                        } else {
-                            unreachable!();
-                        }
-                    },
-                }
-            },
+            TcpOrUnixStream::UNIXStream(ref mut s) => io::Read::read(s, buf),
         }
     }
 }
@@ -382,38 +368,14 @@ impl io::Write for PlainStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.s {
             TcpOrUnixStream::TCPStream(ref mut s) => NewWrite::write(s, buf),
-            TcpOrUnixStream::UNIXStream(ref mut s) => {
-                match s.write_all(buf) {
-                    Ok(()) => Ok(buf.len()),
-                    Err(e) => {
-                        let me: MyError = error::FromError::from_error(e);
-                        if let MyError::MyIoError(ioe) = me {
-                            Err(ioe)
-                        } else {
-                            unreachable!();
-                        }
-                    },
-                }
-            },
+            TcpOrUnixStream::UNIXStream(ref mut s) => NewWrite::write(s, buf),
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         match self.s {
             TcpOrUnixStream::TCPStream(ref mut s) => s.flush(),
-            TcpOrUnixStream::UNIXStream(ref mut s) => {
-                match s.flush() {
-                    Ok(()) => Ok(()),
-                    Err(e) => {
-                        let me: MyError = error::FromError::from_error(e);
-                        if let MyError::MyIoError(ioe) = me {
-                            Err(ioe)
-                        } else {
-                            unreachable!();
-                        }
-                    }
-                }
-            },
+            TcpOrUnixStream::UNIXStream(ref mut s) => s.flush(),
         }
     }
 }
