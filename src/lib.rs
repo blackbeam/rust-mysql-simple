@@ -33,9 +33,9 @@
 #![feature(net)]
 #![feature(fs)]
 #![feature(path)]
-#![feature(test)]
 #![feature(collections)]
 #![feature(std_misc)]
+#![cfg_attr(test, feature(test))]
 
 #![plugin(regex_macros)]
 
