@@ -7,7 +7,6 @@ use std::fs;
 use std::fmt;
 use std::io;
 use std::io::Read;
-use std::io::ReadExt;
 use std::io::Write as NewWrite;
 use std::net::IpAddr;
 use std::net::TcpStream;

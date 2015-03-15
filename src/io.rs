@@ -1,5 +1,4 @@
 use std::io;
-use std::io::ReadExt;
 use std::io::Read as NewRead;
 use std::io::Write as NewWrite;
 use std::net;

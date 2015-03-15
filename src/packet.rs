@@ -1,6 +1,6 @@
 use std::{fmt, str};
 use std::io;
-use std::io::{ReadExt, Seek};
+use std::io::Seek;
 use std::io::Read as NewRead;
 
 use regex::Regex;
