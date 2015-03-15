@@ -31,8 +31,6 @@
 #![feature(io)]
 #![feature(core)]
 #![feature(net)]
-#![feature(fs)]
-#![feature(path)]
 #![feature(collections)]
 #![feature(std_misc)]
 #![cfg_attr(test, feature(test))]
