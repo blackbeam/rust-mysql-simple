@@ -1,4 +1,5 @@
-use std::str::{from_utf8};
+use std::str::FromStr;
+use std::str::from_utf8;
 use std::borrow::ToOwned;
 use std::num::{Int, Float};
 use std::time::{Duration};
@@ -489,7 +490,7 @@ macro_rules! from_value_impl_num(
                     Value::UInt(x) if x <= int_max_value::<$t>() as u64 => Some(x as $t),
                     Value::Bytes(ref bts) => {
                         from_utf8(&bts[..]).ok().and_then(|x| {
-                            StrExt::parse::<$t>(x).ok()
+                            FromStr::from_str(x).ok()
                         })
                     },
                     _ => None
@@ -520,7 +521,7 @@ impl FromValue for i64 {
             Value::UInt(x) if x <= int_max_value::<i64>() as u64 => Some(x as i64),
             Value::Bytes(ref bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
-                    StrExt::parse::<i64>(x).ok()
+                    FromStr::from_str(x).ok()
                 })
             },
             _ => None
@@ -540,7 +541,7 @@ impl FromValue for u64 {
             Value::UInt(x) => Some(x),
             Value::Bytes(ref bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
-                    StrExt::parse::<u64>(x).ok()
+                    FromStr::from_str(x).ok()
                 })
             },
             _ => None
@@ -559,7 +560,7 @@ impl FromValue for f32 {
             Value::Float(x) if x >= float_min_value::<f32>() as f64 && x <= float_max_value::<f32>() as f64 => Some(x as f32),
             Value::Bytes(ref bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
-                    StrExt::parse::<f32>(x).ok()
+                    FromStr::from_str(x).ok()
                 })
             },
             _ => None
@@ -578,7 +579,7 @@ impl FromValue for f64 {
             Value::Float(x) => Some(x),
             Value::Bytes(ref bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
-                    StrExt::parse::<f64>(x).ok()
+                    FromStr::from_str(x).ok()
                 })
             },
             _ => None
@@ -701,7 +702,7 @@ impl FromValue for Duration {
                         [_, []] | [_] => 0,
                         [_, ms] if ms.len() <= 6 => {
                             let x = from_utf8(ms).ok().and_then(|x| {
-                                StrExt::parse::<i64>(x).ok()
+                                FromStr::from_str(x).ok()
                             });
                             if x.is_some() {
                                 x.unwrap() * 10i64.pow(6 - ms.len() as u32)

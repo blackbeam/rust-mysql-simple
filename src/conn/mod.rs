@@ -8,7 +8,7 @@ use std::fmt;
 use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
-use std::net::IpAddr;
+use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::num::FromPrimitive;
 use std::path;
@@ -570,11 +570,11 @@ impl MyConn {
         try!(conn.connect_stream());
         try!(conn.connect());
         if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
-            let addr: Option<IpAddr> = FromStr::from_str(
+            let addr: Option<SocketAddr> = FromStr::from_str(
                 &conn.opts.tcp_addr.as_ref().unwrap()[..]).ok();
             let is_loopback = match addr {
-                Some(IpAddr::V4(addr)) => addr.is_loopback(),
-                Some(IpAddr::V6(addr)) => addr.is_loopback(),
+                Some(SocketAddr::V4(addr)) => addr.ip().is_loopback(),
+                Some(SocketAddr::V6(addr)) => addr.ip().is_loopback(),
                 _ => false,
             };
             if is_loopback {
@@ -605,11 +605,11 @@ impl MyConn {
         try!(conn.connect());
         if let None = conn.opts.ssl_opts {
             if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
-                let addr: Option<IpAddr> = FromStr::from_str(
+                let addr: Option<SocketAddr> = FromStr::from_str(
                     &conn.opts.tcp_addr.as_ref().unwrap()[..]).ok();
                 let is_loopback = match addr {
-                    Some(IpAddr::V4(addr)) => addr.is_loopback(),
-                    Some(IpAddr::V6(addr)) => addr.is_loopback(),
+                    Some(SocketAddr::V4(addr)) => addr.ip().is_loopback(),
+                    Some(SocketAddr::V6(addr)) => addr.ip().is_loopback(),
                     _ => false,
                 };
                 if is_loopback {
@@ -1121,7 +1121,7 @@ impl MyConn {
     }
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
-        use std::os::unix::OsStrExt;
+        use std::os::unix::ffi::OsStrExt;
         let path = ::std::ffi::OsStr::from_bytes(file_name);
         let path = path::PathBuf::new(path);
         let mut file = try!(fs::File::open(&path));
@@ -1672,7 +1672,6 @@ mod test {
         use std::borrow::ToOwned;
         use std::fs;
         use std::io::Write;
-        use std::str::StrExt;
         use time::{Tm, now};
         use super::super::{MyConn, MyOpts};
         use super::super::super::value::{ToValue, from_value};
