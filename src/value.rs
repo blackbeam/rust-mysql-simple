@@ -295,6 +295,12 @@ impl<T:ToValue> ToValue for Option<T> {
 }
 
 macro_rules! to_value_impl_num(
+    (i64) => (
+        impl ToValue for i64 {
+            #[inline]
+            fn to_value(&self) -> Value { Value::Int(*self) }
+        }
+    );
     ($t:ty) => (
         impl ToValue for $t {
             #[inline]
