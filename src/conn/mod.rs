@@ -592,7 +592,7 @@ impl MyConn {
             }
         }
         for cmd in conn.opts.init.clone() {
-            try!(conn.query(cmd.as_slice()));
+            try!(conn.query(&cmd[..]));
         }
         return Ok(conn);
     }
@@ -628,7 +628,7 @@ impl MyConn {
             }
         }
         for cmd in conn.opts.init.clone() {
-            try!(conn.query(cmd.as_slice()));
+            try!(conn.query(&cmd[..]));
         }
         return Ok(conn);
     }
