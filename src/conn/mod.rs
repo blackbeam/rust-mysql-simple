@@ -582,7 +582,7 @@ impl MyConn {
                     Some(path) => {
                         let path = from_value::<String>(&path);
                         let opts = MyOpts{
-                            unix_addr: Some(path::PathBuf::new(path.as_slice())),
+                            unix_addr: Some(::std::convert::From::from(path)),
                             ..conn.opts.clone()
                         };
                         return MyConn::new(opts).or(Ok(conn));
@@ -617,7 +617,7 @@ impl MyConn {
                         Some(path) => {
                             let path = from_value::<String>(&path);
                             let opts = MyOpts{
-                                unix_addr: Some(path::PathBuf::new(path.as_slice())),
+                                unix_addr: Some(::std::convert::From::from(path)),
                                 ..conn.opts.clone()
                             };
                             return MyConn::new(opts).or(Ok(conn));
@@ -1123,7 +1123,7 @@ impl MyConn {
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
         use std::os::unix::ffi::OsStrExt;
         let path = ::std::ffi::OsStr::from_bytes(file_name);
-        let path = path::PathBuf::new(path);
+        let path: path::PathBuf = ::std::convert::From::from(path);
         let mut file = try!(fs::File::open(&path));
         let mut chunk = vec![0u8; self.max_allowed_packet];
         let mut r = file.read(&mut chunk[..]);
@@ -1648,7 +1648,7 @@ mod test {
             tcp_addr: Some(ADDR.to_string()),
             tcp_port: PORT,
             init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
-            ssl_opts: Some((::std::path::PathBuf::new("tests/ca-cert.pem"), None)),
+            ssl_opts: Some((::std::convert::From::from("tests/ca-cert.pem"), None)),
             ..Default::default()
         }
     }
