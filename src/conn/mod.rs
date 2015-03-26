@@ -237,11 +237,11 @@ impl<'a> Stmt<'a> {
 
     /// Returns index of a `Stmt`'s column by name.
     pub fn column_index<T>(&self, name: T) -> Option<usize>
-    where T: Str {
+    where T: ::std::convert::AsRef<str> {
         match self.stmt.columns {
             None => None,
             Some(ref columns) => {
-                let name = name.as_slice().as_bytes();
+                let name = name.as_ref().as_bytes();
                 for (i, c) in columns.iter().enumerate() {
                     if &c.name[..] == name {
                         return Some(i)
@@ -1517,8 +1517,8 @@ impl<'a> QueryResult<'a> {
     }
 
     /// Returns index of a `QueryResult`'s column by name.
-    pub fn column_index<T: Str>(&self, name: T) -> Option<usize> {
-        let name = name.as_slice().as_bytes();
+    pub fn column_index<T: ::std::convert::AsRef<str>>(&self, name: T) -> Option<usize> {
+        let name = name.as_ref().as_bytes();
         for (i, c) in self.columns.iter().enumerate() {
             if &c.name[..] == name {
                 return Some(i)
