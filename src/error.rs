@@ -40,8 +40,8 @@ impl error::Error for MyError {
 
     fn cause(&self) -> Option<&error::Error> {
         match *self {
-            MyError::MyIoError(ref err) => Some(err as &error::Error),
-            MyError::MyDriverError(ref err) => Some(err as &error::Error),
+            MyError::MyIoError(ref err) => Some(err),
+            MyError::MyDriverError(ref err) => Some(err),
             _ => None
         }
     }

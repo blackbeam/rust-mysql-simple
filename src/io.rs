@@ -100,7 +100,7 @@ pub trait Read: ReadBytesExt {
                 if unsigned {
                     Ok(UInt(try!(self.read_u64::<LE>())))
                 } else {
-                    Ok(Int(try!(self.read_i64::<LE>()) as i64))
+                    Ok(Int(try!(self.read_i64::<LE>())))
                 }
             },
             ColumnType::MYSQL_TYPE_FLOAT => {
