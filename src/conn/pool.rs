@@ -317,7 +317,7 @@ mod test {
             pass: Some(PASS.to_string()),
             tcp_addr: Some(ADDR.to_string()),
             tcp_port: PORT,
-            ssl_opts: Some((::std::path::PathBuf::new("tests/ca-cert.pem"), None)),
+            ssl_opts: Some((::std::path::PathBuf::from("tests/ca-cert.pem"), None)),
             ..Default::default()
         }
     }
