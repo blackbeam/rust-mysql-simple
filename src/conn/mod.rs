@@ -237,11 +237,11 @@ impl<'a> Stmt<'a> {
 
     /// Returns index of a `Stmt`'s column by name.
     pub fn column_index<T>(&self, name: T) -> Option<usize>
-    where T: Str {
+    where T: AsRef<str> {
         match self.stmt.columns {
             None => None,
             Some(ref columns) => {
-                let name = name.as_slice().as_bytes();
+                let name = name.as_ref().as_bytes();
                 for (i, c) in columns.iter().enumerate() {
                     if &c.name[..] == name {
                         return Some(i)
@@ -582,7 +582,7 @@ impl MyConn {
                     Some(path) => {
                         let path = from_value::<String>(&path);
                         let opts = MyOpts{
-                            unix_addr: Some(path::PathBuf::new(path.as_slice())),
+                            unix_addr: Some(path::PathBuf::from(path.as_slice())),
                             ..conn.opts.clone()
                         };
                         return MyConn::new(opts).or(Ok(conn));
@@ -617,7 +617,7 @@ impl MyConn {
                         Some(path) => {
                             let path = from_value::<String>(&path);
                             let opts = MyOpts{
-                                unix_addr: Some(path::PathBuf::new(path.as_slice())),
+                                unix_addr: Some(path::PathBuf::from(path)),
                                 ..conn.opts.clone()
                             };
                             return MyConn::new(opts).or(Ok(conn));
@@ -628,7 +628,7 @@ impl MyConn {
             }
         }
         for cmd in conn.opts.init.clone() {
-            try!(conn.query(cmd.as_slice()));
+            try!(conn.query(cmd.as_ref()));
         }
         return Ok(conn);
     }
@@ -1123,7 +1123,7 @@ impl MyConn {
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
         use std::os::unix::ffi::OsStrExt;
         let path = ::std::ffi::OsStr::from_bytes(file_name);
-        let path = path::PathBuf::new(path);
+        let path = path::PathBuf::from(path);
         let mut file = try!(fs::File::open(&path));
         let mut chunk = vec![0u8; self.max_allowed_packet];
         let mut r = file.read(&mut chunk[..]);
@@ -1517,8 +1517,8 @@ impl<'a> QueryResult<'a> {
     }
 
     /// Returns index of a `QueryResult`'s column by name.
-    pub fn column_index<T: Str>(&self, name: T) -> Option<usize> {
-        let name = name.as_slice().as_bytes();
+    pub fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize> {
+        let name = name.as_ref().as_bytes();
         for (i, c) in self.columns.iter().enumerate() {
             if &c.name[..] == name {
                 return Some(i)
@@ -1648,7 +1648,7 @@ mod test {
             tcp_addr: Some(ADDR.to_string()),
             tcp_port: PORT,
             init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
-            ssl_opts: Some((::std::path::PathBuf::new("tests/ca-cert.pem"), None)),
+            ssl_opts: Some((::std::path::PathBuf::from("tests/ca-cert.pem"), None)),
             ..Default::default()
         }
     }
