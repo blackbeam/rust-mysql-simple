@@ -704,16 +704,15 @@ impl FromValue for Duration {
                 }
                 let ms: i64 = {
                     let xss: Vec<&[u8]> = btss.split(|x| *x == b'.').collect();
-                    let ms: i64 = match &xss[..] {
+                    let ms = match &xss[..] {
                         [_, []] | [_] => 0,
                         [_, ms] if ms.len() <= 6 => {
-                            let x = from_utf8(ms).ok().and_then(|x| {
-                                FromStr::from_str(x).ok()
-                            });
-                            if x.is_some() {
-                                x.unwrap() * 10i64.pow(6 - ms.len() as u32)
+                            if let Some::<i64>(x) = from_utf8(ms).ok()
+                                                    .and_then(|x| FromStr::from_str(x).ok())
+                            {
+                                x * 10i64.pow(6 - ms.len() as u32)
                             } else {
-                                return None;
+                                return None
                             }
                         },
                         _ => {
