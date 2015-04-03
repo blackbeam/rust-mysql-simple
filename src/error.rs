@@ -9,7 +9,6 @@ use openssl::ssl::error::{SslError};
 
 pub use super::packet::ErrPacket;
 
-#[derive(Eq, PartialEq, Clone)]
 pub enum MyError {
     MyIoError(io::Error),
     MySqlError(ErrPacket),
@@ -47,28 +46,28 @@ impl error::Error for MyError {
     }
 }
 
-impl error::FromError<io::Error> for MyError {
-    fn from_error(err: io::Error) -> MyError {
+impl From<io::Error> for MyError {
+    fn from(err: io::Error) -> MyError {
         MyError::MyIoError(err)
     }
 }
 
-impl error::FromError<Error> for MyError {
-    fn from_error(err: Error) -> MyError {
-        let io_err: io::Error = error::FromError::from_error(err);
-        error::FromError::from_error(io_err)
+impl From<Error> for MyError {
+    fn from(err: Error) -> MyError {
+        let io_err: io::Error = From::from(err);
+        From::from(io_err)
     }
 }
 
-impl error::FromError<DriverError> for MyError {
-    fn from_error(err: DriverError) -> MyError {
+impl From<DriverError> for MyError {
+    fn from(err: DriverError) -> MyError {
         MyError::MyDriverError(err)
     }
 }
 
 #[cfg(feature = "openssl")]
-impl error::FromError<SslError> for MyError {
-    fn from_error(err: SslError) -> MyError {
+impl From<SslError> for MyError {
+    fn from(err: SslError) -> MyError {
         MyError::MySslError(err)
     }
 }
