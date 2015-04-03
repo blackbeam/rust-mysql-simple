@@ -1276,7 +1276,7 @@ impl MyConn {
     }
 
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
-        for row in self.query(&format!("SELECT @@{};", name)[..]) {
+        for row in self.query(&format!("SELECT @@{};", name)[..]).unwrap() {
             match row {
                 Ok(mut r) => match r.len() {
                     0 => (),
@@ -1370,8 +1370,8 @@ impl MyConn {
 /// Mysql result set for text and binary protocols.
 ///
 /// If you want to get rows from `QueryReult` you should rely on implementation
-/// of `Iterator` over `MyResult<Vec<Value>>` on `MyResult<QueryResult>` or
-/// directly on `QueryResult`. `Vec<Value>` is the current row representation.
+/// of `Iterator` over `MyResult<Vec<Value>>` on `QueryResult`.
+/// `Vec<Value>` is the current row representation.
 ///
 /// ```rust
 /// # use mysql::conn::pool;
@@ -1393,12 +1393,6 @@ impl MyConn {
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.prepare("SELECT 42").map(|mut stmt| {
-///     // Over MyResult<QueryResult>..
-///     for row in stmt.execute(&[]) {
-///         assert_eq!(row.unwrap(), vec![Value::Int(42)]);
-///     }
-///
-///     // Over QueryResult..
 ///     let mut result = stmt.execute(&[]).unwrap();
 ///     for row in result {
 ///         assert_eq!(row.unwrap(), vec![Value::Int(42)]);
@@ -1603,17 +1597,6 @@ impl<'a> Drop for QueryResult<'a> {
     }
 }
 
-impl<'a> Iterator for MyResult<QueryResult<'a>> {
-    type Item = MyResult<Vec<Value>>;
-
-    fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
-        match self.as_mut() {
-            Ok( result ) => result.next(),
-            Err( _ ) => None
-        }
-    }
-}
-
 /***
  *    88888888888                   888
  *        888                       888
@@ -1681,7 +1664,7 @@ mod test {
         #[test]
         fn should_connect() {
             let mut conn = MyConn::new(get_opts()).unwrap();
-            let mode = conn.query("SELECT @@GLOBAL.sql_mode").next().unwrap().unwrap().remove(0);
+            let mode = conn.query("SELECT @@GLOBAL.sql_mode").unwrap().next().unwrap().unwrap().remove(0);
             let mode = from_value::<String>(&mode);
             assert!(mode.contains("TRADITIONAL"));
             assert!(conn.ping());
@@ -1692,8 +1675,8 @@ mod test {
                 db_name: Some("mysql".to_string()),
                 ..get_opts()
             }).unwrap();
-            assert_eq!(conn.query("SELECT DATABASE()").unwrap().next(),
-                       Some(Ok(vec![Bytes(b"mysql".to_vec())])));
+            assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap(),
+                       vec![Bytes(b"mysql".to_vec())]);
         }
         #[test]
         fn should_execute_queryes_and_parse_results() {
@@ -1724,8 +1707,7 @@ mod test {
             // Drop
             assert!(conn.query("UPDATE x.tbl SET a = 'foo'").is_ok());
             assert_eq!(conn.affected_rows, 2);
-            assert_eq!(conn.query("SELECT * FROM x.tbl \
-                                   WHERE a = 'bar'").unwrap().next(), None);
+            assert!(conn.query("SELECT * FROM x.tbl WHERE a = 'bar'").unwrap().next().is_none());
             for (i, row) in conn.query("SELECT * FROM x.tbl")
                                 .unwrap().enumerate() {
                 let row = row.unwrap();
@@ -1750,10 +1732,8 @@ mod test {
         fn should_parse_large_text_result() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert_eq!(
-                conn.query("SELECT REPEAT('A', 20000000)").unwrap().next(),
-                Some(Ok(
-                    vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
-                ))
+                conn.query("SELECT REPEAT('A', 20000000)").unwrap().next().unwrap().unwrap(),
+                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
             );
         }
         #[test]
@@ -1814,10 +1794,8 @@ mod test {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
             assert_eq!(
-                stmt.execute(&[]).unwrap().next(),
-                Some(Ok(
-                     vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
-                ))
+                stmt.execute(&[]).unwrap().next().unwrap().unwrap(),
+                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
             );
         }
         #[test]
@@ -1830,23 +1808,23 @@ mod test {
                 assert!(t.commit().is_ok());
                 Ok(())
             }).unwrap();
-            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
-                       Some(Ok(vec![Bytes(b"2".to_vec())])));
+            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
+                       vec![Bytes(b"2".to_vec())]);
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
                 Ok(())
                 // implicit rollback
             }).unwrap();
-            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
-                       Some(Ok(vec![Bytes(b"2".to_vec())])));
+            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
+                       vec![Bytes(b"2".to_vec())]);
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 assert!(t.rollback().is_ok());
                 Ok(())
             }).unwrap();
-            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
-                       Some(Ok(vec![Bytes(b"2".to_vec())])));
+            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
+                       vec![Bytes(b"2".to_vec())]);
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 let _ = t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
                 .and_then(|mut stmt| {
@@ -1857,8 +1835,8 @@ mod test {
                 assert!(t.commit().is_ok());
                 Ok(())
             }).unwrap();
-            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next(),
-                       Some(Ok(vec![Bytes(b"4".to_vec())])));
+            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
+                       vec![Bytes(b"4".to_vec())]);
         }
         #[test]
         fn should_handle_LOCAL_INFILE() {
@@ -1911,7 +1889,7 @@ mod test {
             for (i, row) in conn.query("CALL multi()")
                                 .unwrap().enumerate() {
                 match i {
-                    0 | 1 => assert_eq!(row, Ok(vec![Bytes(b"1".to_vec())])),
+                    0 | 1 => assert_eq!(row.unwrap(), vec![Bytes(b"1".to_vec())]),
                     _ => unreachable!(),
                 }
             }
@@ -1920,9 +1898,9 @@ mod test {
             while { i += 1; result.more_results_exists() } {
                 for row in result.by_ref() {
                     match i {
-                        1 => assert_eq!(row, Ok(vec![Bytes(b"1".to_vec())])),
-                        2 => assert_eq!(row, Ok(vec![Bytes(b"2".to_vec())])),
-                        3 => assert_eq!(row, Ok(vec![Bytes(b"3".to_vec())])),
+                        1 => assert_eq!(row.unwrap(), vec![Bytes(b"1".to_vec())]),
+                        2 => assert_eq!(row.unwrap(), vec![Bytes(b"2".to_vec())]),
+                        3 => assert_eq!(row.unwrap(), vec![Bytes(b"3".to_vec())]),
                         _ => unreachable!(),
                     }
                 }

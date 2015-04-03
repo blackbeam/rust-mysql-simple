@@ -74,7 +74,7 @@ impl MyInnerPool {
 ///     threads.push(thread::spawn(move || {
 ///         let mut stmt = pool.prepare("SELECT 1").unwrap();
 ///         let mut result = stmt.execute(&[]).unwrap();
-///         assert_eq!(result.next(), Some(Ok(vec![1.to_value()])))
+///         assert_eq!(result.next().unwrap().unwrap(), vec![1.to_value()])
 ///     }));
 /// }
 /// for t in threads.into_iter() {
@@ -204,11 +204,11 @@ impl MyPool {
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.query("SELECT 42").map(|mut result| {
-///     assert_eq!(result.next(), Some(Ok(vec![Value::Bytes(b"42".to_vec())])));
+///     assert_eq!(result.next().unwrap().unwrap(), vec![Value::Bytes(b"42".to_vec())]);
 /// });
 /// conn.prepare("SELECT 42").map(|mut stmt| {
 ///     let mut result = stmt.execute(&[]).unwrap();
-///     assert_eq!(result.next(), Some(Ok(vec![Value::Int(42)])));
+///     assert_eq!(result.next().unwrap().unwrap(), vec![Value::Int(42)]);
 /// });
 /// ```
 ///
@@ -409,7 +409,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.commit()
             }).is_ok());
-            for x in pool.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in pool.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -418,7 +418,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.rollback()
             }).is_ok());
-            for x in pool.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in pool.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -427,7 +427,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 Ok(())
             }).is_ok());
-            for x in pool.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in pool.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -442,7 +442,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.commit()
             }).is_ok());
-            for x in conn.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -451,7 +451,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.rollback()
             }).is_ok());
-            for x in conn.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
@@ -460,7 +460,7 @@ mod test {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 Ok(())
             }).is_ok());
-            for x in conn.query("SELECT COUNT(a) FROM x.tbl") {
+            for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let x = x.unwrap();
                 assert_eq!(from_value::<u8>(&x[0]), 2u8);
             }
