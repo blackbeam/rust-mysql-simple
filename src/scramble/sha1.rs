@@ -1,4 +1,4 @@
-use std::num::wrapping::WrappingOps;
+use std::num::Wrapping;
 
 use byteorder::ByteOrder;
 use byteorder::ReadBytesExt;
@@ -11,8 +11,8 @@ static K3: u32 = 0x8F1BBCDCu32;
 static K4: u32 = 0xCA62C1D6u32;
 
 #[inline]
-fn circular_shift(bits: u32, word: u32) -> u32 {
-    return word << (bits as usize) | word >> ((32u32 - bits) as usize);
+fn circular_shift(bits: u32, Wrapping(word): Wrapping<u32>) -> u32 {
+    word << (bits as usize) | word >> ((32u32 - bits) as usize)
 }
 
 #[allow(unused_must_use)]
@@ -49,63 +49,67 @@ pub fn sha1(message: &[u8]) -> Vec<u8> {
         }
         for j in 16usize..80 {
             let val = w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16];
-            w[j] = circular_shift(1, val);
+            w[j] = circular_shift(1, Wrapping(val));
         }
-        let mut a = hash[0];
-        let mut b = hash[1];
-        let mut c = hash[2];
-        let mut d = hash[3];
-        let mut e = hash[4];
-        let mut temp: u32;
+        let mut a = Wrapping(hash[0]);
+        let mut b = Wrapping(hash[1]);
+        let mut c = Wrapping(hash[2]);
+        let mut d = Wrapping(hash[3]);
+        let mut e = Wrapping(hash[4]);
+        let mut temp: Wrapping<u32>;
         for t in 0usize..20 {
-            temp = circular_shift(5, a).wrapping_add(b & c | !b & d)
-                                       .wrapping_add(e)
-                                       .wrapping_add(w[t])
-                                       .wrapping_add(K1);
+            temp = Wrapping(circular_shift(5, a))
+                 + (b & c | !b & d)
+                 + e
+                 + Wrapping(w[t])
+                 + Wrapping(K1);
             e = d;
             d = c;
-            c = circular_shift(30, b);
+            c = Wrapping(circular_shift(30, b));
             b = a;
             a = temp;
         }
         for t in 20usize..40 {
-            temp = circular_shift(5, a).wrapping_add(b ^ c ^ d)
-                                       .wrapping_add(e)
-                                       .wrapping_add(w[t])
-                                       .wrapping_add(K2);
+            temp = Wrapping(circular_shift(5, a))
+                 + (b ^ c ^ d)
+                 + e
+                 + Wrapping(w[t])
+                 + Wrapping(K2);
             e = d;
             d = c;
-            c = circular_shift(30, b);
+            c = Wrapping(circular_shift(30, b));
             b = a;
             a = temp;
         }
         for t in 40usize..60 {
-            temp = circular_shift(5, a).wrapping_add(b & c | b & d | c & d)
-                                       .wrapping_add(e)
-                                       .wrapping_add(w[t])
-                                       .wrapping_add(K3);
+            temp = Wrapping(circular_shift(5, a))
+                 + (b & c | b & d | c & d)
+                 + e
+                 + Wrapping(w[t])
+                 + Wrapping(K3);
             e = d;
             d = c;
-            c = circular_shift(30, b);
+            c = Wrapping(circular_shift(30, b));
             b = a;
             a = temp;
         }
         for t in 60usize..80 {
-            temp = circular_shift(5, a).wrapping_add(b ^ c ^ d)
-                                       .wrapping_add(e)
-                                       .wrapping_add(w[t])
-                                       .wrapping_add(K4);
+            temp = Wrapping(circular_shift(5, a))
+                 + (b ^ c ^ d)
+                 + e
+                 + Wrapping(w[t])
+                 + Wrapping(K4);
             e = d;
             d = c;
-            c = circular_shift(30, b);
+            c = Wrapping(circular_shift(30, b));
             b = a;
             a = temp;
         }
-        hash[0] = hash[0].wrapping_add(a);
-        hash[1] = hash[1].wrapping_add(b);
-        hash[2] = hash[2].wrapping_add(c);
-        hash[3] = hash[3].wrapping_add(d);
-        hash[4] = hash[4].wrapping_add(e);
+        hash[0] = { let Wrapping(x) = Wrapping(hash[0]) + a; x};
+        hash[1] = { let Wrapping(x) = Wrapping(hash[1]) + b; x};
+        hash[2] = { let Wrapping(x) = Wrapping(hash[2]) + c; x};
+        hash[3] = { let Wrapping(x) = Wrapping(hash[3]) + d; x};
+        hash[4] = { let Wrapping(x) = Wrapping(hash[4]) + e; x};
     }
 
     let mut output = Vec::with_capacity(20);
