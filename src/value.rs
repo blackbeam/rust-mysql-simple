@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
-use std::num::{Int, Float};
 use std::time::{Duration};
 use std::iter;
 use std::io;
@@ -18,26 +17,6 @@ use byteorder::{ByteOrder, WriteBytesExt};
 lazy_static! {
     static ref TM_UTCOFF: i32 = now().tm_utcoff;
     static ref TM_ISDST: i32 = now().tm_isdst;
-}
-
-#[inline]
-fn int_min_value<T: Int>() -> T {
-    Int::min_value()
-}
-
-#[inline]
-fn float_min_value<T: Float>() -> T {
-    Float::min_value()
-}
-
-#[inline]
-fn int_max_value<T: Int>() -> T {
-    Int::max_value()
-}
-
-#[inline]
-fn float_max_value<T: Float>() -> T {
-    Float::max_value()
 }
 
 /// `Value` enumerates possible values in mysql cells. Also `Value` used to fill
@@ -74,7 +53,7 @@ fn float_max_value<T: Float>() -> T {
 ///     let mut result = stmt.execute(&[&20i32, &0.8f32]).unwrap();
 ///     for row in result {
 ///         let row = row.unwrap();
-///         assert_eq!(from_value(&row[0]), 16.0f32);
+///         assert_eq!(from_value::<f32>(&row[0]), 16.0f32);
 ///     }
 /// });
 /// ```
@@ -326,7 +305,7 @@ impl ToValue for u64 {
 impl ToValue for usize {
     #[inline]
     fn to_value(&self) -> Value {
-        if *self as u64 <= int_max_value::<usize>() as u64 {
+        if *self as u64 <= ::std::usize::MAX as u64 {
             Value::Int(*self as i64)
         } else {
             Value::UInt(*self as u64)
@@ -483,7 +462,7 @@ pub fn from_value_opt<T: FromValue>(v: &Value) -> Option<T> {
 }
 
 macro_rules! from_value_impl_num(
-    ($t:ty) => (
+    ($t:ident) => (
         impl FromValue for $t {
             #[inline]
             fn from_value(v: &Value) -> $t {
@@ -492,8 +471,8 @@ macro_rules! from_value_impl_num(
             #[inline]
             fn from_value_opt(v: &Value) -> Option<$t> {
                 match *v {
-                    Value::Int(x) if x >= int_min_value::<$t>() as i64 && x <= int_max_value::<$t>() as i64 => Some(x as $t),
-                    Value::UInt(x) if x <= int_max_value::<$t>() as u64 => Some(x as $t),
+                    Value::Int(x) if x >= ::std::$t::MIN as i64 && x <= ::std::$t::MAX as i64 => Some(x as $t),
+                    Value::UInt(x) if x <= ::std::$t::MAX as u64 => Some(x as $t),
                     Value::Bytes(ref bts) => {
                         from_utf8(&bts[..]).ok().and_then(|x| {
                             FromStr::from_str(x).ok()
@@ -524,7 +503,7 @@ impl FromValue for i64 {
     fn from_value_opt(v: &Value) -> Option<i64> {
         match *v {
             Value::Int(x) => Some(x),
-            Value::UInt(x) if x <= int_max_value::<i64>() as u64 => Some(x as i64),
+            Value::UInt(x) if x <= ::std::i64::MAX as u64 => Some(x as i64),
             Value::Bytes(ref bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
                     FromStr::from_str(x).ok()
@@ -563,7 +542,7 @@ impl FromValue for f32 {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<f32> {
         match *v {
-            Value::Float(x) if x >= float_min_value::<f32>() as f64 && x <= float_max_value::<f32>() as f64 => Some(x as f32),
+            Value::Float(x) if x >= ::std::f32::MIN as f64 && x <= ::std::f32::MAX as f64 => Some(x as f32),
             Value::Bytes(ref bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
                     FromStr::from_str(x).ok()
