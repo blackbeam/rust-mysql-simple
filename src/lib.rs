@@ -28,13 +28,11 @@
 
 #![feature(unsafe_destructor)]
 #![feature(plugin)]
-#![feature(io)]
 #![feature(core)]
 #![feature(ip)]
 #![feature(tcp)]
 #![feature(collections)]
 #![feature(std_misc)]
-#![feature(convert)]
 #![feature(slice_patterns)]
 #![cfg_attr(test, feature(test))]
 
