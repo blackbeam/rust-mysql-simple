@@ -28,7 +28,6 @@
 
 #![feature(unsafe_destructor)]
 #![feature(plugin)]
-#![feature(core)]
 #![feature(ip)]
 #![feature(tcp)]
 #![feature(collections)]
@@ -39,7 +38,6 @@
 #[cfg(test)]
 extern crate test;
 
-extern crate core;
 extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;

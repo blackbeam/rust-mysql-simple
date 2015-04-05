@@ -10,7 +10,6 @@ use std::io::Read;
 use std::io::Write as NewWrite;
 use std::net::SocketAddr;
 use std::net::TcpStream;
-use std::num::FromPrimitive;
 use std::path;
 use std::str::FromStr;
 
@@ -356,7 +355,7 @@ impl Column {
                   org_name: org_name,
                   character_set: character_set,
                   column_length: column_length,
-                  column_type: FromPrimitive::from_u8(column_type).unwrap(),
+                  column_type: From::from(column_type),
                   flags: flags,
                   decimals: decimals,
                   default_values: default_values})

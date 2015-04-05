@@ -124,6 +124,40 @@ pub enum ColumnType {
     MYSQL_TYPE_GEOMETRY    = 0xff_u8,
 }
 
+impl From<u8> for ColumnType {
+    fn from(x: u8) -> ColumnType {
+        match x {
+            0x00_u8 => ColumnType::MYSQL_TYPE_DECIMAL,
+            0x01_u8 => ColumnType::MYSQL_TYPE_TINY,
+            0x02_u8 => ColumnType::MYSQL_TYPE_SHORT,
+            0x03_u8 => ColumnType::MYSQL_TYPE_LONG,
+            0x04_u8 => ColumnType::MYSQL_TYPE_FLOAT,
+            0x05_u8 => ColumnType::MYSQL_TYPE_DOUBLE,
+            0x06_u8 => ColumnType::MYSQL_TYPE_NULL,
+            0x07_u8 => ColumnType::MYSQL_TYPE_TIMESTAMP,
+            0x08_u8 => ColumnType::MYSQL_TYPE_LONGLONG,
+            0x09_u8 => ColumnType::MYSQL_TYPE_INT24,
+            0x0a_u8 => ColumnType::MYSQL_TYPE_DATE,
+            0x0b_u8 => ColumnType::MYSQL_TYPE_TIME,
+            0x0c_u8 => ColumnType::MYSQL_TYPE_DATETIME,
+            0x0d_u8 => ColumnType::MYSQL_TYPE_YEAR,
+            0x0f_u8 => ColumnType::MYSQL_TYPE_VARCHAR,
+            0x10_u8 => ColumnType::MYSQL_TYPE_BIT,
+            0xf6_u8 => ColumnType::MYSQL_TYPE_NEWDECIMAL,
+            0xf7_u8 => ColumnType::MYSQL_TYPE_ENUM,
+            0xf8_u8 => ColumnType::MYSQL_TYPE_SET,
+            0xf9_u8 => ColumnType::MYSQL_TYPE_TINY_BLOB,
+            0xfa_u8 => ColumnType::MYSQL_TYPE_MEDIUM_BLOB,
+            0xfb_u8 => ColumnType::MYSQL_TYPE_LONG_BLOB,
+            0xfc_u8 => ColumnType::MYSQL_TYPE_BLOB,
+            0xfd_u8 => ColumnType::MYSQL_TYPE_VAR_STRING,
+            0xfe_u8 => ColumnType::MYSQL_TYPE_STRING,
+            0xff_u8 => ColumnType::MYSQL_TYPE_GEOMETRY,
+            _ => panic!("Unknown column type"),
+        }
+    }
+}
+
 /// Column flags (u16)
 bitflags! {
     #[derive(Debug)]
