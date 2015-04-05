@@ -14,6 +14,8 @@ use super::io::{Write, Read};
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, WriteBytesExt};
 
+use regex::Regex;
+
 lazy_static! {
     static ref TM_UTCOFF: i32 = now().tm_utcoff;
     static ref TM_ISDST: i32 = now().tm_isdst;
@@ -681,79 +683,38 @@ impl FromValue for Duration {
                 if neg {
                     btss = &bts[1..];
                 }
-                let ms: i64 = {
-                    let xss: Vec<&[u8]> = btss.split(|x| *x == b'.').collect();
-                    let ms = match &xss[..] {
-                        [_, []] | [_] => 0,
-                        [_, ms] if ms.len() <= 6 => {
-                            if let Some::<i64>(x) = from_utf8(ms).ok()
-                                                    .and_then(|x| FromStr::from_str(x).ok())
-                            {
-                                x * 10i64.pow(6 - ms.len() as u32)
-                            } else {
-                                return None
-                            }
-                        },
-                        _ => {
-                            return None;
-                        }
+                from_utf8(btss).ok().and_then(|time_str| {
+                    let tm = time_str.as_ref();
+                    Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)$").unwrap().captures(tm)
+                    .or_else(|| {
+                        Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)\.(\d{1,6})$").unwrap()
+                                                                                   .captures(tm)
+                    }).or_else(|| {
+                        Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)$").unwrap().captures(tm)
+                    }).or_else(|| {
+                        Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{1,6})$").unwrap()
+                                                                               .captures(tm)
+                    })
+
+                }).and_then(|capts| {
+                    let h = capts.at(1).unwrap().parse::<i64>().unwrap();
+                    let m = capts.at(2).unwrap().parse::<i64>().unwrap();
+                    let s = capts.at(3).unwrap().parse::<i64>().unwrap();
+                    let ms = if capts.len() == 5 {
+                        capts.at(4).unwrap().parse::<i64>().unwrap()
+                    } else {
+                        0
                     };
-                    if xss.len() == 2 {
-                        btss = xss[0].clone();
+                    Some(ms + s * 1_000_000 +
+                         m * 60 * 1_000_000 +
+                         h * 60 * 60 * 1_000_000)
+                }).and_then(|ms| {
+                    if neg {
+                        Some(Duration::milliseconds(0 - ms))
+                    } else {
+                        Some(Duration::milliseconds(ms))
                     }
-                    ms
-                };
-                match btss {
-                    // XXX:XX:XX
-                    [h3@0x30 ... 0x38,
-                     h2@0x30 ... 0x39,
-                     h1@0x30 ... 0x39,
-                     b':',
-                     m2@0x30 ... 0x35,
-                     m1@0x30 ... 0x39,
-                     b':',
-                     s2@0x30 ... 0x35,
-                     s1@0x30 ... 0x39] => {
-                        let s = (s2 as i64 & 0x0F) * 10 + (s1 as i64 & 0x0F);
-                        let m = (m2 as i64 & 0x0F) * 10 + (m1 as i64 & 0x0F);
-                        let h = (h3 as i64 & 0x0F) * 100 +
-                                (h2 as i64 & 0x0F) * 10 +
-                                (h1 as i64 & 0x0F);
-                        let microseconds = ms +
-                                           s * 1_000_000 +
-                                           m * 60 * 1_000_000 +
-                                           h * 60 * 60 * 1_000_000;
-                        if neg {
-                            Some(Duration::microseconds(0 - microseconds))
-                        } else {
-                            Some(Duration::microseconds(microseconds))
-                        }
-                    },
-                    // XX:XX:XX
-                    [h2@0x30 ... 0x39,
-                     h1@0x30 ... 0x39,
-                     b':',
-                     m2@0x30 ... 0x35,
-                     m1@0x30 ... 0x39,
-                     b':',
-                     s2@0x30 ... 0x35,
-                     s1@0x30 ... 0x39] => {
-                        let s = (s2 as i64 | 0x0F) * 10 + (s1 as i64 | 0x0F);
-                        let m = (m2 as i64 | 0x0F) * 10 + (m1 as i64 | 0x0F);
-                        let h = (h2 as i64 | 0x0F) * 10 +
-                                (h1 as i64 | 0x0F);
-                        let microseconds = ms +
-                                           s * 1_000_000 +
-                                           m * 60 * 1_000_000 +
-                                           h * 60 * 60 * 1_000_000;
-                        if neg {
-                            Some(Duration::microseconds(0 - microseconds))
-                        } else {
-                            Some(Duration::microseconds(microseconds))
-                        }
-                    },
-                    _ => None
-                }
+                })
             },
             _ => None
         }

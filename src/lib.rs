@@ -28,7 +28,6 @@
 
 #![feature(plugin)]
 #![feature(std_misc)]
-#![feature(slice_patterns)]
 extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;
