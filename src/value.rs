@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
-use std::time::{Duration};
+// XXX: Wait for Duration stabilization
 use std::iter;
 use std::io;
 use std::io::Seek;
@@ -13,8 +13,6 @@ use super::io::{Write, Read};
 
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, WriteBytesExt};
-
-use regex::Regex;
 
 lazy_static! {
     static ref TM_UTCOFF: i32 = now().tm_utcoff;
@@ -370,50 +368,6 @@ impl ToValue for Timespec {
     }
 }
 
-impl ToValue for Duration {
-    fn to_value(&self) -> Value {
-        let mut this = self.clone();
-        let neg = this.num_seconds() < 0;
-        let mut days = this.num_days();
-        if neg {
-            days = 0 - days;
-            this = this + Duration::days(days);
-        } else {
-            this = this - Duration::days(days);
-        }
-        let mut hrs = this.num_hours();
-        if neg {
-            hrs = 0 - hrs;
-            this = this + Duration::hours(hrs);
-        } else {
-            this = this - Duration::hours(hrs);
-        }
-        let mut mins = this.num_minutes();
-        if neg {
-            mins = 0 - mins;
-            this = this + Duration::minutes(mins);
-        } else {
-            this = this - Duration::minutes(mins);
-        }
-        let mut secs = this.num_seconds();
-        if neg {
-            secs = 0 - secs;
-            this = this + Duration::seconds(secs);
-        } else {
-            this = this - Duration::seconds(secs);
-        }
-        let mut mics = this.num_microseconds().unwrap();
-        if mics > 0 {
-            if neg {
-                mics = 1_000_000 - mics;
-            }
-        } else {
-            mics = 0 - mics
-        }
-        Value::Time(neg, days as u32, hrs as u8, mins as u8, secs as u8, mics as u32)
-    }
-}
-
 pub trait FromValue {
     /// Will panic if could not retrieve `Self` from `Value`
     fn from_value(v: &Value) -> Self;
@@ -658,69 +612,6 @@ impl FromValue for Timespec {
     }
 }
 
-impl FromValue for Duration {
-    fn from_value(v: &Value) -> Duration {
-        from_value_opt(v).expect("Error retrieving Duration from value")
-    }
-
-    fn from_value_opt(v: &Value) -> Option<Duration> {
-        match *v {
-            Value::Time(neg, d, h, m, s, u) => {
-                let microseconds = u as i64 +
-                    (s as i64 * 1_000_000) +
-                    (m as i64 * 60 * 1_000_000) +
-                    (h as i64 * 60 * 60 * 1_000_000) +
-                    (d as i64 * 24 * 60 * 60 * 1_000_000);
-                if neg {
-                    Some(Duration::microseconds(0 - microseconds))
-                } else {
-                    Some(Duration::microseconds(microseconds))
-                }
-            },
-            Value::Bytes(ref bts) => {
-                let mut btss = &bts[..];
-                let neg = btss[0] == b'-';
-                if neg {
-                    btss = &bts[1..];
-                }
-                from_utf8(btss).ok().and_then(|time_str| {
-                    let tm = time_str.as_ref();
-                    Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)$").unwrap().captures(tm)
-                    .or_else(|| {
-                        Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)\.(\d{1,6})$").unwrap()
-                                                                                   .captures(tm)
-                    }).or_else(|| {
-                        Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)$").unwrap().captures(tm)
-                    }).or_else(|| {
-                        Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{1,6})$").unwrap()
-                                                                               .captures(tm)
-                    })
-
-                }).and_then(|capts| {
-                    let h = capts.at(1).unwrap().parse::<i64>().unwrap();
-                    let m = capts.at(2).unwrap().parse::<i64>().unwrap();
-                    let s = capts.at(3).unwrap().parse::<i64>().unwrap();
-                    let ms = if capts.len() == 5 {
-                        capts.at(4).unwrap().parse::<i64>().unwrap()
-                    } else {
-                        0
-                    };
-                    Some(ms + s * 1_000_000 +
-                         m * 60 * 1_000_000 +
-                         h * 60 * 60 * 1_000_000)
-                }).and_then(|ms| {
-                    if neg {
-                        Some(Duration::milliseconds(0 - ms))
-                    } else {
-                        Some(Duration::milliseconds(ms))
-                    }
-                })
-            },
-            _ => None
-        }
-    }
-}
-
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
@@ -783,7 +674,6 @@ mod test {
         use super::super::from_value;
         use super::super::Value::{Bytes, Date};
         use time::{Timespec, now};
-        use std::time::Duration;
         #[test]
         fn should_convert_Bytes_to_Timespec() {
             assert_eq!(
@@ -800,19 +690,12 @@ mod test {
                 Timespec { sec: 1414800000 - now().tm_utcoff as i64, nsec: 0 },
                 from_value::<Timespec>(&Bytes(b"2014-11-01".to_vec())));
         }
-        #[test]
-        fn should_convert_Bytes_to_Duration() {
-            assert_eq!(
-                Duration::milliseconds(-433830500),
-                from_value::<Duration>(&Bytes(b"-120:30:30.5".to_vec())));
-        }
     }
 
     mod to_value {
         use super::super::ToValue;
-        use super::super::Value::{Date, Time};
+        use super::super::Value::{Date};
         use time::{Timespec, now};
-        use std::time::Duration;
         #[test]
         fn should_convert_Time_to_Date() {
             let ts = Timespec {
@@ -820,11 +703,6 @@ mod test {
                 nsec: 1000,
             };
             assert_eq!(ts.to_value(), Date(2014, 11, 1, 18, 33, 00, 1));
-        }
-        #[test]
-        fn should_convert_Duration_to_Time() {
-            assert_eq!(Duration::milliseconds(-433830500).to_value(),
-                       Time(true, 5, 0, 30, 30, 500000));
         }
     }
 }
