@@ -1640,7 +1640,6 @@ mod test {
     }
 
     mod my_conn {
-        use test;
         use std::iter;
         use std::env;
         use std::borrow::ToOwned;
@@ -1648,7 +1647,7 @@ mod test {
         use std::io::Write;
         use time::{Tm, now};
         use super::super::{MyConn, MyOpts};
-        use super::super::super::value::{ToValue, from_value};
+        use super::super::super::value::{from_value};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
 
@@ -1896,59 +1895,6 @@ mod test {
                     }
                 }
             }
-        }
-
-        #[bench]
-        fn simple_exec(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
-            bencher.iter(|| { let _ = conn.query("DO 1"); })
-        }
-        #[bench]
-        fn prepared_exec(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("DO 1").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[]); })
-        }
-        #[bench]
-        fn simple_query_row(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
-            bencher.iter(|| { let _ = conn.query("SELECT 1"); })
-        }
-        #[bench]
-        fn simple_prepared_query_row(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT 1").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[]); })
-        }
-        #[bench]
-        fn simple_prepared_query_row_with_param(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT ?").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[&0]); })
-        }
-        #[bench]
-        fn simple_prepared_query_row_with_5_params(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-            let params: &[&ToValue] = &[
-                &42i8,
-                &b"123456".to_vec(),
-                &1.618f64,
-                &NULL,
-                &1i8
-            ];
-            bencher.iter(|| { let _ = stmt.execute(params); })
-        }
-        #[bench]
-        fn select_large_string(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
-            bencher.iter(|| { let _ = conn.query("SELECT REPEAT('A', 10000)"); })
-        }
-        #[bench]
-        fn select_prepared_large_string(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[]); })
         }
     }
 }
