@@ -27,7 +27,6 @@
 #![crate_type="dylib"]
 
 #![feature(plugin)]
-#![feature(ip)]
 #![feature(std_misc)]
 #![feature(slice_patterns)]
 #![cfg_attr(test, feature(test))]

@@ -567,8 +567,9 @@ impl MyConn {
             let addr: Option<SocketAddr> = FromStr::from_str(
                 &conn.opts.tcp_addr.as_ref().unwrap()[..]).ok();
             let is_loopback = match addr {
-                Some(SocketAddr::V4(addr)) => addr.ip().is_loopback(),
-                Some(SocketAddr::V6(addr)) => addr.ip().is_loopback(),
+                // XXX: Wait for is_loopback stabilization
+                Some(SocketAddr::V4(addr)) => addr.ip().octets()[0] == 127,
+                Some(SocketAddr::V6(addr)) => addr.ip().segments() == [0, 0, 0, 0, 0, 0, 0, 1],
                 _ => false,
             };
             if is_loopback {
@@ -602,8 +603,8 @@ impl MyConn {
                 let addr: Option<SocketAddr> = FromStr::from_str(
                     &conn.opts.tcp_addr.as_ref().unwrap()[..]).ok();
                 let is_loopback = match addr {
-                    Some(SocketAddr::V4(addr)) => addr.ip().is_loopback(),
-                    Some(SocketAddr::V6(addr)) => addr.ip().is_loopback(),
+                    Some(SocketAddr::V4(addr)) => addr.ip().octets()[0] == 127,
+                    Some(SocketAddr::V6(addr)) => addr.ip().segments() == [0, 0, 0, 0, 0, 0, 0, 1],
                     _ => false,
                 };
                 if is_loopback {
