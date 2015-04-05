@@ -26,7 +26,6 @@
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
-#![feature(plugin)]
 extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;
