@@ -146,7 +146,6 @@ impl<'a> Transaction<'a> {
     }
 }
 
-#[unsafe_destructor]
 impl<'a> Drop for Transaction<'a> {
     /// Will rollback transaction.
     fn drop(&mut self) {
@@ -265,7 +264,6 @@ impl<'a> Stmt<'a> {
     }
 }
 
-#[unsafe_destructor]
 impl<'a> Drop for Stmt<'a> {
     fn drop(&mut self) {
         let data = [(self.stmt.statement_id & 0x000000FF) as u8,
@@ -1581,7 +1579,6 @@ impl<'a> Iterator for QueryResult<'a> {
     }
 }
 
-#[unsafe_destructor]
 impl<'a> Drop for QueryResult<'a> {
     fn drop(&mut self) {
         if self.conn.is_some() {

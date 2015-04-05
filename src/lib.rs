@@ -26,7 +26,6 @@
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
-#![feature(unsafe_destructor)]
 #![feature(plugin)]
 #![feature(ip)]
 #![feature(tcp)]
