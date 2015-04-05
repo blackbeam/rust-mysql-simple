@@ -403,8 +403,7 @@ pub struct MyOpts {
     ///
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
     pub prefer_socket: bool,
-    /// TCP keepalive timeout in seconds (defaults to one hour).
-    pub keepalive_timeout: Option<u32>,
+    // XXX: Wait for keepalive_timeout stabilization
     /// Commands to execute on each new database connection.
     pub init: Vec<String>,
 
@@ -455,7 +454,6 @@ impl Default for MyOpts {
             pass: None,
             db_name: None,
             prefer_socket: true,
-            keepalive_timeout: Some(60 * 60),
             init: vec![],
             verify_peer: false,
             ssl_opts: None,
@@ -474,7 +472,6 @@ impl Default for MyOpts {
             pass: None,
             db_name: None,
             prefer_socket: true,
-            keepalive_timeout: Some(60 * 60),
             init: vec![],
         }
     }
@@ -768,9 +765,6 @@ impl MyConn {
                   self.opts.tcp_port))
             {
                 Ok(stream) => {
-                    // keepalive one hour
-                    let keepalive_timeout = self.opts.keepalive_timeout.clone();
-                    try!(stream.set_keepalive(keepalive_timeout));
                     self.stream = Some(MyStream::InsecureStream(PlainStream{s: TCPStream(stream), wrapped: false}));
                     return Ok(());
                 },

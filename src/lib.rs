@@ -28,7 +28,6 @@
 
 #![feature(plugin)]
 #![feature(ip)]
-#![feature(tcp)]
 #![feature(collections)]
 #![feature(std_misc)]
 #![feature(slice_patterns)]
