@@ -95,11 +95,11 @@ impl EOFPacket {
 
 /// (major, minor, micro) mysql server version.
 pub type ServerVersion = (u16, u16, u16);
-static VERSION_RE: Regex = regex!(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)");
 
 fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
     let ver_str = String::from_utf8_lossy(bytes).into_owned();
-    VERSION_RE.captures(&ver_str[..])
+    let version_re = Regex::new(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)").unwrap();
+    version_re.captures(&ver_str[..])
     .and_then(|capts| {
         Some((
             (capts.at(1).unwrap().parse::<u16>()).unwrap_or(0),

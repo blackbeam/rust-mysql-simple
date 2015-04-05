@@ -49,11 +49,13 @@ ssl = ["openssl"]
 [dependencies]
 lazy_static = "~0.1.5"
 time = "~0.1.11"
-regex = "~0.1.9"
-regex_macros = "~0.1.4"
 bitflags = "0.1"
 byteorder = "*"
 unix_socket = "0.3.0"
+
+[dependencies.regex]
+version = "0.1"
+default-features = false
 
 [dependencies.openssl]
 version = ">=0.5.0"
