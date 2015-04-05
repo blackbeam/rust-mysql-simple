@@ -426,19 +426,19 @@ impl MyOpts {
     fn get_user(&self) -> String {
         match self.user {
             Some(ref x) => x.clone(),
-            None => String::from_str("")
+            None => String::new(),
         }
     }
     fn get_pass(&self) -> String {
         match self.pass {
             Some(ref x) => x.clone(),
-            None => String::from_str("")
+            None => String::new()
         }
     }
     fn get_db_name(&self) -> String {
         match self.db_name {
             Some(ref x) => x.clone(),
-            None => String::from_str("")
+            None => String::new()
         }
     }
 }
