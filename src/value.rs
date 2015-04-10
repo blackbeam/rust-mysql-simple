@@ -2,9 +2,8 @@ use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
 // XXX: Wait for Duration stabilization
-use std::iter;
 use std::io;
-use std::io::Seek;
+use std::io::Write as stdWrite;
 use time::{Tm, Timespec, now, strptime, at};
 
 use super::consts;
@@ -96,11 +95,9 @@ impl Value {
             Value::Int(x) => format!("{}", x),
             Value::UInt(x) => format!("{}", x),
             Value::Float(x) => format!("{}", x),
-            Value::Date(0, 0, 0, 0, 0, 0, 0) => "''".to_owned(),
             Value::Date(y, m, d, 0, 0, 0, 0) => format!("'{:04}-{:02}-{:02}'", y, m, d),
             Value::Date(y, m, d, h, i, s, 0) => format!("'{:04}-{:02}-{:02} {:02}:{:02}:{:02}'", y, m, d, h, i, s),
             Value::Date(y, m, d, h, i, s, u) => format!("'{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}'", y, m, d, h, i, s, u),
-            Value::Time(_, 0, 0, 0, 0, 0) => "''".to_owned(),
             Value::Time(neg, d, h, i, s, 0) => {
                 if neg {
                     format!("'-{:03}:{:02}:{:02}'", d * 24 + h as u32, i, s)
@@ -138,49 +135,49 @@ impl Value {
                 try!(writer.write_f64::<LE>(x));
             },
             Value::Date(0u16, 0u8, 0u8, 0u8, 0u8, 0u8, 0u32) => {
-                try!(WriteBytesExt::write_u8(&mut writer, 0u8));
+                try!(writer.write_u8(0u8));
             },
             Value::Date(y, m, d, 0u8, 0u8, 0u8, 0u32) => {
-                try!(WriteBytesExt::write_u8(&mut writer, 4u8));
+                try!(writer.write_u8(4u8));
                 try!(writer.write_u16::<LE>(y));
-                try!(WriteBytesExt::write_u8(&mut writer, m));
-                try!(WriteBytesExt::write_u8(&mut writer, d));
+                try!(writer.write_u8(m));
+                try!(writer.write_u8(d));
             },
             Value::Date(y, m, d, h, i, s, 0u32) => {
-                try!(WriteBytesExt::write_u8(&mut writer, 7u8));
+                try!(writer.write_u8(7u8));
                 try!(writer.write_u16::<LE>(y));
-                try!(WriteBytesExt::write_u8(&mut writer, m));
-                try!(WriteBytesExt::write_u8(&mut writer, d));
-                try!(WriteBytesExt::write_u8(&mut writer, h));
-                try!(WriteBytesExt::write_u8(&mut writer, i));
-                try!(WriteBytesExt::write_u8(&mut writer, s));
+                try!(writer.write_u8(m));
+                try!(writer.write_u8(d));
+                try!(writer.write_u8(h));
+                try!(writer.write_u8(i));
+                try!(writer.write_u8(s));
             },
             Value::Date(y, m, d, h, i, s, u) => {
-                try!(WriteBytesExt::write_u8(&mut writer, 11u8));
+                try!(writer.write_u8(11u8));
                 try!(writer.write_u16::<LE>(y));
-                try!(WriteBytesExt::write_u8(&mut writer, m));
-                try!(WriteBytesExt::write_u8(&mut writer, d));
-                try!(WriteBytesExt::write_u8(&mut writer, h));
-                try!(WriteBytesExt::write_u8(&mut writer, i));
-                try!(WriteBytesExt::write_u8(&mut writer, s));
+                try!(writer.write_u8(m));
+                try!(writer.write_u8(d));
+                try!(writer.write_u8(h));
+                try!(writer.write_u8(i));
+                try!(writer.write_u8(s));
                 try!(writer.write_u32::<LE>(u));
             },
-            Value::Time(_, 0u32, 0u8, 0u8, 0u8, 0u32) => try!(WriteBytesExt::write_u8(&mut writer, 0u8)),
+            Value::Time(_, 0u32, 0u8, 0u8, 0u8, 0u32) => try!(writer.write_u8(0u8)),
             Value::Time(neg, d, h, m, s, 0u32) => {
-                try!(WriteBytesExt::write_u8(&mut writer, 8u8));
-                try!(WriteBytesExt::write_u8(&mut writer, if neg {1u8} else {0u8}));
+                try!(writer.write_u8(8u8));
+                try!(writer.write_u8(if neg {1u8} else {0u8}));
                 try!(writer.write_u32::<LE>(d));
-                try!(WriteBytesExt::write_u8(&mut writer, h));
-                try!(WriteBytesExt::write_u8(&mut writer, m));
-                try!(WriteBytesExt::write_u8(&mut writer, s));
+                try!(writer.write_u8(h));
+                try!(writer.write_u8(m));
+                try!(writer.write_u8(s));
             },
             Value::Time(neg, d, h, m, s, u) => {
-                try!(WriteBytesExt::write_u8(&mut writer, 12u8));
-                try!(WriteBytesExt::write_u8(&mut writer, if neg {1u8} else {0u8}));
+                try!(writer.write_u8(12u8));
+                try!(writer.write_u8(if neg {1u8} else {0u8}));
                 try!(writer.write_u32::<LE>(d));
-                try!(WriteBytesExt::write_u8(&mut writer, h));
-                try!(WriteBytesExt::write_u8(&mut writer, m));
-                try!(WriteBytesExt::write_u8(&mut writer, s));
+                try!(writer.write_u8(h));
+                try!(writer.write_u8(m));
+                try!(writer.write_u8(s));
                 try!(writer.write_u32::<LE>(u));
             }
         };
@@ -195,7 +192,8 @@ impl Value {
             if reader.get_ref().len() as u64 == reader.position() {
                 break;
             } else if pld[reader.position() as usize] == 0xfb {
-                try!(reader.seek(io::SeekFrom::Current(1)));
+                let new_position = reader.position() + 1;
+                reader.set_position(new_position);
                 output.push(Value::NULL);
             } else {
                 output.push(Value::Bytes(try!(reader.read_lenenc_bytes())));
@@ -232,7 +230,7 @@ impl Value {
         let bitmap_len = (params.len() + 7) / 8;
         let mut large_ids = Vec::new();
         let mut writer = Vec::new();
-        let mut bitmap = iter::repeat(0u8).take(bitmap_len).collect::<Vec<u8>>();
+        let mut bitmap = vec![0u8; bitmap_len];
         let mut i = 0u16;
         let mut written = 0;
         let cap = max_allowed_packet - bitmap_len - values.len() * 8;
@@ -243,7 +241,7 @@ impl Value {
                     let val = try!(value.to_bin());
                     if val.len() < cap - written {
                         written += val.len();
-                        try!(io::Write::write_all(&mut writer, &val[..]));
+                        try!(writer.write_all(&val[..]));
                     } else {
                         large_ids.push(i);
                     }
@@ -651,7 +649,7 @@ mod test {
         #[test]
         fn should_convert_Date_to_mysql_string() {
             assert_eq!(Date(0, 0, 0, 0, 0, 0, 0).into_str(),
-                       "''".to_string());
+                       "'0000-00-00'".to_string());
             assert_eq!(Date(2014, 2, 20, 0, 0, 0, 0).into_str(),
                        "'2014-02-20'".to_string());
             assert_eq!(Date(2014, 2, 20, 22, 20, 10, 0).into_str(),
@@ -662,7 +660,7 @@ mod test {
         #[test]
         fn should_convert_Time_to_mysql_string() {
             assert_eq!(Time(false, 0, 0, 0, 0, 0).into_str(),
-                       "''".to_string());
+                       "'000:00:00'".to_string());
             assert_eq!(Time(true, 34, 3, 2, 1, 0).into_str(),
                        "'-819:02:01'".to_string());
             assert_eq!(Time(false, 10, 100, 20, 30, 40).into_str(),

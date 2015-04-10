@@ -1,6 +1,3 @@
-#[cfg(feature = "openssl")]
-use openssl::{ssl, x509};
-
 use std::borrow::Borrow;
 use std::default::Default;
 use std::fs;
@@ -8,22 +5,20 @@ use std::fmt;
 use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
+use std::net;
 use std::net::SocketAddr;
-use std::net::TcpStream;
 use std::path;
 use std::str::FromStr;
 
 use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
-use super::io::MyStream;
 use super::io::Read as MyRead;
 use super::io::Write;
-use super::io::PlainStream;
-use super::io::TcpOrUnixStream::TCPStream;
-use super::io::TcpOrUnixStream::UNIXStream;
-#[cfg(feature = "ssl")]
-use super::io::MySslStream;
+use super::io::Stream;
+use super::io::Stream::UnixStream;
+use super::io::Stream::TcpStream;
+use super::io::TcpStream::Insecure;
 use super::error::MyError::{
     MyIoError,
     MySqlError,
@@ -49,7 +44,7 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
-use unix_socket::UnixStream;
+use unix_socket as us;
 
 pub mod pool;
 
@@ -494,7 +489,7 @@ impl Default for MyOpts {
 /// Mysql connection.
 pub struct MyConn {
     opts: MyOpts,
-    stream: Option<MyStream>,
+    stream: Option<Stream>,
     server_version: ServerVersion,
     affected_rows: u64,
     last_insert_id: u64,
@@ -507,34 +502,8 @@ pub struct MyConn {
     last_command: u8,
     connected: bool,
     has_results: bool,
-    #[cfg(feature = "openssl")]
-    ssl_context: Option<ssl::SslContext>,
 }
 
-#[cfg(feature = "openssl")]
-impl Default for MyConn {
-    fn default() -> MyConn {
-        MyConn{
-            stream: None,
-            seq_id: 0u8,
-            capability_flags: consts::CapabilityFlags::empty(),
-            status_flags: consts::StatusFlags::empty(),
-            connection_id: 0u32,
-            character_set: 0u8,
-            affected_rows: 0u64,
-            last_insert_id: 0u64,
-            last_command: 0u8,
-            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-            opts: Default::default(),
-            connected: false,
-            has_results: false,
-            ssl_context: None,
-            server_version: (0, 0, 0),
-        }
-    }
-}
-
-#[cfg(not(feature = "ssl"))]
 impl Default for MyConn {
     fn default() -> MyConn {
         MyConn{
@@ -628,47 +597,6 @@ impl MyConn {
         return Ok(conn);
     }
 
-    #[cfg(feature = "ssl")]
-    /// Resets `MyConn` (drops state then reconnects).
-    pub fn reset(&mut self) -> MyResult<()> {
-        if self.server_version > (5, 7, 2) {
-            try!(self.write_command(Command::COM_RESET_CONNECTION));
-            self.read_packet()
-            .and_then(|pld| {
-                match pld[0] {
-                    0 => {
-                        let ok = try!(OkPacket::from_payload(&pld[..]));
-                        self.handle_ok(&ok);
-                        self.last_command = 0;
-                        Ok(())
-                    },
-                    _ => {
-                        let err = try!(ErrPacket::from_payload(&pld[..]));
-                        Err(MySqlError(err))
-                    }
-                }
-            })
-        } else {
-            self.stream = None;
-            self.seq_id = 0;
-            self.capability_flags = consts::CapabilityFlags::empty();
-            self.status_flags = consts::StatusFlags::empty();
-            self.connection_id = 0;
-            self.character_set = 0;
-            self.affected_rows = 0;
-            self.last_insert_id = 0;
-            self.last_command = 0;
-            self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
-            self.connected = false;
-            self.has_results = false;
-            self.ssl_context = None;
-            try!(self.connect_stream());
-            self.connect()
-        }
-
-    }
-
-    #[cfg(not(feature = "ssl"))]
     /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
         if self.server_version > (5, 7, 2) {
@@ -706,76 +634,47 @@ impl MyConn {
         }
     }
 
-    fn get_mut_stream<'a>(&'a mut self) -> &'a mut MyStream {
+    fn get_mut_stream<'a>(&'a mut self) -> &'a mut Stream {
         self.stream.as_mut().unwrap()
     }
 
     #[cfg(feature = "openssl")]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
-        let stream = self.stream.take().unwrap();
-        match stream {
-            MyStream::InsecureStream(mut s) => {
-                let mut ctx = try!(ssl::SslContext::new(ssl::SslMethod::Tlsv1));
-                let mode = if self.opts.verify_peer {
-                    ssl::SSL_VERIFY_PEER
-                } else {
-                    ssl::SSL_VERIFY_NONE
-                };
-                ctx.set_verify(mode, None);
-                match self.opts.ssl_opts {
-                    Some((ref ca_cert, None)) => {
-                        try!(ctx.set_CA_file(&ca_cert));
-                    },
-                    Some((ref ca_cert, Some((ref client_cert, ref client_key)))) => {
-                        try!(ctx.set_CA_file(&ca_cert));
-                        try!(ctx.set_certificate_file(&client_cert, x509::X509FileType::PEM));
-                        try!(ctx.set_private_key_file(&client_key, x509::X509FileType::PEM));
-                    },
-                    _ => { unreachable!() }
-                }
-                s.wrapped = true;
-                self.stream = Some(MyStream::SecureStream(MySslStream(try!(ssl::SslStream::new(&ctx, s)))));
-                self.ssl_context = Some(ctx);
-            },
-            s => {
-                self.stream = Some(s);
-            }
+        if self.stream.is_some() {
+            let stream = self.stream.take().unwrap();
+            let stream = try!(stream.make_secure(self.opts.verify_peer, &self.opts.ssl_opts));
+            self.stream = Some(stream);
         }
         Ok(())
     }
 
     fn connect_stream(&mut self) -> MyResult<()> {
         if self.opts.unix_addr.is_some() {
-            match UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
+            match us::UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
                 Ok(stream) => {
-                    self.stream = Some(MyStream::InsecureStream(PlainStream{
-                        s: UNIXStream(stream),
-                        wrapped: false
-                    }));
-                    return Ok(());
+                    self.stream = Some(Stream::UnixStream(stream));
+                    Ok(())
                 },
                 _ => {
-                    let path_str = format!("{}", self.opts.unix_addr.as_ref().unwrap().display())
-                                   .to_string();
-                    return Err(MyDriverError(CouldNotConnect(Some(path_str))));
+                    let path_str = format!("{}", self.opts.unix_addr.as_ref().unwrap().display());
+                    Err(MyDriverError(CouldNotConnect(Some(path_str))))
                 }
             }
-        }
-        if self.opts.tcp_addr.is_some() {
-            match TcpStream::connect(
-                &(&self.opts.tcp_addr.as_ref().unwrap()[..],
-                  self.opts.tcp_port))
+        } else if self.opts.tcp_addr.is_some() {
+            match net::TcpStream::connect(&(&self.opts.tcp_addr.as_ref().unwrap()[..],
+                                             self.opts.tcp_port))
             {
                 Ok(stream) => {
-                    self.stream = Some(MyStream::InsecureStream(PlainStream{s: TCPStream(stream), wrapped: false}));
-                    return Ok(());
+                    self.stream = Some(Stream::TcpStream(Some(Insecure(stream))));
+                    Ok(())
                 },
                 _ => {
-                    return Err(MyDriverError(CouldNotConnect(self.opts.tcp_addr.clone())));
+                    Err(MyDriverError(CouldNotConnect(self.opts.tcp_addr.clone())))
                 }
             }
+        } else {
+            Err(MyDriverError(CouldNotConnect(None)))
         }
-        return Err(MyDriverError(CouldNotConnect(None)));
     }
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
@@ -852,8 +751,8 @@ impl MyConn {
                 return Err(MyDriverError(Protocol41NotSet));
             }
             self.handle_handshake(&handshake);
-            if self.opts.ssl_opts.is_some() {
-                if let Some(MyStream::InsecureStream(PlainStream{s: TCPStream(_), ..})) = self.stream {
+            if self.opts.ssl_opts.is_some() && self.stream.is_some() {
+                if self.stream.as_ref().unwrap().is_insecure() {
                     if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
                         return Err(MyDriverError(SslNotSupported));
                     } else {
@@ -895,7 +794,7 @@ impl MyConn {
         if self.opts.get_db_name().len() > 0 {
             client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
         }
-        if let Some(MyStream::InsecureStream(_)) = self.stream {
+        if self.stream.is_some() && self.stream.as_ref().unwrap().is_insecure() {
             if let Some(_) = self.opts.ssl_opts {
                 client_flags.insert(consts::CLIENT_SSL);
             }

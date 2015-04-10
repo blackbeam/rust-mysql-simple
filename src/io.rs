@@ -14,12 +14,12 @@ use super::error::DriverError::PacketOutOfSync;
 use super::error::MyResult;
 
 #[cfg(feature = "openssl")]
-use openssl::ssl;
+use openssl::{ssl, x509};
 use byteorder::ByteOrder;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;
-use unix_socket::UnixStream;
+use unix_socket as us;
 
 pub trait Read: ReadBytesExt {
     fn read_lenenc_int(&mut self) -> io::Result<u64> {
@@ -37,10 +37,17 @@ pub trait Read: ReadBytesExt {
     fn read_lenenc_bytes(&mut self) -> io::Result<Vec<u8>> {
         let len = try!(self.read_lenenc_int());
         let mut out = Vec::with_capacity(len as usize);
-        if len > 0 {
-            try!(self.take(len).read_to_end(&mut out));
+        let count = if len > 0 {
+            try!(self.take(len).read_to_end(&mut out))
+        } else {
+            0
+        };
+        if count as u64 == len {
+            Ok(out)
+        } else {
+            Err(io::Error::new(io::ErrorKind::Other,
+                               "Unexpected EOF while reading length encoded string"))
         }
-        Ok(out)
     }
 
     fn read_to_null(&mut self) -> io::Result<Vec<u8>> {
@@ -161,8 +168,8 @@ pub trait Read: ReadBytesExt {
 
     /// Reads mysql packet payload returns it with new seq_id value.
     fn read_packet(&mut self, mut seq_id: u8) -> MyResult<(Vec<u8>, u8)> {
+        use std::io::ErrorKind::Other;
         let mut output = Vec::new();
-        let mut pos = 0;
         loop {
             let payload_len = try!(self.read_uint::<LE>(3)) as usize;
             let srv_seq_id = try!(self.read_u8());
@@ -171,30 +178,20 @@ pub trait Read: ReadBytesExt {
             }
             seq_id += 1;
             if payload_len == consts::MAX_PAYLOAD_LEN {
-                output.reserve(pos + consts::MAX_PAYLOAD_LEN);
-                unsafe { output.set_len(pos + consts::MAX_PAYLOAD_LEN); }
+                output.reserve(consts::MAX_PAYLOAD_LEN);
                 let mut chunk = self.take(consts::MAX_PAYLOAD_LEN as u64);
-                loop {
-                    let count = try!(chunk.read(&mut output[pos..]));
-                    if count == 0 {
-                        break;
-                    } else {
-                        pos += count;
-                    }
+                let count = try!(chunk.read_to_end(&mut output));
+                if count != consts::MAX_PAYLOAD_LEN {
+                    return Err(io::Error::new(Other, "Unexpected EOF while reading packet").into())
                 }
             } else if payload_len == 0 {
                 break;
             } else {
-                output.reserve(pos + payload_len);
-                unsafe { output.set_len(pos + payload_len); }
+                output.reserve(payload_len);
                 let mut chunk = self.take(payload_len as u64);
-                loop {
-                    let count = try!(chunk.read(&mut output[pos..]));
-                    if count == 0 {
-                        break;
-                    } else {
-                        pos += count;
-                    }
+                let count = try!(chunk.read_to_end(&mut output));
+                if count != payload_len {
+                    return Err(io::Error::new(Other, "Unexpected EOF while reading packet").into())
                 }
                 break;
             }
@@ -207,18 +204,19 @@ impl<T: ReadBytesExt> Read for T {}
 
 pub trait Write: WriteBytesExt {
     fn write_le_uint_n(&mut self, x: u64, len: usize) -> io::Result<()> {
-        let mut buf = vec![0u8; len];
+        let mut buf = [0u8; 8];
         let mut offset = 0;
         while offset < len {
             buf[offset] = (((0xFF << (offset * 8)) & x) >> (offset * 8)) as u8;
             offset += 1;
         }
-        NewWrite::write_all(self, &buf[..])
+        NewWrite::write_all(self, &buf[..len])
     }
 
     fn write_lenenc_int(&mut self, x: u64) -> io::Result<()> {
         if x < 251 {
-            self.write_le_uint_n(x, 1)
+            try!(self.write_u8(x as u8));
+            Ok(())
         } else if x < 65_536 {
             try!(self.write_u8(0xFC));
             self.write_le_uint_n(x, 2)
@@ -233,7 +231,7 @@ pub trait Write: WriteBytesExt {
 
     fn write_lenenc_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
         try!(self.write_lenenc_int(bytes.len() as u64));
-        NewWrite::write_all(self, bytes)
+        self.write_all(bytes)
     }
 
     fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: usize) -> MyResult<u8> {
@@ -242,22 +240,22 @@ pub trait Write: WriteBytesExt {
             return Err(MyDriverError(PacketTooLarge));
         }
         if data.len() == 0 {
-            try!(NewWrite::write_all(self, &[0u8, 0u8, 0u8, seq_id]));
+            try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
             return Ok(seq_id + 1);
         }
         let mut last_was_max = false;
         for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
             let chunk_len = chunk.len();
             let mut writer = Vec::with_capacity(4 + chunk_len);
-            last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
             try!(writer.write_le_uint_n(chunk_len as u64, 3));
-            try!(WriteBytesExt::write_u8(&mut writer, seq_id));
-            seq_id += 1;
-            try!(NewWrite::write_all(&mut writer, chunk));
+            try!(writer.write_u8(seq_id));
+            try!(writer.write_all(chunk));
             try!(self.write_all(&writer[..]));
+            last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
+            seq_id += 1;
         }
         if last_was_max {
-            try!(NewWrite::write_all(self, &[0u8, 0u8, 0u8, seq_id]));
+            try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
             seq_id += 1;
         }
         Ok(seq_id)
@@ -266,115 +264,150 @@ pub trait Write: WriteBytesExt {
 
 impl<T: WriteBytesExt> Write for T {}
 
-#[cfg(feature = "openssl")]
-pub struct MySslStream(pub ssl::SslStream<PlainStream>);
+pub enum Stream {
+    UnixStream(us::UnixStream),
+    TcpStream(Option<TcpStream>),
+}
 
 #[cfg(feature = "openssl")]
-impl Drop for MySslStream {
-    fn drop(&mut self) {
-        let MySslStream(ref mut s) = *self;
-        let _ = s.write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
-        let _ = s.flush();
+impl Stream {
+    pub fn is_insecure(&self) -> bool {
+        match self {
+            &Stream::TcpStream(Some(TcpStream::Insecure(_))) => true,
+            _ => false,
+        }
+    }
+    pub fn make_secure(mut self,
+                       verify_peer: bool,
+                       ssl_opts: &Option<(::std::path::PathBuf,
+                                          Option<(::std::path::PathBuf, ::std::path::PathBuf)>)>)
+    -> MyResult<Stream>
+    {
+        if self.is_insecure() {
+            let mut ctx = try!(ssl::SslContext::new(ssl::SslMethod::Tlsv1));
+            let mode = if verify_peer {
+                ssl::SSL_VERIFY_PEER
+            } else {
+                ssl::SSL_VERIFY_NONE
+            };
+            ctx.set_verify(mode, None);
+            match *ssl_opts {
+                Some((ref ca_cert, None)) => try!(ctx.set_CA_file(&ca_cert)),
+                Some((ref ca_cert, Some((ref client_cert, ref client_key)))) => {
+                    try!(ctx.set_CA_file(&ca_cert));
+                    try!(ctx.set_certificate_file(&client_cert, x509::X509FileType::PEM));
+                    try!(ctx.set_private_key_file(&client_key, x509::X509FileType::PEM));
+                },
+                _ => unreachable!(),
+            }
+            match self {
+                Stream::TcpStream(ref mut opt_stream) if opt_stream.is_some() => {
+                    let stream = opt_stream.take().unwrap();
+                    match stream {
+                        TcpStream::Insecure(stream) => {
+                            let ssl_stream = try!(ssl::SslStream::new(&ctx, stream));
+                            Ok(Stream::TcpStream(Some(TcpStream::Secure(ssl_stream))))
+                        },
+                        _ => unreachable!(),
+                    }
+
+                },
+                _ => unreachable!(),
+            }
+        } else {
+            Ok(self)
+        }
     }
 }
 
-pub enum MyStream {
+impl Drop for Stream {
+    fn drop(&mut self) {
+        if let &mut Stream::TcpStream(None) = self {
+            return;
+        }
+        let _ = self.write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+        let _ = self.flush();
+    }
+}
+
+impl io::Read for Stream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match *self {
+            Stream::UnixStream(ref mut s) => s.read(buf),
+            Stream::TcpStream(Some(ref mut s)) => s.read(buf),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+}
+
+impl io::Write for Stream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match *self {
+            Stream::UnixStream(ref mut s) => s.write(buf),
+            Stream::TcpStream(Some(ref mut s)) => s.write(buf),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match *self {
+            Stream::UnixStream(ref mut s) => s.flush(),
+            Stream::TcpStream(Some(ref mut s)) => s.flush(),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+}
+
+pub enum TcpStream {
     #[cfg(feature = "openssl")]
-    SecureStream(MySslStream),
-    InsecureStream(PlainStream),
+    Secure(ssl::SslStream<net::TcpStream>),
+    Insecure(net::TcpStream),
 }
 
 #[cfg(feature = "ssl")]
-impl io::Read for MyStream {
+impl io::Read for TcpStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
-            MyStream::SecureStream(MySslStream(ref mut s)) => s.read(buf),
-            MyStream::InsecureStream(ref mut s) => s.read(buf),
+            TcpStream::Secure(ref mut s) => s.read(buf),
+            TcpStream::Insecure(ref mut s) => s.read(buf),
         }
     }
 }
 
 #[cfg(not(feature = "ssl"))]
-impl io::Read for MyStream {
+impl io::Read for TcpStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
-            MyStream::InsecureStream(ref mut s) => s.read(buf),
+            TcpStream::Insecure(ref mut s) => s.read(buf),
         }
     }
 }
 
 #[cfg(feature = "ssl")]
-impl io::Write for MyStream {
+impl io::Write for TcpStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match *self {
-            MyStream::SecureStream(MySslStream(ref mut s)) => NewWrite::write(s, buf),
-            MyStream::InsecureStream(ref mut s) => NewWrite::write(s, buf),
+            TcpStream::Secure(ref mut s) => s.write(buf),
+            TcpStream::Insecure(ref mut s) => s.write(buf),
         }
     }
-
     fn flush(&mut self) -> io::Result<()> {
         match *self {
-            MyStream::SecureStream(MySslStream(ref mut s)) => s.flush(),
-            MyStream::InsecureStream(ref mut s) => s.flush(),
+            TcpStream::Secure(ref mut s) => s.flush(),
+            TcpStream::Insecure(ref mut s) => s.flush(),
         }
     }
 }
 
 #[cfg(not(feature = "ssl"))]
-impl io::Write for MyStream {
+impl io::Write for TcpStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match *self {
-            MyStream::InsecureStream(ref mut s) => NewWrite::write(s, buf),
+            TcpStream::Insecure(ref mut s) => s.write(buf),
         }
     }
-
     fn flush(&mut self) -> io::Result<()> {
         match *self {
-            MyStream::InsecureStream(ref mut s) => s.flush(),
-        }
-    }
-}
-
-pub enum TcpOrUnixStream {
-    TCPStream(net::TcpStream),
-    UNIXStream(UnixStream),
-}
-
-pub struct PlainStream {
-    pub s: TcpOrUnixStream,
-    pub wrapped: bool,
-}
-
-impl Drop for PlainStream {
-    fn drop(&mut self) {
-        if ! self.wrapped {
-            let _ = self.write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
-            let _ = self.flush();
-        }
-    }
-}
-
-impl io::Read for PlainStream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self.s {
-            TcpOrUnixStream::TCPStream(ref mut s) => io::Read::read(s, buf),
-            TcpOrUnixStream::UNIXStream(ref mut s) => io::Read::read(s, buf),
-        }
-    }
-}
-
-impl io::Write for PlainStream {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self.s {
-            TcpOrUnixStream::TCPStream(ref mut s) => NewWrite::write(s, buf),
-            TcpOrUnixStream::UNIXStream(ref mut s) => NewWrite::write(s, buf),
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        match self.s {
-            TcpOrUnixStream::TCPStream(ref mut s) => s.flush(),
-            TcpOrUnixStream::UNIXStream(ref mut s) => s.flush(),
+            TcpStream::Insecure(ref mut s) => s.flush(),
         }
     }
 }
