@@ -135,33 +135,6 @@ impl MyPool {
         Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
     }
 
-    /// You can call `query`, `prepare` and `start_transaction` directly on a pool but be aware of
-    /// the fact that you can't guarantee that query will be called on concrete
-    /// connection.
-    ///
-    /// For example:
-    ///
-    /// ```ignore
-    /// let opts = MyOpts{user: Some("root".to_string()), ..Default::default()};
-    /// let pool = MyPool::new(opts).unwrap();
-    ///
-    /// pool.query("USE some_database");
-    /// let result = pool.query("INSERT INTO users (name) VALUES ('Steven')");
-    /// let result = pool.query("SELECT * FROM users"); // Error! `no database selected`
-    ///                                                 // because PooledConn on which
-    ///                                                 // you have executed USE was
-    ///                                                 // borrowed by result shadowed
-    ///                                                 // on previous line and will not
-    ///                                                 // be available until the end of
-    ///                                                 // its scope.
-    /// ```
-    #[deprecated(since = "0.2.14",
-                 reason = "Leads to unintuitive borrow checker errors")]
-    pub fn query<'a>(&'a self, query: &'a str) -> MyResult<QueryResult<'a>> {
-        let conn = try!(self.get_conn());
-        conn.pooled_query(query)
-    }
-
     /// See docs on [`Pool#query`](#method.query)
     pub fn prepare<'a>(&'a self, query: &'a str) -> MyResult<Stmt<'a>> {
         let conn = try!(self.get_conn());
@@ -271,16 +244,6 @@ impl MyPooledConn {
         self.conn.take().unwrap()
     }
 
-    fn pooled_query(mut self, query: &str) -> MyResult<QueryResult> {
-        match self.as_mut()._query(query) {
-            Ok((columns, ok_packet)) => Ok(QueryResult::new_pooled(self,
-                                                                   columns,
-                                                                   ok_packet,
-                                                                   false)),
-            Err(err) => Err(err)
-        }
-    }
-
     fn pooled_prepare(mut self, query: &str) -> MyResult<Stmt> {
         match self.as_mut()._prepare(query) {
             Ok(stmt) => Ok(Stmt::new_pooled(stmt, self)),
@@ -356,20 +319,6 @@ mod test {
             }
         }
         #[test]
-        fn should_execute_queryes_on_MyPool() {
-            let pool = MyPool::new(get_opts()).unwrap();
-            let mut threads = Vec::new();
-            for _ in 0usize..10 {
-                let pool = pool.clone();
-                threads.push(thread::spawn(move || {
-                    assert!(pool.query("SELECT 1").is_ok());
-                }));
-            }
-            for t in threads.into_iter() {
-                assert!(t.join().is_ok());
-            }
-        }
-        #[test]
         fn should_execute_statements_on_MyPooledConn() {
             let pool = MyPool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
@@ -403,34 +352,42 @@ mod test {
         #[test]
         fn should_start_transaction_on_MyPool() {
             let pool = MyPool::new(get_opts()).unwrap();
-            assert!(pool.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
+            pool.prepare("CREATE TEMPORARY TABLE x.tbl(a INT)").ok().map(|mut stmt| {
+                assert!(stmt.execute(&[]).is_ok());
+            });
             assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.commit()
             }).is_ok());
-            for x in pool.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
-                let x = x.unwrap();
-                assert_eq!(from_value::<u8>(&x[0]), 2u8);
-            }
+            pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
+                for x in stmt.execute(&[]).unwrap() {
+                    let x = x.unwrap();
+                    assert_eq!(from_value::<u8>(&x[0]), 2u8);
+                }
+            });
             assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 t.rollback()
             }).is_ok());
-            for x in pool.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
-                let x = x.unwrap();
-                assert_eq!(from_value::<u8>(&x[0]), 2u8);
-            }
+            pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
+                for x in stmt.execute(&[]).unwrap() {
+                    let x = x.unwrap();
+                    assert_eq!(from_value::<u8>(&x[0]), 2u8);
+                }
+            });
             assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 Ok(())
             }).is_ok());
-            for x in pool.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
-                let x = x.unwrap();
-                assert_eq!(from_value::<u8>(&x[0]), 2u8);
-            }
+            pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
+                for x in stmt.execute(&[]).unwrap() {
+                    let x = x.unwrap();
+                    assert_eq!(from_value::<u8>(&x[0]), 2u8);
+                }
+            });
         }
         #[test]
         fn should_start_transaction_on_MyPooledConn() {

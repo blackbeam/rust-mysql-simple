@@ -1314,17 +1314,6 @@ impl<'a> QueryResult<'a> {
                     is_bin: is_bin}
     }
 
-    fn new_pooled(conn: pool::MyPooledConn,
-                      columns: Vec<Column>,
-                      ok_packet: Option<OkPacket>,
-                      is_bin: bool) -> QueryResult<'a> {
-        QueryResult{pooled_conn: Some(conn),
-                    columns: columns,
-                    conn: None,
-                    ok_packet: ok_packet,
-                    is_bin: is_bin}
-    }
-
     fn handle_if_more_results(&mut self) -> Option<MyResult<Vec<Value>>> {
         if self.conn.is_some() {
             let conn_ref = self.conn.as_mut().unwrap();
