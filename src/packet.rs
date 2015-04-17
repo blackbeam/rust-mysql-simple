@@ -1,23 +1,24 @@
-use std::{fmt, str};
+use std::fmt;
 use std::io;
-use std::io::Seek;
-use std::io::Read as NewRead;
+use std::io::Read as StdRead;
 
 use regex::Regex;
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, ReadBytesExt};
 
-use super::io::{Read};
 use super::consts;
+use super::consts::StatusFlags;
+use super::consts::CapabilityFlags;
 use super::error;
 use super::error::DriverError;
 use super::error::MyError::MyDriverError;
+use super::io::Read;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct OkPacket {
     pub affected_rows: u64,
     pub last_insert_id: u64,
-    pub status_flags: consts::StatusFlags,
+    pub status_flags: StatusFlags,
     pub warnings: u16,
     pub info: Vec<u8>
 }
@@ -28,11 +29,11 @@ impl OkPacket {
         Ok(OkPacket{
             affected_rows: try!(reader.read_lenenc_int()),
             last_insert_id: try!(reader.read_lenenc_int()),
-            status_flags: consts::StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>())),
+            status_flags: StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>())),
             warnings: try!(reader.read_u16::<LE>()),
             info: {
                 let mut info = Vec::with_capacity(reader.len());
-                try!(NewRead::read_to_end(&mut reader, &mut info));
+                try!(reader.read_to_end(&mut info));
                 info
             },
         })
@@ -50,7 +51,7 @@ impl ErrPacket {
     pub fn from_payload(pld: &[u8]) -> io::Result<ErrPacket> {
         let mut reader = &pld[1..];
         let error_code = try!(reader.read_u16::<LE>());
-        try!(ReadBytesExt::read_u8(&mut reader));
+        try!(reader.read_u8());
         Ok(ErrPacket{
             error_code: error_code,
             sql_state: {
@@ -60,7 +61,7 @@ impl ErrPacket {
             },
             error_message: {
                 let mut error_message = Vec::with_capacity(reader.len());
-                try!(NewRead::read_to_end(&mut reader, &mut error_message));
+                try!(reader.read_to_end(&mut error_message));
                 error_message
             },
         })
@@ -72,15 +73,15 @@ impl fmt::Display for ErrPacket {
         write!(f,
                "ERROR {} ({}): {}",
                self.error_code,
-               str::from_utf8(&self.sql_state[..]).unwrap(),
-               str::from_utf8(&self.error_message[..]).unwrap())
+               String::from_utf8_lossy(&self.sql_state[..]).into_owned(),
+               String::from_utf8_lossy(&self.error_message[..]).into_owned())
     }
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct EOFPacket {
     pub warnings: u16,
-    pub status_flags: consts::StatusFlags,
+    pub status_flags: StatusFlags,
 }
 
 impl EOFPacket {
@@ -88,7 +89,7 @@ impl EOFPacket {
         let mut reader = &pld[1..];
         Ok(EOFPacket{
             warnings: try!(reader.read_u16::<LE>()),
-            status_flags: consts::StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>())),
+            status_flags: StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>())),
         })
     }
 }
@@ -106,8 +107,7 @@ fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
             (capts.at(2).unwrap().parse::<u16>()).unwrap_or(0),
             (capts.at(3).unwrap().parse::<u16>()).unwrap_or(0),
         ))
-    })
-    .and_then(|version| {
+    }).and_then(|version| {
         if version == (0, 0, 0) {
             None
         } else {
@@ -122,8 +122,8 @@ pub struct HandshakePacket {
     pub auth_plugin_name: Vec<u8>,
     pub server_version: ServerVersion,
     pub connection_id: u32,
-    pub capability_flags: consts::CapabilityFlags,
-    pub status_flags: consts::StatusFlags,
+    pub capability_flags: CapabilityFlags,
+    pub status_flags: StatusFlags,
     pub protocol_version: u8,
     pub character_set: u8,
 }
@@ -134,29 +134,30 @@ impl HandshakePacket {
         let mut auth_plugin_data: Vec<u8> = Vec::with_capacity(32);
         let mut auth_plugin_name: Vec<u8> = Vec::with_capacity(32);
         let mut character_set = 0u8;
-        let mut status_flags = consts::StatusFlags::empty();
+        let mut status_flags = StatusFlags::empty();
         let payload_len = pld.len();
         let mut reader = io::Cursor::new(pld);
-        let protocol_version = try!(ReadBytesExt::read_u8(&mut reader));
+        let protocol_version = try!(reader.read_u8());
         let version_bytes = try!(reader.read_to_null());
         let server_version = try!(parse_version(&version_bytes[..]));
         let connection_id = try!(reader.read_u32::<LE>());
         try!(reader.by_ref().take(8).read_to_end(&mut auth_plugin_data));
         // skip filler
-        try!(reader.seek(io::SeekFrom::Current(1)));
+        { let pos = reader.position(); reader.set_position(pos + 1); }
         let lower_cf = try!(reader.read_u16::<LE>());
-        let mut capability_flags = consts::CapabilityFlags::from_bits_truncate(lower_cf as u32);
+        let mut capability_flags = CapabilityFlags::from_bits_truncate(lower_cf as u32);
         if reader.position() != payload_len as u64 {
-            character_set = try!(ReadBytesExt::read_u8(&mut reader));
-            status_flags = consts::StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>()));
+            character_set = try!(reader.read_u8());
+            status_flags = StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>()));
             let upper_cf = try!(reader.read_u16::<LE>());
-            capability_flags.insert(consts::CapabilityFlags::from_bits_truncate((upper_cf as u32) << 16));
+            capability_flags.insert(CapabilityFlags::from_bits_truncate((upper_cf as u32) << 16));
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                length_of_auth_plugin_data = try!(ReadBytesExt::read_u8(&mut reader)) as i16;
+                length_of_auth_plugin_data = try!(reader.read_u8()) as i16;
             } else {
-                try!(reader.seek(io::SeekFrom::Current(1)));
+                let pos = reader.position();
+                reader.set_position(pos + 1);
             }
-            try!(reader.seek(io::SeekFrom::Current(10)));
+            { let pos = reader.position(); reader.set_position(pos + 10); }
             if capability_flags.contains(consts::CLIENT_SECURE_CONNECTION) {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
@@ -210,15 +211,13 @@ mod test {
         let payload = [0xfe_u8, 1u8, 0u8, 8u8, 0u8];
         let eof_packet = EOFPacket::from_payload(&payload).unwrap();
         assert_eq!(eof_packet.warnings, 1);
-        assert_eq!(eof_packet.status_flags,
-                   consts::SERVER_MORE_RESULTS_EXISTS);
+        assert_eq!(eof_packet.status_flags, consts::SERVER_MORE_RESULTS_EXISTS);
     }
     #[test]
     fn should_parse_handshake_packet() {
         let payload = b"\x0a5.6.4\x00\x01\x00\x00\x00\x01\x02\x03\x04\x05\
                         \x06\x07\x08\x00\x04\x80";
-        let handshake_packet = HandshakePacket::from_payload(payload)
-                                               .unwrap();
+        let handshake_packet = HandshakePacket::from_payload(payload).unwrap();
         assert_eq!(handshake_packet.protocol_version, 0x0a);
         assert_eq!(handshake_packet.server_version, (5, 6, 4));
         assert_eq!(handshake_packet.connection_id, 1);
