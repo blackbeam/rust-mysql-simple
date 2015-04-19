@@ -136,7 +136,7 @@ impl MyPool {
     }
 
     /// See docs on [`Pool#query`](#method.query)
-    pub fn prepare<'a>(&'a self, query: &'a str) -> MyResult<Stmt<'a>> {
+    pub fn prepare<'a, T: AsRef<str> + 'a>(&'a self, query: T) -> MyResult<Stmt<'a>> {
         let conn = try!(self.get_conn());
         conn.pooled_prepare(query)
     }
@@ -206,13 +206,13 @@ impl Drop for MyPooledConn {
 impl MyPooledConn {
     /// Redirects to
     /// [`MyConn#query`](../struct.MyConn.html#method.query).
-    pub fn query<'a>(&'a mut self, query: &str) -> MyResult<QueryResult<'a>> {
+    pub fn query<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<QueryResult<'a>> {
         self.conn.as_mut().unwrap().query(query)
     }
 
     /// Redirects to
     /// [`MyConn#prepare`](../struct.MyConn.html#method.prepare).
-    pub fn prepare<'a>(&'a mut self, query: &str) -> MyResult<Stmt<'a>> {
+    pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
         self.conn.as_mut().unwrap().prepare(query)
     }
 
@@ -244,8 +244,8 @@ impl MyPooledConn {
         self.conn.take().unwrap()
     }
 
-    fn pooled_prepare(mut self, query: &str) -> MyResult<Stmt> {
-        match self.as_mut()._prepare(query) {
+    fn pooled_prepare<'a, T: AsRef<str>>(mut self, query: T) -> MyResult<Stmt<'a>> {
+        match self.as_mut()._prepare(query.as_ref()) {
             Ok(stmt) => Ok(Stmt::new_pooled(stmt, self)),
             Err(err) => Err(err)
         }
