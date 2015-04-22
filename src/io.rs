@@ -176,7 +176,7 @@ pub trait Read: ReadBytesExt {
             if srv_seq_id != seq_id {
                 return Err(MyDriverError(PacketOutOfSync));
             }
-            seq_id += 1;
+            seq_id = seq_id.wrapping_add(1);
             if payload_len == consts::MAX_PAYLOAD_LEN {
                 output.reserve(consts::MAX_PAYLOAD_LEN);
                 let mut chunk = self.take(consts::MAX_PAYLOAD_LEN as u64);
