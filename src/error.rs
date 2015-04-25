@@ -196,7 +196,7 @@ pub type MyResult<T> = Result<T, MyError>;
 
 /// Server error codes (u16)
 #[allow(non_camel_case_types)]
-#[derive(Clone, FromPrimitive, Eq, PartialEq, Debug, Copy)]
+#[derive(Clone, Eq, PartialEq, Debug, Copy)]
 #[repr(u16)]
 pub enum ServerError {
     ER_HASHCHK = 1000u16,
