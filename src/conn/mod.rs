@@ -50,8 +50,8 @@ pub mod pool;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum IsolationLevel {
-    ReadUncommied,
-    ReadCommited,
+    ReadUncommitted,
+    ReadCommitted,
     RepeatableRead,
     Serializable,
 }
@@ -59,8 +59,8 @@ pub enum IsolationLevel {
 impl fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            IsolationLevel::ReadUncommied => write!(f, "READ UNCOMMITTED"),
-            IsolationLevel::ReadCommited => write!(f, "READ COMMITTED"),
+            IsolationLevel::ReadUncommitted => write!(f, "READ UNCOMMITTED"),
+            IsolationLevel::ReadCommitted => write!(f, "READ COMMITTED"),
             IsolationLevel::RepeatableRead => write!(f, "REPEATABLE READ"),
             IsolationLevel::Serializable => write!(f, "SERIALIZABLE"),
         }
