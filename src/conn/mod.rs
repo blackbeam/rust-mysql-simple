@@ -1246,7 +1246,7 @@ impl MyConn {
 
 /// Mysql result set for text and binary protocols.
 ///
-/// If you want to get rows from `QueryReult` you should rely on implementation
+/// If you want to get rows from `QueryResult` you should rely on implementation
 /// of `Iterator` over `MyResult<Vec<Value>>` on `QueryResult`.
 /// `Vec<Value>` is the current row representation.
 ///
