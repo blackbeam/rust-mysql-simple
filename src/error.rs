@@ -100,7 +100,7 @@ impl fmt::Debug for MyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
-            MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
+            MyError::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
             MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
             MyError::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
         }
@@ -112,7 +112,7 @@ impl fmt::Debug for MyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
-            MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
+            MyError::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
             MyError::MyDriverError(ref driver_err) => write!(f, "{:?}", driver_err),
         }
     }

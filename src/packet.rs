@@ -14,7 +14,7 @@ use super::error::DriverError;
 use super::error::MyError::MyDriverError;
 use super::io::Read;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct OkPacket {
     pub affected_rows: u64,
     pub last_insert_id: u64,
@@ -40,7 +40,7 @@ impl OkPacket {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct ErrPacket {
     pub sql_state: Vec<u8>,
     pub error_message: Vec<u8>,
@@ -78,7 +78,7 @@ impl fmt::Display for ErrPacket {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct EOFPacket {
     pub warnings: u16,
     pub status_flags: StatusFlags,
@@ -116,7 +116,7 @@ fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
     }).ok_or(MyDriverError(DriverError::CouldNotParseVersion))
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HandshakePacket {
     pub auth_plugin_data: Vec<u8>,
     pub auth_plugin_name: Vec<u8>,

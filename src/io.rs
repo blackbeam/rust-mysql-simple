@@ -2,6 +2,7 @@ use std::io;
 use std::io::Read as NewRead;
 use std::io::Write as NewWrite;
 use std::net;
+use std::fmt;
 
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
@@ -264,6 +265,7 @@ pub trait Write: WriteBytesExt {
 
 impl<T: WriteBytesExt> Write for T {}
 
+#[derive(Debug)]
 pub enum Stream {
     UnixStream(us::UnixStream),
     TcpStream(Option<TcpStream>),
@@ -361,6 +363,25 @@ pub enum TcpStream {
     #[cfg(feature = "openssl")]
     Secure(ssl::SslStream<net::TcpStream>),
     Insecure(net::TcpStream),
+}
+
+#[cfg(feature = "ssl")]
+impl fmt::Debug for TcpStream {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            TcpStream::Secure(_) => write!(f, "Secure stream"),
+            TcpStream::Insecure(_) => write!(f, "Insecure stream"),
+        }
+    }
+}
+
+#[cfg(not(feature = "ssl"))]
+impl fmt::Debug for TcpStream {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            TcpStream::Insecure(_) => write!(f, "Insecure stream"),
+        }
+    }
 }
 
 #[cfg(feature = "ssl")]

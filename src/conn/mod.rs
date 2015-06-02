@@ -48,7 +48,7 @@ use unix_socket as us;
 
 pub mod pool;
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum IsolationLevel {
     ReadUncommitted,
     ReadCommitted,
@@ -67,6 +67,7 @@ impl fmt::Display for IsolationLevel {
     }
 }
 
+#[derive(Debug)]
 pub struct Transaction<'a> {
     conn: Option<&'a mut MyConn>,
     pooled_conn: Option<pool::MyPooledConn>,
@@ -167,7 +168,7 @@ impl<'a> Drop for Transaction<'a> {
  *
  *
  */
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 struct InnerStmt {
     params: Option<Vec<Column>>,
     columns: Option<Vec<Column>>,
@@ -195,6 +196,7 @@ impl InnerStmt {
 
 /// Mysql
 /// [prepared statement](http://dev.mysql.com/doc/internals/en/prepared-statements.html).
+#[derive(Debug)]
 pub struct Stmt<'a> {
     stmt: InnerStmt,
     conn: Option<&'a mut MyConn>,
@@ -290,7 +292,7 @@ impl<'a> Drop for Stmt<'a> {
 
 /// Mysql
 /// [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition).
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Column {
     /// Schema name.
     pub schema: Vec<u8>,
@@ -379,7 +381,7 @@ impl Column {
 ///     ..Default::default()
 /// };
 /// ```
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct MyOpts {
     /// TCP address of mysql server (defaults to `127.0.0.1`).
     pub tcp_addr: Option<String>,
@@ -486,6 +488,7 @@ impl Default for MyOpts {
  */
 
 /// Mysql connection.
+#[derive(Debug)]
 pub struct MyConn {
     opts: MyOpts,
     stream: Option<Stream>,
@@ -1279,6 +1282,7 @@ impl MyConn {
 ///
 /// For more info on how to work with values please look at
 /// [`Value`](../value/enum.Value.html) documentation.
+#[derive(Debug)]
 pub struct QueryResult<'a> {
     pooled_conn: Option<pool::MyPooledConn>,
     conn: Option<&'a mut MyConn>,

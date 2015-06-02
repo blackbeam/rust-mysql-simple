@@ -6,6 +6,7 @@ use super::super::error::{MyError, DriverError};
 use super::{MyConn, MyOpts, Stmt, QueryResult};
 use super::super::error::{MyResult};
 
+#[derive(Debug)]
 struct MyInnerPool {
     opts: MyOpts,
     pool: Vec<MyConn>,
@@ -84,7 +85,7 @@ impl MyInnerPool {
 ///
 /// For more info on how to work with mysql connection please look at
 /// [`MyPooledConn`](struct.MyPooledConn.html) documentation.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MyPool {
     pool: Arc<Mutex<MyInnerPool>>
 }
@@ -187,6 +188,7 @@ impl MyPool {
 ///
 /// For more info on how to work with query results please look at
 /// [`QueryResult`](../struct.QueryResult.html) documentation.
+#[derive(Debug)]
 pub struct MyPooledConn {
     pool: MyPool,
     conn: Option<MyConn>

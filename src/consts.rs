@@ -54,7 +54,7 @@ bitflags! {
 
 /// Commands (u8)
 #[allow(non_camel_case_types)]
-#[derive(Clone, Eq, PartialEq, Copy)]
+#[derive(Clone, Eq, PartialEq, Copy, Debug)]
 #[repr(u8)]
 pub enum Command {
     COM_SLEEP               = 0x00_u8,
@@ -93,7 +93,7 @@ pub enum Command {
 
 /// Text protocol column types (u8)
 #[allow(non_camel_case_types)]
-#[derive(Clone, Eq, PartialEq, Copy)]
+#[derive(Clone, Eq, PartialEq, Copy, Debug)]
 #[repr(u8)]
 pub enum ColumnType {
     MYSQL_TYPE_DECIMAL     = 0x00_u8,
