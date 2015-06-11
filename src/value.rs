@@ -425,7 +425,18 @@ macro_rules! from_value_impl_num(
             #[inline]
             fn from_value_opt(v: &Value) -> Option<$t> {
                 match *v {
-                    Value::Int(x) if x >= ::std::$t::MIN as i64 && x <= ::std::$t::MAX as i64 => Some(x as $t),
+                    Value::Int(x) => {
+                        let min = ::std::$t::MIN as i64;
+                        let mut max = ::std::$t::MAX as i64;
+                        if max < 0 {
+                            max = ::std::i64::MAX;
+                        }
+                        if min <= x && x <= max {
+                            Some(x as $t)
+                        } else {
+                            None
+                        }
+                    }
                     Value::UInt(x) if x <= ::std::$t::MAX as u64 => Some(x as $t),
                     Value::Bytes(ref bts) => {
                         from_utf8(&bts[..]).ok().and_then(|x| {
@@ -476,7 +487,7 @@ impl FromValue for u64 {
     #[inline]
     fn from_value_opt(v: &Value) -> Option<u64> {
         match *v {
-            Value::Int(x) => Some(x as u64),
+            Value::Int(x) if x >= 0 => Some(x as u64),
             Value::UInt(x) => Some(x),
             Value::Bytes(ref bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
@@ -534,8 +545,8 @@ impl FromValue for bool {
     #[inline]
     fn from_value_opt(v:&Value) -> Option<bool> {
         match *v {
-            Value::Int(x) if x == 0 => Some(false),
-            Value::Int(x) if x == 1 => Some(true),
+            Value::Int(0) => Some(false),
+            Value::Int(1) => Some(true),
             Value::Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x30 => Some(false),
             Value::Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x31 => Some(true),
             _ => None
@@ -670,7 +681,7 @@ mod test {
 
     mod from_value {
         use super::super::from_value;
-        use super::super::Value::{Bytes, Date};
+        use super::super::Value::{Bytes, Date, Int};
         use time::{Timespec, now};
         #[test]
         fn should_convert_Bytes_to_Timespec() {
@@ -687,6 +698,15 @@ mod test {
             assert_eq!(
                 Timespec { sec: 1414800000 - now().tm_utcoff as i64, nsec: 0 },
                 from_value::<Timespec>(&Bytes(b"2014-11-01".to_vec())));
+        }
+        #[test]
+        fn should_convert_signed_to_unsigned() {
+            assert_eq!(1, from_value::<usize>(&Int(1)));
+        }
+        #[test]
+        #[should_panic]
+        fn should_not_convert_negative_to_unsigned() {
+            from_value::<u64>(&Int(-1));
         }
     }
 
