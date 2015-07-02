@@ -151,7 +151,7 @@ bench:
 	          fi"
 
 	bash -c "\
-		if (cargo bench --no-default-features);\
+		if (cargo bench --no-default-features --features nightly);\
 		then \
 			exit 0;\
 		else\
@@ -161,7 +161,7 @@ bench:
 		fi"
 
 	bash -c "\
-		if (cargo bench);\
+		if (cargo bench --features nightly);\
 		then \
 			exit 0;\
 		else\

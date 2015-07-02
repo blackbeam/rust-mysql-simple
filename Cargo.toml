@@ -41,10 +41,9 @@ opt-level = 0
 debug = true
 
 [features]
-
 default = ["ssl"]
-
 ssl = ["openssl"]
+nightly = []
 
 [dependencies]
 lazy_static = "~0.1.5"

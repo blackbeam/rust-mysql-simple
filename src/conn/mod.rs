@@ -1774,5 +1774,83 @@ mod test {
             }
         }
     }
+
+    #[cfg(feature = "nightly")]
+    mod bench {
+        use test;
+        use super::get_opts;
+        use super::super::{MyConn};
+        use super::super::super::value::{ToValue};
+        use super::super::super::value::Value::NULL;
+
+        #[bench]
+        fn simple_exec(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            bencher.iter(|| { let _ = conn.query("DO 1"); })
+        }
+
+        #[bench]
+        fn prepared_exec(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("DO 1").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(&[]); })
+        }
+
+        #[bench]
+        fn prepare_and_exec(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            bencher.iter(|| {
+                let mut stmt = conn.prepare("SELECT ?").unwrap();
+                let _ = stmt.execute(&[&0]).unwrap();
+            })
+        }
+
+        #[bench]
+        fn simple_query_row(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            bencher.iter(|| { let _ = conn.query("SELECT 1"); })
+        }
+
+        #[bench]
+        fn simple_prepared_query_row(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT 1").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(&[]); })
+        }
+
+        #[bench]
+        fn simple_prepared_query_row_with_param(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT ?").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(&[&0]); })
+        }
+
+        #[bench]
+        fn simple_prepared_query_row_with_5_params(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
+            let params: &[&ToValue] = &[
+                &42i8,
+                &b"123456".to_vec(),
+                &1.618f64,
+                &NULL,
+                &1i8
+            ];
+            bencher.iter(|| { let _ = stmt.execute(params); })
+        }
+
+        #[bench]
+        fn select_large_string(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            bencher.iter(|| { let _ = conn.query("SELECT REPEAT('A', 10000)"); })
+        }
+
+        #[bench]
+        fn select_prepared_large_string(bencher: &mut test::Bencher) {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(&[]); })
+        }
+    }
 }
 

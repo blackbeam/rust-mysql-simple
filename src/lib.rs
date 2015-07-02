@@ -26,6 +26,10 @@
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
+#![cfg_attr(feature = "nightly", feature(test))]
+#[cfg(feature = "nightly")]
+extern crate test;
+
 extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;
