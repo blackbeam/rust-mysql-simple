@@ -9,6 +9,7 @@ use std::net;
 use std::net::SocketAddr;
 use std::path;
 use std::str::FromStr;
+use std::collections::HashMap;
 
 use super::consts;
 use super::consts::Command;
@@ -260,22 +261,6 @@ impl<'a> Stmt<'a> {
     }
 }
 
-impl<'a> Drop for Stmt<'a> {
-    fn drop(&mut self) {
-        let data = [(self.stmt.statement_id & 0x000000FF) as u8,
-                    ((self.stmt.statement_id & 0x0000FF00) >> 8) as u8,
-                    ((self.stmt.statement_id & 0x00FF0000) >> 16) as u8,
-                    ((self.stmt.statement_id & 0xFF000000) >> 24) as u8,];
-        if self.conn.is_some() {
-            let conn = self.conn.as_mut().unwrap();
-            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, &data);
-        } else {
-            let conn = self.pooled_conn.as_mut().unwrap().as_mut();
-            let _ = conn.write_command_data(Command::COM_STMT_CLOSE, &data);
-        }
-    }
-}
-
 /***
  *     .d8888b.           888
  *    d88P  Y88b          888
@@ -492,6 +477,7 @@ impl Default for MyOpts {
 pub struct MyConn {
     opts: MyOpts,
     stream: Option<Stream>,
+    stmts: HashMap<String, InnerStmt>,
     server_version: ServerVersion,
     affected_rows: u64,
     last_insert_id: u64,
@@ -506,10 +492,14 @@ pub struct MyConn {
     has_results: bool,
 }
 
-impl Default for MyConn {
-    fn default() -> MyConn {
-        MyConn{
+impl MyConn {
+    #[cfg(not(feature = "ssl"))]
+    /// Creates new `MyConn`.
+    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+        let mut conn = MyConn {
+            opts: opts,
             stream: None,
+            stmts: HashMap::new(),
             seq_id: 0u8,
             capability_flags: consts::CapabilityFlags::empty(),
             status_flags: consts::StatusFlags::empty(),
@@ -519,19 +509,10 @@ impl Default for MyConn {
             last_insert_id: 0u64,
             last_command: 0u8,
             max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-            opts: Default::default(),
             connected: false,
             has_results: false,
             server_version: (0, 0, 0),
-        }
-    }
-}
-
-impl MyConn {
-    #[cfg(not(feature = "ssl"))]
-    /// Creates new `MyConn`.
-    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
-        let mut conn = MyConn{opts: opts, ..Default::default()};
+        };
         try!(conn.connect_stream());
         try!(conn.connect());
         if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
@@ -566,7 +547,23 @@ impl MyConn {
     #[cfg(feature = "ssl")]
     /// Creates new `MyConn`.
     pub fn new(opts: MyOpts) -> MyResult<MyConn> {
-        let mut conn = MyConn{opts: opts, ..Default::default()};
+        let mut conn = MyConn {
+            opts: opts,
+            stream: None,
+            stmts: HashMap::new(),
+            seq_id: 0u8,
+            capability_flags: consts::CapabilityFlags::empty(),
+            status_flags: consts::StatusFlags::empty(),
+            connection_id: 0u32,
+            character_set: 0u8,
+            affected_rows: 0u64,
+            last_insert_id: 0u64,
+            last_command: 0u8,
+            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
+            connected: false,
+            has_results: false,
+            server_version: (0, 0, 0),
+        };
         try!(conn.connect_stream());
         try!(conn.connect());
         if let None = conn.opts.ssl_opts {
@@ -610,6 +607,7 @@ impl MyConn {
                         let ok = try!(OkPacket::from_payload(pld.as_ref()));
                         self.handle_ok(&ok);
                         self.last_command = 0;
+                        self.stmts.clear();
                         Ok(())
                     },
                     _ => {
@@ -620,6 +618,7 @@ impl MyConn {
             })
         } else {
             self.stream = None;
+            self.stmts.clear();
             self.seq_id = 0;
             self.capability_flags = consts::CapabilityFlags::empty();
             self.status_flags = consts::StatusFlags::empty();
@@ -1089,7 +1088,7 @@ impl MyConn {
         }
     }
 
-    fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
+    fn _true_prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
         try!(self.write_command_data(Command::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match pld[0] {
@@ -1120,6 +1119,16 @@ impl MyConn {
                 Ok(stmt)
             }
         }
+    }
+
+    fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
+        if let Some(inner_st) = self.stmts.get(query) {
+            return Ok(inner_st.clone());
+        }
+
+        let inner_st = try!(self._true_prepare(query));
+        self.stmts.insert(query.to_owned(), inner_st.clone());
+        Ok(inner_st)
     }
 
     /// Implements binary protocol of mysql server.
@@ -1228,6 +1237,25 @@ impl MyConn {
             Err(err) => {
                 self.has_results = false;
                 Err(MyIoError(err))
+            }
+        }
+    }
+
+    fn has_stmt(&self, query: &str) -> bool {
+        self.stmts.contains_key(query)
+    }
+}
+
+impl Drop for MyConn {
+    fn drop(&mut self) {
+        let keys: Vec<String> = self.stmts.keys().map(Clone::clone).collect();
+        for key in keys {
+            for stmt in self.stmts.remove(&key) {
+                let data: [u8; 4] = [(stmt.statement_id & 0x000000FF) as u8,
+                                     ((stmt.statement_id & 0x0000FF00) >> 08) as u8,
+                                     ((stmt.statement_id & 0x00FF0000) >> 16) as u8,
+                                     ((stmt.statement_id & 0xFF000000) >> 24) as u8,];
+                let _ = self.write_command_data(Command::COM_STMT_CLOSE, &data);
             }
         }
     }

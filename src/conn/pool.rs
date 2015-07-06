@@ -136,9 +136,41 @@ impl MyPool {
         Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
     }
 
+    fn get_conn_by_stmt<T: AsRef<str>>(&self, query: T) -> MyResult<MyPooledConn> {
+        let conn = {
+            let mut pool = match self.pool.lock() {
+                Ok(mutex) => mutex,
+                _ => return Err(MyError::MyDriverError(
+                                DriverError::PoisonedPoolMutex)),
+            };
+
+            let mut id = None;
+            for (i, conn) in pool.pool.iter().enumerate() {
+                if conn.has_stmt(query.as_ref()) {
+                    id = Some(i);
+                    break;
+                }
+            }
+
+            if let Some(id) = id {
+                let mut conn = pool.pool.remove(id);
+                if !conn.ping() {
+                    try!(conn.reset());
+                }
+                Some(MyPooledConn {pool: self.clone(), conn: Some(conn)})
+            } else {
+                None
+            }
+        };
+        match conn {
+            Some(pooled_conn) => Ok(pooled_conn),
+            None => self.get_conn(),
+        }
+    }
+
     /// See docs on [`Pool#query`](#method.query)
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a self, query: T) -> MyResult<Stmt<'a>> {
-        let conn = try!(self.get_conn());
+        let conn = try!(self.get_conn_by_stmt(query.as_ref()));
         conn.pooled_prepare(query)
     }
 
