@@ -40,7 +40,7 @@ use super::error::DriverError::SslNotSupported;
 use super::scramble::scramble;
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
 use super::value::Value;
-use super::value::{ToValue, from_value, from_value_opt};
+use super::value::{ToRow, from_value, from_value_opt};
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 use byteorder::LittleEndian as LE;
@@ -250,7 +250,7 @@ impl<'a> Stmt<'a> {
     /// Executes prepared statement with an arguments passed as a slice of a
     /// references to a [`ToValue`](../value/trait.ToValue.html) trait
     /// implementors.
-    pub fn execute<'s>(&'s mut self, params: &[&ToValue]) -> MyResult<QueryResult<'s>> {
+    pub fn execute<'s, T: ToRow>(&'s mut self, params: T) -> MyResult<QueryResult<'s>> {
         if self.conn.is_some() {
             let conn_ref = self.conn.as_mut().unwrap();
             conn_ref.execute(&self.stmt, params)
@@ -527,7 +527,7 @@ impl MyConn {
             if is_loopback {
                 match conn.get_system_var("socket") {
                     Some(path) => {
-                        let path = from_value::<String>(&path);
+                        let path = from_value::<String>(path);
                         let opts = MyOpts{
                             unix_addr: Some(From::from(path)),
                             ..conn.opts.clone()
@@ -578,7 +578,7 @@ impl MyConn {
                 if is_loopback {
                     match conn.get_system_var("socket") {
                         Some(path) => {
-                            let path = from_value::<String>(&path);
+                            let path = from_value::<String>(path);
                             let opts = MyOpts{
                                 unix_addr: Some(From::from(path)),
                                 ..conn.opts.clone()
@@ -958,9 +958,9 @@ impl MyConn {
         self.handle_result_set()
     }
 
-    fn execute<'a>(&'a mut self, stmt: &InnerStmt, params: &[&ToValue]) -> MyResult<QueryResult<'a>> {
-        let _params: Vec<Value> = params.iter().map(|x| x.to_value() ).collect();
-        match self._execute(stmt, _params.as_ref()) {
+    fn execute<'a, T: ToRow>(&'a mut self, stmt: &InnerStmt, params: T) -> MyResult<QueryResult<'a>> {
+        let params = params.to_row();
+        match self._execute(stmt, params.as_ref()) {
             Ok((columns, ok_packet)) => {
                 Ok(QueryResult::new(self, columns, ok_packet, true))
             },
@@ -1151,7 +1151,7 @@ impl MyConn {
             return Ok(());
         }
         self.do_handshake().and_then(|_| {
-            Ok(from_value_opt::<usize>(&self.get_system_var("max_allowed_packet").unwrap_or(NULL))
+            Ok(from_value_opt::<usize>(self.get_system_var("max_allowed_packet").unwrap_or(NULL))
                .unwrap_or(0))
         }).and_then(|max_allowed_packet| {
             if max_allowed_packet == 0 {
@@ -1301,7 +1301,7 @@ impl Drop for MyConn {
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.prepare("SELECT 42").map(|mut stmt| {
-///     let mut result = stmt.execute(&[]).unwrap();
+///     let mut result = stmt.execute(()).unwrap();
 ///     for row in result {
 ///         assert_eq!(row.unwrap(), vec![Value::Int(42)]);
 ///     }
@@ -1552,7 +1552,7 @@ mod test {
         use std::io::Write;
         use time::{Tm, now};
         use super::super::{MyConn, MyOpts};
-        use super::super::super::value::{from_value};
+        use super::super::super::value::{ToValue, from_value};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
 
@@ -1560,7 +1560,7 @@ mod test {
         fn should_connect() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mode = conn.query("SELECT @@GLOBAL.sql_mode").unwrap().next().unwrap().unwrap().remove(0);
-            let mode = from_value::<String>(&mode);
+            let mode = from_value::<String>(mode);
             assert!(mode.contains("TRADITIONAL"));
             assert!(conn.ping());
         }
@@ -1646,37 +1646,32 @@ mod test {
             .and_then(|mut stmt| {
                 let tm = Tm { tm_year: 114, tm_mon: 4, tm_mday: 5, tm_hour: 0,
                               tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now() };
+                let hello = b"hello".to_vec();
+                assert!(stmt.execute((&hello, -123, 123, tm.to_timespec(), 123.123f64)).is_ok());
                 assert!(stmt.execute(&[
-                    &b"hello".to_vec(),
-                    &-123,
-                    &123,
-                    &(tm.to_timespec()),
-                    &123.123f64
-                ]).is_ok());
-                assert!(stmt.execute(&[
-                    &b"world".to_vec(),
-                    &NULL,
-                    &NULL,
-                    &NULL,
-                    &321.321f64
-                ]).is_ok());
+                    &b"world".to_vec() as &ToValue,
+                    &NULL as &ToValue,
+                    &NULL as &ToValue,
+                    &NULL as &ToValue,
+                    &321.321f64 as &ToValue
+                ][..]).is_ok());
                 Ok(())
             }).unwrap();
             let _ = conn.prepare("SELECT * from x.tbl").and_then(|mut stmt| {
-                for (i, row) in stmt.execute(&[]).unwrap().enumerate() {
-                    let row = row.unwrap();
+                for (i, row) in stmt.execute(()).unwrap().enumerate() {
+                    let mut row = row.unwrap();
                     if i == 0 {
                         assert_eq!(row[0], Bytes(b"hello".to_vec()));
                         assert_eq!(row[1], Int(-123i64));
                         assert_eq!(row[2], Int(123i64));
                         assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                        assert_eq!(from_value::<f64>(&row[4]), 123.123);
+                        assert_eq!(from_value::<f64>(row.pop().unwrap()), 123.123);
                     } else if i == 1 {
                         assert_eq!(row[0], Bytes(b"world".to_vec()));
                         assert_eq!(row[1], NULL);
                         assert_eq!(row[2], NULL);
                         assert_eq!(row[3], NULL);
-                        assert_eq!(from_value::<f64>(&row[4]), 321.321);
+                        assert_eq!(from_value::<f64>(row.pop().unwrap()), 321.321);
                     } else {
                         unreachable!();
                     }
@@ -1689,7 +1684,7 @@ mod test {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
             assert_eq!(
-                stmt.execute(&[]).unwrap().next().unwrap().unwrap(),
+                stmt.execute(()).unwrap().next().unwrap().unwrap(),
                 vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
             );
         }
@@ -1723,8 +1718,8 @@ mod test {
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 let _ = t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
                 .and_then(|mut stmt| {
-                    assert!(stmt.execute(&[&3]).is_ok());
-                    assert!(stmt.execute(&[&4]).is_ok());
+                    assert!(stmt.execute((3)).is_ok());
+                    assert!(stmt.execute((4)).is_ok());
                     Ok(())
                 }).unwrap();
                 assert!(t.commit().is_ok());
@@ -1808,7 +1803,7 @@ mod test {
         use test;
         use super::get_opts;
         use super::super::{MyConn};
-        use super::super::super::value::{ToValue};
+        use super::super::super::value::{IntoValue};
         use super::super::super::value::Value::NULL;
 
         #[bench]
@@ -1857,7 +1852,7 @@ mod test {
         fn simple_prepared_query_row_with_5_params(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-            let params: &[&ToValue] = &[
+            let params: &[&IntoValue] = &[
                 &42i8,
                 &b"123456".to_vec(),
                 &1.618f64,

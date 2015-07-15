@@ -49,10 +49,10 @@ lazy_static! {
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.prepare("SELECT ? * ?").map(|mut stmt| {
-///     let mut result = stmt.execute(&[&20i32, &0.8f32]).unwrap();
+///     let mut result = stmt.execute((20i32, 0.8f32)).unwrap();
 ///     for row in result {
-///         let row = row.unwrap();
-///         assert_eq!(from_value::<f32>(&row[0]), 16.0f32);
+///         let mut row = row.unwrap();
+///         assert_eq!(from_value::<f32>(row.pop().unwrap()), 16.0f32);
 ///     }
 /// });
 /// ```
@@ -257,6 +257,182 @@ impl Value {
     }
 }
 
+pub trait ToRow {
+    fn to_row(self) -> Vec<Value>;
+}
+
+impl<'a> ToRow for &'a [&'a ToValue] {
+    fn to_row(self) -> Vec<Value> {
+        let mut row: Vec<Value> = Vec::with_capacity(self.len());
+        for v in self.into_iter() {
+            row.push(v.to_value());
+        }
+        row
+    }
+}
+
+impl<A: IntoValue> ToRow for A {
+    fn to_row(self) -> Vec<Value> {
+        vec![self.into_value()]
+    }
+}
+
+impl ToRow for () {
+    fn to_row(self) -> Vec<Value> {
+        Vec::new()
+    }
+}
+
+impl<A: IntoValue> ToRow for (A,) {
+    fn to_row(self) -> Vec<Value> {
+        let (a,) = self;
+        vec![a.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue> ToRow for (A, B) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b) = self;
+        vec![a.into_value(), b.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue> ToRow for (A, B, C) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c) = self;
+        vec![a.into_value(), b.into_value(), c.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue> ToRow for (A, B, C, D) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue,
+     E: IntoValue> ToRow for (A, B, C, D, E) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d, e) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue,
+     E: IntoValue,
+     F: IntoValue> ToRow for (A, B, C, D, E, F) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d, e, f) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue,
+     E: IntoValue,
+     F: IntoValue,
+     G: IntoValue> ToRow for (A, B, C, D, E, F, G) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d, e, f, g) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue,
+     E: IntoValue,
+     F: IntoValue,
+     G: IntoValue,
+     H: IntoValue> ToRow for (A, B, C, D, E, F, G, H) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d, e, f, g, h) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue,
+     E: IntoValue,
+     F: IntoValue,
+     G: IntoValue,
+     H: IntoValue,
+     I: IntoValue> ToRow for (A, B, C, D, E, F, G, H, I) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d, e, f, g, h, i) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value(), i.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue,
+     E: IntoValue,
+     F: IntoValue,
+     G: IntoValue,
+     H: IntoValue,
+     I: IntoValue,
+     J: IntoValue> ToRow for (A, B, C, D, E, F, G, H, I, J) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d, e, f, g, h, i, j) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value(), i.into_value(), j.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue,
+     E: IntoValue,
+     F: IntoValue,
+     G: IntoValue,
+     H: IntoValue,
+     I: IntoValue,
+     J: IntoValue,
+     K: IntoValue> ToRow for (A, B, C, D, E, F, G, H, I, J, K) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d, e, f, g, h, i, j, k) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value(), i.into_value(), j.into_value(), k.into_value()]
+    }
+}
+
+impl<A: IntoValue,
+     B: IntoValue,
+     C: IntoValue,
+     D: IntoValue,
+     E: IntoValue,
+     F: IntoValue,
+     G: IntoValue,
+     H: IntoValue,
+     I: IntoValue,
+     J: IntoValue,
+     K: IntoValue,
+     L: IntoValue> ToRow for (A, B, C, D, E, F, G, H, I, J, K, L) {
+    fn to_row(self) -> Vec<Value> {
+        let (a, b, c, d, e, f, g, h, i, j, k, l) = self;
+        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value(), i.into_value(), j.into_value(), k.into_value(), l.into_value()]
+    }
+}
+
 pub trait ToValue {
     fn to_value(&self) -> Value;
 }
@@ -366,37 +542,162 @@ impl ToValue for Timespec {
     }
 }
 
+pub trait IntoValue {
+    fn into_value(self) -> Value;
+}
+
+impl<'a, T: ToValue> IntoValue for &'a T {
+    fn into_value(self) -> Value {
+        self.to_value()
+    }
+}
+
+impl<T: IntoValue> IntoValue for Option<T> {
+    fn into_value(self) -> Value {
+        match self {
+            None => Value::NULL,
+            Some(x) => x.into_value(),
+        }
+    }
+}
+
+macro_rules! into_value_impl_num(
+    (i64) => (
+        impl IntoValue for i64 {
+            fn into_value(self) -> Value {
+                Value::Int(self)
+            }
+        }
+    );
+    ($t:ty) => (
+        impl IntoValue for $t {
+            fn into_value(self) -> Value {
+                Value::Int(self as i64)
+            }
+        }
+    )
+);
+
+into_value_impl_num!(i8);
+into_value_impl_num!(u8);
+into_value_impl_num!(i16);
+into_value_impl_num!(u16);
+into_value_impl_num!(i32);
+into_value_impl_num!(u32);
+into_value_impl_num!(isize);
+into_value_impl_num!(i64);
+
+impl IntoValue for u64 {
+    fn into_value(self) -> Value {
+        Value::UInt(self)
+    }
+}
+
+impl IntoValue for usize {
+    fn into_value(self) -> Value {
+        if self as u64 <= ::std::usize::MAX as u64 {
+            Value::Int(self as i64)
+        } else {
+            Value::UInt(self as u64)
+        }
+    }
+}
+
+impl IntoValue for f32 {
+    fn into_value(self) -> Value {
+        Value::Float(self as f64)
+    }
+}
+
+impl IntoValue for f64 {
+    fn into_value(self) -> Value {
+        Value::Float(self)
+    }
+}
+
+impl IntoValue for bool {
+    fn into_value(self) -> Value {
+        Value::Int(if self {1} else {0})
+    }
+}
+
+impl<'a> IntoValue for &'a [u8] {
+    fn into_value(self) -> Value {
+        Value::Bytes(self.into())
+    }
+}
+
+impl IntoValue for Vec<u8> {
+    fn into_value(self) -> Value {
+        Value::Bytes(self)
+    }
+}
+
+impl<'a> IntoValue for &'a str {
+    fn into_value(self) -> Value {
+        let string: String = self.into();
+        Value::Bytes(string.into_bytes())
+    }
+}
+
+impl IntoValue for String {
+    fn into_value(self) -> Value {
+        Value::Bytes(self.into_bytes())
+    }
+}
+
+impl IntoValue for Timespec {
+    fn into_value(self) -> Value {
+        let t = at(self);
+        Value::Date(
+             t.tm_year as u16 + 1_900,
+             (t.tm_mon + 1) as u8,
+             t.tm_mday as u8,
+             t.tm_hour as u8,
+             t.tm_min as u8,
+             t.tm_sec as u8,
+             t.tm_nsec as u32 / 1000)
+    }
+}
+
+impl IntoValue for Value {
+    fn into_value(self) -> Value {
+        self
+    }
+}
+
+
 pub trait FromValue {
     /// Will panic if could not retrieve `Self` from `Value`
-    fn from_value(v: &Value) -> Self;
+    fn from_value(v: Value) -> Self;
 
-    /// Will return `None` if could not retrieve `Self` from `Value`
-    fn from_value_opt(v: &Value) -> Option<Self>;
+    /// Will return `None` if coluld not retrieve `Self` from `Value`
+    fn from_value_opt(v: Value) -> Option<Self>;
 }
 
 impl FromValue for Value {
-    #[inline]
-    fn from_value(v: &Value) -> Value { v.clone() }
-    #[inline]
-    fn from_value_opt(v: &Value) -> Option<Value> { Some(v.clone()) }
+    fn from_value(v: Value) -> Value {
+        v
+    }
+    fn from_value_opt(v: Value) -> Option<Value> {
+        Some(v)
+    }
 }
 
-impl<T:FromValue> FromValue for Option<T> {
-    #[inline]
-    fn from_value(v: &Value) -> Option<T> {
-        match *v {
+impl<T: FromValue> FromValue for Option<T> {
+    fn from_value(v: Value) -> Option<T> {
+        match v {
             Value::NULL => None,
-            _ => Some(from_value(v))
+            v => Some(FromValue::from_value(v))
         }
     }
-    #[inline]
-    fn from_value_opt(v: &Value) -> Option<Option<T>> {
-        match *v {
+    fn from_value_opt(v: Value) -> Option<Option<T>> {
+        match v {
             Value::NULL => Some(None),
-            _ => {
-                match from_value_opt(v) {
+            v => {
+                match FromValue::from_value_opt(v) {
                     None => None,
-                    x => Some(x)
+                    x => Some(x),
                 }
             }
         }
@@ -405,26 +706,24 @@ impl<T:FromValue> FromValue for Option<T> {
 
 /// Will panic if could not retrieve `Self` from `Value`
 #[inline]
-pub fn from_value<T: FromValue>(v: &Value) -> T {
+pub fn from_value<T: FromValue>(v: Value) -> T {
     FromValue::from_value(v)
 }
 
 /// Will return `None` if could not retrieve `Self` from `Value`
 #[inline]
-pub fn from_value_opt<T: FromValue>(v: &Value) -> Option<T> {
+pub fn from_value_opt<T: FromValue>(v: Value) -> Option<T> {
     FromValue::from_value_opt(v)
 }
 
-macro_rules! from_value_impl_num(
+macro_rules! from_value_impl_num {
     ($t:ident) => (
         impl FromValue for $t {
-            #[inline]
-            fn from_value(v: &Value) -> $t {
-                from_value_opt(v).expect("Error retrieving $t from value")
+            fn from_value(v: Value) -> $t {
+                from_value_opt(v).expect("Error retrieving from value")
             }
-            #[inline]
-            fn from_value_opt(v: &Value) -> Option<$t> {
-                match *v {
+            fn from_value_opt(v: Value) -> Option<$t> {
+                match v {
                     Value::Int(x) => {
                         let min = ::std::$t::MIN as i64;
                         let mut max = ::std::$t::MAX as i64;
@@ -436,19 +735,19 @@ macro_rules! from_value_impl_num(
                         } else {
                             None
                         }
-                    }
+                    },
                     Value::UInt(x) if x <= ::std::$t::MAX as u64 => Some(x as $t),
                     Value::Bytes(ref bts) => {
                         from_utf8(&bts[..]).ok().and_then(|x| {
                             FromStr::from_str(x).ok()
                         })
                     },
-                    _ => None
+                    _ => None,
                 }
             }
         }
     )
-);
+}
 
 from_value_impl_num!(i8);
 from_value_impl_num!(u8);
@@ -460,16 +759,14 @@ from_value_impl_num!(isize);
 from_value_impl_num!(usize);
 
 impl FromValue for i64 {
-    #[inline]
-    fn from_value(v: &Value) -> i64 {
+    fn from_value(v: Value) -> i64 {
         from_value_opt(v).expect("Error retrieving i64 from value")
     }
-    #[inline]
-    fn from_value_opt(v: &Value) -> Option<i64> {
-        match *v {
+    fn from_value_opt(v: Value) -> Option<i64> {
+        match v {
             Value::Int(x) => Some(x),
             Value::UInt(x) if x <= ::std::i64::MAX as u64 => Some(x as i64),
-            Value::Bytes(ref bts) => {
+            Value::Bytes(bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
                     FromStr::from_str(x).ok()
                 })
@@ -480,16 +777,14 @@ impl FromValue for i64 {
 }
 
 impl FromValue for u64 {
-    #[inline]
-    fn from_value(v: &Value) -> u64 {
+    fn from_value(v: Value) -> u64 {
         from_value_opt(v).expect("Error retrieving u64 from value")
     }
-    #[inline]
-    fn from_value_opt(v: &Value) -> Option<u64> {
-        match *v {
+    fn from_value_opt(v: Value) -> Option<u64> {
+        match v {
             Value::Int(x) if x >= 0 => Some(x as u64),
             Value::UInt(x) => Some(x),
-            Value::Bytes(ref bts) => {
+            Value::Bytes(bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
                     FromStr::from_str(x).ok()
                 })
@@ -500,15 +795,13 @@ impl FromValue for u64 {
 }
 
 impl FromValue for f32 {
-    #[inline]
-    fn from_value(v: &Value) -> f32 {
+    fn from_value(v: Value) -> f32 {
         from_value_opt(v).expect("Error retrieving f32 from value")
     }
-    #[inline]
-    fn from_value_opt(v: &Value) -> Option<f32> {
-        match *v {
+    fn from_value_opt(v: Value) -> Option<f32> {
+        match v {
             Value::Float(x) if x >= ::std::f32::MIN as f64 && x <= ::std::f32::MAX as f64 => Some(x as f32),
-            Value::Bytes(ref bts) => {
+            Value::Bytes(bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
                     FromStr::from_str(x).ok()
                 })
@@ -519,15 +812,14 @@ impl FromValue for f32 {
 }
 
 impl FromValue for f64 {
-    #[inline]
-    fn from_value(v: &Value) -> f64 {
+    fn from_value(v: Value) -> f64 {
         from_value_opt(v).expect("Error retrieving f64 from value")
     }
     #[inline]
-    fn from_value_opt(v: &Value) -> Option<f64> {
-        match *v {
+    fn from_value_opt(v: Value) -> Option<f64> {
+        match v {
             Value::Float(x) => Some(x),
-            Value::Bytes(ref bts) => {
+            Value::Bytes(bts) => {
                 from_utf8(&bts[..]).ok().and_then(|x| {
                     FromStr::from_str(x).ok()
                 })
@@ -538,13 +830,11 @@ impl FromValue for f64 {
 }
 
 impl FromValue for bool {
-    #[inline]
-    fn from_value(v: &Value) -> bool {
+    fn from_value(v: Value) -> bool {
         from_value_opt(v).expect("Error retrieving bool from value")
     }
-    #[inline]
-    fn from_value_opt(v:&Value) -> Option<bool> {
-        match *v {
+    fn from_value_opt(v: Value) -> Option<bool> {
+        match v {
             Value::Int(0) => Some(false),
             Value::Int(1) => Some(true),
             Value::Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x30 => Some(false),
@@ -555,29 +845,25 @@ impl FromValue for bool {
 }
 
 impl FromValue for Vec<u8> {
-    #[inline]
-    fn from_value(v: &Value) -> Vec<u8> {
+    fn from_value(v: Value) -> Vec<u8> {
         from_value_opt(v).expect("Error retrieving Vec<u8> from value")
     }
-    #[inline]
-    fn from_value_opt(v: &Value) -> Option<Vec<u8>> {
-        match *v {
-            Value::Bytes(ref bts) => Some(bts.to_vec()),
+    fn from_value_opt(v: Value) -> Option<Vec<u8>> {
+        match v {
+            Value::Bytes(bts) => Some(bts),
             _ => None
         }
     }
 }
 
 impl FromValue for String {
-    #[inline]
-    fn from_value(v: &Value) -> String {
+    fn from_value(v: Value) -> String {
         from_value_opt(v).expect("Error retrieving String from value")
     }
-    #[inline]
-    fn from_value_opt(v: &Value) -> Option<String> {
-        match *v {
-            Value::Bytes(ref bts) => {
-                String::from_utf8(bts.clone()).ok()
+    fn from_value_opt(v: Value) -> Option<String> {
+        match v {
+            Value::Bytes(bts) => {
+                String::from_utf8(bts).ok()
             },
             _ => None
         }
@@ -585,13 +871,11 @@ impl FromValue for String {
 }
 
 impl FromValue for Timespec {
-    #[inline]
-    fn from_value(v: &Value) -> Timespec {
+    fn from_value(v: Value) -> Timespec {
         from_value_opt(v).expect("Error retrieving Timespec from Value")
     }
-    #[inline]
-    fn from_value_opt(v: &Value) -> Option<Timespec> {
-        match *v {
+    fn from_value_opt(v: Value) -> Option<Timespec> {
+        match v {
             Value::Date(y, m, d, h, i, s, u) => {
                 Some(Tm{
                         tm_year: y as i32 - 1_900,
@@ -607,7 +891,7 @@ impl FromValue for Timespec {
                         tm_isdst: *TM_ISDST,
                     }.to_timespec())
             },
-            Value::Bytes(ref bts) => {
+            Value::Bytes(bts) => {
                 from_utf8(&bts[..]).ok().and_then(|s| {
                     strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).and_then(|mut tm| {
@@ -687,31 +971,31 @@ mod test {
         fn should_convert_Bytes_to_Timespec() {
             assert_eq!(
                 Timespec { sec: 1414866780 - now().tm_utcoff as i64,nsec: 0 },
-                from_value::<Timespec>(&Bytes(b"2014-11-01 18:33:00".to_vec()))
+                from_value::<Timespec>(Bytes(b"2014-11-01 18:33:00".to_vec()))
             );
             assert_eq!(
                 Timespec {
                     sec: 1414866780 - now().tm_utcoff as i64,
                     nsec: 1000,
                 },
-                from_value::<Timespec>(&Date(2014, 11, 1, 18, 33, 00, 1)));
+                from_value::<Timespec>(Date(2014, 11, 1, 18, 33, 00, 1)));
             assert_eq!(
                 Timespec { sec: 1414800000 - now().tm_utcoff as i64, nsec: 0 },
-                from_value::<Timespec>(&Bytes(b"2014-11-01".to_vec())));
+                from_value::<Timespec>(Bytes(b"2014-11-01".to_vec())));
         }
         #[test]
         fn should_convert_signed_to_unsigned() {
-            assert_eq!(1, from_value::<usize>(&Int(1)));
+            assert_eq!(1, from_value::<usize>(Int(1)));
         }
         #[test]
         #[should_panic]
         fn should_not_convert_negative_to_unsigned() {
-            from_value::<u64>(&Int(-1));
+            from_value::<u64>(Int(-1));
         }
     }
 
     mod to_value {
-        use super::super::ToValue;
+        use super::super::IntoValue;
         use super::super::Value::{Date};
         use time::{Timespec, now};
         #[test]
@@ -720,7 +1004,7 @@ mod test {
                 sec: 1414866780 - now().tm_utcoff as i64,
                 nsec: 1000,
             };
-            assert_eq!(ts.to_value(), Date(2014, 11, 1, 18, 33, 00, 1));
+            assert_eq!(ts.into_value(), Date(2014, 11, 1, 18, 33, 00, 1));
         }
     }
 }
