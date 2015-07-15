@@ -9,6 +9,8 @@ use std::net;
 use std::net::SocketAddr;
 use std::path;
 use std::str::FromStr;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::collections::HashMap;
 
 use super::consts;
@@ -70,8 +72,7 @@ impl fmt::Display for IsolationLevel {
 
 #[derive(Debug)]
 pub struct Transaction<'a> {
-    conn: Option<&'a mut MyConn>,
-    pooled_conn: Option<pool::MyPooledConn>,
+    conn: ConnRef<'a>,
     committed: bool,
     rolled_back: bool,
 }
@@ -79,8 +80,7 @@ pub struct Transaction<'a> {
 impl<'a> Transaction<'a> {
     fn new(conn: &'a mut MyConn) -> Transaction<'a> {
         Transaction {
-            conn: Some(conn),
-            pooled_conn: None,
+            conn: ConnRef::ViaConnRef(conn),
             committed: false,
             rolled_back: false,
         }
@@ -88,8 +88,7 @@ impl<'a> Transaction<'a> {
 
     fn new_pooled(conn: pool::MyPooledConn) -> Transaction<'a> {
         Transaction {
-            conn: None,
-            pooled_conn: Some(conn),
+            conn: ConnRef::ViaPooledConn(conn),
             committed: false,
             rolled_back: false,
         }
@@ -97,35 +96,22 @@ impl<'a> Transaction<'a> {
 
     /// See [`MyConn#query`](struct.MyConn.html#method.query).
     pub fn query<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<QueryResult<'c>> {
-        if let Some(ref mut conn) = self.conn {
-            conn.query(query)
-        } else if let Some(ref mut conn) = self.pooled_conn {
-            conn.query(query)
-        } else {
-            unreachable!()
-        }
+        self.conn.query(query)
     }
 
     /// See [`MyConn#prepare`](struct.MyConn.html#method.prepare).
     pub fn prepare<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<Stmt<'c>> {
-        if let Some(ref mut conn) = self.conn {
-            conn.prepare(query)
-        } else if let Some(ref mut conn) = self.pooled_conn {
-            conn.prepare(query)
-        } else {
-            unreachable!()
-        }
+        self.conn.prepare(query)
+    }
+
+    /// See [`MyConn#prep_exec`](struct.MyConn.html#method.prep_exec).
+    pub fn prep_exec<'c, A: AsRef<str> + 'c, T: ToRow>(&'c mut self, query: A, params: T) -> MyResult<QueryResult<'c>> {
+        self.conn.prep_exec(query, params)
     }
 
     /// Will consume and commit transaction.
     pub fn commit(mut self) -> MyResult<()> {
-        if let Some(ref mut conn) = self.conn {
-            try!(conn.query("COMMIT"));
-        } else if let Some(ref mut conn) = self.pooled_conn {
-            try!(conn.query("COMMIT"));
-        } else {
-            unreachable!()
-        }
+        try!(self.conn.query("COMMIT"));
         self.committed = true;
         Ok(())
     }
@@ -133,11 +119,7 @@ impl<'a> Transaction<'a> {
     /// Will consume and rollback transaction. You also can rely on `Drop` implementation but it
     /// will swallow errors.
     pub fn rollback(mut self) -> MyResult<()> {
-        if let Some(ref mut conn) = self.conn {
-            let _ = try!(conn.query("ROLLBACK"));
-        } else if let Some(ref mut conn) = self.pooled_conn {
-            let _ = try!(conn.query("ROLLBACK"));
-        }
+        try!(self.conn.query("ROLLBACK"));
         self.rolled_back = true;
         Ok(())
     }
@@ -147,11 +129,7 @@ impl<'a> Drop for Transaction<'a> {
     /// Will rollback transaction.
     fn drop(&mut self) {
         if ! self.committed && ! self.rolled_back {
-            if let Some(ref mut conn) = self.conn {
-                let _ = conn.query("ROLLBACK");
-            } else if let Some(ref mut conn) = self.pooled_conn {
-                let _ = conn.query("ROLLBACK");
-            }
+            let _ = self.conn.query("ROLLBACK");
         }
     }
 }
@@ -195,22 +173,54 @@ impl InnerStmt {
     }
 }
 
+/// Possible ways to pass conn to a statement or transaction
+#[derive(Debug)]
+enum ConnRef<'a> {
+    ViaConnRef(&'a mut MyConn),
+    ViaPooledConn(pool::MyPooledConn),
+}
+
+impl<'a> Deref for ConnRef<'a> {
+    type Target = MyConn;
+
+    fn deref<'c>(&'c self) -> &'c MyConn {
+        match *self {
+            ConnRef::ViaConnRef(ref conn_ref) => conn_ref,
+            ConnRef::ViaPooledConn(ref conn) => conn.as_ref(),
+        }
+    }
+}
+
+impl<'a> DerefMut for ConnRef<'a> {
+    fn deref_mut<'c>(&'c mut self) -> &'c mut MyConn {
+        match *self {
+            ConnRef::ViaConnRef(ref mut conn_ref) => conn_ref,
+            ConnRef::ViaPooledConn(ref mut conn) => conn.as_mut(),
+        }
+    }
+}
+
 /// Mysql
 /// [prepared statement](http://dev.mysql.com/doc/internals/en/prepared-statements.html).
 #[derive(Debug)]
 pub struct Stmt<'a> {
     stmt: InnerStmt,
-    conn: Option<&'a mut MyConn>,
-    pooled_conn: Option<pool::MyPooledConn>
+    conn: ConnRef<'a>,
 }
 
 impl<'a> Stmt<'a> {
     fn new(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
-        Stmt{stmt: stmt, conn: Some(conn), pooled_conn: None}
+        Stmt {
+            stmt: stmt,
+            conn: ConnRef::ViaConnRef(conn),
+        }
     }
 
     fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt<'a> {
-        Stmt{stmt: stmt, conn: None, pooled_conn: Some(pooled_conn)}
+        Stmt {
+            stmt: stmt,
+            conn: ConnRef::ViaPooledConn(pooled_conn),
+        }
     }
 
     /// Returns a slice of a [`Column`s](struct.Column.html) which represents
@@ -247,17 +257,16 @@ impl<'a> Stmt<'a> {
         }
     }
 
-    /// Executes prepared statement with an arguments passed as a slice of a
-    /// references to a [`ToValue`](../value/trait.ToValue.html) trait
-    /// implementors.
+    /// Executes prepared statement with an arguments passed as a
+    // [`ToRow`](../value/trait.ToValue.html) trait implementor.
     pub fn execute<'s, T: ToRow>(&'s mut self, params: T) -> MyResult<QueryResult<'s>> {
-        if self.conn.is_some() {
-            let conn_ref = self.conn.as_mut().unwrap();
-            conn_ref.execute(&self.stmt, params)
-        } else {
-            let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
-            conn_ref.execute(&self.stmt, params)
-        }
+        self.conn.execute(&self.stmt, params)
+    }
+
+    fn prep_exec<T: ToRow>(mut self, params: T) -> MyResult<QueryResult<'a>> {
+        let params = params.to_row();
+        let (columns, ok_packet) = try!(self.conn._execute(&self.stmt, &params));
+        Ok(QueryResult::new(ResultConnRef::ViaStmt(self), columns, ok_packet, true))
     }
 }
 
@@ -962,10 +971,14 @@ impl MyConn {
         let params = params.to_row();
         match self._execute(stmt, params.as_ref()) {
             Ok((columns, ok_packet)) => {
-                Ok(QueryResult::new(self, columns, ok_packet, true))
+                Ok(QueryResult::new(ResultConnRef::ViaConnRef(self), columns, ok_packet, true))
             },
             Err(err) => Err(err)
         }
+    }
+
+    pub fn prep_exec<'a, T: ToRow, A: AsRef<str> + 'a>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+        try!(self.prepare(query)).prep_exec(params.to_row())
     }
 
     fn _start_transaction(&mut self,
@@ -1083,7 +1096,9 @@ impl MyConn {
     /// will borrow `MyConn` until the end of its scope.
     pub fn query<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<QueryResult<'a>> {
         match self._query(query.as_ref()) {
-            Ok((columns, ok_packet)) => Ok(QueryResult::new(self, columns, ok_packet, false)),
+            Ok((columns, ok_packet)) => {
+                Ok(QueryResult::new(ResultConnRef::ViaConnRef(self), columns, ok_packet, false))
+            },
             Err(err) => Err(err),
         }
     }
@@ -1275,6 +1290,33 @@ impl Drop for MyConn {
  *                   "Y88P"
  */
 
+/// Possible ways to pass conn to a query result
+#[derive(Debug)]
+enum ResultConnRef<'a> {
+    ViaConnRef(&'a mut MyConn),
+    ViaStmt(Stmt<'a>)
+}
+
+impl<'a> Deref for ResultConnRef<'a> {
+    type Target = MyConn;
+
+    fn deref<'c>(&'c self) -> &'c MyConn {
+        match *self {
+            ResultConnRef::ViaConnRef(ref conn_ref) => conn_ref,
+            ResultConnRef::ViaStmt(ref stmt) => stmt.conn.deref(),
+        }
+    }
+}
+
+impl<'a> DerefMut for ResultConnRef<'a> {
+    fn deref_mut<'c>(&'c mut self) -> &'c mut MyConn {
+        match *self {
+            ResultConnRef::ViaConnRef(ref mut conn_ref) => conn_ref,
+            ResultConnRef::ViaStmt(ref mut stmt) => stmt.conn.deref_mut(),
+        }
+    }
+}
+
 /// Mysql result set for text and binary protocols.
 ///
 /// If you want to get rows from `QueryResult` you should rely on implementation
@@ -1312,54 +1354,38 @@ impl Drop for MyConn {
 /// [`Value`](../value/enum.Value.html) documentation.
 #[derive(Debug)]
 pub struct QueryResult<'a> {
-    pooled_conn: Option<pool::MyPooledConn>,
-    conn: Option<&'a mut MyConn>,
+    conn: ResultConnRef<'a>,
     columns: Vec<Column>,
     ok_packet: Option<OkPacket>,
     is_bin: bool,
 }
 
 impl<'a> QueryResult<'a> {
-    fn new(conn: &'a mut MyConn,
+    fn new(conn: ResultConnRef<'a>,
            columns: Vec<Column>,
            ok_packet: Option<OkPacket>,
-           is_bin: bool) -> QueryResult<'a> {
-        QueryResult{pooled_conn: None,
-                    columns: columns,
-                    conn: Some(conn),
-                    ok_packet: ok_packet,
-                    is_bin: is_bin}
+           is_bin: bool) -> QueryResult<'a>
+    {
+        QueryResult {
+            conn: conn,
+            columns: columns,
+            ok_packet: ok_packet,
+            is_bin: is_bin
+        }
     }
 
     fn handle_if_more_results(&mut self) -> Option<MyResult<Vec<Value>>> {
-        if self.conn.is_some() {
-            let conn_ref = self.conn.as_mut().unwrap();
-            if conn_ref.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
-                match conn_ref.handle_result_set() {
-                    Ok((cols, ok_p)) => {
-                        self.columns = cols;
-                        self.ok_packet = ok_p;
-                        None
-                    },
-                    Err(e) => return Some(Err(e)),
-                }
-            } else {
-                None
+        if self.conn.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
+            match self.conn.handle_result_set() {
+                Ok((cols, ok_p)) => {
+                    self.columns = cols;
+                    self.ok_packet = ok_p;
+                    None
+                },
+                Err(e) => return Some(Err(e)),
             }
         } else {
-            let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
-            if conn_ref.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
-                match conn_ref.handle_result_set() {
-                    Ok((cols, ok_p)) => {
-                        self.columns = cols;
-                        self.ok_packet = ok_p;
-                        None
-                    },
-                    Err(e) => return Some(Err(e))
-                }
-            } else {
-                None
-            }
+            None
         }
     }
 
@@ -1367,33 +1393,21 @@ impl<'a> QueryResult<'a> {
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// affected rows.
     pub fn affected_rows(&self) -> u64 {
-        if self.conn.is_some() {
-            self.conn.as_ref().unwrap().affected_rows
-        } else {
-            self.pooled_conn.as_ref().unwrap().as_ref().affected_rows
-        }
+        self.conn.affected_rows
     }
 
     /// Returns
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// last insert id.
     pub fn last_insert_id(&self) -> u64 {
-        if self.conn.is_some() {
-            self.conn.as_ref().unwrap().last_insert_id
-        } else {
-            self.pooled_conn.as_ref().unwrap().as_ref().last_insert_id
-        }
+        self.conn.last_insert_id
     }
 
     /// Returns
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// warnings count.
     pub fn warnings(&self) -> u16 {
-        if self.ok_packet.is_some() {
-            self.ok_packet.as_ref().unwrap().warnings
-        } else {
-            0u16
-        }
+        self.ok_packet.as_ref().map(|ok_p| ok_p.warnings).unwrap_or(0u16)
     }
 
     /// Returns
@@ -1438,11 +1452,7 @@ impl<'a> QueryResult<'a> {
     /// }
     /// ```
     pub fn more_results_exists(&self) -> bool {
-        if self.conn.is_some() {
-            self.conn.as_ref().unwrap().has_results
-        } else {
-            self.pooled_conn.as_ref().unwrap().as_ref().has_results
-        }
+        self.conn.has_results
     }
 }
 
@@ -1451,21 +1461,9 @@ impl<'a> Iterator for QueryResult<'a> {
 
     fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
         let r = if self.is_bin {
-            if self.conn.is_some() {
-                let conn_ref = self.conn.as_mut().unwrap();
-                conn_ref.next_bin(&self.columns)
-            } else {
-                let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
-                conn_ref.next_bin(&self.columns)
-            }
+            self.conn.next_bin(&self.columns)
         } else {
-            if self.conn.is_some() {
-                let conn_ref = self.conn.as_mut().unwrap();
-                conn_ref.next_text(self.columns.len())
-            } else {
-                let conn_ref = self.pooled_conn.as_mut().unwrap().as_mut();
-                conn_ref.next_text(self.columns.len())
-            }
+            self.conn.next_text(self.columns.len())
         };
         match r {
             Ok(r) => {
@@ -1481,14 +1479,8 @@ impl<'a> Iterator for QueryResult<'a> {
 
 impl<'a> Drop for QueryResult<'a> {
     fn drop(&mut self) {
-        if self.conn.is_some() {
-            while self.conn.as_ref().unwrap().more_results_exists() {
-                while let Some(_) = self.next() {}
-            }
-        } else {
-            while self.pooled_conn.as_ref().unwrap().as_ref().more_results_exists() {
-                while let Some(_) = self.next() {}
-            }
+        while self.conn.more_results_exists() {
+            while let Some(_) = self.next() {}
         }
     }
 }
@@ -1678,6 +1670,12 @@ mod test {
                 }
                 Ok(())
             }).unwrap();
+            let mut result = conn.prep_exec("SELECT ?, ?, ?", ("hello", 1, 1.1)).unwrap();
+            let row = result.next().unwrap();
+            let mut row = row.unwrap();
+            assert_eq!(from_value::<f32>(row.pop().unwrap()), 1.1);
+            assert_eq!(from_value::<i8>(row.pop().unwrap()), 1);
+            assert_eq!(from_value::<String>(row.pop().unwrap()), "hello".to_string());
         }
         #[test]
         fn should_parse_large_binary_result() {
@@ -1718,8 +1716,8 @@ mod test {
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 let _ = t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
                 .and_then(|mut stmt| {
-                    assert!(stmt.execute((3)).is_ok());
-                    assert!(stmt.execute((4)).is_ok());
+                    assert!(stmt.execute(3).is_ok());
+                    assert!(stmt.execute(4).is_ok());
                     Ok(())
                 }).unwrap();
                 assert!(t.commit().is_ok());
@@ -1727,6 +1725,11 @@ mod test {
             }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
                        vec![Bytes(b"4".to_vec())]);
+            let _ = conn.start_transaction(false, None, None). and_then(|mut t| {
+                t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", 5).unwrap();
+                t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", 6).unwrap();
+                Ok(())
+            }).unwrap();
         }
         #[test]
         fn should_handle_LOCAL_INFILE() {

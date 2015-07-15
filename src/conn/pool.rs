@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use super::IsolationLevel;
 use super::Transaction;
 use super::super::error::{MyError, DriverError};
+use super::super::value::ToRow;
 use super::{MyConn, MyOpts, Stmt, QueryResult};
 use super::super::error::{MyResult};
 
@@ -174,6 +175,12 @@ impl MyPool {
         conn.pooled_prepare(query)
     }
 
+    /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`.
+    pub fn prep_exec<'a, A: AsRef<str>, T: ToRow>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+        let conn = try!(self.get_conn_by_stmt(query.as_ref()));
+        conn.pooled_prep_exec(query, params)
+    }
+
     /// Shortcut for `try!(pool.get_conn()).start_transaction(..)`.
     pub fn start_transaction(&self,
                              consistent_snapshot: bool,
@@ -251,6 +258,12 @@ impl MyPooledConn {
     }
 
     /// Redirects to
+    /// [`MyConn#prep_exec`](../struct.MyConn.html#method.prep_exec).
+    pub fn prep_exec<'a, A: AsRef<str> + 'a, T: ToRow>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+        self.conn.as_mut().unwrap().prep_exec(query, params)
+    }
+
+    /// Redirects to
     /// [`MyConn#start_transaction`](../struct.MyConn.html#method.start_transaction)
     pub fn start_transaction<'a>(&'a mut self,
                                  consistent_snapshot: bool,
@@ -283,6 +296,12 @@ impl MyPooledConn {
             Ok(stmt) => Ok(Stmt::new_pooled(stmt, self)),
             Err(err) => Err(err)
         }
+    }
+
+    fn pooled_prep_exec<'a, A: AsRef<str>, T: ToRow>(mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+        let stmt = try!(self.as_mut()._prepare(query.as_ref()));
+        let stmt = Stmt::new_pooled(stmt, self);
+        stmt.prep_exec(params)
     }
 
     fn pooled_start_transaction<'a>(mut self,
@@ -367,6 +386,19 @@ mod test {
             for t in threads.into_iter() {
                 assert!(t.join().is_ok());
             }
+
+            let pool = MyPool::new(get_opts()).unwrap();
+            let mut threads = Vec::new();
+            for _ in 0usize..10 {
+                let pool = pool.clone();
+                threads.push(thread::spawn(move || {
+                    let mut conn = pool.get_conn().unwrap();
+                    conn.prep_exec("SELECT ?", 1).unwrap();
+                }));
+            }
+            for t in threads.into_iter() {
+                assert!(t.join().is_ok());
+            }
         }
         #[test]
         fn should_execute_statements_on_MyPool() {
@@ -377,6 +409,18 @@ mod test {
                 threads.push(thread::spawn(move || {
                     let mut stmt = pool.prepare("SELECT 1").unwrap();
                     assert!(stmt.execute(()).is_ok());
+                }));
+            }
+            for t in threads.into_iter() {
+                assert!(t.join().is_ok());
+            }
+
+            let pool = MyPool::new(get_opts()).unwrap();
+            let mut threads = Vec::new();
+            for _ in 0usize..10 {
+                let pool = pool.clone();
+                threads.push(thread::spawn(move || {
+                    pool.prep_exec("SELECT ?", 1).unwrap();
                 }));
             }
             for t in threads.into_iter() {
