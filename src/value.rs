@@ -261,6 +261,12 @@ pub trait ToRow {
     fn to_row(self) -> Vec<Value>;
 }
 
+impl ToRow for Vec<Value> {
+    fn to_row(self) -> Vec<Value> {
+        self
+    }
+}
+
 impl<'a> ToRow for &'a [&'a ToValue] {
     fn to_row(self) -> Vec<Value> {
         let mut row: Vec<Value> = Vec::with_capacity(self.len());
