@@ -40,7 +40,7 @@ impl OkPacket {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ErrPacket {
     pub sql_state: Vec<u8>,
     pub error_message: Vec<u8>,
@@ -69,6 +69,16 @@ impl ErrPacket {
 }
 
 impl fmt::Display for ErrPacket {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,
+               "ERROR {} ({}): {}",
+               self.error_code,
+               String::from_utf8_lossy(&self.sql_state[..]).into_owned(),
+               String::from_utf8_lossy(&self.error_message[..]).into_owned())
+    }
+}
+
+impl fmt::Debug for ErrPacket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f,
                "ERROR {} ({}): {}",
