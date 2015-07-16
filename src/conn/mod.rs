@@ -1870,7 +1870,6 @@ mod test {
         use test;
         use super::get_opts;
         use super::super::{MyConn};
-        use super::super::super::value::{IntoValue};
         use super::super::super::value::Value::NULL;
 
         #[bench]
