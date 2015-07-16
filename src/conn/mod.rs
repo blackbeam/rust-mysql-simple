@@ -1716,8 +1716,8 @@ mod test {
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 let _ = t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
                 .and_then(|mut stmt| {
-                    assert!(stmt.execute(3).is_ok());
-                    assert!(stmt.execute(4).is_ok());
+                    assert!(stmt.execute((3,)).is_ok());
+                    assert!(stmt.execute((4,)).is_ok());
                     Ok(())
                 }).unwrap();
                 assert!(t.commit().is_ok());
@@ -1726,8 +1726,8 @@ mod test {
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
                        vec![Bytes(b"4".to_vec())]);
             let _ = conn.start_transaction(false, None, None). and_then(|mut t| {
-                t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", 5).unwrap();
-                t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", 6).unwrap();
+                t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", (5,)).unwrap();
+                t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", (6,)).unwrap();
                 Ok(())
             }).unwrap();
         }
@@ -1819,7 +1819,7 @@ mod test {
         fn prepared_exec(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("DO 1").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[]); })
+            bencher.iter(|| { let _ = stmt.execute(()); })
         }
 
         #[bench]
@@ -1827,7 +1827,7 @@ mod test {
             let mut conn = MyConn::new(get_opts()).unwrap();
             bencher.iter(|| {
                 let mut stmt = conn.prepare("SELECT ?").unwrap();
-                let _ = stmt.execute(&[&0]).unwrap();
+                let _ = stmt.execute((0,)).unwrap();
             })
         }
 
@@ -1841,28 +1841,22 @@ mod test {
         fn simple_prepared_query_row(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT 1").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[]); })
+            bencher.iter(|| { let _ = stmt.execute(()); })
         }
 
         #[bench]
         fn simple_prepared_query_row_with_param(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[&0]); })
+            bencher.iter(|| { let _ = stmt.execute((0,)); })
         }
 
         #[bench]
         fn simple_prepared_query_row_with_5_params(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-            let params: &[&IntoValue] = &[
-                &42i8,
-                &b"123456".to_vec(),
-                &1.618f64,
-                &NULL,
-                &1i8
-            ];
-            bencher.iter(|| { let _ = stmt.execute(params); })
+            let params = (42i8, b"123456".to_vec(), 1.618f64, NULL, 1i8);
+            bencher.iter(|| { let _ = stmt.execute(&params); })
         }
 
         #[bench]
@@ -1875,7 +1869,7 @@ mod test {
         fn select_prepared_large_string(bencher: &mut test::Bencher) {
             let mut conn = MyConn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
-            bencher.iter(|| { let _ = stmt.execute(&[]); })
+            bencher.iter(|| { let _ = stmt.execute(()); })
         }
     }
 }

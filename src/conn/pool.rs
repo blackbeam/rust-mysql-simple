@@ -393,7 +393,7 @@ mod test {
                 let pool = pool.clone();
                 threads.push(thread::spawn(move || {
                     let mut conn = pool.get_conn().unwrap();
-                    conn.prep_exec("SELECT ?", 1).unwrap();
+                    conn.prep_exec("SELECT ?", (1,)).unwrap();
                 }));
             }
             for t in threads.into_iter() {
@@ -420,7 +420,7 @@ mod test {
             for _ in 0usize..10 {
                 let pool = pool.clone();
                 threads.push(thread::spawn(move || {
-                    pool.prep_exec("SELECT ?", 1).unwrap();
+                    pool.prep_exec("SELECT ?", (1,)).unwrap();
                 }));
             }
             for t in threads.into_iter() {

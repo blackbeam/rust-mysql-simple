@@ -261,6 +261,12 @@ pub trait ToRow {
     fn to_row(self) -> Vec<Value>;
 }
 
+impl<'a, T: ToRow + Clone> ToRow for &'a T {
+    fn to_row(self) -> Vec<Value> {
+        self.clone().to_row()
+    }
+}
+
 impl ToRow for Vec<Value> {
     fn to_row(self) -> Vec<Value> {
         self
@@ -274,12 +280,6 @@ impl<'a> ToRow for &'a [&'a ToValue] {
             row.push(v.to_value());
         }
         row
-    }
-}
-
-impl<A: IntoValue> ToRow for A {
-    fn to_row(self) -> Vec<Value> {
-        vec![self.into_value()]
     }
 }
 
