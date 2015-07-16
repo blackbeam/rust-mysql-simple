@@ -19,15 +19,17 @@ lazy_static! {
 }
 
 /// `Value` enumerates possible values in mysql cells. Also `Value` used to fill
-/// prepared statements. Note that to receive something other than `Value::NULL`
-/// or `Value::Bytes` from mysql you should use prepared statements.
+/// prepared statements.
+///
+/// Note that to receive something different than `Value::NULL` or `Value::Bytes` from mysql
+/// you should use prepared statements.
 ///
 /// If you want to get something more useful from `Value` you should implement
 /// [`FromValue`](trait.FromValue.html) on it. To get `T: FromValue` from
 /// nullable value you should rely on `FromValue` implemented on `Option<T>`.
 ///
 /// To convert something to `Value` you should implement
-/// [`ToValue`](trait.ToValue.html) on it.
+/// [`IntoValue`](trait.IntoValue.html) on it.
 ///
 /// ```rust
 /// # use mysql::conn::pool;
@@ -48,13 +50,11 @@ lazy_static! {
 /// # let pool = pool::MyPool::new(opts).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
-/// conn.prepare("SELECT ? * ?").map(|mut stmt| {
-///     let mut result = stmt.execute((20i32, 0.8f32)).unwrap();
-///     for row in result {
-///         let mut row = row.unwrap();
-///         assert_eq!(from_value::<f32>(row.pop().unwrap()), 16.0f32);
-///     }
-/// });
+/// let result = conn.prep_exec("SELECT ? * ?", (20i32, 0.8_f32)).unwrap();
+/// for row in result {
+///     let mut row = row.unwrap();
+///     assert_eq!(from_value::<f32>(row.pop().unwrap()), 16.0_f32);
+/// }
 /// ```
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Value {
@@ -449,6 +449,7 @@ impl<T: IntoValue + Clone> ToValue for T {
     }
 }
 
+/// Implement this trait if you want to convert something to `Value`.
 pub trait IntoValue {
     fn into_value(self) -> Value;
 }
@@ -573,7 +574,7 @@ impl IntoValue for Value {
     }
 }
 
-
+/// Implement this trait to convert value to something.
 pub trait FromValue {
     /// Will panic if could not retrieve `Self` from `Value`
     fn from_value(v: Value) -> Self;

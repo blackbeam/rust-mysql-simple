@@ -48,13 +48,16 @@ impl MyInnerPool {
 /// However you can prepare statements directly on `MyPool` without
 /// invoking [`MyPool::get_conn`](struct.MyPool.html#method.get_conn).
 ///
+/// `MyPool` will hold at least `min` connections and will create as many as `max`
+/// connections.
+///
 /// Example of multithreaded `MyPool` usage:
 ///
 /// ```rust
 /// use mysql::conn::pool;
 /// use std::default::Default;
 /// use mysql::conn::MyOpts;
-/// use mysql::value::ToValue;
+/// use mysql::value::IntoValue;
 /// use std::thread;
 ///
 /// fn get_opts() -> MyOpts {
@@ -74,9 +77,8 @@ impl MyInnerPool {
 /// for _ in 0..100 {
 ///     let pool = pool.clone();
 ///     threads.push(thread::spawn(move || {
-///         let mut stmt = pool.prepare("SELECT 1").unwrap();
-///         let mut result = stmt.execute(()).unwrap();
-///         assert_eq!(result.next().unwrap().unwrap(), vec![1.to_value()])
+///         let mut result = pool.prep_exec("SELECT 1", ()).unwrap();
+///         assert_eq!(result.next().unwrap().unwrap(), vec![1.into_value()]);
 ///     }));
 /// }
 /// for t in threads.into_iter() {
@@ -169,13 +171,17 @@ impl MyPool {
         }
     }
 
-    /// See docs on [`Pool#query`](#method.query)
+    /// Will prepare statement.
+    ///
+    /// It will try to find connection which has this statement cached.
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a self, query: T) -> MyResult<Stmt<'a>> {
         let conn = try!(self.get_conn_by_stmt(query.as_ref()));
         conn.pooled_prepare(query)
     }
 
     /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`.
+    ///
+    /// It will try to find connection which has this statement cached.
     pub fn prep_exec<'a, A: AsRef<str>, T: ToRow>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>> {
         let conn = try!(self.get_conn_by_stmt(query.as_ref()));
         conn.pooled_prep_exec(query, params)
@@ -190,17 +196,19 @@ impl MyPool {
     }
 }
 
-/// Pooled mysql connection which will return to the pool at the end of its
-/// lifetime.
+/// Pooled mysql connection which will return to the pool on `drop`.
 ///
-/// You should prefer using `prepare` instead of `query` where possible because
-/// of speed and security. `query` is a part of mysql text protocol, so you will
-/// always receive `Value::Bytes` as a result.
+/// You should prefer using `prepare` or `prep_exec` instead of `query` where possible, except
+/// cases when statement has no params and when it has no return values or return values which
+/// evaluates to `Value::Bytes`.
+///
+/// `query` is a part of mysql text protocol, so under the hood you will always receive
+/// `Value::Bytes` as a result and `from_value` will need to parse it if you want, for example, `i64`
 ///
 /// ```rust
 /// # use mysql::conn::pool;
 /// # use mysql::conn::MyOpts;
-/// # use mysql::value::Value;
+/// # use mysql::value::{from_value, Value};
 /// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # fn get_opts() -> MyOpts {
@@ -217,11 +225,14 @@ impl MyPool {
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.query("SELECT 42").map(|mut result| {
-///     assert_eq!(result.next().unwrap().unwrap(), vec![Value::Bytes(b"42".to_vec())]);
+///     let cell = result.next().unwrap().unwrap().pop().unwrap();
+///     assert_eq!(cell, Value::Bytes(b"42".to_vec()));
+///     assert_eq!(from_value::<i64>(cell), 42i64);
 /// });
-/// conn.prepare("SELECT 42").map(|mut stmt| {
-///     let mut result = stmt.execute(()).unwrap();
-///     assert_eq!(result.next().unwrap().unwrap(), vec![Value::Int(42)]);
+/// conn.prep_exec("SELECT 42", ()).map(|mut result| {
+///     let cell = result.next().unwrap().unwrap().pop().unwrap();
+///     assert_eq!(cell, Value::Int(42i64));
+///     assert_eq!(from_value::<i64>(cell), 42i64);
 /// });
 /// ```
 ///

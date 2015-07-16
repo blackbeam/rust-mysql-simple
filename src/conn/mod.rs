@@ -258,7 +258,67 @@ impl<'a> Stmt<'a> {
     }
 
     /// Executes prepared statement with an arguments passed as a
-    // [`ToRow`](../value/trait.ToValue.html) trait implementor.
+    /// [`ToRow`](../value/trait.ToRow.html) implementor.
+    ///
+    /// ```rust
+    /// # use mysql::conn::pool;
+    /// # use mysql::conn::MyOpts;
+    /// # use mysql::value::{from_value, IntoValue, ToValue, Value};
+    /// # use std::thread::Thread;
+    /// # use std::default::Default;
+    /// # use std::iter::repeat;
+    /// # fn get_opts() -> MyOpts {
+    /// #     MyOpts {
+    /// #         user: Some("root".to_string()),
+    /// #         pass: Some("password".to_string()),
+    /// #         tcp_addr: Some("127.0.0.1".to_string()),
+    /// #         tcp_port: 3307,
+    /// #         ..Default::default()
+    /// #     }
+    /// # }
+    /// # let opts = get_opts();
+    /// # let pool = pool::MyPool::new(opts).unwrap();
+    /// let mut stmt0 = pool.prepare("SELECT 42").unwrap();
+    /// let mut stmt1 = pool.prepare("SELECT ?").unwrap();
+    /// let mut stmt12 = pool.prepare("SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?").unwrap();
+    ///
+    /// // It is better to pass tuple as a params when executing statements of arity <= 11
+    /// for row in stmt0.execute(()).unwrap() {
+    ///     assert_eq!(from_value::<u8>(row.unwrap().pop().unwrap()), 42);
+    /// }
+    /// // just do not forget about trailing comma in case of arity = 1
+    /// for row in stmt1.execute((42,)).unwrap() {
+    ///     assert_eq!(from_value::<u8>(row.unwrap().pop().unwrap()), 42);
+    /// }
+    ///
+    /// // If you do not want to lose ownership of param, when you should pass it by referense
+    /// let word = "hello".to_string();
+    /// for _ in 0..2 {
+    ///     for row in stmt1.execute((&word,)).unwrap() {
+    ///         assert_eq!(from_value::<String>(row.unwrap().pop().unwrap()),"hello");
+    ///     }
+    /// }
+    ///
+    /// // If you want to execute statement of arity > 11, then you can pass &[&ToValue]
+    /// // as params.
+    /// let params: &[&ToValue] = &[&1, &2, &3, &4, &5, &6, &7, &8, &9, &10, &11, &12];
+    /// for row in stmt12.execute(params).unwrap() {
+    ///     let row: Vec<u8> = row.unwrap().into_iter().map(from_value::<u8>).collect();
+    ///     assert_eq!(row, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    /// }
+    /// // but be aware of implicit copying, so if you have huge params and do not care
+    /// // about ownership, then better to use plain Vec<Value>.
+    /// let mut params: Vec<Value> = Vec::with_capacity(12);
+    /// for i in 1..13 {
+    ///     params.push(repeat('A').take(i * 1000).collect::<String>().into_value());
+    /// }
+    /// for row in stmt12.execute(params).unwrap() {
+    ///     let row: Vec<String> = row.unwrap().into_iter().map(from_value::<String>).collect();
+    ///     for i in 1..13 {
+    ///         assert_eq!(row[i-1], repeat('A').take(i * 1000).collect::<String>());
+    ///     }
+    /// }
+    /// ```
     pub fn execute<'s, T: ToRow>(&'s mut self, params: T) -> MyResult<QueryResult<'s>> {
         self.conn.execute(&self.stmt, params)
     }
@@ -880,19 +940,6 @@ impl MyConn {
         self.write_packet(writer.into_inner().borrow())
     }
 
-    /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
-    /// on `MyConn`. Return `true` on success or `false` on error.
-    pub fn ping(&mut self) -> bool {
-        match self.write_command(Command::COM_PING) {
-            Ok(_) => {
-                // ommit ok packet
-                let _ = self.read_packet();
-                true
-            },
-            _ => false
-        }
-    }
-
     fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
         for &id in ids.iter() {
             match params[id as usize] {
@@ -977,10 +1024,6 @@ impl MyConn {
         }
     }
 
-    pub fn prep_exec<'a, T: ToRow, A: AsRef<str> + 'a>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
-        try!(self.prepare(query)).prep_exec(params.to_row())
-    }
-
     fn _start_transaction(&mut self,
                           consistent_snapshot: bool,
                           isolation_level: Option<IsolationLevel>,
@@ -1004,16 +1047,6 @@ impl MyConn {
             try!(self.query("START TRANSACTION"))
         };
         Ok(())
-    }
-
-    /// Starts new transaction with provided options.
-    /// `readonly` is only available since MySQL 5.6.5.
-    pub fn start_transaction<'a>(&'a mut self,
-                                 consistent_snapshot: bool,
-                                 isolation_level: Option<IsolationLevel>,
-                                 readonly: Option<bool>) -> MyResult<Transaction<'a>> {
-        let _ = try!(self._start_transaction(consistent_snapshot, isolation_level, readonly));
-        Ok(Transaction::new(self))
     }
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
@@ -1090,6 +1123,29 @@ impl MyConn {
         self.handle_result_set()
     }
 
+    /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
+    /// on `MyConn`. Return `true` on success or `false` on error.
+    pub fn ping(&mut self) -> bool {
+        match self.write_command(Command::COM_PING) {
+            Ok(_) => {
+                // ommit ok packet
+                let _ = self.read_packet();
+                true
+            },
+            _ => false
+        }
+    }
+
+    /// Starts new transaction with provided options.
+    /// `readonly` is only available since MySQL 5.6.5.
+    pub fn start_transaction<'a>(&'a mut self,
+                                 consistent_snapshot: bool,
+                                 isolation_level: Option<IsolationLevel>,
+                                 readonly: Option<bool>) -> MyResult<Transaction<'a>> {
+        let _ = try!(self._start_transaction(consistent_snapshot, isolation_level, readonly));
+        Ok(Transaction::new(self))
+    }
+
     /// Implements text protocol of mysql server.
     ///
     /// Executes mysql query on `MyConn`. [`QueryResult`](struct.QueryResult.html)
@@ -1150,11 +1206,22 @@ impl MyConn {
     ///
     /// Prepares mysql statement on `MyConn`. [`Stmt`](struct.Stmt.html) will
     /// borrow `MyConn` until the end of its scope.
+    ///
+    /// This call will take statement from cache if has been prepared on this connection.
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
         match self._prepare(query.as_ref()) {
             Ok(stmt) => Ok(Stmt::new(stmt, self)),
             Err(err) => Err(err),
         }
+    }
+
+    /// Prepares and executes statement in one call.
+    ///
+    /// This call will take statement from cache if has been prepared on this connection.
+    pub fn prep_exec<'a, A, T>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
+    where A: AsRef<str> + 'a,
+          T: ToRow {
+        try!(self.prepare(query)).prep_exec(params.to_row())
     }
 
     fn more_results_exists(&self) -> bool {
@@ -1342,12 +1409,9 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// # let pool = pool::MyPool::new(opts).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
-/// conn.prepare("SELECT 42").map(|mut stmt| {
-///     let mut result = stmt.execute(()).unwrap();
-///     for row in result {
-///         assert_eq!(row.unwrap(), vec![Value::Int(42)]);
-///     }
-/// });
+/// for row in conn.prep_exec("SELECT ?", (42,)).unwrap() {
+///     assert_eq!(row.unwrap(), vec![Value::Int(42)]);
+/// }
 /// ```
 ///
 /// For more info on how to work with values please look at
