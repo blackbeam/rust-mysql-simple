@@ -6,7 +6,6 @@ pub static UTF8_GENERAL_CI: u8 = 33u8;
 
 /// Server status flags
 bitflags! {
-    #[derive(Debug)]
     flags StatusFlags: u16 {
         const SERVER_STATUS_IN_TRANS             = 0x0001u16,
         const SERVER_STATUS_AUTOCOMMIT           = 0x0002u16,
@@ -25,7 +24,6 @@ bitflags! {
 
 /// Capability flags (u32)
 bitflags! {
-    #[derive(Debug)]
     flags CapabilityFlags: u32 {
         const CLIENT_LONG_PASSWORD                  = 0x00000001u32,
         const CLIENT_FOUND_ROWS                     = 0x00000002u32,
@@ -160,7 +158,6 @@ impl From<u8> for ColumnType {
 
 /// Column flags (u16)
 bitflags! {
-    #[derive(Debug)]
     flags ColumnFlags: u16 {
         const NOT_NULL_FLAG         = 1u16,
         const PRI_KEY_FLAG          = 2u16,
