@@ -263,7 +263,7 @@ impl<'a> Stmt<'a> {
     /// ```rust
     /// # use mysql::conn::pool;
     /// # use mysql::conn::MyOpts;
-    /// # use mysql::value::{from_value, IntoValue, ToValue, Value};
+    /// # use mysql::value::{from_value, from_row, IntoValue, ToValue, Value};
     /// # use std::thread::Thread;
     /// # use std::default::Default;
     /// # use std::iter::repeat;
@@ -280,41 +280,43 @@ impl<'a> Stmt<'a> {
     /// # let pool = pool::MyPool::new(opts).unwrap();
     /// let mut stmt0 = pool.prepare("SELECT 42").unwrap();
     /// let mut stmt1 = pool.prepare("SELECT ?").unwrap();
-    /// let mut stmt12 = pool.prepare("SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?").unwrap();
+    /// let mut stmt2 = pool.prepare("SELECT ?, ?").unwrap();
+    /// let mut stmt13 = pool.prepare("SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?").unwrap();
     ///
-    /// // It is better to pass tuple as a params when executing statements of arity <= 11
+    /// // It is better to pass params as a tuple when executing statements of arity <= 12
     /// for row in stmt0.execute(()).unwrap() {
-    ///     assert_eq!(from_value::<u8>(row.unwrap().pop().unwrap()), 42);
+    ///     let (cell,) = from_row::<(u8,)>(row.unwrap());
+    ///     assert_eq!(cell, 42u8);
     /// }
     /// // just do not forget about trailing comma in case of arity = 1
     /// for row in stmt1.execute((42,)).unwrap() {
-    ///     assert_eq!(from_value::<u8>(row.unwrap().pop().unwrap()), 42);
+    ///     let (cell,) = from_row::<(u8,)>(row.unwrap());
+    ///     assert_eq!(cell, 42u8);
     /// }
     ///
-    /// // If you do not want to lose ownership of param, when you should pass it by referense
+    /// // If you don't want to lose ownership of param, then you should pass it by reference
     /// let word = "hello".to_string();
-    /// for _ in 0..2 {
-    ///     for row in stmt1.execute((&word,)).unwrap() {
-    ///         assert_eq!(from_value::<String>(row.unwrap().pop().unwrap()),"hello");
-    ///     }
+    /// for row in stmt2.execute((&word, &word)).unwrap() {
+    ///     let (cell1, cell2) = from_row::<(String, String)>(row.unwrap());
+    ///     assert_eq!(cell1, "hello");
+    ///     assert_eq!(cell2, "hello");
     /// }
     ///
-    /// // If you want to execute statement of arity > 11, then you can pass &[&ToValue]
-    /// // as params.
-    /// let params: &[&ToValue] = &[&1, &2, &3, &4, &5, &6, &7, &8, &9, &10, &11, &12];
-    /// for row in stmt12.execute(params).unwrap() {
+    /// // If you want to execute statement of arity > 12, then you can pass params as &[&ToValue].
+    /// let params: &[&ToValue] = &[&1, &2, &3, &4, &5, &6, &7, &8, &9, &10, &11, &12, &13];
+    /// for row in stmt13.execute(params).unwrap() {
     ///     let row: Vec<u8> = row.unwrap().into_iter().map(from_value::<u8>).collect();
-    ///     assert_eq!(row, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    ///     assert_eq!(row, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     /// }
     /// // but be aware of implicit copying, so if you have huge params and do not care
     /// // about ownership, then better to use plain Vec<Value>.
-    /// let mut params: Vec<Value> = Vec::with_capacity(12);
-    /// for i in 1..13 {
+    /// let mut params: Vec<Value> = Vec::with_capacity(13);
+    /// for i in 1..14 {
     ///     params.push(repeat('A').take(i * 1000).collect::<String>().into_value());
     /// }
-    /// for row in stmt12.execute(params).unwrap() {
+    /// for row in stmt13.execute(params).unwrap() {
     ///     let row: Vec<String> = row.unwrap().into_iter().map(from_value::<String>).collect();
-    ///     for i in 1..13 {
+    ///     for i in 1..14 {
     ///         assert_eq!(row[i-1], repeat('A').take(i * 1000).collect::<String>());
     ///     }
     /// }
@@ -1388,9 +1390,13 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 ///
 /// If you want to get rows from `QueryResult` you should rely on implementation
 /// of `Iterator` over `MyResult<Vec<Value>>` on `QueryResult`.
-/// `Vec<Value>` is the current row representation.
+///
+/// `Vec<Value>` is the current row representation. To get something useful from `Vec<Value>` you
+/// should rely on `FromRow` trait implemented for tuples of `FromValue` implementors up to arity
+/// 12, or on `FromValue` trait for rows with bigger arity.
 ///
 /// ```rust
+/// use mysql::value::from_row;
 /// # use mysql::conn::pool;
 /// # use mysql::conn::MyOpts;
 /// # use mysql::value::Value;
@@ -1409,8 +1415,9 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// # let pool = pool::MyPool::new(opts).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
-/// for row in conn.prep_exec("SELECT ?", (42,)).unwrap() {
-///     assert_eq!(row.unwrap(), vec![Value::Int(42)]);
+/// for row in conn.prep_exec("SELECT ?, ?", (42, 2.5)).unwrap() {
+///     let (a, b) = from_row(row.unwrap());
+///     assert_eq!((a, b), (42u8, 2.5_f32));
 /// }
 /// ```
 ///

@@ -31,7 +31,7 @@
 //!
 //! use mysql::conn::MyOpts;
 //! use mysql::conn::pool::MyPool;
-//! use mysql::value::from_value;
+//! use mysql::value::from_row;
 //!
 //! #[derive(Debug, PartialEq, Eq)]
 //! struct Payment {
@@ -88,11 +88,12 @@
 //!         // `QueryResult` is iterator over `MyResult<row, err>` so first call to `map`
 //!         // will map each `MyResult` to contained `row` (no proper error handling)
 //!         // and second call to `map` will map each `row` to `Payment`
-//!         result.map(|x| x.unwrap()).map(|mut row| {
+//!         result.map(|x| x.unwrap()).map(|row| {
+//!             let (customer_id, amount, account_name) = from_row(row);
 //!             Payment {
-//!                 account_name: from_value(row.pop().unwrap()),
-//!                 amount: from_value(row.pop().unwrap()),
-//!                 customer_id: from_value(row.pop().unwrap()),
+//!                 customer_id: customer_id,
+//!                 amount: amount,
+//!                 account_name: account_name,
 //!             }
 //!         }).collect() // Collect payments so now `QueryResult` is mapped to `Vec<Payment>`
 //!     }).unwrap(); // Unwrap `Vec<Payment>`
