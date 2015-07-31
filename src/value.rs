@@ -278,6 +278,26 @@ pub trait FromRow {
     fn from_row_opt(row: Vec<Value>) -> Result<Self, Vec<Value>>;
 }
 
+impl<T: FromValue> FromRow for T {
+    fn from_row(row: Vec<Value>) -> T {
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to T")
+    }
+    fn from_row_opt(mut row: Vec<Value>) -> Result<T, Vec<Value>> {
+        if row.len() == 1 {
+            match from_value_opt(row.pop().unwrap()) {
+                Ok(t) => Ok(t),
+                v => {
+                    mem::forget(v);
+                    unsafe { row.set_len(1); }
+                    Err(row)
+                }
+            }
+        } else {
+            Err(row)
+        }
+    }
+}
+
 impl<T1: FromValue> FromRow for (T1,) {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1,) {
@@ -1411,6 +1431,10 @@ mod test {
             let r11 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone());
             let r12 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone());
 
+            assert_eq!(o1, from_row(vec![t1]));
+            assert_eq!(o2, from_row::<String>(vec![t2]));
+            assert_eq!(o3, from_row::<Vec<u8>>(vec![t3]));
+            assert_eq!(o4, from_row(vec![t4]));
             assert_eq!(r1, from_row(v1));
             assert_eq!(r2, from_row(v2));
             assert_eq!(r3, from_row(v3));
@@ -1439,6 +1463,7 @@ mod test {
             let v10 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
             let v11 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
             let v12 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
+            assert_eq!(Err(v1.clone()), from_row_opt::<String>(v1.clone()));
             assert_eq!(Err(v1.clone()), from_row_opt::<(String,)>(v1));
             assert_eq!(Err(v2.clone()), from_row_opt::<(String,String,)>(v2));
             assert_eq!(Err(v3.clone()), from_row_opt::<(String,i8,String,)>(v3));
