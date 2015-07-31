@@ -53,7 +53,7 @@ lazy_static! {
 ///
 /// let result = conn.prep_exec("SELECT ? * ?", (20i32, 0.8_f32)).unwrap();
 /// for row in result {
-///     let (c,): (f32,) = from_row(row.unwrap());
+///     let c = from_row::<f32>(row.unwrap());
 ///     assert_eq!(c, 16.0_f32);
 /// }
 /// ```

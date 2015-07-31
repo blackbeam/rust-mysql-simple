@@ -285,12 +285,12 @@ impl<'a> Stmt<'a> {
     ///
     /// // It is better to pass params as a tuple when executing statements of arity <= 12
     /// for row in stmt0.execute(()).unwrap() {
-    ///     let (cell,) = from_row::<(u8,)>(row.unwrap());
+    ///     let cell = from_row::<u8>(row.unwrap());
     ///     assert_eq!(cell, 42u8);
     /// }
     /// // just do not forget about trailing comma in case of arity = 1
     /// for row in stmt1.execute((42,)).unwrap() {
-    ///     let (cell,) = from_row::<(u8,)>(row.unwrap());
+    ///     let cell = from_row::<u8>(row.unwrap());
     ///     assert_eq!(cell, 42u8);
     /// }
     ///
