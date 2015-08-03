@@ -682,7 +682,7 @@ impl MyConn {
                         Ok(())
                     },
                     _ => {
-                        let err = try!(ErrPacket::from_payload(pld.as_ref()));
+                        let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
                         Err(MySqlError(err))
                     }
                 }
@@ -784,15 +784,24 @@ impl MyConn {
     #[cfg(not(feature = "ssl"))]
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
-            let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
-            if handshake.protocol_version != 10u8 {
-                return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
+            match pld[0] {
+                0xFF => {
+                    let error_packet = try!(ErrPacket::from_payload(pld.as_ref(),
+                                                                    self.capability_flags));
+                    Err(MySqlError(error_packet))
+                },
+                _ => {
+                    let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
+                    if handshake.protocol_version != 10u8 {
+                        return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
+                    }
+                    if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
+                        return Err(MyDriverError(Protocol41NotSet));
+                    }
+                    self.handle_handshake(&handshake);
+                    self.do_handshake_response(&handshake)
+                },
             }
-            if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
-                return Err(MyDriverError(Protocol41NotSet));
-            }
-            self.handle_handshake(&handshake);
-            self.do_handshake_response(&handshake)
         }).and_then(|_| {
             self.read_packet()
         }).and_then(|pld| {
@@ -803,7 +812,8 @@ impl MyConn {
                     Ok(())
                 },
                 0xffu8 => {
-                    let err = try!(ErrPacket::from_payload(pld.as_ref()));
+                    let err = try!(ErrPacket::from_payload(pld.as_ref(),
+                                                           self.capability_flags));
                     Err(MySqlError(err))
                 },
                 _ => Err(MyDriverError(UnexpectedPacket))
@@ -814,25 +824,34 @@ impl MyConn {
     #[cfg(feature = "ssl")]
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
-            let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
-            if handshake.protocol_version != 10u8 {
-                return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
-            }
-            if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
-                return Err(MyDriverError(Protocol41NotSet));
-            }
-            self.handle_handshake(&handshake);
-            if self.opts.ssl_opts.is_some() && self.stream.is_some() {
-                if self.stream.as_ref().unwrap().is_insecure() {
-                    if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
-                        return Err(MyDriverError(SslNotSupported));
-                    } else {
-                        try!(self.do_ssl_request());
-                        try!(self.switch_to_ssl());
+            match pld[0] {
+                0xFF => {
+                    let error_packet = try!(ErrPacket::from_payload(pld.as_ref(),
+                                                                    self.capability_flags));
+                    Err(MySqlError(error_packet))
+                },
+                _ => {
+                    let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
+                    if handshake.protocol_version != 10u8 {
+                        return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
                     }
-                }
+                    if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
+                        return Err(MyDriverError(Protocol41NotSet));
+                    }
+                    self.handle_handshake(&handshake);
+                    if self.opts.ssl_opts.is_some() && self.stream.is_some() {
+                        if self.stream.as_ref().unwrap().is_insecure() {
+                            if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
+                                return Err(MyDriverError(SslNotSupported));
+                            } else {
+                                try!(self.do_ssl_request());
+                                try!(self.switch_to_ssl());
+                            }
+                        }
+                    }
+                    self.do_handshake_response(&handshake)
+                },
             }
-            self.do_handshake_response(&handshake)
         }).and_then(|_| {
             self.read_packet()
         }).and_then(|pld| {
@@ -843,7 +862,8 @@ impl MyConn {
                     Ok(())
                 },
                 0xffu8 => {
-                    let err = try!(ErrPacket::from_payload(pld.as_ref()));
+                    let err = try!(ErrPacket::from_payload(pld.as_ref(),
+                                                           self.capability_flags));
                     Err(MySqlError(err))
                 },
                 _ => Err(MyDriverError(UnexpectedPacket))
@@ -1101,7 +1121,7 @@ impl MyConn {
                 }
             },
             0xff => {
-                let err = try!(ErrPacket::from_payload(pld.as_ref()));
+                let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
                 Err(MySqlError(err))
             },
             _ => {
@@ -1166,7 +1186,7 @@ impl MyConn {
         let pld = try!(self.read_packet());
         match pld[0] {
             0xff => {
-                let err =  try!(ErrPacket::from_payload(pld.as_ref()));
+                let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
                 Err(MySqlError(err))
             },
             _ => {
@@ -1308,7 +1328,7 @@ impl MyConn {
                 self.handle_eof(&p);
                 return Ok(None);
             } else /* x == 0xff */ {
-                let p = ErrPacket::from_payload(pld.as_ref());
+                let p = ErrPacket::from_payload(pld.as_ref(), self.capability_flags);
                 match p {
                     Ok(p) => return Err(MySqlError(p)),
                     Err(err) => return Err(MyIoError(err))

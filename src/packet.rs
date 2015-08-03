@@ -48,16 +48,20 @@ pub struct ErrPacket {
 }
 
 impl ErrPacket {
-    pub fn from_payload(pld: &[u8]) -> io::Result<ErrPacket> {
+    pub fn from_payload(pld: &[u8], c_flags: consts::CapabilityFlags) -> io::Result<ErrPacket> {
         let mut reader = &pld[1..];
         let error_code = try!(reader.read_u16::<LE>());
-        try!(reader.read_u8());
         Ok(ErrPacket{
             error_code: error_code,
             sql_state: {
-                let mut sql_state = Vec::with_capacity(5);
-                try!(reader.by_ref().take(5).read_to_end(&mut sql_state));
-                sql_state
+                if c_flags.contains(consts::CLIENT_PROTOCOL_41) {
+                    try!(reader.read_u8());
+                    let mut sql_state = Vec::with_capacity(5);
+                    try!(reader.by_ref().take(5).read_to_end(&mut sql_state));
+                    sql_state
+                } else {
+                    b"NY000".to_vec()
+                }
             },
             error_message: {
                 let mut error_message = Vec::with_capacity(reader.len());
@@ -211,7 +215,7 @@ mod test {
     fn should_parse_Error_packet() {
         let payload = [255u8, 1u8, 0u8, 35u8, 51u8, 68u8, 48u8, 48u8, 48u8,
                        32u8, 32u8];
-        let err_packet = ErrPacket::from_payload(&payload).unwrap();
+        let err_packet = ErrPacket::from_payload(&payload, consts::CLIENT_PROTOCOL_41).unwrap();
         assert_eq!(err_packet.error_code, 1);
         assert_eq!(err_packet.sql_state, vec!(51u8, 68u8, 48u8, 48u8, 48u8));
         assert_eq!(err_packet.error_message, vec!(32u8, 32u8));
