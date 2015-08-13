@@ -1744,7 +1744,6 @@ mod test {
 
     mod my_conn {
         use std::iter;
-        use std::env;
         use std::borrow::ToOwned;
         use std::fs;
         use std::io::Write;
