@@ -8,24 +8,26 @@ Latest crate API docs hosted [here](http://blackbeam.org/doc/mysql/index.html).
 ### Installation
 Please use [crates.io](https://crates.io/crates/mysql)
 
-Also you can use git via another `[dependencies.*]` section in your Cargo.toml:
-
 ```toml
-[dependencies.mysql]
-git = "https://github.com/blackbeam/rust-mysql-simple"
+[dependencies]
+mysql = "*"
 ```
 
 rust-mysql-simple offer support of SSL via `ssl` cargo feature which is enabled by default. If you have no plans to use SSL, then you should disable that feature to not to depend on rust-openssl:
 
 ```toml
-# For crates.io
 [dependencies.mysql]
 mysql = "*"
 default-features = false
+features = ["socket"]
+```
 
-# For git
+### Windows support (since 0.18.0)
+Currently rust-mysql-simple have no support of SSL nor named pipes. To use crate on Windows you have to disable default features.
+
+```toml
 [dependencies.mysql]
-git = "https://github.com/blackbeam/rust-mysql-simple"
+mysql = "*"
 default-features = false
 ```
 
