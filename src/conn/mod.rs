@@ -6,8 +6,10 @@ use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
 use std::net;
+#[cfg(feature = "socket")]
 use std::net::SocketAddr;
 use std::path;
+#[cfg(feature = "socket")]
 use std::str::FromStr;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -19,6 +21,7 @@ use super::consts::ColumnType;
 use super::io::Read as MyRead;
 use super::io::Write;
 use super::io::Stream;
+#[cfg(feature = "socket")]
 use super::io::Stream::UnixStream;
 use super::io::Stream::TcpStream;
 use super::io::TcpStream::Insecure;
@@ -42,11 +45,14 @@ use super::error::DriverError::SslNotSupported;
 use super::scramble::scramble;
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
 use super::value::Value;
-use super::value::{ToRow, from_value, from_value_opt};
+use super::value::{ToRow, from_value_opt};
+#[cfg(feature = "socket")]
+use super::value::from_value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
+#[cfg(feature = "socket")]
 use unix_socket as us;
 
 pub mod pool;
@@ -451,6 +457,8 @@ pub struct MyOpts {
     pub pass: Option<String>,
     /// Database name (defaults to `None`).
     pub db_name: Option<String>,
+
+    #[cfg(feature = "socket")]
     /// Prefer socket connection (defaults to `true`).
     ///
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
@@ -495,7 +503,7 @@ impl MyOpts {
     }
 }
 
-#[cfg(feature = "ssl")]
+#[cfg(all(feature = "ssl", feature = "socket"))]
 impl Default for MyOpts {
     fn default() -> MyOpts {
         MyOpts{
@@ -513,7 +521,7 @@ impl Default for MyOpts {
     }
 }
 
-#[cfg(not(feature = "ssl"))]
+#[cfg(all(not(feature = "ssl"), feature = "socket"))]
 impl Default for MyOpts {
     fn default() -> MyOpts {
         MyOpts{
@@ -524,6 +532,38 @@ impl Default for MyOpts {
             pass: None,
             db_name: None,
             prefer_socket: true,
+            init: vec![],
+        }
+    }
+}
+
+#[cfg(all(feature = "ssl", not(feature = "socket")))]
+impl Default for MyOpts {
+    fn default() -> MyOpts {
+        MyOpts{
+            tcp_addr: Some("127.0.0.1".to_string()),
+            tcp_port: 3306,
+            unix_addr: None,
+            user: None,
+            pass: None,
+            db_name: None,
+            init: vec![],
+            verify_peer: false,
+            ssl_opts: None,
+        }
+    }
+}
+
+#[cfg(all(not(feature = "ssl"), not(feature = "socket")))]
+impl Default for MyOpts {
+    fn default() -> MyOpts {
+        MyOpts{
+            tcp_addr: Some("127.0.0.1".to_string()),
+            tcp_port: 3306,
+            unix_addr: None,
+            user: None,
+            pass: None,
+            db_name: None,
             init: vec![],
         }
     }
@@ -564,7 +604,7 @@ pub struct MyConn {
 }
 
 impl MyConn {
-    #[cfg(not(feature = "ssl"))]
+    #[cfg(all(not(feature = "ssl"), feature = "socket"))]
     /// Creates new `MyConn`.
     pub fn new(opts: MyOpts) -> MyResult<MyConn> {
         let mut conn = MyConn {
@@ -615,7 +655,7 @@ impl MyConn {
         return Ok(conn);
     }
 
-    #[cfg(feature = "ssl")]
+    #[cfg(all(feature = "ssl", feature = "socket"))]
     /// Creates new `MyConn`.
     pub fn new(opts: MyOpts) -> MyResult<MyConn> {
         let mut conn = MyConn {
@@ -661,6 +701,61 @@ impl MyConn {
                 }
             }
         }
+        for cmd in conn.opts.init.clone() {
+            try!(conn.query(cmd));
+        }
+        return Ok(conn);
+    }
+    #[cfg(all(not(feature = "ssl"), not(feature = "socket")))]
+    /// Creates new `MyConn`.
+    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+        let mut conn = MyConn {
+            opts: opts,
+            stream: None,
+            stmts: HashMap::new(),
+            seq_id: 0u8,
+            capability_flags: consts::CapabilityFlags::empty(),
+            status_flags: consts::StatusFlags::empty(),
+            connection_id: 0u32,
+            character_set: 0u8,
+            affected_rows: 0u64,
+            last_insert_id: 0u64,
+            last_command: 0u8,
+            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
+            connected: false,
+            has_results: false,
+            server_version: (0, 0, 0),
+        };
+        try!(conn.connect_stream());
+        try!(conn.connect());
+        for cmd in conn.opts.init.clone() {
+            try!(conn.query(cmd));
+        }
+        return Ok(conn);
+    }
+
+    #[cfg(all(feature = "ssl", not(feature = "socket")))]
+    /// Creates new `MyConn`.
+    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+        let mut conn = MyConn {
+            opts: opts,
+            stream: None,
+            stmts: HashMap::new(),
+            seq_id: 0u8,
+            capability_flags: consts::CapabilityFlags::empty(),
+            status_flags: consts::StatusFlags::empty(),
+            connection_id: 0u32,
+            character_set: 0u8,
+            affected_rows: 0u64,
+            last_insert_id: 0u64,
+            last_command: 0u8,
+            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
+            connected: false,
+            has_results: false,
+            server_version: (0, 0, 0),
+        };
+        try!(conn.connect_stream());
+        try!(conn.connect());
         for cmd in conn.opts.init.clone() {
             try!(conn.query(cmd));
         }
@@ -720,6 +815,7 @@ impl MyConn {
         Ok(())
     }
 
+    #[cfg(feature = "socket")]
     fn connect_stream(&mut self) -> MyResult<()> {
         if self.opts.unix_addr.is_some() {
             match us::UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
@@ -733,6 +829,25 @@ impl MyConn {
                 }
             }
         } else if self.opts.tcp_addr.is_some() {
+            match net::TcpStream::connect(&(self.opts.tcp_addr.as_ref().unwrap().as_ref(),
+                                             self.opts.tcp_port))
+            {
+                Ok(stream) => {
+                    self.stream = Some(Stream::TcpStream(Some(Insecure(stream))));
+                    Ok(())
+                },
+                _ => {
+                    Err(MyDriverError(CouldNotConnect(self.opts.tcp_addr.clone())))
+                }
+            }
+        } else {
+            Err(MyDriverError(CouldNotConnect(None)))
+        }
+    }
+
+    #[cfg(not(feature = "socket"))]
+    fn connect_stream(&mut self) -> MyResult<()> {
+        if self.opts.tcp_addr.is_some() {
             match net::TcpStream::connect(&(self.opts.tcp_addr.as_ref().unwrap().as_ref(),
                                              self.opts.tcp_port))
             {
@@ -1072,9 +1187,9 @@ impl MyConn {
     }
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
-        use std::os::unix::ffi::OsStrExt;
-        let path = ::std::ffi::OsStr::from_bytes(file_name);
-        let path: path::PathBuf = From::from(path);
+        let path = String::from_utf8_lossy(file_name);
+        let path = path.into_owned();
+        let path: path::PathBuf = path.into();
         let mut file = try!(fs::File::open(&path));
         let mut chunk = vec![0u8; self.max_allowed_packet];
         let mut r = file.read(&mut chunk[..]);
@@ -1826,8 +1941,7 @@ mod test {
         fn should_handle_LOCAL_INFILE() {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
-            let mut path = env::current_dir().unwrap();
-            path.push("local_infile.txt");
+            let path = ::std::path::PathBuf::from("local_infile.txt");
             {
                 let mut file = fs::File::create(&path).unwrap();
                 let _ = file.write(b"AAAAAA\n");
@@ -1836,7 +1950,7 @@ mod test {
             }
             let query = format!("LOAD DATA LOCAL INFILE '{}' INTO TABLE x.tbl",
                                 path.to_str().unwrap().to_owned());
-            assert!(conn.query(query).is_ok());
+            conn.query(query).unwrap();
             for (i, row) in conn.query("SELECT * FROM x.tbl")
                                 .unwrap().enumerate() {
                 let row = row.unwrap();
@@ -1858,7 +1972,9 @@ mod test {
             assert!(conn.reset().is_ok());
             assert!(conn.query("SELECT * FROM `db`.`test`;").is_err());
         }
+
         #[test]
+        #[cfg(feature = "socket")]
         fn should_handle_multi_resultset() {
             let mut conn = MyConn::new(MyOpts {
                 prefer_socket: false,
@@ -1963,4 +2079,3 @@ mod test {
         }
     }
 }
-

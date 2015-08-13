@@ -20,6 +20,7 @@ use byteorder::ByteOrder;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;
+#[cfg(feature = "socket")]
 use unix_socket as us;
 
 pub trait Read: ReadBytesExt {
@@ -267,6 +268,7 @@ impl<T: WriteBytesExt> Write for T {}
 
 #[derive(Debug)]
 pub enum Stream {
+    #[cfg(feature = "socket")]
     UnixStream(us::UnixStream),
     TcpStream(Option<TcpStream>),
 }
@@ -333,6 +335,7 @@ impl Drop for Stream {
 }
 
 impl io::Read for Stream {
+    #[cfg(feature = "socket")]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
             Stream::UnixStream(ref mut s) => s.read(buf),
@@ -340,9 +343,18 @@ impl io::Read for Stream {
             _ => panic!("Incomplete stream"),
         }
     }
+
+    #[cfg(not(feature = "socket"))]
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match *self {
+            Stream::TcpStream(Some(ref mut s)) => s.read(buf),
+            _ => panic!("Incomplete stream"),
+        }
+    }
 }
 
 impl io::Write for Stream {
+    #[cfg(feature = "socket")]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match *self {
             Stream::UnixStream(ref mut s) => s.write(buf),
@@ -350,9 +362,27 @@ impl io::Write for Stream {
             _ => panic!("Incomplete stream"),
         }
     }
+
+    #[cfg(feature = "socket")]
     fn flush(&mut self) -> io::Result<()> {
         match *self {
             Stream::UnixStream(ref mut s) => s.flush(),
+            Stream::TcpStream(Some(ref mut s)) => s.flush(),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(not(feature = "socket"))]
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match *self {
+            Stream::TcpStream(Some(ref mut s)) => s.write(buf),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(not(feature = "socket"))]
+    fn flush(&mut self) -> io::Result<()> {
+        match *self {
             Stream::TcpStream(Some(ref mut s)) => s.flush(),
             _ => panic!("Incomplete stream"),
         }

@@ -123,6 +123,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate bitflags;
 extern crate byteorder;
+#[cfg(feature = "socket")]
 extern crate unix_socket;
 
 mod scramble;
