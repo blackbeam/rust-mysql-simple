@@ -16,6 +16,18 @@
 //! [dependencies.mysql]
 //! mysql = "*"
 //! default-features = false
+//! features = ["socket"]
+//! ```
+//!
+//! #### Window support (since 0.18.0)
+//!
+//! Currently rust-mysql-simple have no support of SSL nor named pipes. To use crate on Windows
+//! you have to disable default features.
+//!
+//! ```toml
+//! [dependencies.mysql]
+//! mysql = "*"
+//! default-features = false
 //! ```
 //!
 //! #### Use
