@@ -53,11 +53,16 @@
 //! }
 //!
 //! fn main() {
+//! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
+//! #   let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+//! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
+//! #                              .unwrap_or(3307);
+//!     println!("PORT IS {}", port);
 //!     let opts = MyOpts {
 //!           user: Some("root".to_string()),
-//!           pass: Some("password".to_string()),
+//!           pass: Some(pwd),
 //! #         tcp_addr: Some("127.0.0.1".to_string()),
-//! #         tcp_port: 3307,
+//! #         tcp_port: port,
 //!           ..Default::default()
 //!     };
 //!     let pool = MyPool::new(opts).unwrap();

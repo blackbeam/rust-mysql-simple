@@ -274,11 +274,15 @@ impl<'a> Stmt<'a> {
     /// # use std::default::Default;
     /// # use std::iter::repeat;
     /// # fn get_opts() -> MyOpts {
+    /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
+    /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+    /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
+    /// #                                .unwrap_or(3307);
     /// #     MyOpts {
     /// #         user: Some("root".to_string()),
-    /// #         pass: Some("password".to_string()),
+    /// #         pass: Some(pwd),
     /// #         tcp_addr: Some("127.0.0.1".to_string()),
-    /// #         tcp_port: 3307,
+    /// #         tcp_port: port,
     /// #         ..Default::default()
     /// #     }
     /// # }
@@ -1538,11 +1542,15 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # fn get_opts() -> MyOpts {
+/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
+/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
+/// #                                .unwrap_or(3307);
 /// #     MyOpts {
 /// #         user: Some("root".to_string()),
-/// #         pass: Some("password".to_string()),
+/// #         pass: Some(pwd),
 /// #         tcp_addr: Some("127.0.0.1".to_string()),
-/// #         tcp_port: 3307,
+/// #         tcp_port: port,
 /// #         ..Default::default()
 /// #     }
 /// # }
@@ -1719,11 +1727,15 @@ mod test {
 
     #[cfg(feature = "openssl")]
     pub fn get_opts() -> MyOpts {
+        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+                                   .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
+                                   .unwrap_or(PORT);
         MyOpts {
             user: Some(USER.to_string()),
-            pass: Some(PASS.to_string()),
+            pass: Some(pwd),
             tcp_addr: Some(ADDR.to_string()),
-            tcp_port: PORT,
+            tcp_port: port,
             init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
             ssl_opts: Some((::std::convert::From::from("tests/ca-cert.pem"), None)),
             ..Default::default()
@@ -1732,11 +1744,15 @@ mod test {
 
     #[cfg(not(feature = "ssl"))]
     pub fn get_opts() -> MyOpts {
+        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+                                   .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
+                                   .unwrap_or(PORT);
         MyOpts {
             user: Some(USER.to_string()),
-            pass: Some(PASS.to_string()),
+            pass: Some(pwd),
             tcp_addr: Some(ADDR.to_string()),
-            tcp_port: PORT,
+            tcp_port: port,
             init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
             ..Default::default()
         }
