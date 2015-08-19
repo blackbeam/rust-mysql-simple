@@ -279,7 +279,7 @@ pub trait FromRow {
     /// Will *panic* if could not convert `row` to `Self`.
     fn from_row(row: Vec<Value>) -> Self;
     /// Will return `Err(row)` if could not convert `row` to `Self`
-    fn from_row_opt(row: Vec<Value>) -> Result<Self, Vec<Value>>;
+    fn from_row_opt(row: Vec<Value>) -> Result<Self, Vec<Value>> where Self: Sized;
 }
 
 impl<T: FromValue> FromRow for T {
@@ -1052,7 +1052,7 @@ pub trait FromValue {
     fn from_value(v: Value) -> Self;
 
     /// Will return `Err(v)` if could not convert `v` to `Self`
-    fn from_value_opt(v: Value) -> Result<Self, Value>;
+    fn from_value_opt(v: Value) -> Result<Self, Value> where Self: Sized;
 }
 
 impl FromValue for Value {
