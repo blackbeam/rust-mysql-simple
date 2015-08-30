@@ -6,10 +6,10 @@ use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
 use std::net;
-#[cfg(any(feature = "pipe", feature = "socket"))]
+#[cfg(any(feature = "socket", feature = "pipe"))]
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path;
-#[cfg(any(feature = "pipe", feature = "socket"))]
+#[cfg(any(feature = "socket", feature = "pipe"))]
 use std::str::FromStr;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -514,6 +514,7 @@ impl MyOpts {
         }
     }
 
+    #[cfg(any(feature = "socket", feature = "pipe"))]
     fn tcp_addr_is_loopback(&self) -> bool {
         if self.tcp_addr.is_some() {
             let v4addr: Option<Ipv4Addr> = FromStr::from_str(
