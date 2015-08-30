@@ -10,7 +10,8 @@
 //! ```
 //!
 //! rust-mysql-simple offer support of SSL via `ssl` cargo feature which is enabled by default.
-//! If you have no plans to use SSL, then you should disable that feature to not to depend on rust-openssl:
+//! If you have no plans to use SSL, then you should disable that feature to not to depend on
+//! rust-openssl:
 //!
 //! ```toml
 //! [dependencies.mysql]
@@ -21,13 +22,13 @@
 //!
 //! #### Window support (since 0.18.0)
 //!
-//! Currently rust-mysql-simple have no support of SSL nor named pipes. To use crate on Windows
-//! you have to disable default features.
+//! Currently rust-mysql-simple have no support of SSL on Windows.
 //!
 //! ```toml
 //! [dependencies.mysql]
 //! mysql = "*"
 //! default-features = false
+//! features = ["pipe"]
 //! ```
 //!
 //! #### Use
