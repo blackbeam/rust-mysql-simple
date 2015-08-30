@@ -142,6 +142,8 @@ extern crate bitflags;
 extern crate byteorder;
 #[cfg(feature = "socket")]
 extern crate unix_socket;
+#[cfg(feature = "pipe")]
+extern crate named_pipe;
 
 mod scramble;
 pub mod consts;

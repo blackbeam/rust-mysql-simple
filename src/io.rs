@@ -22,6 +22,8 @@ use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;
 #[cfg(feature = "socket")]
 use unix_socket as us;
+#[cfg(feature = "pipe")]
+use named_pipe as np;
 
 pub trait Read: ReadBytesExt {
     fn read_lenenc_int(&mut self) -> io::Result<u64> {
@@ -270,6 +272,8 @@ impl<T: WriteBytesExt> Write for T {}
 pub enum Stream {
     #[cfg(feature = "socket")]
     UnixStream(us::UnixStream),
+    #[cfg(feature = "pipe")]
+    PipeStream(np::PipeClient),
     TcpStream(Option<TcpStream>),
 }
 
@@ -344,7 +348,16 @@ impl io::Read for Stream {
         }
     }
 
-    #[cfg(not(feature = "socket"))]
+    #[cfg(feature = "pipe")]
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match *self {
+            Stream::PipeStream(ref mut s) => s.read(buf),
+            Stream::TcpStream(Some(ref mut s)) => s.read(buf),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
             Stream::TcpStream(Some(ref mut s)) => s.read(buf),
@@ -372,7 +385,25 @@ impl io::Write for Stream {
         }
     }
 
-    #[cfg(not(feature = "socket"))]
+    #[cfg(feature = "pipe")]
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match *self {
+            Stream::PipeStream(ref mut s) => s.write(buf),
+            Stream::TcpStream(Some(ref mut s)) => s.write(buf),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(feature = "pipe")]
+    fn flush(&mut self) -> io::Result<()> {
+        match *self {
+            Stream::PipeStream(ref mut s) => s.flush(),
+            Stream::TcpStream(Some(ref mut s)) => s.flush(),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match *self {
             Stream::TcpStream(Some(ref mut s)) => s.write(buf),
@@ -380,7 +411,7 @@ impl io::Write for Stream {
         }
     }
 
-    #[cfg(not(feature = "socket"))]
+    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
     fn flush(&mut self) -> io::Result<()> {
         match *self {
             Stream::TcpStream(Some(ref mut s)) => s.flush(),
