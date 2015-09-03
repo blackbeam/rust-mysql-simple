@@ -460,7 +460,7 @@ pub struct MyOpts {
     /// Path to unix socket of mysql server (defaults to `None`).
     #[cfg(feature = "socket")]
     pub unix_addr: Option<path::PathBuf>,
-    /// Pipe name of mysql server (defaults ot `None`).
+    /// Pipe name of mysql server (defaults to `None`).
     #[cfg(feature = "pipe")]
     pub pipe_name: Option<String>,
     /// User (defaults to `None`).
