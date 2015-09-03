@@ -118,7 +118,7 @@ impl fmt::Debug for MyError {
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone)]
 pub enum DriverError {
     CouldNotConnect(Option<String>),
     UnsupportedProtocol(u8),
@@ -189,6 +189,12 @@ impl fmt::Display for DriverError {
                 write!(f, "Poisoned pool mutex")
             }
         }
+    }
+}
+
+impl fmt::Debug for DriverError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }
 

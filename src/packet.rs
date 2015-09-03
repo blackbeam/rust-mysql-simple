@@ -84,11 +84,7 @@ impl fmt::Display for ErrPacket {
 
 impl fmt::Debug for ErrPacket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,
-               "ERROR {} ({}): {}",
-               self.error_code,
-               String::from_utf8_lossy(&self.sql_state[..]).into_owned(),
-               String::from_utf8_lossy(&self.error_message[..]).into_owned())
+        fmt::Display::fmt(self, f)
     }
 }
 
