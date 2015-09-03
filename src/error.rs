@@ -78,7 +78,7 @@ impl fmt::Display for MyError {
         match *self {
             MyError::MyIoError(ref io_err) => io_err.fmt(f),
             MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
-            MyError::MyDriverError(ref driver_err) => driver_err.fmt(f),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
             MyError::MySslError(ref ssl_error) => ssl_error.fmt(f),
         }
     }
@@ -90,7 +90,7 @@ impl fmt::Display for MyError {
         match *self {
             MyError::MyIoError(ref io_err) => io_err.fmt(f),
             MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
-            MyError::MyDriverError(ref driver_err) => driver_err.fmt(f),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{:?}", driver_err),
         }
     }
 }
@@ -101,7 +101,7 @@ impl fmt::Debug for MyError {
         match *self {
             MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             MyError::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
-            MyError::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{}", driver_err),
             MyError::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
         }
     }
@@ -113,7 +113,7 @@ impl fmt::Debug for MyError {
         match *self {
             MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             MyError::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
-            MyError::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
+            MyError::MyDriverError(ref driver_err) => write!(f, "{:?}", driver_err),
         }
     }
 }
