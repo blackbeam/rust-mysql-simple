@@ -2,14 +2,16 @@ use std::mem;
 use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
-// XXX: Wait for Duration stabilization
 use std::io;
 use std::io::Write as stdWrite;
+use std::time::Duration;
 use time::{Tm, Timespec, now, strptime, at};
 
 use super::consts;
 use super::conn::{Column};
 use super::io::{Write, Read};
+
+use regex::Regex;
 
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, WriteBytesExt};
@@ -18,6 +20,10 @@ lazy_static! {
     static ref TM_UTCOFF: i32 = now().tm_utcoff;
     static ref TM_ISDST: i32 = now().tm_isdst;
 }
+
+/// A way to store negativeness of mysql's time. `.0 == true` means negative.
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
+pub struct SignedDuration(pub bool, pub Duration);
 
 /// `Value` enumerates possible values in mysql cells. Also `Value` used to fill
 /// prepared statements.
@@ -1040,6 +1046,31 @@ impl IntoValue for Timespec {
     }
 }
 
+impl IntoValue for Duration {
+    fn into_value(self) -> Value {
+        let mut secs_total = self.as_secs();
+        let micros = (self.subsec_nanos() as f64 / 1000_f64).round() as u32;
+        let seconds = (secs_total % 60) as u8;
+        secs_total -= seconds as u64;
+        let minutes = ((secs_total % (60 * 60)) / 60) as u8;
+        secs_total -= (minutes as u64) * 60;
+        let hours = ((secs_total % (60 * 60 * 24)) / (60 * 60)) as u8;
+        secs_total -= (hours as u64) * 60 * 60;
+        Value::Time(false, (secs_total / (60 * 60 * 24)) as u32, hours, minutes, seconds, micros)
+    }
+}
+
+impl IntoValue for SignedDuration {
+    fn into_value(self) -> Value {
+        let SignedDuration(is_neg, duration) = self;
+        if let Value::Time(_, days, hours, minutes, seconds, micros) = duration.into_value() {
+            Value::Time(is_neg, days, hours, minutes, seconds, micros)
+        } else {
+            unreachable!()
+        }
+    }
+}
+
 impl IntoValue for Value {
     fn into_value(self) -> Value {
         self
@@ -1293,6 +1324,77 @@ impl FromValue for Timespec {
     }
 }
 
+impl FromValue for SignedDuration {
+    fn from_value(v: Value) -> SignedDuration {
+        from_value_opt(v).ok().expect("Error retrieving Duration from Value")
+    }
+    fn from_value_opt(v: Value) -> Result<SignedDuration, Value> {
+        match v {
+            Value::Time(is_neg, days, hours, minutes, seconds, micros) => {
+                let mut secs_total = seconds as u64;
+                secs_total += minutes as u64 * 60;
+                secs_total += hours as u64 * 60 * 60;
+                secs_total += days as u64 * 24 * 60 * 60;
+                Ok(SignedDuration(is_neg, Duration::new(secs_total, micros * 1000)))
+            },
+            Value::Bytes(val_bytes) => {
+                {
+                    let mut bytes = &val_bytes[..];
+                    let is_neg = bytes[0] == b'-';
+                    if is_neg {
+                        bytes = &bytes[1..];
+                    }
+                    from_utf8(bytes).ok()
+                    .and_then(|time_str| {
+                        let t_ref = time_str.as_ref();
+                        Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)$").unwrap().captures(t_ref)
+                        .or_else(|| {
+                            Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)\.(\d{1,6})$")
+                                  .unwrap()
+                                  .captures(t_ref)
+                        }).or_else(|| {
+                            Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)$")
+                                  .unwrap()
+                                  .captures(t_ref)
+                        }).or_else(|| {
+                            Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{1,6})$")
+                                  .unwrap()
+                                  .captures(t_ref)
+                        })
+                    }).and_then(|capts| {
+                        let hours = capts.at(1).unwrap().parse::<u64>().unwrap();
+                        let minutes = capts.at(2).unwrap().parse::<u64>().unwrap();
+                        let seconds = capts.at(3).unwrap().parse::<u64>().unwrap();
+                        let micros = if capts.len() == 5 {
+                            let micros_str = capts.at(4).unwrap();
+                            let mut left_zero_count = 0;
+                            for b in micros_str.bytes() {
+                                if b == b'0' {
+                                    left_zero_count += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                            let mut micros = capts.at(4).unwrap().parse::<u32>().unwrap();
+                            for _ in 0..(6 - left_zero_count - (micros_str.len() - left_zero_count)) {
+                                micros *= 10;
+                            }
+                            micros
+                        } else {
+                            0
+                        };
+                        let mut secs_total = seconds;
+                        secs_total += minutes * 60;
+                        secs_total += hours * 60 * 60;
+                        Some(SignedDuration(is_neg, Duration::new(secs_total, micros * 1_000)))
+                    })
+                }.ok_or(Value::Bytes(val_bytes))
+            },
+            _ => Err(v),
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
@@ -1352,9 +1454,11 @@ mod test {
     }
 
     mod from_value {
-        use super::super::from_value;
+        use std::time::Duration;
+        use super::super::{from_value, SignedDuration};
         use super::super::Value::{Bytes, Date, Int};
         use time::{Timespec, now};
+
         #[test]
         fn should_convert_Bytes_to_Timespec() {
             assert_eq!(
@@ -1372,6 +1476,15 @@ mod test {
                 from_value::<Timespec>(Bytes(b"2014-11-01".to_vec())));
         }
         #[test]
+        fn should_convert_Bytes_to_Duration() {
+            assert_eq!(SignedDuration(true, Duration::from_millis(433830500)),
+                       from_value(Bytes(b"-120:30:30.5".to_vec())));
+            assert_eq!(SignedDuration(true, Duration::from_millis(433830500)),
+                       from_value(Bytes(b"-120:30:30.500000".to_vec())));
+            assert_eq!(SignedDuration(true, Duration::from_millis(433830005)),
+                       from_value(Bytes(b"-120:30:30.005".to_vec())));
+        }
+        #[test]
         fn should_convert_signed_to_unsigned() {
             assert_eq!(1, from_value::<usize>(Int(1)));
         }
@@ -1383,9 +1496,11 @@ mod test {
     }
 
     mod to_value {
-        use super::super::IntoValue;
-        use super::super::Value::{Date};
+        use std::time::Duration;
+        use super::super::{IntoValue, SignedDuration};
+        use super::super::Value::{Date, Time};
         use time::{Timespec, now};
+
         #[test]
         fn should_convert_Time_to_Date() {
             let ts = Timespec {
@@ -1393,6 +1508,13 @@ mod test {
                 nsec: 1000,
             };
             assert_eq!(ts.into_value(), Date(2014, 11, 1, 18, 33, 00, 1));
+        }
+        #[test]
+        fn should_convert_Duration_to_Time() {
+            assert_eq!(Duration::from_millis(433830500).into_value(),
+                       Time(false, 5, 0, 30, 30, 500000));
+            assert_eq!(SignedDuration(true, Duration::from_millis(433830500)).into_value(),
+                       Time(true, 5, 0, 30, 30, 500000));
         }
     }
 
