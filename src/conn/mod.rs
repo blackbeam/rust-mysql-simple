@@ -1803,6 +1803,12 @@ impl<'a> QueryResult<'a> {
         None
     }
 
+    /// Returns a slice of a [`Column`s](struct.Column.html) which represents
+    /// `QueryResult`'s columns if any.
+    pub fn columns_ref(&self) -> &[Column] {
+        self.columns.as_ref()
+    }
+
     /// This predicate will help you if you are expecting multiple result sets.
     ///
     /// For example:
