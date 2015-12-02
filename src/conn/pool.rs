@@ -28,7 +28,7 @@ impl MyInnerPool {
             min: min,
             count: 0
         };
-        for _ in (0..min) {
+        for _ in 0..min {
             try!(pool.new_conn());
         }
         Ok(pool)

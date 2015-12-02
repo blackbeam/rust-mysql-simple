@@ -1404,7 +1404,7 @@ impl MyConn {
                 let mut reader = &pld[..];
                 let column_count = try!(reader.read_lenenc_int());
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
-                for _ in (0..column_count) {
+                for _ in 0..column_count {
                     let pld = try!(self.read_packet());
                     columns.push(try!(Column::from_payload(self.last_command, pld.as_ref())));
                 }

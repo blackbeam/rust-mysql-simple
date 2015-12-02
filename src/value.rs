@@ -222,7 +222,7 @@ impl Value {
         let bitmap_len = (columns.len() + 7 + bit_offset) / 8;
         let mut bitmap = Vec::with_capacity(bitmap_len);
         let mut values = Vec::with_capacity(columns.len());
-        for i in (0..bitmap_len) {
+        for i in 0..bitmap_len {
             bitmap.push(pld[i+1]);
         }
         let mut reader = &pld[1 + bitmap_len..];
