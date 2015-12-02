@@ -1,4 +1,3 @@
-use std::mem;
 use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
@@ -9,6 +8,10 @@ use time::{Tm, Timespec, now, strptime, at};
 
 use super::consts;
 use super::conn::{Column};
+use super::error::{
+    MyError,
+    MyResult,
+};
 use super::io::{Write, Read};
 
 use regex::Regex;
@@ -268,6 +271,14 @@ impl Value {
     }
 }
 
+macro_rules! rollback {
+    ($x:ident) => (match $x {
+        Ok(x) => x.rollback(),
+        Err(MyError::FromValueError(x)) => x,
+        _ => unreachable!(),
+    });
+}
+
 /// Will *panic* if could not convert `row` to `T`.
 #[inline]
 pub fn from_row<T: FromRow>(row: Vec<Value>) -> T {
@@ -276,461 +287,648 @@ pub fn from_row<T: FromRow>(row: Vec<Value>) -> T {
 
 /// Will return `Err(row)` if could not convert `row` to `T`
 #[inline]
-pub fn from_row_opt<T: FromRow>(row: Vec<Value>) -> Result<T, Vec<Value>> {
+pub fn from_row_opt<T: FromRow>(row: Vec<Value>) -> MyResult<T> {
     FromRow::from_row_opt(row)
 }
 
 /// Trait to convert `Vec<Value>` into tuple of `FromValue` implementors up to arity 12.
 pub trait FromRow {
-    /// Will *panic* if could not convert `row` to `Self`.
     fn from_row(row: Vec<Value>) -> Self;
-    /// Will return `Err(row)` if could not convert `row` to `Self`
-    fn from_row_opt(row: Vec<Value>) -> Result<Self, Vec<Value>> where Self: Sized;
+    fn from_row_opt(row: Vec<Value>) -> MyResult<Self> where Self: Sized;
 }
 
-impl<T: FromValue> FromRow for T {
+impl<T, Ir> FromRow for T
+where Ir: ConvIr<T>,
+      T: FromValue<Intermediate=Ir> {
+    #[inline]
     fn from_row(row: Vec<Value>) -> T {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to T")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<T, Vec<Value>> {
+    fn from_row_opt(mut row: Vec<Value>) -> MyResult<T> {
         if row.len() == 1 {
-            match from_value_opt(row.pop().unwrap()) {
-                Ok(t) => Ok(t),
-                v => {
-                    mem::forget(v);
-                    unsafe { row.set_len(1); }
-                    Err(row)
+            let opt_ir: MyResult<Ir> = T::get_intermediate(row.pop().unwrap());
+            match opt_ir {
+                Ok(ir) => Ok(ir.commit()),
+                Err(MyError::FromValueError(v)) => {
+                    row.push(v);
+                    Err(MyError::FromRowError(row))
                 }
+                _ => unreachable!(),
             }
         } else {
-            Err(row)
+            Err(MyError::FromRowError(row))
         }
     }
 }
 
-impl<T1: FromValue> FromRow for (T1,) {
+impl<T1, Ir1> FromRow for (T1,)
+where Ir1: ConvIr<T1>,
+      T1: FromValue<Intermediate=Ir1> {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1,) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1,)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1,), Vec<Value>> {
-        if row.len() == 1 {
-            match from_value_opt(row.pop().unwrap()) {
-                Ok(t1) => Ok((t1,)),
-                v1 => {
-                    mem::forget(v1);
-                    unsafe { row.set_len(1); }
-                    Err(row)
-                }
-            }
-        } else {
-            Err(row)
-        }
+    fn from_row_opt(row: Vec<Value>) -> MyResult<(T1,)> {
+        T1::from_row_opt(row).map(|t| (t,))
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue> FromRow for (T1, T2) {
+impl<T1, Ir1,
+     T2, Ir2> FromRow for (T1, T2)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2> {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2) {
-        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1, T2)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1,T2)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2), Vec<Value>> {
-        if row.len() == 2 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(2); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) -> MyResult<(T1, T2)> {
+        if row.len() != 2 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2) {
+            (Ok(ir1), Ok(ir2)) => Ok((ir1.commit(), ir2.commit())),
+            (ir1, ir2) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue> FromRow for (T1, T2, T3) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,> FromRow for (T1, T2, T3)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1,T2,T3)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3), Vec<Value>> {
-        if row.len() == 3 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(3); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) -> MyResult<(T1, T2, T3)> {
+        if row.len() != 3 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3) {
+            (Ok(ir1), Ok(ir2), Ok(ir3)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+            )),
+            (ir1, ir2, ir3) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue> FromRow for (T1, T2, T3, T4) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,> FromRow for (T1, T2, T3, T4)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T4)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4), Vec<Value>> {
-        if row.len() == 4 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(4); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) -> MyResult<(T1, T2, T3, T4)> {
+        if row.len() != 4 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+            )),
+            (ir1, ir2, ir3, ir4) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue,
-     T5: FromValue> FromRow for (T1, T2, T3, T4, T5) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,
+     T5, Ir5,> FromRow for (T1, T2, T3, T4, T5)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
+      Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4, T5)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T5)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4, T5), Vec<Value>> {
-        if row.len() == 5 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t5), Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4, t5))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(5); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) -> MyResult<(T1, T2, T3, T4, T5)> {
+        if row.len() != 5 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4, ir5) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+                ir5.commit(),
+            )),
+            (ir1, ir2, ir3, ir4, ir5) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                row.push(rollback!(ir5));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue,
-     T5: FromValue,
-     T6: FromValue> FromRow for (T1, T2, T3, T4, T5, T6) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,
+     T5, Ir5,
+     T6, Ir6,> FromRow for (T1, T2, T3, T4, T5, T6)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
+      Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>,
+      Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4, T5, T6)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T6)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4, T5, T6), Vec<Value>> {
-        if row.len() == 6 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t6), Ok(t5), Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4, t5, t6))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(6); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) ->
+        MyResult<(T1, T2, T3, T4, T5, T6)>
+    {
+        if row.len() != 6 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
+        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4, ir5, ir6) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+                ir5.commit(),
+                ir6.commit(),
+            )),
+            (ir1, ir2, ir3, ir4, ir5, ir6) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                row.push(rollback!(ir5));
+                row.push(rollback!(ir6));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue,
-     T5: FromValue,
-     T6: FromValue,
-     T7: FromValue> FromRow for (T1, T2, T3, T4, T5, T6, T7) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,
+     T5, Ir5,
+     T6, Ir6,
+     T7, Ir7,> FromRow for (T1, T2, T3, T4, T5, T6, T7)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
+      Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>,
+      Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>,
+      Ir7: ConvIr<T7>, T7: FromValue<Intermediate=Ir7>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4, T5, T6, T7)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T7)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4, T5, T6, T7), Vec<Value>> {
-        if row.len() == 7 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t7), Ok(t6), Ok(t5), Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4, t5, t6, t7))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(7); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) ->
+        MyResult<(T1, T2, T3, T4, T5, T6, T7)>
+    {
+        if row.len() != 7 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
+        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
+        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
+            Ok(ir7)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+                ir5.commit(),
+                ir6.commit(),
+                ir7.commit(),
+            )),
+            (ir1, ir2, ir3, ir4, ir5, ir6, ir7) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                row.push(rollback!(ir5));
+                row.push(rollback!(ir6));
+                row.push(rollback!(ir7));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue,
-     T5: FromValue,
-     T6: FromValue,
-     T7: FromValue,
-     T8: FromValue> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,
+     T5, Ir5,
+     T6, Ir6,
+     T7, Ir7,
+     T8, Ir8,> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
+      Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>,
+      Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>,
+      Ir7: ConvIr<T7>, T7: FromValue<Intermediate=Ir7>,
+      Ir8: ConvIr<T8>, T8: FromValue<Intermediate=Ir8>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4, T5, T6, T7, T8)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T8)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4, T5, T6, T7, T8), Vec<Value>> {
-        if row.len() == 8 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t8), Ok(t7), Ok(t6), Ok(t5), Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4, t5, t6, t7, t8))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(8); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) ->
+        MyResult<(T1, T2, T3, T4, T5, T6, T7, T8)>
+    {
+        if row.len() != 8 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
+        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
+        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
+        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
+            Ok(ir7), Ok(ir8)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+                ir5.commit(),
+                ir6.commit(),
+                ir7.commit(),
+                ir8.commit(),
+            )),
+            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                row.push(rollback!(ir5));
+                row.push(rollback!(ir6));
+                row.push(rollback!(ir7));
+                row.push(rollback!(ir8));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue,
-     T5: FromValue,
-     T6: FromValue,
-     T7: FromValue,
-     T8: FromValue,
-     T9: FromValue> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8, T9) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,
+     T5, Ir5,
+     T6, Ir6,
+     T7, Ir7,
+     T8, Ir8,
+     T9, Ir9,> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8, T9)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
+      Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>,
+      Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>,
+      Ir7: ConvIr<T7>, T7: FromValue<Intermediate=Ir7>,
+      Ir8: ConvIr<T8>, T8: FromValue<Intermediate=Ir8>,
+      Ir9: ConvIr<T9>, T9: FromValue<Intermediate=Ir9>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4, T5, T6, T7, T8, T9)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T9)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4, T5, T6, T7, T8, T9), Vec<Value>> {
-        if row.len() == 9 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t9), Ok(t8), Ok(t7), Ok(t6), Ok(t5), Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4, t5, t6, t7, t8, t9))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(9); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) ->
+        MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9)>
+    {
+        if row.len() != 9 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir9: MyResult<Ir9> = T9::get_intermediate(row.pop().unwrap());
+        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
+        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
+        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
+        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
+            Ok(ir7), Ok(ir8), Ok(ir9)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+                ir5.commit(),
+                ir6.commit(),
+                ir7.commit(),
+                ir8.commit(),
+                ir9.commit(),
+            )),
+            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                row.push(rollback!(ir5));
+                row.push(rollback!(ir6));
+                row.push(rollback!(ir7));
+                row.push(rollback!(ir8));
+                row.push(rollback!(ir9));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue,
-     T5: FromValue,
-     T6: FromValue,
-     T7: FromValue,
-     T8: FromValue,
-     T9: FromValue,
-     T10: FromValue> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,
+     T5, Ir5,
+     T6, Ir6,
+     T7, Ir7,
+     T8, Ir8,
+     T9, Ir9,
+     T10, Ir10,> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
+      Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>,
+      Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>,
+      Ir7: ConvIr<T7>, T7: FromValue<Intermediate=Ir7>,
+      Ir8: ConvIr<T8>, T8: FromValue<Intermediate=Ir8>,
+      Ir9: ConvIr<T9>, T9: FromValue<Intermediate=Ir9>,
+      Ir10: ConvIr<T10>, T10: FromValue<Intermediate=Ir10>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T10)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10), Vec<Value>> {
-        if row.len() == 10 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t10), Ok(t9), Ok(t8), Ok(t7), Ok(t6), Ok(t5), Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4, t5, t6, t7, t8, t9, t10))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(10); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) ->
+        MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)>
+    {
+        if row.len() != 10 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir10: MyResult<Ir10> = T10::get_intermediate(row.pop().unwrap());
+        let ir9: MyResult<Ir9> = T9::get_intermediate(row.pop().unwrap());
+        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
+        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
+        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
+        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
+            Ok(ir7), Ok(ir8), Ok(ir9), Ok(ir10)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+                ir5.commit(),
+                ir6.commit(),
+                ir7.commit(),
+                ir8.commit(),
+                ir9.commit(),
+                ir10.commit(),
+            )),
+            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                row.push(rollback!(ir5));
+                row.push(rollback!(ir6));
+                row.push(rollback!(ir7));
+                row.push(rollback!(ir8));
+                row.push(rollback!(ir9));
+                row.push(rollback!(ir10));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue,
-     T5: FromValue,
-     T6: FromValue,
-     T7: FromValue,
-     T8: FromValue,
-     T9: FromValue,
-     T10: FromValue,
-     T11: FromValue> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,
+     T5, Ir5,
+     T6, Ir6,
+     T7, Ir7,
+     T8, Ir8,
+     T9, Ir9,
+     T10, Ir10,
+     T11, Ir11,> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
+      Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>,
+      Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>,
+      Ir7: ConvIr<T7>, T7: FromValue<Intermediate=Ir7>,
+      Ir8: ConvIr<T8>, T8: FromValue<Intermediate=Ir8>,
+      Ir9: ConvIr<T9>, T9: FromValue<Intermediate=Ir9>,
+      Ir10: ConvIr<T10>, T10: FromValue<Intermediate=Ir10>,
+      Ir11: ConvIr<T11>, T11: FromValue<Intermediate=Ir11>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T11)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11), Vec<Value>> {
-        if row.len() == 11 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t11), Ok(t10), Ok(t9), Ok(t8), Ok(t7), Ok(t6), Ok(t5), Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(11); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) ->
+        MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)>
+    {
+        if row.len() != 11 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir11: MyResult<Ir11> = T11::get_intermediate(row.pop().unwrap());
+        let ir10: MyResult<Ir10> = T10::get_intermediate(row.pop().unwrap());
+        let ir9: MyResult<Ir9> = T9::get_intermediate(row.pop().unwrap());
+        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
+        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
+        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
+        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10, ir11) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
+            Ok(ir7), Ok(ir8), Ok(ir9), Ok(ir10), Ok(ir11)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+                ir5.commit(),
+                ir6.commit(),
+                ir7.commit(),
+                ir8.commit(),
+                ir9.commit(),
+                ir10.commit(),
+                ir11.commit(),
+            )),
+            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10, ir11) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                row.push(rollback!(ir5));
+                row.push(rollback!(ir6));
+                row.push(rollback!(ir7));
+                row.push(rollback!(ir8));
+                row.push(rollback!(ir9));
+                row.push(rollback!(ir10));
+                row.push(rollback!(ir11));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
 
-impl<T1: FromValue,
-     T2: FromValue,
-     T3: FromValue,
-     T4: FromValue,
-     T5: FromValue,
-     T6: FromValue,
-     T7: FromValue,
-     T8: FromValue,
-     T9: FromValue,
-     T10: FromValue,
-     T11: FromValue,
-     T12: FromValue> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12) {
+impl<T1, Ir1,
+     T2, Ir2,
+     T3, Ir3,
+     T4, Ir4,
+     T5, Ir5,
+     T6, Ir6,
+     T7, Ir7,
+     T8, Ir8,
+     T9, Ir9,
+     T10, Ir10,
+     T11, Ir11,
+     T12, Ir12,> FromRow for (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)
+where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
+      Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
+      Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
+      Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
+      Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>,
+      Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>,
+      Ir7: ConvIr<T7>, T7: FromValue<Intermediate=Ir7>,
+      Ir8: ConvIr<T8>, T8: FromValue<Intermediate=Ir8>,
+      Ir9: ConvIr<T9>, T9: FromValue<Intermediate=Ir9>,
+      Ir10: ConvIr<T10>, T10: FromValue<Intermediate=Ir10>,
+      Ir11: ConvIr<T11>, T11: FromValue<Intermediate=Ir11>,
+      Ir12: ConvIr<T12>, T12: FromValue<Intermediate=Ir12>, {
     #[inline]
     fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12) {
-        FromRow::from_row_opt(row)
-        .ok().expect("Could not convert row to (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)")
+        FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T12)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> Result<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12), Vec<Value>> {
-        if row.len() == 12 {
-            let vs = (from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()),
-                      from_value_opt(row.pop().unwrap()));
-            match vs {
-                (Ok(t12), Ok(t11), Ok(t10), Ok(t9), Ok(t8), Ok(t7), Ok(t6), Ok(t5), Ok(t4), Ok(t3), Ok(t2), Ok(t1)) =>  {
-                    Ok((t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12))
-                },
-                vs => {
-                    mem::forget(vs);
-                    unsafe { row.set_len(12); }
-                    Err(row)
-                }
+    fn from_row_opt(mut row: Vec<Value>) ->
+        MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)>
+    {
+        if row.len() != 12 {
+            return Err(MyError::FromRowError(row));
+        }
+        let ir12: MyResult<Ir12> = T12::get_intermediate(row.pop().unwrap());
+        let ir11: MyResult<Ir11> = T11::get_intermediate(row.pop().unwrap());
+        let ir10: MyResult<Ir10> = T10::get_intermediate(row.pop().unwrap());
+        let ir9: MyResult<Ir9> = T9::get_intermediate(row.pop().unwrap());
+        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
+        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
+        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
+        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
+        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
+        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
+        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
+        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
+        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10, ir11, ir12) {
+            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
+            Ok(ir7), Ok(ir8), Ok(ir9), Ok(ir10), Ok(ir11), Ok(ir12)) => Ok((
+                ir1.commit(),
+                ir2.commit(),
+                ir3.commit(),
+                ir4.commit(),
+                ir5.commit(),
+                ir6.commit(),
+                ir7.commit(),
+                ir8.commit(),
+                ir9.commit(),
+                ir10.commit(),
+                ir11.commit(),
+                ir12.commit(),
+            )),
+            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10, ir11, ir12) => {
+                row.push(rollback!(ir1));
+                row.push(rollback!(ir2));
+                row.push(rollback!(ir3));
+                row.push(rollback!(ir4));
+                row.push(rollback!(ir5));
+                row.push(rollback!(ir6));
+                row.push(rollback!(ir7));
+                row.push(rollback!(ir8));
+                row.push(rollback!(ir9));
+                row.push(rollback!(ir10));
+                row.push(rollback!(ir11));
+                row.push(rollback!(ir12));
+                Err(MyError::FromRowError(row))
             }
-        } else {
-            Err(row)
         }
     }
 }
@@ -1077,63 +1275,101 @@ impl IntoValue for Value {
     }
 }
 
+/// Basic operations on `FromValue` conversion intermediate result.
+///
+/// See [`FromValue`](trait.FromValue.html)
+pub trait ConvIr<T>: Sized {
+    fn new(v: Value) -> MyResult<Self>;
+    fn commit(self) -> T;
+    fn rollback(self) -> Value;
+}
+
 /// Implement this trait to convert value to something.
-pub trait FromValue {
-    /// Will panic if could not convert `v` to `Self`
-    fn from_value(v: Value) -> Self;
+///
+/// `FromRow` requires ability to cheaply rollback `FromValue` conversion. This ability is
+/// provided via `Intermediate` associated type.
+///
+/// Example implementation:
+///
+/// ```ignore
+/// #[derive(Debug)]
+/// pub struct StringIr {
+///     bytes: Vec<u8>,
+/// }
+///
+/// impl ConvIr<String> for StringIr {
+///     fn new(v: Value) -> MyResult<StringIr> {
+///         match v {
+///             Value::Bytes(bytes) => match from_utf8(&*bytes) {
+///                 Ok(_) => Ok(StringIr { bytes: bytes }),
+///                 Err(_) => Err(MyError::FromValueError(Value::Bytes(bytes))),
+///             },
+///             v => Err(MyError::FromValueError(v)),
+///         }
+///     }
+///     fn commit(self) -> String {
+///         unsafe { String::from_utf8_unchecked(self.bytes) }
+///     }
+///     fn rollback(self) -> Value {
+///         Value::Bytes(self.bytes)
+///     }
+/// }
+///
+/// impl FromValue for String {
+///     type Intermediate = StringIr;
+/// }
+/// ```
+pub trait FromValue: Sized {
+    type Intermediate: ConvIr<Self>;
 
-    /// Will return `Err(v)` if could not convert `v` to `Self`
-    fn from_value_opt(v: Value) -> Result<Self, Value> where Self: Sized;
+    /// Will panic if could not convert `v` to `Self`.
+    fn from_value(v: Value) -> Self {
+        Self::from_value_opt(v).ok().expect("Could not retrieve Self from Value")
+    }
+
+    /// Will return `Err(MyError::FromValueError(v))` if could not convert `v` to `Self`.
+    fn from_value_opt(v: Value) -> MyResult<Self> {
+        let ir = try!(Self::Intermediate::new(v));
+        Ok(ir.commit())
+    }
+
+    /// Will return `Err(MyError::FromValueError(v))` if `v` is not convertible to `Self`.
+    fn get_intermediate(v: Value) -> MyResult<Self::Intermediate> {
+        Self::Intermediate::new(v)
+    }
 }
 
-impl FromValue for Value {
-    fn from_value(v: Value) -> Value {
-        v
-    }
-    fn from_value_opt(v: Value) -> Result<Value, Value> {
-        Ok(v)
-    }
-}
-
-impl<T: FromValue> FromValue for Option<T> {
-    fn from_value(v: Value) -> Option<T> {
-        match v {
-            Value::NULL => None,
-            v => Some(FromValue::from_value(v))
-        }
-    }
-    fn from_value_opt(v: Value) -> Result<Option<T>, Value> {
-        match v {
-            Value::NULL => Ok(None),
-            v => {
-                match FromValue::from_value_opt(v) {
-                    Err(v) => Err(v),
-                    Ok(x) => Ok(Some(x)),
-                }
+macro_rules! impl_from_value {
+    ($ty:ty, $ir:ty, $msg:expr) => (
+        impl FromValue for $ty {
+            type Intermediate = $ir;
+            fn from_value(v: Value) -> $ty {
+                <Self as FromValue>::from_value_opt(v).ok().expect($msg)
             }
         }
-    }
+    );
 }
 
-/// Will panic if could not convert `v` to `T`
-#[inline]
-pub fn from_value<T: FromValue>(v: Value) -> T {
-    FromValue::from_value(v)
+#[derive(Debug)]
+pub struct ParseIr<T> {
+    value: Value,
+    output: T,
 }
 
-/// Will return `Err(v)` if could not convert `v` to `T`
-#[inline]
-pub fn from_value_opt<T: FromValue>(v: Value) -> Result<T, Value> {
-    FromValue::from_value_opt(v)
+#[derive(Debug)]
+pub struct BytesIr {
+    bytes: Vec<u8>,
 }
 
-macro_rules! from_value_impl_num {
-    ($t:ident) => (
-        impl FromValue for $t {
-            fn from_value(v: Value) -> $t {
-                from_value_opt(v).ok().expect("Error retrieving number from value")
-            }
-            fn from_value_opt(v: Value) -> Result<$t, Value> {
+#[derive(Debug)]
+pub struct StringIr {
+    bytes: Vec<u8>,
+}
+
+macro_rules! impl_from_value_num_2 {
+    ($t:ident, $msg:expr) => (
+        impl ConvIr<$t> for ParseIr<$t> {
+            fn new(v: Value) -> MyResult<ParseIr<$t>> {
                 match v {
                     Value::Int(x) => {
                         let min = ::std::$t::MIN as i64;
@@ -1142,210 +1378,391 @@ macro_rules! from_value_impl_num {
                             max = ::std::i64::MAX;
                         }
                         if min <= x && x <= max {
-                            Ok(x as $t)
+                            Ok(ParseIr {
+                                value: Value::Int(x),
+                                output: x as $t,
+                            })
                         } else {
-                            Err(Value::Int(x))
+                            Err(MyError::FromValueError(Value::Int(x)))
                         }
                     },
-                    Value::UInt(x) if x <= ::std::$t::MAX as u64 => Ok(x as $t),
+                    Value::UInt(x) if x <= ::std::$t::MAX as u64 => Ok(ParseIr {
+                        value: Value::UInt(x),
+                        output: x as $t,
+                    }),
                     Value::Bytes(bytes) => {
-                        from_utf8(&bytes[..]).ok()
-                        .and_then(|x| {
+                        let val = from_utf8(&*bytes).ok().and_then(|x| {
                             FromStr::from_str(x).ok()
-                        }).ok_or(Value::Bytes(bytes))
+                        });
+                        match val {
+                            Some(x) => Ok(ParseIr {
+                                value: Value::Bytes(bytes),
+                                output: x,
+                            }),
+                            None => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                        }
                     },
-                    v => Err(v),
+                    v => Err(MyError::FromValueError(v)),
+                }
+            }
+            fn commit(self) -> $t {
+                self.output
+            }
+            fn rollback(self) -> Value {
+                self.value
+            }
+        }
+
+        impl_from_value!($t, ParseIr<$t>, $msg);
+    );
+}
+
+#[derive(Debug)]
+pub struct OptionIr<T> {
+    value: Option<Value>,
+    ir: Option<T>,
+}
+
+impl<T, Ir> ConvIr<Option<T>> for OptionIr<Ir>
+where T: FromValue<Intermediate=Ir>,
+      Ir: ConvIr<T> {
+    fn new(v: Value) -> MyResult<OptionIr<Ir>> {
+        match v {
+            Value::NULL => Ok(OptionIr {
+                value: Some(Value::NULL),
+                ir: None,
+            }),
+            v => {
+                match T::get_intermediate(v) {
+                    Ok(ir) => Ok(OptionIr {
+                        value: None,
+                        ir: Some(ir),
+                    }),
+                    Err(MyError::FromValueError(v)) => {
+                        Err(MyError::FromValueError(v))
+                    },
+                    _ => unreachable!(),
                 }
             }
         }
-    )
+    }
+    fn commit(self) -> Option<T> {
+        match self.ir {
+            Some(ir) => Some(ir.commit()),
+            None => None,
+        }
+    }
+    fn rollback(self) -> Value {
+        let OptionIr { value, ir } = self;
+        match value {
+            Some(v) => v,
+            None => match ir {
+                Some(ir) => ir.rollback(),
+                None => unreachable!(),
+            }
+        }
+    }
 }
 
-from_value_impl_num!(i8);
-from_value_impl_num!(u8);
-from_value_impl_num!(i16);
-from_value_impl_num!(u16);
-from_value_impl_num!(i32);
-from_value_impl_num!(u32);
-from_value_impl_num!(isize);
-from_value_impl_num!(usize);
-
-impl FromValue for i64 {
-    fn from_value(v: Value) -> i64 {
-        from_value_opt(v).ok().expect("Error retrieving i64 from value")
+impl<T> FromValue for Option<T>
+where T: FromValue {
+    type Intermediate = OptionIr<T::Intermediate>;
+    fn from_value(v: Value) -> Option<T> {
+        <Self as FromValue>::from_value_opt(v).ok()
+            .expect("Could not retrieve Option<T> from Value")
     }
-    fn from_value_opt(v: Value) -> Result<i64, Value> {
+}
+
+#[derive(Debug)]
+pub struct ValueIr {
+    value: Value,
+}
+
+impl ConvIr<Value> for ValueIr {
+    fn new(v: Value) -> MyResult<ValueIr> {
+        Ok(ValueIr { value: v })
+    }
+    fn commit(self) -> Value {
+        self.value
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl FromValue for Value {
+    type Intermediate = ValueIr;
+    fn from_value(v: Value) -> Value {
+        v
+    }
+    fn from_value_opt(v: Value) -> MyResult<Value> {
+        Ok(v)
+    }
+}
+
+impl ConvIr<String> for StringIr {
+    fn new(v: Value) -> MyResult<StringIr> {
         match v {
-            Value::Int(x) => Ok(x),
-            Value::UInt(x) if x <= ::std::i64::MAX as u64 => Ok(x as i64),
-            Value::Bytes(bytes) => {
-                from_utf8(&bytes[..]).ok()
-                .and_then(|x| {
-                    FromStr::from_str(x).ok()
-                }).ok_or(Value::Bytes(bytes))
+            Value::Bytes(bytes) => match from_utf8(&*bytes) {
+                Ok(_) => Ok(StringIr { bytes: bytes }),
+                Err(_) => Err(MyError::FromValueError(Value::Bytes(bytes))),
             },
-            v => Err(v),
+            v => Err(MyError::FromValueError(v)),
         }
+    }
+    fn commit(self) -> String {
+        unsafe { String::from_utf8_unchecked(self.bytes) }
+    }
+    fn rollback(self) -> Value {
+        Value::Bytes(self.bytes)
     }
 }
 
-impl FromValue for u64 {
-    fn from_value(v: Value) -> u64 {
-        from_value_opt(v).ok().expect("Error retrieving u64 from value")
-    }
-    fn from_value_opt(v: Value) -> Result<u64, Value> {
+impl ConvIr<i64> for ParseIr<i64> {
+    fn new(v: Value) -> MyResult<ParseIr<i64>> {
         match v {
-            Value::Int(x) if x >= 0 => Ok(x as u64),
-            Value::UInt(x) => Ok(x),
+            Value::Int(x) => Ok(ParseIr {
+                value: Value::Int(x),
+                output: x,
+            }),
+            Value::UInt(x) if x <= ::std::i64::MAX as u64 => Ok(ParseIr {
+                value: Value::UInt(x),
+                output: x as i64,
+            }),
             Value::Bytes(bytes) => {
-                from_utf8(&bytes[..]).ok()
-                .and_then(|x| {
-                    FromStr::from_str(x).ok()
-                }).ok_or(Value::Bytes(bytes))
+                let val = from_utf8(&*bytes).ok().and_then(|x| i64::from_str(x).ok());
+                match val {
+                    Some(x) => Ok(ParseIr {
+                        value: Value::Bytes(bytes),
+                        output: x,
+                    }),
+                    None => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                }
             },
-            v => Err(v),
+            v => Err(MyError::FromValueError(v)),
         }
+    }
+    fn commit(self) -> i64 {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
     }
 }
 
-impl FromValue for f32 {
-    fn from_value(v: Value) -> f32 {
-        from_value_opt(v).ok().expect("Error retrieving f32 from value")
-    }
-    fn from_value_opt(v: Value) -> Result<f32, Value> {
+impl ConvIr<u64> for ParseIr<u64> {
+    fn new(v: Value) -> MyResult<ParseIr<u64>> {
         match v {
-            Value::Float(x) if x >= ::std::f32::MIN as f64 && x <= ::std::f32::MAX as f64 => Ok(x as f32),
+            Value::Int(x) if x >= 0 => Ok(ParseIr {
+                value: Value::Int(x),
+                output: x as u64,
+            }),
+            Value::UInt(x) => Ok(ParseIr {
+                value: Value::UInt(x),
+                output: x,
+            }),
             Value::Bytes(bytes) => {
-                from_utf8(&bytes[..]).ok()
-                .and_then(|x| {
-                    FromStr::from_str(x).ok()
-                }).ok_or(Value::Bytes(bytes))
+                let val = from_utf8(&*bytes).ok().and_then(|x| u64::from_str(x).ok());
+                match val {
+                    Some(x) => Ok(ParseIr {
+                        value: Value::Bytes(bytes),
+                        output: x,
+                    }),
+                    _ => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                }
             },
-            v => Err(v),
+            v => Err(MyError::FromValueError(v)),
         }
+    }
+    fn commit(self) -> u64 {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
     }
 }
 
-impl FromValue for f64 {
-    fn from_value(v: Value) -> f64 {
-        from_value_opt(v).ok().expect("Error retrieving f64 from value")
-    }
-    #[inline]
-    fn from_value_opt(v: Value) -> Result<f64, Value> {
+impl ConvIr<f32> for ParseIr<f32> {
+    fn new(v: Value) -> MyResult<ParseIr<f32>> {
         match v {
-            Value::Float(x) => Ok(x),
-            Value::Bytes(bytes) => {
-                from_utf8(&bytes[..]).ok()
-                .and_then(|x| {
-                    FromStr::from_str(x).ok()
-                }).ok_or(Value::Bytes(bytes))
-            },
-            v => Err(v),
-        }
-    }
-}
-
-impl FromValue for bool {
-    fn from_value(v: Value) -> bool {
-        from_value_opt(v).ok().expect("Error retrieving bool from value")
-    }
-    fn from_value_opt(v: Value) -> Result<bool, Value> {
-        match v {
-            Value::Int(0) => Ok(false),
-            Value::Int(1) => Ok(true),
-            Value::Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x30 => Ok(false),
-            Value::Bytes(ref bts) if bts.len() == 1 && bts[0] == 0x31 => Ok(true),
-            v => Err(v),
-        }
-    }
-}
-
-impl FromValue for Vec<u8> {
-    fn from_value(v: Value) -> Vec<u8> {
-        from_value_opt(v).ok().expect("Error retrieving Vec<u8> from value")
-    }
-    fn from_value_opt(v: Value) -> Result<Vec<u8>, Value> {
-        match v {
-            Value::Bytes(bts) => Ok(bts),
-            v => Err(v),
-        }
-    }
-}
-
-impl FromValue for String {
-    fn from_value(v: Value) -> String {
-        from_value_opt(v).ok().expect("Error retrieving String from value")
-    }
-    fn from_value_opt(v: Value) -> Result<String, Value> {
-        match v {
-            Value::Bytes(bytes) => {
-                String::from_utf8(bytes).map_err(|e| Value::Bytes(e.into_bytes()))
-            },
-            v => Err(v),
-        }
-    }
-}
-
-impl FromValue for Timespec {
-    fn from_value(v: Value) -> Timespec {
-        from_value_opt(v).ok().expect("Error retrieving Timespec from Value")
-    }
-    fn from_value_opt(v: Value) -> Result<Timespec, Value> {
-        match v {
-            Value::Date(y, m, d, h, i, s, u) => {
-                Ok(Tm{
-                        tm_year: y as i32 - 1_900,
-                        tm_mon: m as i32 - 1,
-                        tm_mday: d as i32,
-                        tm_hour: h as i32,
-                        tm_min: i as i32,
-                        tm_sec: s as i32,
-                        tm_nsec: u as i32 * 1_000,
-                        tm_utcoff: *TM_UTCOFF,
-                        tm_wday: 0,
-                        tm_yday: 0,
-                        tm_isdst: *TM_ISDST,
-                    }.to_timespec())
+            Value::Float(x) if x >= ::std::f32::MIN as f64 && x <= ::std::f32::MAX as f64 => {
+                Ok(ParseIr {
+                    value: Value::Float(x),
+                    output: x as f32,
+                })
             },
             Value::Bytes(bytes) => {
-                from_utf8(&bytes[..]).ok()
-                .and_then(|s| {
-                    strptime(s, "%Y-%m-%d %H:%M:%S")
-                    .or(strptime(s, "%Y-%m-%d"))
-                    .ok()
+                let val = from_utf8(&*bytes).ok().and_then(|x| f32::from_str(x).ok());
+                match val {
+                    Some(x) => Ok(ParseIr {
+                        value: Value::Bytes(bytes),
+                        output: x,
+                    }),
+                    None => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                }
+            },
+            v => Err(MyError::FromValueError(v)),
+        }
+    }
+    fn commit(self) -> f32 {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl ConvIr<f64> for ParseIr<f64> {
+    fn new(v: Value) -> MyResult<ParseIr<f64>> {
+        match v {
+            Value::Float(x) => Ok(ParseIr {
+                value: Value::Float(x),
+                output: x,
+            }),
+            Value::Bytes(bytes) => {
+                let val = from_utf8(&*bytes).ok().and_then(|x| f64::from_str(x).ok());
+                match val {
+                    Some(x) => Ok(ParseIr {
+                        value: Value::Bytes(bytes),
+                        output: x,
+                    }),
+                    _ => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                }
+            },
+            v => Err(MyError::FromValueError(v)),
+        }
+    }
+    fn commit(self) -> f64 {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl ConvIr<bool> for ParseIr<bool> {
+    fn new(v: Value) -> MyResult<ParseIr<bool>> {
+        match v {
+            Value::Int(0) => Ok(ParseIr {
+                value: Value::Int(0),
+                output: false,
+            }),
+            Value::Int(1) => Ok(ParseIr {
+                value: Value::Int(1),
+                output: true,
+            }),
+            Value::Bytes(bytes) => {
+                if bytes.len() == 1 {
+                    match bytes[0] {
+                        0x30 => Ok(ParseIr {
+                            value: Value::Bytes(bytes),
+                            output: false,
+                        }),
+                        0x31 => Ok(ParseIr {
+                            value: Value::Bytes(bytes),
+                            output: true,
+                        }),
+                        _ => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                    }
+                } else {
+                    Err(MyError::FromValueError(Value::Bytes(bytes)))
+                }
+            },
+            v => Err(MyError::FromValueError(v)),
+        }
+    }
+    fn commit(self) -> bool {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl ConvIr<Vec<u8>> for BytesIr {
+    fn new(v: Value) -> MyResult<BytesIr> {
+        match v {
+            Value::Bytes(bytes) => Ok(BytesIr {
+                bytes: bytes,
+            }),
+            v => Err(MyError::FromValueError(v)),
+        }
+    }
+    fn commit(self) -> Vec<u8> {
+        self.bytes
+    }
+    fn rollback(self) -> Value {
+        Value::Bytes(self.bytes)
+    }
+}
+
+impl ConvIr<Timespec> for ParseIr<Timespec> {
+    fn new (v: Value) -> MyResult<ParseIr<Timespec>> {
+        match v {
+            Value::Date(y, m, d, h, i, s, u) => Ok(ParseIr {
+                value: Value::Date(y, m, d, h, i, s, u),
+                output: Tm {
+                    tm_year: y as i32 - 1_900,
+                    tm_mon: m as i32 - 1,
+                    tm_mday: d as i32,
+                    tm_hour: h as i32,
+                    tm_min: i as i32,
+                    tm_sec: s as i32,
+                    tm_nsec: u as i32 * 1_000,
+                    tm_utcoff: *TM_UTCOFF,
+                    tm_wday: 0,
+                    tm_yday: 0,
+                    tm_isdst: *TM_ISDST,
+                }.to_timespec()
+            }),
+            Value::Bytes(bytes) => {
+                let val = from_utf8(&*bytes).ok().and_then(|s| {
+                    strptime(s, "%Y-%m-%d %H:%M:%S").or(strptime(s, "%Y-%m-%d")).ok()
                 }).map(|mut tm| {
                     tm.tm_utcoff = *TM_UTCOFF;
                     tm.tm_isdst = *TM_ISDST;
                     tm.to_timespec()
-                }).ok_or(Value::Bytes(bytes))
+                });
+                match val {
+                    Some(timespec) => Ok(ParseIr {
+                        value: Value::Bytes(bytes),
+                        output: timespec,
+                    }),
+                    None => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                }
             },
-            v => Err(v),
+            v => Err(MyError::FromValueError(v)),
         }
+    }
+    fn commit(self) -> Timespec {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
     }
 }
 
-impl FromValue for SignedDuration {
-    fn from_value(v: Value) -> SignedDuration {
-        from_value_opt(v).ok().expect("Error retrieving Duration from Value")
-    }
-    fn from_value_opt(v: Value) -> Result<SignedDuration, Value> {
+impl ConvIr<SignedDuration> for ParseIr<SignedDuration> {
+    fn new(v: Value) -> MyResult<ParseIr<SignedDuration>> {
         match v {
             Value::Time(is_neg, days, hours, minutes, seconds, micros) => {
                 let mut secs_total = seconds as u64;
                 secs_total += minutes as u64 * 60;
                 secs_total += hours as u64 * 60 * 60;
                 secs_total += days as u64 * 24 * 60 * 60;
-                Ok(SignedDuration(is_neg, Duration::new(secs_total, micros * 1000)))
+                Ok(ParseIr {
+                    value: Value::Time(is_neg, days, hours, minutes, seconds, micros),
+                    output: SignedDuration(is_neg, Duration::new(secs_total, micros * 1000)),
+                })
             },
             Value::Bytes(val_bytes) => {
-                {
+                let val = {
                     let mut bytes = &val_bytes[..];
                     let is_neg = bytes[0] == b'-';
                     if is_neg {
                         bytes = &bytes[1..];
                     }
-                    from_utf8(bytes).ok()
-                    .and_then(|time_str| {
+                    from_utf8(bytes).ok().and_then(|time_str| {
                         let t_ref = time_str.as_ref();
                         Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)$").unwrap().captures(t_ref)
                         .or_else(|| {
@@ -1388,11 +1805,55 @@ impl FromValue for SignedDuration {
                         secs_total += hours * 60 * 60;
                         Some(SignedDuration(is_neg, Duration::new(secs_total, micros * 1_000)))
                     })
-                }.ok_or(Value::Bytes(val_bytes))
+                };
+                match val {
+                    Some(sig_dur) => Ok(ParseIr {
+                        value: Value::Bytes(val_bytes),
+                        output: sig_dur,
+                    }),
+                    None => Err(MyError::FromValueError(Value::Bytes(val_bytes)))
+                }
             },
-            _ => Err(v),
+            v => Err(MyError::FromValueError(v)),
         }
     }
+    fn commit(self) -> SignedDuration {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl_from_value!(Timespec, ParseIr<Timespec>, "Could not retrieve Timespec from Value");
+impl_from_value!(SignedDuration, ParseIr<SignedDuration>,
+                 "Could not retrieve Timespec from Value");
+impl_from_value!(String, StringIr, "Could not retrieve String from Value");
+impl_from_value!(Vec<u8>, BytesIr, "Could not retrieve Vec<u8> from Value");
+impl_from_value!(bool, ParseIr<bool>, "Could not retrieve bool from Value");
+impl_from_value!(i64, ParseIr<i64>, "Could not retrieve i64 from Value");
+impl_from_value!(u64, ParseIr<u64>, "Could not retrieve u64 from Value");
+impl_from_value!(f32, ParseIr<f32>, "Could not retrieve f32 from Value");
+impl_from_value!(f64, ParseIr<f64>, "Could not retrieve f64 from Value");
+impl_from_value_num_2!(i8, "Could not retrieve i8 from Value");
+impl_from_value_num_2!(u8, "Could not retrieve u8 from Value");
+impl_from_value_num_2!(i16, "Could not retrieve i16 from Value");
+impl_from_value_num_2!(u16, "Could not retrieve u16 from Value");
+impl_from_value_num_2!(i32, "Could not retrieve i32 from Value");
+impl_from_value_num_2!(u32, "Could not retrieve u32 from Value");
+impl_from_value_num_2!(isize, "Could not retrieve isize from Value");
+impl_from_value_num_2!(usize, "Could not retrieve usize from Value");
+
+/// Will panic if could not convert `v` to `T`
+#[inline]
+pub fn from_value<T: FromValue>(v: Value) -> T {
+    FromValue::from_value(v)
+}
+
+/// Will return `Err(v)` if could not convert `v` to `T`
+#[inline]
+pub fn from_value_opt<T: FromValue>(v: Value) -> MyResult<T> {
+    FromValue::from_value_opt(v)
 }
 
 #[cfg(test)]
@@ -1521,6 +1982,7 @@ mod test {
     mod from_row {
         use time::{Timespec, now};
         use super::super::{from_row, from_row_opt, Value};
+        use super::super::super::error::MyError;
 
         #[test]
         fn should_convert_to_tuples() {
@@ -1536,14 +1998,26 @@ mod test {
             let v2 = vec![t1.clone(), t2.clone()];
             let v3 = vec![t1.clone(), t2.clone(), t3.clone()];
             let v4 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone()];
-            let v5 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone()];
-            let v6 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone()];
-            let v7 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone(), t3.clone()];
-            let v8 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone(), t3.clone(), t4.clone()];
-            let v9 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone()];
-            let v10 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone()];
-            let v11 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone(), t3.clone()];
-            let v12 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone(), t2.clone(), t3.clone(), t4.clone()];
+            let v5 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone()];
+            let v6 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone(), t2.clone()];
+            let v7 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone(), t2.clone(), t3.clone()];
+            let v8 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone(), t2.clone(), t3.clone(), t4.clone()];
+            let v9 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone()];
+            let v10 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone()];
+            let v11 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone()];
+            let v12 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone(), t4.clone()];
             let r1 = (o1,);
             let r2 = (o1, o2.clone());
             let r3 = (o1, o2.clone(), o3.clone());
@@ -1551,11 +2025,20 @@ mod test {
             let r5 = (o1, o2.clone(), o3.clone(), o4.clone(), o1);
             let r6 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone());
             let r7 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone());
-            let r8 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone());
-            let r9 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone(), o1);
-            let r10 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone());
-            let r11 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone());
-            let r12 = (o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone(), o1, o2.clone(), o3.clone(), o4.clone());
+            let r8 = (o1, o2.clone(), o3.clone(), o4.clone(),
+                      o1, o2.clone(), o3.clone(), o4.clone());
+            let r9 = (o1, o2.clone(), o3.clone(), o4.clone(),
+                      o1, o2.clone(), o3.clone(), o4.clone(),
+                      o1);
+            let r10 = (o1, o2.clone(), o3.clone(), o4.clone(),
+                       o1, o2.clone(), o3.clone(), o4.clone(),
+                       o1, o2.clone());
+            let r11 = (o1, o2.clone(), o3.clone(), o4.clone(),
+                       o1, o2.clone(), o3.clone(), o4.clone(),
+                       o1, o2.clone(), o3.clone());
+            let r12 = (o1, o2.clone(), o3.clone(), o4.clone(),
+                       o1, o2.clone(), o3.clone(), o4.clone(),
+                       o1, o2.clone(), o3.clone(), o4.clone());
 
             assert_eq!(o1, from_row(vec![t1]));
             assert_eq!(o2, from_row::<String>(vec![t2]));
@@ -1577,31 +2060,83 @@ mod test {
 
         #[test]
         fn should_return_error_if_could_not_convert() {
-            let v1 = vec![Value::Int(1)];
-            let v2 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1)];
-            let v3 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1)];
-            let v4 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1)];
-            let v5 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
-            let v6 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
-            let v7 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
-            let v8 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
-            let v9 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
-            let v10 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
-            let v11 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
-            let v12 = vec![Value::Bytes(b"foo".to_vec()), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1), Value::Int(1)];
-            assert_eq!(Err(v1.clone()), from_row_opt::<String>(v1.clone()));
-            assert_eq!(Err(v1.clone()), from_row_opt::<(String,)>(v1));
-            assert_eq!(Err(v2.clone()), from_row_opt::<(String,String,)>(v2));
-            assert_eq!(Err(v3.clone()), from_row_opt::<(String,i8,String,)>(v3));
-            assert_eq!(Err(v4.clone()), from_row_opt::<(String,i8,i8,String,)>(v4));
-            assert_eq!(Err(v5.clone()), from_row_opt::<(String,i8,i8,i8,String,)>(v5));
-            assert_eq!(Err(v6.clone()), from_row_opt::<(String,i8,i8,i8,i8,String,)>(v6));
-            assert_eq!(Err(v7.clone()), from_row_opt::<(String,i8,i8,i8,i8,i8,String,)>(v7));
-            assert_eq!(Err(v8.clone()), from_row_opt::<(String,i8,i8,i8,i8,i8,i8,String,)>(v8));
-            assert_eq!(Err(v9.clone()), from_row_opt::<(String,i8,i8,i8,i8,i8,i8,i8,String,)>(v9));
-            assert_eq!(Err(v10.clone()), from_row_opt::<(String,i8,i8,i8,i8,i8,i8,i8,i8,String,)>(v10));
-            assert_eq!(Err(v11.clone()), from_row_opt::<(String,i8,i8,i8,i8,i8,i8,i8,i8,i8,String,)>(v11));
-            assert_eq!(Err(v12.clone()), from_row_opt::<(String,i8,i8,i8,i8,i8,i8,i8,i8,i8,i8,String,)>(v12));
+            let t1 = Value::Int(1);
+            let t2 = Value::Bytes(b"a".to_vec());
+            let t3 = Value::Bytes(vec![255]);
+            let t4 = Value::Date(2014, 11, 1, 18, 33, 00, 1);
+
+            let v1 = vec![t1.clone()];
+            let v2 = vec![t1.clone(), t2.clone()];
+            let v3 = vec![t1.clone(), t2.clone(), t3.clone()];
+            let v4 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone()];
+            let v5 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone()];
+            let v6 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone(), t2.clone()];
+            let v7 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone(), t2.clone(), t3.clone()];
+            let v8 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone(), t2.clone(), t3.clone(), t4.clone()];
+            let v9 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                          t1.clone()];
+            let v10 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone()];
+            let v11 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone()];
+            let v12 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                           t1.clone(), t2.clone(), t3.clone(), t4.clone()];
+
+            match from_row_opt::<f32>(v1.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v1, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8)>(v2.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v2, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8)>(v3.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v3, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8)>(v4.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v4, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8,u8)>(v5.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v5, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8,u8,u8)>(v6.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v6, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8)>(v7.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v7, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8)>(v8.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v8, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8,u8)>(v9.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v9, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8,u8,u8)>(v10.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v10, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8,u8,u8,u8)>(v11.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v11, e),
+                _ => unreachable!(),
+            }
+            match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8,u8,u8,u8,u8)>(v12.clone()) {
+                Err(MyError::FromRowError(e)) => assert_eq!(v12, e),
+                _ => unreachable!(),
+            }
         }
     }
 

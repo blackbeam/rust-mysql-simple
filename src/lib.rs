@@ -128,7 +128,7 @@
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
-#![cfg_attr(feature = "nightly", feature(test))]
+#![cfg_attr(feature = "nightly", feature(test, const_fn))]
 #[cfg(feature = "nightly")]
 extern crate test;
 

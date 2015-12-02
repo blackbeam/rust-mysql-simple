@@ -8,6 +8,7 @@ use byteorder::Error;
 use openssl::ssl::error::{SslError};
 
 pub use super::packet::ErrPacket;
+use super::value::Value;
 
 pub enum MyError {
     MyIoError(io::Error),
@@ -15,6 +16,8 @@ pub enum MyError {
     MyDriverError(DriverError),
     #[cfg(feature = "openssl")]
     MySslError(SslError),
+    FromValueError(Value),
+    FromRowError(Vec<Value>),
 }
 
 impl error::Error for MyError {
@@ -25,6 +28,8 @@ impl error::Error for MyError {
             MyError::MySqlError(_) => "MySql server error",
             MyError::MyDriverError(_) => "driver error",
             MyError::MySslError(_) => "ssl error",
+            MyError::FromRowError(_) => "from row conversion error",
+            MyError::FromValueError(_) => "from value conversion error",
         }
     }
 
@@ -34,6 +39,8 @@ impl error::Error for MyError {
             MyError::MyIoError(_) => "I/O Error",
             MyError::MySqlError(_) => "MySql server error",
             MyError::MyDriverError(_) => "driver error",
+            MyError::FromRowError(_) => "from row conversion error",
+            MyError::FromValueError(_) => "from value conversion error",
         }
     }
 
@@ -80,6 +87,8 @@ impl fmt::Display for MyError {
             MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
             MyError::MyDriverError(ref driver_err) => driver_err.fmt(f),
             MyError::MySslError(ref ssl_error) => ssl_error.fmt(f),
+            MyError::FromRowError(_) => "from row conversion error".fmt(f),
+            MyError::FromValueError(_) => "from value conversion error".fmt(f),
         }
     }
 }
@@ -91,6 +100,8 @@ impl fmt::Display for MyError {
             MyError::MyIoError(ref io_err) => io_err.fmt(f),
             MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
             MyError::MyDriverError(ref driver_err) => driver_err.fmt(f),
+            MyError::FromRowError(_) => "from row conversion error".fmt(f),
+            MyError::FromValueError(_) => "from value conversion error".fmt(f),
         }
     }
 }
@@ -103,6 +114,8 @@ impl fmt::Debug for MyError {
             MyError::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
             MyError::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
             MyError::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
+            MyError::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
+            MyError::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
         }
     }
 }
@@ -114,6 +127,8 @@ impl fmt::Debug for MyError {
             MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             MyError::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
             MyError::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
+            MyError::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
+            MyError::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
         }
     }
 }
