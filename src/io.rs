@@ -313,7 +313,7 @@ impl Stream {
                     let stream = opt_stream.take().unwrap();
                     match stream {
                         TcpStream::Insecure(stream) => {
-                            let ssl_stream = try!(ssl::SslStream::new(&ctx, stream));
+                            let ssl_stream = try!(ssl::SslStream::connect(&ctx, stream));
                             Ok(Stream::TcpStream(Some(TcpStream::Secure(ssl_stream))))
                         },
                         _ => unreachable!(),
