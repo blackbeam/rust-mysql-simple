@@ -21,11 +21,6 @@ use super::consts::ColumnType;
 use super::io::Read as MyRead;
 use super::io::Write;
 use super::io::Stream;
-#[cfg(feature = "socket")]
-use super::io::Stream::UnixStream;
-#[cfg(feature = "pipe")]
-use super::io::Stream::PipeStream;
-use super::io::Stream::TcpStream;
 use super::io::TcpStream::Insecure;
 use super::error::MyError::{
     MyIoError,
