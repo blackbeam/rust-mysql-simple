@@ -448,7 +448,7 @@ impl Column {
 /// ```
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct MyOpts {
-    /// TCP address of mysql server (defaults to `127.0.0.1`).
+    /// TCP address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
     pub tcp_addr: Option<String>,
     /// TCP port of mysql server (defaults to `3306`).
     pub tcp_port: u16,
@@ -1939,6 +1939,16 @@ mod test {
         fn should_connect_with_database() {
             let mut conn = MyConn::new(MyOpts {
                 db_name: Some("mysql".to_string()),
+                ..get_opts()
+            }).unwrap();
+            assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap(),
+                       vec![Bytes(b"mysql".to_vec())]);
+        }
+        #[test]
+        fn should_connect_by_hostname() {
+            let mut conn = MyConn::new(MyOpts {
+                db_name: Some("mysql".to_string()),
+                tcp_addr: Some("localhost".to_string()),
                 ..get_opts()
             }).unwrap();
             assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap(),
