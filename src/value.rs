@@ -1919,6 +1919,45 @@ mod test {
         use super::super::{from_value, SignedDuration};
         use super::super::Value::{Bytes, Date, Int};
         use time::{Timespec, now};
+        use super::super::super::conn::{MyConn, MyOpts};
+
+        static USER: &'static str = "root";
+        static PASS: &'static str = "password";
+        static ADDR: &'static str = "127.0.0.1";
+        static PORT: u16          = 3307;
+
+        #[cfg(feature = "openssl")]
+        pub fn get_opts() -> MyOpts {
+            let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+            let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+                                       .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
+                                       .unwrap_or(PORT);
+            MyOpts {
+                user: Some(USER.to_string()),
+                pass: Some(pwd),
+                tcp_addr: Some(ADDR.to_string()),
+                tcp_port: port,
+                init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
+                ssl_opts: Some((::std::convert::From::from("tests/ca-cert.pem"), None)),
+                ..Default::default()
+            }
+        }
+
+        #[cfg(not(feature = "ssl"))]
+        pub fn get_opts() -> MyOpts {
+            let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+            let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+                                       .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
+                                       .unwrap_or(PORT);
+            MyOpts {
+                user: Some(USER.to_string()),
+                pass: Some(pwd),
+                tcp_addr: Some(ADDR.to_string()),
+                tcp_port: port,
+                init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
+                ..Default::default()
+            }
+        }
 
         #[test]
         fn should_convert_Bytes_to_Timespec() {
@@ -1936,6 +1975,27 @@ mod test {
                 Timespec { sec: 1414800000 - now().tm_utcoff as i64, nsec: 0 },
                 from_value::<Timespec>(Bytes(b"2014-11-01".to_vec())));
         }
+
+        #[test]
+        fn stored_and_retrieved_timestamp_should_match() {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            conn.query("CREATE TEMPORARY TABLE x.t (ts TIMESTAMP)").unwrap();
+            let ts = Timespec { sec: 1414866780, nsec: 0 };
+            conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
+            let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
+            assert_eq!(ts, from_value::<Timespec>(x.pop().unwrap()));
+        }
+
+        #[test]
+        fn stored_and_retrieved_datetime_should_match() {
+            let mut conn = MyConn::new(get_opts()).unwrap();
+            conn.query("CREATE TEMPORARY TABLE x.t (ts DATETIME)").unwrap();
+            let ts = Timespec { sec: 1414866780, nsec: 0 };
+            conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
+            let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
+            assert_eq!(ts, from_value::<Timespec>(x.pop().unwrap()));
+        }
+
         #[test]
         fn should_convert_Bytes_to_Duration() {
             assert_eq!(SignedDuration(true, Duration::from_millis(433830500)),
@@ -1945,10 +2005,12 @@ mod test {
             assert_eq!(SignedDuration(true, Duration::from_millis(433830005)),
                        from_value(Bytes(b"-120:30:30.005".to_vec())));
         }
+
         #[test]
         fn should_convert_signed_to_unsigned() {
             assert_eq!(1, from_value::<usize>(Int(1)));
         }
+
         #[test]
         #[should_panic]
         fn should_not_convert_negative_to_unsigned() {

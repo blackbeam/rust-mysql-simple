@@ -1289,7 +1289,7 @@ impl MyConn {
                         Float(..) => try!(
                             writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0u8])),
                         Date(..) => try!(
-                            writer.write_all(&[ColumnType::MYSQL_TYPE_DATE as u8, 0u8])),
+                            writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0u8])),
                         Time(..) => try!(
                             writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0u8]))
                     }
