@@ -4,12 +4,12 @@ use super::IsolationLevel;
 use super::Transaction;
 use super::super::error::{MyError, DriverError};
 use super::super::value::ToRow;
-use super::{MyConn, MyOpts, Stmt, QueryResult};
+use super::{MyConn, Opts, Stmt, QueryResult};
 use super::super::error::{MyResult};
 
 #[derive(Debug)]
 struct MyInnerPool {
-    opts: MyOpts,
+    opts: Opts,
     pool: Vec<MyConn>,
     min: usize,
     max: usize,
@@ -17,7 +17,7 @@ struct MyInnerPool {
 }
 
 impl MyInnerPool {
-    fn new(min: usize, max: usize, opts: MyOpts) -> MyResult<MyInnerPool> {
+    fn new(min: usize, max: usize, opts: Opts) -> MyResult<MyInnerPool> {
         if min > max || max == 0 {
             return Err(MyError::MyDriverError(DriverError::InvalidPoolConstraints));
         }
@@ -56,17 +56,17 @@ impl MyInnerPool {
 /// ```rust
 /// use mysql::conn::pool;
 /// use std::default::Default;
-/// use mysql::conn::MyOpts;
+/// use mysql::conn::Opts;
 /// use mysql::value::IntoValue;
 /// use std::thread;
 ///
-/// fn get_opts() -> MyOpts {
+/// fn get_opts() -> Opts {
 ///       // ...
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
-/// #     MyOpts {
+/// #     Opts {
 /// #         user: Some("root".to_string()),
 /// #         pass: Some(pwd),
 /// #         tcp_addr: Some("127.0.0.1".to_string()),
@@ -99,12 +99,12 @@ pub struct MyPool {
 
 impl MyPool {
     /// Creates new pool with `min = 10` and `max = 100`.
-    pub fn new(opts: MyOpts) -> MyResult<MyPool> {
+    pub fn new(opts: Opts) -> MyResult<MyPool> {
         MyPool::new_manual(10, 100, opts)
     }
 
     /// Same as `new` but you can set `min` and `max`.
-    pub fn new_manual(min: usize, max: usize, opts: MyOpts) -> MyResult<MyPool> {
+    pub fn new_manual(min: usize, max: usize, opts: Opts) -> MyResult<MyPool> {
         let pool = try!(MyInnerPool::new(min, max, opts));
         Ok(MyPool{ pool: Arc::new(Mutex::new(pool)) })
     }
@@ -211,16 +211,16 @@ impl MyPool {
 ///
 /// ```rust
 /// # use mysql::conn::pool;
-/// # use mysql::conn::MyOpts;
+/// # use mysql::conn::Opts;
 /// # use mysql::value::{from_value, Value};
 /// # use std::thread::Thread;
 /// # use std::default::Default;
-/// # fn get_opts() -> MyOpts {
+/// # fn get_opts() -> Opts {
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
-/// #     MyOpts {
+/// #     Opts {
 /// #         user: Some("root".to_string()),
 /// #         pass: Some(pwd),
 /// #         tcp_addr: Some("127.0.0.1".to_string()),
@@ -337,7 +337,7 @@ impl MyPooledConn {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    use conn::MyOpts;
+    use conn::Opts;
     use std::default::Default;
 
     pub static USER: &'static str = "root";
@@ -346,12 +346,12 @@ mod test {
     pub static PORT: u16          = 3307;
 
     #[cfg(feature = "openssl")]
-    pub fn get_opts() -> MyOpts {
+    pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
-        MyOpts {
+        Opts {
             user: Some(USER.to_string()),
             pass: Some(pwd),
             tcp_addr: Some(ADDR.to_string()),
@@ -362,12 +362,12 @@ mod test {
     }
 
     #[cfg(not(feature = "ssl"))]
-    pub fn get_opts() -> MyOpts {
+    pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
-        MyOpts {
+        Opts {
             user: Some(USER.to_string()),
             pass: Some(pwd),
             tcp_addr: Some(ADDR.to_string()),

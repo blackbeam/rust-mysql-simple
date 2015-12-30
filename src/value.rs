@@ -43,16 +43,16 @@ pub struct SignedDuration(pub bool, pub Duration);
 ///
 /// ```rust
 /// # use mysql::conn::pool;
-/// # use mysql::conn::MyOpts;
+/// # use mysql::conn::Opts;
 /// use mysql::value::from_row;
 /// # use std::thread::Thread;
 /// # use std::default::Default;
-/// # fn get_opts() -> MyOpts {
+/// # fn get_opts() -> Opts {
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
-/// #     MyOpts {
+/// #     Opts {
 /// #         user: Some("root".to_string()),
 /// #         pass: Some(pwd),
 /// #         tcp_addr: Some("127.0.0.1".to_string()),
@@ -1919,7 +1919,7 @@ mod test {
         use super::super::{from_value, SignedDuration};
         use super::super::Value::{Bytes, Date, Int};
         use time::{Timespec, now};
-        use super::super::super::conn::{MyConn, MyOpts};
+        use super::super::super::conn::{MyConn, Opts};
 
         static USER: &'static str = "root";
         static PASS: &'static str = "password";
@@ -1927,12 +1927,12 @@ mod test {
         static PORT: u16          = 3307;
 
         #[cfg(feature = "openssl")]
-        pub fn get_opts() -> MyOpts {
+        pub fn get_opts() -> Opts {
             let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
             let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                        .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                        .unwrap_or(PORT);
-            MyOpts {
+            Opts {
                 user: Some(USER.to_string()),
                 pass: Some(pwd),
                 tcp_addr: Some(ADDR.to_string()),
@@ -1944,12 +1944,12 @@ mod test {
         }
 
         #[cfg(not(feature = "ssl"))]
-        pub fn get_opts() -> MyOpts {
+        pub fn get_opts() -> Opts {
             let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
             let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                        .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                        .unwrap_or(PORT);
-            MyOpts {
+            Opts {
                 user: Some(USER.to_string()),
                 pass: Some(pwd),
                 tcp_addr: Some(ADDR.to_string()),

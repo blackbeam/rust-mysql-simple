@@ -1,16 +1,11 @@
 use std::borrow::Borrow;
-use std::default::Default;
 use std::fs;
 use std::fmt;
 use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
 use std::net;
-#[cfg(any(feature = "socket", feature = "pipe"))]
-use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path;
-#[cfg(any(feature = "socket", feature = "pipe"))]
-use std::str::FromStr;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::collections::HashMap;
@@ -55,6 +50,8 @@ use unix_socket as us;
 use named_pipe as np;
 
 pub mod pool;
+mod opts;
+pub use self::opts::Opts;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum IsolationLevel {
@@ -267,17 +264,17 @@ impl<'a> Stmt<'a> {
     ///
     /// ```rust
     /// # use mysql::conn::pool;
-    /// # use mysql::conn::MyOpts;
+    /// # use mysql::conn::Opts;
     /// # use mysql::value::{from_value, from_row, IntoValue, ToValue, Value};
     /// # use std::thread::Thread;
     /// # use std::default::Default;
     /// # use std::iter::repeat;
-    /// # fn get_opts() -> MyOpts {
+    /// # fn get_opts() -> Opts {
     /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
     /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
     /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
     /// #                                .unwrap_or(3307);
-    /// #     MyOpts {
+    /// #     Opts {
     /// #         user: Some("root".to_string()),
     /// #         pass: Some(pwd),
     /// #         tcp_addr: Some("127.0.0.1".to_string()),
@@ -422,212 +419,6 @@ impl Column {
 }
 
 /***
- *    888b     d888           .d88888b.           888
- *    8888b   d8888          d88P" "Y88b          888
- *    88888b.d88888          888     888          888
- *    888Y88888P888 888  888 888     888 88888b.  888888 .d8888b
- *    888 Y888P 888 888  888 888     888 888 "88b 888    88K
- *    888  Y8P  888 888  888 888     888 888  888 888    "Y8888b.
- *    888   "   888 Y88b 888 Y88b. .d88P 888 d88P Y88b.       X88
- *    888       888  "Y88888  "Y88888P"  88888P"   "Y888  88888P'
- *                       888             888
- *                  Y8b d88P             888
- *                   "Y88P"              888
- */
-/// Mysql connection options.
-///
-/// For example:
-///
-/// ```ignore
-/// let opts = MyOpts {
-///     user: Some("username".to_string()),
-///     pass: Some("password".to_string()),
-///     db_name: Some("mydatabase".to_string()),
-///     ..Default::default()
-/// };
-/// ```
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub struct MyOpts {
-    /// TCP address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
-    pub tcp_addr: Option<String>,
-    /// TCP port of mysql server (defaults to `3306`).
-    pub tcp_port: u16,
-    /// Path to unix socket of mysql server (defaults to `None`).
-    #[cfg(feature = "socket")]
-    pub unix_addr: Option<path::PathBuf>,
-    /// Pipe name of mysql server (defaults to `None`).
-    #[cfg(feature = "pipe")]
-    pub pipe_name: Option<String>,
-    /// User (defaults to `None`).
-    pub user: Option<String>,
-    /// Password (defaults to `None`).
-    pub pass: Option<String>,
-    /// Database name (defaults to `None`).
-    pub db_name: Option<String>,
-
-    #[cfg(any(feature = "socket", feature = "pipe"))]
-    /// Prefer socket connection (defaults to `true`).
-    ///
-    /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
-    pub prefer_socket: bool,
-    // XXX: Wait for keepalive_timeout stabilization
-    /// Commands to execute on each new database connection.
-    pub init: Vec<String>,
-
-    #[cfg(feature = "ssl")]
-    /// #### Only available if `ssl` feature enabled.
-    /// Perform or not ssl peer verification (defaults to `false`).
-    /// Only make sense if ssl_opts is not None.
-    pub verify_peer: bool,
-
-    #[cfg(feature = "ssl")]
-    /// #### Only available if `ssl` feature enabled.
-    /// SSL certificates and keys in pem format.
-    /// If not None, then ssl connection implied.
-    ///
-    /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
-    pub ssl_opts: Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>
-}
-
-impl MyOpts {
-    fn get_user(&self) -> String {
-        match self.user {
-            Some(ref x) => x.clone(),
-            None => String::new(),
-        }
-    }
-    fn get_pass(&self) -> String {
-        match self.pass {
-            Some(ref x) => x.clone(),
-            None => String::new()
-        }
-    }
-    fn get_db_name(&self) -> String {
-        match self.db_name {
-            Some(ref x) => x.clone(),
-            None => String::new()
-        }
-    }
-
-    #[cfg(any(feature = "socket", feature = "pipe"))]
-    fn tcp_addr_is_loopback(&self) -> bool {
-        if self.tcp_addr.is_some() {
-            let v4addr: Option<Ipv4Addr> = FromStr::from_str(
-                self.tcp_addr.as_ref().unwrap().as_ref()).ok();
-            let v6addr: Option<Ipv6Addr> = FromStr::from_str(
-                self.tcp_addr.as_ref().unwrap().as_ref()).ok();
-            if let Some(addr) = v4addr {
-                addr.octets()[0] == 127
-            } else if let Some(addr) = v6addr {
-                addr.segments() == [0, 0, 0, 0, 0, 0, 0, 1]
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    }
-}
-
-#[cfg(all(feature = "ssl", feature = "socket", not(feature = "pipe")))]
-impl Default for MyOpts {
-    fn default() -> MyOpts {
-        MyOpts{
-            tcp_addr: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            unix_addr: None,
-            user: None,
-            pass: None,
-            db_name: None,
-            prefer_socket: true,
-            init: vec![],
-            verify_peer: false,
-            ssl_opts: None,
-        }
-    }
-}
-
-#[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
-impl Default for MyOpts {
-    fn default() -> MyOpts {
-        MyOpts{
-            tcp_addr: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            unix_addr: None,
-            user: None,
-            pass: None,
-            db_name: None,
-            prefer_socket: true,
-            init: vec![],
-        }
-    }
-}
-
-#[cfg(all(feature = "ssl", not(feature = "socket"), not(feature = "pipe")))]
-impl Default for MyOpts {
-    fn default() -> MyOpts {
-        MyOpts{
-            tcp_addr: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            user: None,
-            pass: None,
-            db_name: None,
-            init: vec![],
-            verify_peer: false,
-            ssl_opts: None,
-        }
-    }
-}
-
-#[cfg(all(feature = "ssl", not(feature = "socket"), feature = "pipe"))]
-impl Default for MyOpts {
-    fn default() -> MyOpts {
-        MyOpts{
-            tcp_addr: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            pipe_name: None,
-            user: None,
-            pass: None,
-            db_name: None,
-            init: vec![],
-            verify_peer: false,
-            prefer_socket: true,
-            ssl_opts: None,
-        }
-    }
-}
-
-#[cfg(all(not(feature = "ssl"), not(feature = "socket"), not(feature = "pipe")))]
-impl Default for MyOpts {
-    fn default() -> MyOpts {
-        MyOpts{
-            tcp_addr: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            user: None,
-            pass: None,
-            db_name: None,
-            init: vec![],
-        }
-    }
-}
-
-#[cfg(all(not(feature = "ssl"), not(feature = "socket"), feature = "pipe"))]
-impl Default for MyOpts {
-    fn default() -> MyOpts {
-        MyOpts{
-            tcp_addr: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            pipe_name: None,
-            user: None,
-            pass: None,
-            db_name: None,
-            prefer_socket: true,
-            init: vec![],
-        }
-    }
-}
-
-/***
  *    888b     d888           .d8888b.
  *    8888b   d8888          d88P  Y88b
  *    88888b.d88888          888    888
@@ -644,7 +435,7 @@ impl Default for MyOpts {
 /// Mysql connection.
 #[derive(Debug)]
 pub struct MyConn {
-    opts: MyOpts,
+    opts: Opts,
     stream: Option<Stream>,
     stmts: HashMap<String, InnerStmt>,
     server_version: ServerVersion,
@@ -664,7 +455,7 @@ pub struct MyConn {
 impl MyConn {
     #[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
     /// Creates new `MyConn`.
-    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+    pub fn new(opts: Opts) -> MyResult<MyConn> {
         let mut conn = MyConn {
             opts: opts,
             stream: None,
@@ -689,7 +480,7 @@ impl MyConn {
                 match conn.get_system_var("socket") {
                     Some(path) => {
                         let path = from_value::<String>(path);
-                        let opts = MyOpts{
+                        let opts = Opts{
                             unix_addr: Some(From::from(path)),
                             ..conn.opts.clone()
                         };
@@ -707,7 +498,7 @@ impl MyConn {
 
     #[cfg(all(not(feature = "ssl"), not(feature = "socket"), feature = "pipe"))]
     /// Creates new `MyConn`.
-    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+    pub fn new(opts: Opts) -> MyResult<MyConn> {
         let mut conn = MyConn {
             opts: opts,
             stream: None,
@@ -732,7 +523,7 @@ impl MyConn {
                 match conn.get_system_var("socket") {
                     Some(name) => {
                         let name = from_value::<String>(name);
-                        let opts = MyOpts{
+                        let opts = Opts{
                             pipe_name: Some(name),
                             ..conn.opts.clone()
                         };
@@ -750,7 +541,7 @@ impl MyConn {
 
     #[cfg(all(feature = "ssl", feature = "socket"))]
     /// Creates new `MyConn`.
-    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+    pub fn new(opts: Opts) -> MyResult<MyConn> {
         let mut conn = MyConn {
             opts: opts,
             stream: None,
@@ -776,7 +567,7 @@ impl MyConn {
                     match conn.get_system_var("socket") {
                         Some(path) => {
                             let path = from_value::<String>(path);
-                            let opts = MyOpts{
+                            let opts = Opts{
                                 unix_addr: Some(From::from(path)),
                                 ..conn.opts.clone()
                             };
@@ -795,7 +586,7 @@ impl MyConn {
 
     #[cfg(all(feature = "ssl", not(feature = "socket"), feature = "pipe"))]
     /// Creates new `MyConn`.
-    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+    pub fn new(opts: Opts) -> MyResult<MyConn> {
         let mut conn = MyConn {
             opts: opts,
             stream: None,
@@ -821,7 +612,7 @@ impl MyConn {
                     match conn.get_system_var("socket") {
                         Some(name) => {
                             let name = from_value::<String>(path);
-                            let opts = MyOpts{
+                            let opts = Opts{
                                 pipe_name: Some(name),
                                 ..conn.opts.clone()
                             };
@@ -840,7 +631,7 @@ impl MyConn {
 
     #[cfg(all(not(feature = "ssl"), not(feature = "socket"), not(feature = "pipe")))]
     /// Creates new `MyConn`.
-    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+    pub fn new(opts: Opts) -> MyResult<MyConn> {
         let mut conn = MyConn {
             opts: opts,
             stream: None,
@@ -868,7 +659,7 @@ impl MyConn {
 
     #[cfg(all(feature = "ssl", not(feature = "socket"), not(feature = "pipe")))]
     /// Creates new `MyConn`.
-    pub fn new(opts: MyOpts) -> MyResult<MyConn> {
+    pub fn new(opts: Opts) -> MyResult<MyConn> {
         let mut conn = MyConn {
             opts: opts,
             stream: None,
@@ -1153,8 +944,10 @@ impl MyConn {
                                consts::CLIENT_MULTI_RESULTS |
                                consts::CLIENT_PS_MULTI_RESULTS |
                                (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        if self.opts.get_db_name().len() > 0 {
-            client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
+        if let Some(ref db_name) = self.opts.db_name {
+            if db_name.len() > 0 {
+                client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
+            }
         }
         if self.stream.is_some() && self.stream.as_ref().unwrap().is_insecure() {
             if self.opts.ssl_opts.is_some() {
@@ -1175,8 +968,10 @@ impl MyConn {
                                consts::CLIENT_MULTI_RESULTS |
                                consts::CLIENT_PS_MULTI_RESULTS |
                                (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        if self.opts.get_db_name().len() > 0 {
-            client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
+        if let Some(ref db_name) = self.opts.db_name {
+            if db_name.len() > 0 {
+                client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
+            }
         }
         client_flags
     }
@@ -1194,25 +989,34 @@ impl MyConn {
 
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let client_flags = self.get_client_flags();
-        let scramble_buf = scramble(hp.auth_plugin_data.as_ref(), self.opts.get_pass().as_bytes());
+        let scramble_buf = if let Some(ref pass) = self.opts.pass {
+            scramble(&*hp.auth_plugin_data, pass.as_bytes())
+        } else {
+            None
+        };
+        let user_len = self.opts.user.as_ref().map(|x| x.as_bytes().len()).unwrap_or(0);
+        let db_name_len = self.opts.db_name.as_ref().map(|x| x.as_bytes().len()).unwrap_or(0);
         let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
-        let mut payload_len = 4 + 4 + 1 + 23 + self.opts.get_user().len() + 1 + 1 + scramble_buf_len;
-        if self.opts.get_db_name().len() > 0 {
-            payload_len += self.opts.get_db_name().len() + 1;
+        let mut payload_len = 4 + 4 + 1 + 23 + user_len + 1 + 1 + scramble_buf_len;
+        if db_name_len > 0 {
+            payload_len += db_name_len + 1;
         }
         let mut writer = io::Cursor::new(Vec::with_capacity(payload_len));
         try!(writer.write_u32::<LE>(client_flags.bits()));
         try!(writer.write_all(&[0u8; 4]));
         try!(writer.write_u8(consts::UTF8_GENERAL_CI));
         try!(writer.write_all(&[0u8; 23]));
-        try!(writer.write_all(self.opts.get_user().as_bytes()));
+        if let Some(ref user) = self.opts.user {
+            try!(writer.write_all(user.as_bytes()));
+        }
         try!(writer.write_u8(0u8));
         try!(writer.write_u8(scramble_buf_len as u8));
         if let Some(scr) = scramble_buf {
             try!(writer.write_all(scr.as_ref()));
         }
-        if self.opts.get_db_name().len() > 0 {
-            try!(writer.write_all(self.opts.get_db_name().as_bytes()));
+        if db_name_len > 0 {
+            let db_name = self.opts.db_name.as_ref().unwrap();
+            try!(writer.write_all(db_name.as_bytes()));
             try!(writer.write_u8(0u8));
         }
         self.write_packet(writer.into_inner().borrow())
@@ -1689,16 +1493,16 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// ```rust
 /// use mysql::value::from_row;
 /// # use mysql::conn::pool;
-/// # use mysql::conn::MyOpts;
+/// # use mysql::conn::Opts;
 /// # use mysql::value::Value;
 /// # use std::thread::Thread;
 /// # use std::default::Default;
-/// # fn get_opts() -> MyOpts {
+/// # fn get_opts() -> Opts {
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
-/// #     MyOpts {
+/// #     Opts {
 /// #         user: Some("root".to_string()),
 /// #         pass: Some(pwd),
 /// #         tcp_addr: Some("127.0.0.1".to_string()),
@@ -1876,7 +1680,7 @@ impl<'a> Drop for QueryResult<'a> {
 mod test {
     use std::borrow::ToOwned;
     use std::default::Default;
-    use super::MyOpts;
+    use super::Opts;
 
     static USER: &'static str = "root";
     static PASS: &'static str = "password";
@@ -1884,12 +1688,12 @@ mod test {
     static PORT: u16          = 3307;
 
     #[cfg(feature = "openssl")]
-    pub fn get_opts() -> MyOpts {
+    pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
-        MyOpts {
+        Opts {
             user: Some(USER.to_string()),
             pass: Some(pwd),
             tcp_addr: Some(ADDR.to_string()),
@@ -1901,12 +1705,12 @@ mod test {
     }
 
     #[cfg(not(feature = "ssl"))]
-    pub fn get_opts() -> MyOpts {
+    pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
-        MyOpts {
+        Opts {
             user: Some(USER.to_string()),
             pass: Some(pwd),
             tcp_addr: Some(ADDR.to_string()),
@@ -1922,7 +1726,7 @@ mod test {
         use std::fs;
         use std::io::Write;
         use time::{Tm, now};
-        use super::super::{MyConn, MyOpts};
+        use super::super::{MyConn, Opts};
         use super::super::super::value::{ToValue, from_value};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
@@ -1937,7 +1741,7 @@ mod test {
         }
         #[test]
         fn should_connect_with_database() {
-            let mut conn = MyConn::new(MyOpts {
+            let mut conn = MyConn::new(Opts {
                 db_name: Some("mysql".to_string()),
                 ..get_opts()
             }).unwrap();
@@ -1946,7 +1750,7 @@ mod test {
         }
         #[test]
         fn should_connect_by_hostname() {
-            let mut conn = MyConn::new(MyOpts {
+            let mut conn = MyConn::new(Opts {
                 db_name: Some("mysql".to_string()),
                 tcp_addr: Some("localhost".to_string()),
                 ..get_opts()
@@ -2159,7 +1963,7 @@ mod test {
         #[test]
         #[cfg(any(feature = "pipe", feature = "socket"))]
         fn should_handle_multi_resultset() {
-            let mut conn = MyConn::new(MyOpts {
+            let mut conn = MyConn::new(Opts {
                 prefer_socket: false,
                 db_name: Some("mysql".to_string()),
                 ..get_opts()

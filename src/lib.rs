@@ -32,7 +32,7 @@
 //! ```
 //!
 //! #### Use
-//! You should start by creating [`MyOpts`](conn/struct.MyOpts.html) struct.
+//! You should start by creating [`Opts`](conn/struct.Opts.html) struct.
 //!
 //! Then you can create [`MyPool`](conn/pool/struct.MyPool.html) which should be
 //! enough to work with mysql server.
@@ -42,7 +42,7 @@
 //! ```rust
 //! use std::default::Default;
 //!
-//! use mysql::conn::MyOpts;
+//! use mysql::conn::Opts;
 //! use mysql::conn::pool::MyPool;
 //! use mysql::value::from_row;
 //!
@@ -59,7 +59,7 @@
 //! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
 //! #                              .unwrap_or(3307);
 //!     println!("PORT IS {}", port);
-//!     let opts = MyOpts {
+//!     let opts = Opts {
 //!           user: Some("root".to_string()),
 //!           pass: Some(pwd),
 //! #         tcp_addr: Some("127.0.0.1".to_string()),
