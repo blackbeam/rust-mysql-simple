@@ -55,7 +55,7 @@ pub struct SignedDuration(pub bool, pub Duration);
 /// #     Opts {
 /// #         user: Some("root".to_string()),
 /// #         pass: Some(pwd),
-/// #         tcp_addr: Some("127.0.0.1".to_string()),
+/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
 /// #         tcp_port: port,
 /// #         ..Default::default()
 /// #     }
@@ -1935,7 +1935,7 @@ mod test {
             Opts {
                 user: Some(USER.to_string()),
                 pass: Some(pwd),
-                tcp_addr: Some(ADDR.to_string()),
+                ip_or_hostname: Some(ADDR.to_string()),
                 tcp_port: port,
                 init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
                 ssl_opts: Some((::std::convert::From::from("tests/ca-cert.pem"), None)),
@@ -1952,7 +1952,7 @@ mod test {
             Opts {
                 user: Some(USER.to_string()),
                 pass: Some(pwd),
-                tcp_addr: Some(ADDR.to_string()),
+                ip_or_hostname: Some(ADDR.to_string()),
                 tcp_port: port,
                 init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
                 ..Default::default()

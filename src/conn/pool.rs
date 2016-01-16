@@ -69,7 +69,7 @@ impl MyInnerPool {
 /// #     Opts {
 /// #         user: Some("root".to_string()),
 /// #         pass: Some(pwd),
-/// #         tcp_addr: Some("127.0.0.1".to_string()),
+/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
 /// #         tcp_port: port,
 /// #         ..Default::default()
 /// #     }
@@ -223,7 +223,7 @@ impl MyPool {
 /// #     Opts {
 /// #         user: Some("root".to_string()),
 /// #         pass: Some(pwd),
-/// #         tcp_addr: Some("127.0.0.1".to_string()),
+/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
 /// #         tcp_port: port,
 /// #         ..Default::default()
 /// #     }
@@ -354,7 +354,7 @@ mod test {
         Opts {
             user: Some(USER.to_string()),
             pass: Some(pwd),
-            tcp_addr: Some(ADDR.to_string()),
+            ip_or_hostname: Some(ADDR.to_string()),
             tcp_port: port,
             ssl_opts: Some((::std::convert::From::from("tests/ca-cert.pem"), None)),
             ..Default::default()
@@ -370,7 +370,7 @@ mod test {
         Opts {
             user: Some(USER.to_string()),
             pass: Some(pwd),
-            tcp_addr: Some(ADDR.to_string()),
+            ip_or_hostname: Some(ADDR.to_string()),
             tcp_port: port,
             ..Default::default()
         }

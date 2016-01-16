@@ -62,7 +62,7 @@
 //!     let opts = Opts {
 //!           user: Some("root".to_string()),
 //!           pass: Some(pwd),
-//! #         tcp_addr: Some("127.0.0.1".to_string()),
+//! #         ip_or_hostname: Some("127.0.0.1".to_string()),
 //! #         tcp_port: port,
 //!           ..Default::default()
 //!     };

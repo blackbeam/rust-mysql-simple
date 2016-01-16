@@ -21,8 +21,8 @@ use std::str::FromStr;
 /// ```
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Opts {
-    /// TCP address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
-    pub tcp_addr: Option<String>,
+    /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
+    pub ip_or_hostname: Option<String>,
     /// TCP port of mysql server (defaults to `3306`).
     pub tcp_port: u16,
     /// Path to unix socket of mysql server (defaults to `None`).
@@ -65,16 +65,18 @@ pub struct Opts {
 impl Opts {
     #[doc(hidden)]
     #[cfg(any(feature = "socket", feature = "pipe"))]
-    pub fn tcp_addr_is_loopback(&self) -> bool {
-        if self.tcp_addr.is_some() {
+    pub fn addr_is_loopback(&self) -> bool {
+        if self.ip_or_hostname.is_some() {
             let v4addr: Option<Ipv4Addr> = FromStr::from_str(
-                self.tcp_addr.as_ref().unwrap().as_ref()).ok();
+                self.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
             let v6addr: Option<Ipv6Addr> = FromStr::from_str(
-                self.tcp_addr.as_ref().unwrap().as_ref()).ok();
+                self.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
             if let Some(addr) = v4addr {
                 addr.octets()[0] == 127
             } else if let Some(addr) = v6addr {
                 addr.segments() == [0, 0, 0, 0, 0, 0, 0, 1]
+            } else if self.ip_or_hostname.as_ref().unwrap() == "localhost" {
+                true
             } else {
                 false
             }
@@ -88,7 +90,7 @@ impl Opts {
 impl Default for Opts {
     fn default() -> Opts {
         Opts{
-            tcp_addr: Some("127.0.0.1".to_string()),
+            ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             unix_addr: None,
             user: None,
@@ -104,7 +106,7 @@ impl Default for Opts {
 impl Default for Opts {
     fn default() -> Opts {
         Opts{
-            tcp_addr: Some("127.0.0.1".to_string()),
+            ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             user: None,
             pass: None,
@@ -118,7 +120,7 @@ impl Default for Opts {
 impl Default for Opts {
     fn default() -> Opts {
         Opts{
-            tcp_addr: Some("127.0.0.1".to_string()),
+            ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             pipe_name: None,
             user: None,
@@ -134,7 +136,7 @@ impl Default for Opts {
 impl Default for Opts {
     fn default() -> Opts {
         Opts{
-            tcp_addr: Some("127.0.0.1".to_string()),
+            ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             user: None,
             pass: None,
@@ -150,7 +152,7 @@ impl Default for Opts {
 impl Default for Opts {
     fn default() -> Opts {
         Opts{
-            tcp_addr: Some("127.0.0.1".to_string()),
+            ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             pipe_name: None,
             user: None,
@@ -168,7 +170,7 @@ impl Default for Opts {
 impl Default for Opts {
     fn default() -> Opts {
         Opts{
-            tcp_addr: Some("127.0.0.1".to_string()),
+            ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             unix_addr: None,
             user: None,

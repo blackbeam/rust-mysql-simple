@@ -277,7 +277,7 @@ impl<'a> Stmt<'a> {
     /// #     Opts {
     /// #         user: Some("root".to_string()),
     /// #         pass: Some(pwd),
-    /// #         tcp_addr: Some("127.0.0.1".to_string()),
+    /// #         ip_or_hostname: Some("127.0.0.1".to_string()),
     /// #         tcp_port: port,
     /// #         ..Default::default()
     /// #     }
@@ -453,11 +453,9 @@ pub struct MyConn {
 }
 
 impl MyConn {
-    #[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
-    /// Creates new `MyConn`.
-    pub fn new(opts: Opts) -> MyResult<MyConn> {
-        let mut conn = MyConn {
-            opts: opts,
+    fn empty<T: Into<Opts>>(opts: T) -> MyConn {
+        MyConn {
+            opts: opts.into(),
             stream: None,
             stmts: HashMap::new(),
             seq_id: 0u8,
@@ -472,11 +470,17 @@ impl MyConn {
             connected: false,
             has_results: false,
             server_version: (0, 0, 0),
-        };
+        }
+    }
+
+    #[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
+    /// Creates new `MyConn`.
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
+        let mut conn = MyConn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
-            if conn.opts.tcp_addr_is_loopback() {
+            if conn.opts.addr_is_loopback() {
                 match conn.get_system_var("socket") {
                     Some(path) => {
                         let path = from_value::<String>(path);
@@ -498,28 +502,12 @@ impl MyConn {
 
     #[cfg(all(not(feature = "ssl"), not(feature = "socket"), feature = "pipe"))]
     /// Creates new `MyConn`.
-    pub fn new(opts: Opts) -> MyResult<MyConn> {
-        let mut conn = MyConn {
-            opts: opts,
-            stream: None,
-            stmts: HashMap::new(),
-            seq_id: 0u8,
-            capability_flags: consts::CapabilityFlags::empty(),
-            status_flags: consts::StatusFlags::empty(),
-            connection_id: 0u32,
-            character_set: 0u8,
-            affected_rows: 0u64,
-            last_insert_id: 0u64,
-            last_command: 0u8,
-            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-            connected: false,
-            has_results: false,
-            server_version: (0, 0, 0),
-        };
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
+        let mut conn = MyConn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         if conn.opts.pipe_name.is_none() && conn.opts.prefer_socket {
-            if conn.opts.tcp_addr_is_loopback() {
+            if conn.opts.addr_is_loopback() {
                 match conn.get_system_var("socket") {
                     Some(name) => {
                         let name = from_value::<String>(name);
@@ -541,29 +529,13 @@ impl MyConn {
 
     #[cfg(all(feature = "ssl", feature = "socket"))]
     /// Creates new `MyConn`.
-    pub fn new(opts: Opts) -> MyResult<MyConn> {
-        let mut conn = MyConn {
-            opts: opts,
-            stream: None,
-            stmts: HashMap::new(),
-            seq_id: 0u8,
-            capability_flags: consts::CapabilityFlags::empty(),
-            status_flags: consts::StatusFlags::empty(),
-            connection_id: 0u32,
-            character_set: 0u8,
-            affected_rows: 0u64,
-            last_insert_id: 0u64,
-            last_command: 0u8,
-            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-            connected: false,
-            has_results: false,
-            server_version: (0, 0, 0),
-        };
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
+        let mut conn = MyConn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         if let None = conn.opts.ssl_opts {
             if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
-                if conn.opts.tcp_addr_is_loopback() {
+                if conn.opts.addr_is_loopback() {
                     match conn.get_system_var("socket") {
                         Some(path) => {
                             let path = from_value::<String>(path);
@@ -586,29 +558,13 @@ impl MyConn {
 
     #[cfg(all(feature = "ssl", not(feature = "socket"), feature = "pipe"))]
     /// Creates new `MyConn`.
-    pub fn new(opts: Opts) -> MyResult<MyConn> {
-        let mut conn = MyConn {
-            opts: opts,
-            stream: None,
-            stmts: HashMap::new(),
-            seq_id: 0u8,
-            capability_flags: consts::CapabilityFlags::empty(),
-            status_flags: consts::StatusFlags::empty(),
-            connection_id: 0u32,
-            character_set: 0u8,
-            affected_rows: 0u64,
-            last_insert_id: 0u64,
-            last_command: 0u8,
-            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-            connected: false,
-            has_results: false,
-            server_version: (0, 0, 0),
-        };
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
+        let mut conn = MyConn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         if let None = conn.opts.ssl_opts {
             if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
-                if conn.opts.tcp_addr_is_loopback() {
+                if conn.opts.addr_is_loopback() {
                     match conn.get_system_var("socket") {
                         Some(name) => {
                             let name = from_value::<String>(path);
@@ -631,24 +587,8 @@ impl MyConn {
 
     #[cfg(all(not(feature = "ssl"), not(feature = "socket"), not(feature = "pipe")))]
     /// Creates new `MyConn`.
-    pub fn new(opts: Opts) -> MyResult<MyConn> {
-        let mut conn = MyConn {
-            opts: opts,
-            stream: None,
-            stmts: HashMap::new(),
-            seq_id: 0u8,
-            capability_flags: consts::CapabilityFlags::empty(),
-            status_flags: consts::StatusFlags::empty(),
-            connection_id: 0u32,
-            character_set: 0u8,
-            affected_rows: 0u64,
-            last_insert_id: 0u64,
-            last_command: 0u8,
-            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-            connected: false,
-            has_results: false,
-            server_version: (0, 0, 0),
-        };
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
+        let mut conn = MyConn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         for cmd in conn.opts.init.clone() {
@@ -659,24 +599,8 @@ impl MyConn {
 
     #[cfg(all(feature = "ssl", not(feature = "socket"), not(feature = "pipe")))]
     /// Creates new `MyConn`.
-    pub fn new(opts: Opts) -> MyResult<MyConn> {
-        let mut conn = MyConn {
-            opts: opts,
-            stream: None,
-            stmts: HashMap::new(),
-            seq_id: 0u8,
-            capability_flags: consts::CapabilityFlags::empty(),
-            status_flags: consts::StatusFlags::empty(),
-            connection_id: 0u32,
-            character_set: 0u8,
-            affected_rows: 0u64,
-            last_insert_id: 0u64,
-            last_command: 0u8,
-            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
-            connected: false,
-            has_results: false,
-            server_version: (0, 0, 0),
-        };
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
+        let mut conn = MyConn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         for cmd in conn.opts.init.clone() {
@@ -745,8 +669,8 @@ impl MyConn {
             full_name.push_str(self.opts.pipe_name.as_ref().unwrap().as_ref());
             self.stream = Some(Stream::PipeStream(try!(np::PipeClient::connect(full_name))));
             Ok(())
-        } else if self.opts.tcp_addr.is_some() {
-            match net::TcpStream::connect(&(self.opts.tcp_addr.as_ref().unwrap().as_ref(),
+        } else if self.opts.ip_or_hostname.is_some() {
+            match net::TcpStream::connect(&(self.opts.ip_or_hostname.as_ref().unwrap().as_ref(),
                                              self.opts.tcp_port))
             {
                 Ok(stream) => {
@@ -754,7 +678,7 @@ impl MyConn {
                     Ok(())
                 },
                 _ => {
-                    Err(MyDriverError(CouldNotConnect(self.opts.tcp_addr.clone())))
+                    Err(MyDriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
                 }
             }
         } else {
@@ -775,16 +699,16 @@ impl MyConn {
                     Err(MyDriverError(CouldNotConnect(Some(path_str))))
                 }
             }
-        } else if self.opts.tcp_addr.is_some() {
-            match net::TcpStream::connect(&(self.opts.tcp_addr.as_ref().unwrap().as_ref(),
-                                             self.opts.tcp_port))
+        } else if self.opts.ip_or_hostname.is_some() {
+            match net::TcpStream::connect(&(&**self.opts.ip_or_hostname.as_ref().unwrap(),
+                                            self.opts.tcp_port))
             {
                 Ok(stream) => {
                     self.stream = Some(Stream::TcpStream(Some(Insecure(stream))));
                     Ok(())
                 },
                 _ => {
-                    Err(MyDriverError(CouldNotConnect(self.opts.tcp_addr.clone())))
+                    Err(MyDriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
                 }
             }
         } else {
@@ -794,16 +718,16 @@ impl MyConn {
 
     #[cfg(all(not(feature = "socket"), not(feature = "pipe")))]
     fn connect_stream(&mut self) -> MyResult<()> {
-        if self.opts.tcp_addr.is_some() {
-            match net::TcpStream::connect(&(self.opts.tcp_addr.as_ref().unwrap().as_ref(),
-                                             self.opts.tcp_port))
+        if self.opts.ip_or_hostname.is_some() {
+            match net::TcpStream::connect(&(&**self.opts.ip_or_hostname.as_ref().unwrap(),
+                                            self.opts.tcp_port))
             {
                 Ok(stream) => {
                     self.stream = Some(Stream::TcpStream(Some(Insecure(stream))));
                     Ok(())
                 },
                 _ => {
-                    Err(MyDriverError(CouldNotConnect(self.opts.tcp_addr.clone())))
+                    Err(MyDriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
                 }
             }
         } else {
@@ -1505,7 +1429,7 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// #     Opts {
 /// #         user: Some("root".to_string()),
 /// #         pass: Some(pwd),
-/// #         tcp_addr: Some("127.0.0.1".to_string()),
+/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
 /// #         tcp_port: port,
 /// #         ..Default::default()
 /// #     }
@@ -1696,7 +1620,7 @@ mod test {
         Opts {
             user: Some(USER.to_string()),
             pass: Some(pwd),
-            tcp_addr: Some(ADDR.to_string()),
+            ip_or_hostname: Some(ADDR.to_string()),
             tcp_port: port,
             init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
             ssl_opts: Some((::std::convert::From::from("tests/ca-cert.pem"), None)),
@@ -1713,7 +1637,7 @@ mod test {
         Opts {
             user: Some(USER.to_string()),
             pass: Some(pwd),
-            tcp_addr: Some(ADDR.to_string()),
+            ip_or_hostname: Some(ADDR.to_string()),
             tcp_port: port,
             init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
             ..Default::default()
@@ -1752,7 +1676,7 @@ mod test {
         fn should_connect_by_hostname() {
             let mut conn = MyConn::new(Opts {
                 db_name: Some("mysql".to_string()),
-                tcp_addr: Some("localhost".to_string()),
+                ip_or_hostname: Some("localhost".to_string()),
                 ..get_opts()
             }).unwrap();
             assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap(),
