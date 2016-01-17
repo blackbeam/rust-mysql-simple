@@ -89,7 +89,7 @@ impl Opts {
 #[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
 impl Default for Opts {
     fn default() -> Opts {
-        Opts{
+        Opts {
             ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             unix_addr: None,
@@ -105,7 +105,7 @@ impl Default for Opts {
 #[cfg(all(not(feature = "ssl"), not(feature = "socket"), not(feature = "pipe")))]
 impl Default for Opts {
     fn default() -> Opts {
-        Opts{
+        Opts {
             ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             user: None,
@@ -119,7 +119,7 @@ impl Default for Opts {
 #[cfg(all(not(feature = "ssl"), not(feature = "socket"), feature = "pipe"))]
 impl Default for Opts {
     fn default() -> Opts {
-        Opts{
+        Opts {
             ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             pipe_name: None,
@@ -135,7 +135,7 @@ impl Default for Opts {
 #[cfg(all(feature = "ssl", not(feature = "socket"), not(feature = "pipe")))]
 impl Default for Opts {
     fn default() -> Opts {
-        Opts{
+        Opts {
             ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             user: None,
@@ -151,7 +151,7 @@ impl Default for Opts {
 #[cfg(all(feature = "ssl", not(feature = "socket"), feature = "pipe"))]
 impl Default for Opts {
     fn default() -> Opts {
-        Opts{
+        Opts {
             ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             pipe_name: None,
@@ -169,7 +169,7 @@ impl Default for Opts {
 #[cfg(all(feature = "ssl", feature = "socket", not(feature = "pipe")))]
 impl Default for Opts {
     fn default() -> Opts {
-        Opts{
+        Opts {
             ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             unix_addr: None,
