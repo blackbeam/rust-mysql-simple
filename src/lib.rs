@@ -145,6 +145,7 @@ extern crate byteorder;
 extern crate unix_socket;
 #[cfg(feature = "pipe")]
 extern crate named_pipe;
+extern crate url;
 
 mod scramble;
 pub mod consts;

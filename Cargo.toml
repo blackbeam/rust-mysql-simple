@@ -52,6 +52,7 @@ lazy_static = "~0.1.0"
 time = "~0.1.0"
 bitflags = "~0.3.0"
 byteorder = "~0.4.0"
+url = "0.5"
 
 [dependencies.regex]
 version = "~0.1.0"
