@@ -8,6 +8,7 @@ use byteorder::Error;
 use openssl::ssl::error::{SslError};
 
 pub use super::packet::ErrPacket;
+use super::conn::Row;
 use super::value::Value;
 
 pub enum MyError {
@@ -17,7 +18,7 @@ pub enum MyError {
     #[cfg(feature = "openssl")]
     MySslError(SslError),
     FromValueError(Value),
-    FromRowError(Vec<Value>),
+    FromRowError(Row),
 }
 
 impl error::Error for MyError {

@@ -13,6 +13,7 @@ use super::error::{
     MyResult,
 };
 use super::io::{Write, Read};
+use super::conn::Row;
 
 use regex::Regex;
 
@@ -281,40 +282,66 @@ macro_rules! rollback {
 
 /// Will *panic* if could not convert `row` to `T`.
 #[inline]
-pub fn from_row<T: FromRow>(row: Vec<Value>) -> T {
+pub fn from_row<T: FromRow>(row: Row) -> T {
     FromRow::from_row(row)
 }
 
 /// Will return `Err(row)` if could not convert `row` to `T`
 #[inline]
-pub fn from_row_opt<T: FromRow>(row: Vec<Value>) -> MyResult<T> {
+pub fn from_row_opt<T: FromRow>(row: Row) -> MyResult<T> {
     FromRow::from_row_opt(row)
 }
 
 /// Trait to convert `Vec<Value>` into tuple of `FromValue` implementors up to arity 12.
 pub trait FromRow {
-    fn from_row(row: Vec<Value>) -> Self;
-    fn from_row_opt(row: Vec<Value>) -> MyResult<Self> where Self: Sized;
+    fn from_row(row: Row) -> Self;
+    fn from_row_opt(row: Row) -> MyResult<Self> where Self: Sized;
+}
+
+macro_rules! take_or_place {
+    ($row:expr, $index:expr, $t:ident) => (
+        match $row.take($index) {
+            Some(value) => {
+                match $t::get_intermediate(value) {
+                    Ok(ir) => ir,
+                    Err(MyError::FromValueError(value)) => {
+                        $row.place($index, value);
+                        return Err(MyError::FromRowError($row));
+                    },
+                    _ => unreachable!(),
+                }
+            },
+            None => return Err(MyError::FromRowError($row)),
+        }
+    );
+    ($row:expr, $index:expr, $t:ident, $( [$idx:expr, $ir:expr] ),*) => (
+        match $row.take($index) {
+            Some(value) => {
+                match $t::get_intermediate(value) {
+                    Ok(ir) => ir,
+                    Err(MyError::FromValueError(value)) => {
+                        $($row.place($idx, $ir.rollback());)*
+                        $row.place($index, value);
+                        return Err(MyError::FromRowError($row));
+                    },
+                    _ => unreachable!(),
+                }
+            },
+            None => return Err(MyError::FromRowError($row)),
+        }
+    );
 }
 
 impl<T, Ir> FromRow for T
 where Ir: ConvIr<T>,
       T: FromValue<Intermediate=Ir> {
     #[inline]
-    fn from_row(row: Vec<Value>) -> T {
+    fn from_row(row: Row) -> T {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to T")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> MyResult<T> {
+    fn from_row_opt(mut row: Row) -> MyResult<T> {
         if row.len() == 1 {
-            let opt_ir: MyResult<Ir> = T::get_intermediate(row.pop().unwrap());
-            match opt_ir {
-                Ok(ir) => Ok(ir.commit()),
-                Err(MyError::FromValueError(v)) => {
-                    row.push(v);
-                    Err(MyError::FromRowError(row))
-                }
-                _ => unreachable!(),
-            }
+            Ok(take_or_place!(row, 0, T).commit())
         } else {
             Err(MyError::FromRowError(row))
         }
@@ -325,10 +352,10 @@ impl<T1, Ir1> FromRow for (T1,)
 where Ir1: ConvIr<T1>,
       T1: FromValue<Intermediate=Ir1> {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1,) {
+    fn from_row(row: Row) -> (T1,) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1,)")
     }
-    fn from_row_opt(row: Vec<Value>) -> MyResult<(T1,)> {
+    fn from_row_opt(row: Row) -> MyResult<(T1,)> {
         T1::from_row_opt(row).map(|t| (t,))
     }
 }
@@ -338,23 +365,16 @@ impl<T1, Ir1,
 where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2> {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2) {
+    fn from_row(row: Row) -> (T1, T2) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1,T2)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> MyResult<(T1, T2)> {
+    fn from_row_opt(mut row: Row) -> MyResult<(T1, T2)> {
         if row.len() != 2 {
             return Err(MyError::FromRowError(row));
         }
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2) {
-            (Ok(ir1), Ok(ir2)) => Ok((ir1.commit(), ir2.commit())),
-            (ir1, ir2) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        Ok((ir1.commit(), ir2.commit()))
     }
 }
 
@@ -365,29 +385,21 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir2: ConvIr<T2>, T2: FromValue<Intermediate=Ir2>,
       Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3) {
+    fn from_row(row: Row) -> (T1, T2, T3) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1,T2,T3)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> MyResult<(T1, T2, T3)> {
+    fn from_row_opt(mut row: Row) -> MyResult<(T1, T2, T3)> {
         if row.len() != 3 {
             return Err(MyError::FromRowError(row));
         }
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3) {
-            (Ok(ir1), Ok(ir2), Ok(ir3)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-            )),
-            (ir1, ir2, ir3) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+        ))
     }
 }
 
@@ -400,32 +412,23 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir3: ConvIr<T3>, T3: FromValue<Intermediate=Ir3>,
       Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T4)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> MyResult<(T1, T2, T3, T4)> {
+    fn from_row_opt(mut row: Row) -> MyResult<(T1, T2, T3, T4)> {
         if row.len() != 4 {
             return Err(MyError::FromRowError(row));
         }
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-            )),
-            (ir1, ir2, ir3, ir4) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+        ))
     }
 }
 
@@ -440,35 +443,25 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir4: ConvIr<T4>, T4: FromValue<Intermediate=Ir4>,
       Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4, T5) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T5)")
     }
-    fn from_row_opt(mut row: Vec<Value>) -> MyResult<(T1, T2, T3, T4, T5)> {
+    fn from_row_opt(mut row: Row) -> MyResult<(T1, T2, T3, T4, T5)> {
         if row.len() != 5 {
             return Err(MyError::FromRowError(row));
         }
-        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4, ir5) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-                ir5.commit(),
-            )),
-            (ir1, ir2, ir3, ir4, ir5) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                row.push(rollback!(ir5));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        let ir5 = take_or_place!(row, 4, T5, [0, ir1], [1, ir2], [2, ir3], [3, ir4]);
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+            ir5.commit(),
+        ))
     }
 }
 
@@ -485,40 +478,29 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir5: ConvIr<T5>, T5: FromValue<Intermediate=Ir5>,
       Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4, T5, T6) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T6)")
     }
-    fn from_row_opt(mut row: Vec<Value>) ->
+    fn from_row_opt(mut row: Row) ->
         MyResult<(T1, T2, T3, T4, T5, T6)>
     {
         if row.len() != 6 {
             return Err(MyError::FromRowError(row));
         }
-        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
-        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4, ir5, ir6) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-                ir5.commit(),
-                ir6.commit(),
-            )),
-            (ir1, ir2, ir3, ir4, ir5, ir6) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                row.push(rollback!(ir5));
-                row.push(rollback!(ir6));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        let ir5 = take_or_place!(row, 4, T5, [0, ir1], [1, ir2], [2, ir3], [3, ir4]);
+        let ir6 = take_or_place!(row, 5, T6, [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5]);
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+            ir5.commit(),
+            ir6.commit(),
+        ))
     }
 }
 
@@ -537,44 +519,32 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir6: ConvIr<T6>, T6: FromValue<Intermediate=Ir6>,
       Ir7: ConvIr<T7>, T7: FromValue<Intermediate=Ir7>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4, T5, T6, T7) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T7)")
     }
-    fn from_row_opt(mut row: Vec<Value>) ->
+    fn from_row_opt(mut row: Row) ->
         MyResult<(T1, T2, T3, T4, T5, T6, T7)>
     {
         if row.len() != 7 {
             return Err(MyError::FromRowError(row));
         }
-        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
-        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
-        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
-            Ok(ir7)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-                ir5.commit(),
-                ir6.commit(),
-                ir7.commit(),
-            )),
-            (ir1, ir2, ir3, ir4, ir5, ir6, ir7) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                row.push(rollback!(ir5));
-                row.push(rollback!(ir6));
-                row.push(rollback!(ir7));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        let ir5 = take_or_place!(row, 4, T5, [0, ir1], [1, ir2], [2, ir3], [3, ir4]);
+        let ir6 = take_or_place!(row, 5, T6, [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5]);
+        let ir7 = take_or_place!(row, 6, T7,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6]);
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+            ir5.commit(),
+            ir6.commit(),
+            ir7.commit(),
+        ))
     }
 }
 
@@ -595,47 +565,39 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir7: ConvIr<T7>, T7: FromValue<Intermediate=Ir7>,
       Ir8: ConvIr<T8>, T8: FromValue<Intermediate=Ir8>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4, T5, T6, T7, T8) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T8)")
     }
-    fn from_row_opt(mut row: Vec<Value>) ->
+    fn from_row_opt(mut row: Row) ->
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8)>
     {
         if row.len() != 8 {
             return Err(MyError::FromRowError(row));
         }
-        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
-        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
-        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
-        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
-            Ok(ir7), Ok(ir8)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-                ir5.commit(),
-                ir6.commit(),
-                ir7.commit(),
-                ir8.commit(),
-            )),
-            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                row.push(rollback!(ir5));
-                row.push(rollback!(ir6));
-                row.push(rollback!(ir7));
-                row.push(rollback!(ir8));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        let ir5 = take_or_place!(row, 4, T5, [0, ir1], [1, ir2], [2, ir3], [3, ir4]);
+        let ir6 = take_or_place!(row, 5, T6, [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5]);
+        let ir7 = take_or_place!(
+            row, 6, T7,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6]
+        );
+        let ir8 = take_or_place!(
+            row, 7, T8,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7]
+        );
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+            ir5.commit(),
+            ir6.commit(),
+            ir7.commit(),
+            ir8.commit(),
+        ))
     }
 }
 
@@ -658,50 +620,45 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir8: ConvIr<T8>, T8: FromValue<Intermediate=Ir8>,
       Ir9: ConvIr<T9>, T9: FromValue<Intermediate=Ir9>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T9)")
     }
-    fn from_row_opt(mut row: Vec<Value>) ->
+    fn from_row_opt(mut row: Row) ->
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9)>
     {
         if row.len() != 9 {
             return Err(MyError::FromRowError(row));
         }
-        let ir9: MyResult<Ir9> = T9::get_intermediate(row.pop().unwrap());
-        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
-        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
-        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
-        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
-            Ok(ir7), Ok(ir8), Ok(ir9)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-                ir5.commit(),
-                ir6.commit(),
-                ir7.commit(),
-                ir8.commit(),
-                ir9.commit(),
-            )),
-            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                row.push(rollback!(ir5));
-                row.push(rollback!(ir6));
-                row.push(rollback!(ir7));
-                row.push(rollback!(ir8));
-                row.push(rollback!(ir9));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        let ir5 = take_or_place!(row, 4, T5, [0, ir1], [1, ir2], [2, ir3], [3, ir4]);
+        let ir6 = take_or_place!(row, 5, T6, [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5]);
+        let ir7 = take_or_place!(
+            row, 6, T7,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6]
+        );
+        let ir8 = take_or_place!(
+            row, 7, T8,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7]
+        );
+        let ir9 = take_or_place!(
+            row, 8, T9,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8]
+        );
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+            ir5.commit(),
+            ir6.commit(),
+            ir7.commit(),
+            ir8.commit(),
+            ir9.commit(),
+        ))
     }
 }
 
@@ -726,53 +683,51 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir9: ConvIr<T9>, T9: FromValue<Intermediate=Ir9>,
       Ir10: ConvIr<T10>, T10: FromValue<Intermediate=Ir10>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T10)")
     }
-    fn from_row_opt(mut row: Vec<Value>) ->
+    fn from_row_opt(mut row: Row) ->
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)>
     {
         if row.len() != 10 {
             return Err(MyError::FromRowError(row));
         }
-        let ir10: MyResult<Ir10> = T10::get_intermediate(row.pop().unwrap());
-        let ir9: MyResult<Ir9> = T9::get_intermediate(row.pop().unwrap());
-        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
-        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
-        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
-        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
-            Ok(ir7), Ok(ir8), Ok(ir9), Ok(ir10)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-                ir5.commit(),
-                ir6.commit(),
-                ir7.commit(),
-                ir8.commit(),
-                ir9.commit(),
-                ir10.commit(),
-            )),
-            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                row.push(rollback!(ir5));
-                row.push(rollback!(ir6));
-                row.push(rollback!(ir7));
-                row.push(rollback!(ir8));
-                row.push(rollback!(ir9));
-                row.push(rollback!(ir10));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        let ir5 = take_or_place!(row, 4, T5, [0, ir1], [1, ir2], [2, ir3], [3, ir4]);
+        let ir6 = take_or_place!(row, 5, T6, [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5]);
+        let ir7 = take_or_place!(
+            row, 6, T7,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6]
+        );
+        let ir8 = take_or_place!(
+            row, 7, T8,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7]
+        );
+        let ir9 = take_or_place!(
+            row, 8, T9,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8]
+        );
+        let ir10 = take_or_place!(
+            row, 9, T10,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8], [8, ir9]
+        );
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+            ir5.commit(),
+            ir6.commit(),
+            ir7.commit(),
+            ir8.commit(),
+            ir9.commit(),
+            ir10.commit(),
+        ))
     }
 }
 
@@ -799,56 +754,57 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir10: ConvIr<T10>, T10: FromValue<Intermediate=Ir10>,
       Ir11: ConvIr<T11>, T11: FromValue<Intermediate=Ir11>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T11)")
     }
-    fn from_row_opt(mut row: Vec<Value>) ->
+    fn from_row_opt(mut row: Row) ->
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)>
     {
         if row.len() != 11 {
             return Err(MyError::FromRowError(row));
         }
-        let ir11: MyResult<Ir11> = T11::get_intermediate(row.pop().unwrap());
-        let ir10: MyResult<Ir10> = T10::get_intermediate(row.pop().unwrap());
-        let ir9: MyResult<Ir9> = T9::get_intermediate(row.pop().unwrap());
-        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
-        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
-        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
-        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10, ir11) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
-            Ok(ir7), Ok(ir8), Ok(ir9), Ok(ir10), Ok(ir11)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-                ir5.commit(),
-                ir6.commit(),
-                ir7.commit(),
-                ir8.commit(),
-                ir9.commit(),
-                ir10.commit(),
-                ir11.commit(),
-            )),
-            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10, ir11) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                row.push(rollback!(ir5));
-                row.push(rollback!(ir6));
-                row.push(rollback!(ir7));
-                row.push(rollback!(ir8));
-                row.push(rollback!(ir9));
-                row.push(rollback!(ir10));
-                row.push(rollback!(ir11));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        let ir5 = take_or_place!(row, 4, T5, [0, ir1], [1, ir2], [2, ir3], [3, ir4]);
+        let ir6 = take_or_place!(row, 5, T6, [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5]);
+        let ir7 = take_or_place!(
+            row, 6, T7,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6]
+        );
+        let ir8 = take_or_place!(
+            row, 7, T8,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7]
+        );
+        let ir9 = take_or_place!(
+            row, 8, T9,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8]
+        );
+        let ir10 = take_or_place!(
+            row, 9, T10,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8], [8, ir9]
+        );
+        let ir11 = take_or_place!(
+            row, 10, T11,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8], [8, ir9], [9, ir10]
+        );
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+            ir5.commit(),
+            ir6.commit(),
+            ir7.commit(),
+            ir8.commit(),
+            ir9.commit(),
+            ir10.commit(),
+            ir11.commit(),
+        ))
     }
 }
 
@@ -877,59 +833,63 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
       Ir11: ConvIr<T11>, T11: FromValue<Intermediate=Ir11>,
       Ir12: ConvIr<T12>, T12: FromValue<Intermediate=Ir12>, {
     #[inline]
-    fn from_row(row: Vec<Value>) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12) {
+    fn from_row(row: Row) -> (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12) {
         FromRow::from_row_opt(row).ok().expect("Could not convert row to (T1 .. T12)")
     }
-    fn from_row_opt(mut row: Vec<Value>) ->
+    fn from_row_opt(mut row: Row) ->
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)>
     {
         if row.len() != 12 {
             return Err(MyError::FromRowError(row));
         }
-        let ir12: MyResult<Ir12> = T12::get_intermediate(row.pop().unwrap());
-        let ir11: MyResult<Ir11> = T11::get_intermediate(row.pop().unwrap());
-        let ir10: MyResult<Ir10> = T10::get_intermediate(row.pop().unwrap());
-        let ir9: MyResult<Ir9> = T9::get_intermediate(row.pop().unwrap());
-        let ir8: MyResult<Ir8> = T8::get_intermediate(row.pop().unwrap());
-        let ir7: MyResult<Ir7> = T7::get_intermediate(row.pop().unwrap());
-        let ir6: MyResult<Ir6> = T6::get_intermediate(row.pop().unwrap());
-        let ir5: MyResult<Ir5> = T5::get_intermediate(row.pop().unwrap());
-        let ir4: MyResult<Ir4> = T4::get_intermediate(row.pop().unwrap());
-        let ir3: MyResult<Ir3> = T3::get_intermediate(row.pop().unwrap());
-        let ir2: MyResult<Ir2> = T2::get_intermediate(row.pop().unwrap());
-        let ir1: MyResult<Ir1> = T1::get_intermediate(row.pop().unwrap());
-        match (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10, ir11, ir12) {
-            (Ok(ir1), Ok(ir2), Ok(ir3), Ok(ir4), Ok(ir5), Ok(ir6),
-            Ok(ir7), Ok(ir8), Ok(ir9), Ok(ir10), Ok(ir11), Ok(ir12)) => Ok((
-                ir1.commit(),
-                ir2.commit(),
-                ir3.commit(),
-                ir4.commit(),
-                ir5.commit(),
-                ir6.commit(),
-                ir7.commit(),
-                ir8.commit(),
-                ir9.commit(),
-                ir10.commit(),
-                ir11.commit(),
-                ir12.commit(),
-            )),
-            (ir1, ir2, ir3, ir4, ir5, ir6, ir7, ir8, ir9, ir10, ir11, ir12) => {
-                row.push(rollback!(ir1));
-                row.push(rollback!(ir2));
-                row.push(rollback!(ir3));
-                row.push(rollback!(ir4));
-                row.push(rollback!(ir5));
-                row.push(rollback!(ir6));
-                row.push(rollback!(ir7));
-                row.push(rollback!(ir8));
-                row.push(rollback!(ir9));
-                row.push(rollback!(ir10));
-                row.push(rollback!(ir11));
-                row.push(rollback!(ir12));
-                Err(MyError::FromRowError(row))
-            }
-        }
+        let ir1 = take_or_place!(row, 0, T1);
+        let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
+        let ir3 = take_or_place!(row, 2, T3, [0, ir1], [1, ir2]);
+        let ir4 = take_or_place!(row, 3, T4, [0, ir1], [1, ir2], [2, ir3]);
+        let ir5 = take_or_place!(row, 4, T5, [0, ir1], [1, ir2], [2, ir3], [3, ir4]);
+        let ir6 = take_or_place!(row, 5, T6, [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5]);
+        let ir7 = take_or_place!(
+            row, 6, T7,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6]
+        );
+        let ir8 = take_or_place!(
+            row, 7, T8,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7]
+        );
+        let ir9 = take_or_place!(
+            row, 8, T9,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8]
+        );
+        let ir10 = take_or_place!(
+            row, 9, T10,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8], [8, ir9]
+        );
+        let ir11 = take_or_place!(
+            row, 10, T11,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8], [8, ir9], [9, ir10]
+        );
+        let ir12 = take_or_place!(
+            row, 11, T12,
+            [0, ir1], [1, ir2], [2, ir3], [3, ir4], [4, ir5], [5, ir6], [6, ir7],
+            [7, ir8], [8, ir9], [9, ir10], [10, ir11]
+        );
+        Ok((
+            ir1.commit(),
+            ir2.commit(),
+            ir3.commit(),
+            ir4.commit(),
+            ir5.commit(),
+            ir6.commit(),
+            ir7.commit(),
+            ir8.commit(),
+            ir9.commit(),
+            ir10.commit(),
+            ir11.commit(),
+            ir12.commit(),
+        ))
     }
 }
 
@@ -1983,7 +1943,7 @@ mod test {
             let ts = Timespec { sec: 1414866780, nsec: 0 };
             conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
             let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
-            assert_eq!(ts, from_value::<Timespec>(x.pop().unwrap()));
+            assert_eq!(ts, from_value::<Timespec>(x.take(0).unwrap()));
         }
 
         #[test]
@@ -1993,7 +1953,7 @@ mod test {
             let ts = Timespec { sec: 1414866780, nsec: 0 };
             conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
             let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
-            assert_eq!(ts, from_value::<Timespec>(x.pop().unwrap()));
+            assert_eq!(ts, from_value::<Timespec>(x.take(0).unwrap()));
         }
 
         #[test]
@@ -2045,6 +2005,7 @@ mod test {
         use time::{Timespec, now};
         use super::super::{from_row, from_row_opt, Value};
         use super::super::super::error::MyError;
+        use super::super::super::conn::Row;
 
         #[test]
         fn should_convert_to_tuples() {
@@ -2102,22 +2063,22 @@ mod test {
                        o1, o2.clone(), o3.clone(), o4.clone(),
                        o1, o2.clone(), o3.clone(), o4.clone());
 
-            assert_eq!(o1, from_row(vec![t1]));
-            assert_eq!(o2, from_row::<String>(vec![t2]));
-            assert_eq!(o3, from_row::<Vec<u8>>(vec![t3]));
-            assert_eq!(o4, from_row(vec![t4]));
-            assert_eq!(r1, from_row(v1));
-            assert_eq!(r2, from_row(v2));
-            assert_eq!(r3, from_row(v3));
-            assert_eq!(r4, from_row(v4));
-            assert_eq!(r5, from_row(v5));
-            assert_eq!(r6, from_row(v6));
-            assert_eq!(r7, from_row(v7));
-            assert_eq!(r8, from_row(v8));
-            assert_eq!(r9, from_row(v9));
-            assert_eq!(r10, from_row(v10));
-            assert_eq!(r11, from_row(v11));
-            assert_eq!(r12, from_row(v12));
+            assert_eq!(o1, from_row(Row::new(vec![t1])));
+            assert_eq!(o2, from_row::<String>(Row::new(vec![t2])));
+            assert_eq!(o3, from_row::<Vec<u8>>(Row::new(vec![t3])));
+            assert_eq!(o4, from_row(Row::new(vec![t4])));
+            assert_eq!(r1, from_row(Row::new(v1)));
+            assert_eq!(r2, from_row(Row::new(v2)));
+            assert_eq!(r3, from_row(Row::new(v3)));
+            assert_eq!(r4, from_row(Row::new(v4)));
+            assert_eq!(r5, from_row(Row::new(v5)));
+            assert_eq!(r6, from_row(Row::new(v6)));
+            assert_eq!(r7, from_row(Row::new(v7)));
+            assert_eq!(r8, from_row(Row::new(v8)));
+            assert_eq!(r9, from_row(Row::new(v9)));
+            assert_eq!(r10, from_row(Row::new(v10)));
+            assert_eq!(r11, from_row(Row::new(v11)));
+            assert_eq!(r12, from_row(Row::new(v12)));
         }
 
         #[test]
@@ -2127,29 +2088,29 @@ mod test {
             let t3 = Value::Bytes(vec![255]);
             let t4 = Value::Date(2014, 11, 1, 18, 33, 00, 1);
 
-            let v1 = vec![t1.clone()];
-            let v2 = vec![t1.clone(), t2.clone()];
-            let v3 = vec![t1.clone(), t2.clone(), t3.clone()];
-            let v4 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone()];
-            let v5 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone()];
-            let v6 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                          t1.clone(), t2.clone()];
-            let v7 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                          t1.clone(), t2.clone(), t3.clone()];
-            let v8 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                          t1.clone(), t2.clone(), t3.clone(), t4.clone()];
-            let v9 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                          t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                          t1.clone()];
-            let v10 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                           t1.clone(), t2.clone()];
-            let v11 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                           t1.clone(), t2.clone(), t3.clone()];
-            let v12 = vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                           t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                           t1.clone(), t2.clone(), t3.clone(), t4.clone()];
+            let v1 = Row::new(vec![t1.clone()]);
+            let v2 = Row::new(vec![t1.clone(), t2.clone()]);
+            let v3 = Row::new(vec![t1.clone(), t2.clone(), t3.clone()]);
+            let v4 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone()]);
+            let v5 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone()]);
+            let v6 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                              t1.clone(), t2.clone()]);
+            let v7 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                              t1.clone(), t2.clone(), t3.clone()]);
+            let v8 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                              t1.clone(), t2.clone(), t3.clone(), t4.clone()]);
+            let v9 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                              t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                              t1.clone()]);
+            let v10 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                               t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                               t1.clone(), t2.clone()]);
+            let v11 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                               t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                               t1.clone(), t2.clone(), t3.clone()]);
+            let v12 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                               t1.clone(), t2.clone(), t3.clone(), t4.clone(),
+                               t1.clone(), t2.clone(), t3.clone(), t4.clone()]);
 
             match from_row_opt::<f32>(v1.clone()) {
                 Err(MyError::FromRowError(e)) => assert_eq!(v1, e),
@@ -2207,6 +2168,7 @@ mod test {
         use test;
         use time::Timespec;
         use super::super::{from_row, from_value, Value};
+        use super::super::super::conn::Row;
 
         #[bench]
         fn pop_vs_from_row_pop(bencher: &mut test::Bencher) {
@@ -2242,18 +2204,18 @@ mod test {
 
         #[bench]
         fn pop_vs_from_row_from_row(bencher: &mut test::Bencher) {
-            let row = vec![Value::Int(1),
-                           Value::Bytes(vec![b'a']),
-                           Value::Bytes(vec![255]),
-                           Value::Date(2014, 11, 1, 18, 33, 00, 1),
-                           Value::Int(1),
-                           Value::Bytes(vec![b'a']),
-                           Value::Bytes(vec![255]),
-                           Value::Date(2014, 11, 1, 18, 33, 00, 1),
-                           Value::Int(1),
-                           Value::Bytes(vec![b'a']),
-                           Value::Bytes(vec![255]),
-                           Value::Date(2014, 11, 1, 18, 33, 00, 1)];
+            let row = Row::new(vec![Value::Int(1),
+                                    Value::Bytes(vec![b'a']),
+                                    Value::Bytes(vec![255]),
+                                    Value::Date(2014, 11, 1, 18, 33, 00, 1),
+                                    Value::Int(1),
+                                    Value::Bytes(vec![b'a']),
+                                    Value::Bytes(vec![255]),
+                                    Value::Date(2014, 11, 1, 18, 33, 00, 1),
+                                    Value::Int(1),
+                                    Value::Bytes(vec![b'a']),
+                                    Value::Bytes(vec![255]),
+                                    Value::Date(2014, 11, 1, 18, 33, 00, 1)]);
             bencher.iter(|| {
                 let vs: (i8, String, Vec<u8>, Timespec,
                          i8, String, Vec<u8>, Timespec,

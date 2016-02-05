@@ -57,6 +57,7 @@ impl MyInnerPool {
 /// use mysql::conn::pool;
 /// use std::default::Default;
 /// use mysql::conn::Opts;
+/// # use mysql::conn::Row;
 /// use mysql::value::IntoValue;
 /// use std::thread;
 ///
@@ -82,7 +83,7 @@ impl MyInnerPool {
 ///     let pool = pool.clone();
 ///     threads.push(thread::spawn(move || {
 ///         let mut result = pool.prep_exec("SELECT 1", ()).unwrap();
-///         assert_eq!(result.next().unwrap().unwrap(), vec![1.into_value()]);
+///         assert_eq!(result.next().unwrap().unwrap(), Row::new(vec![1.into_value()]));
 ///     }));
 /// }
 /// for t in threads.into_iter() {
@@ -118,8 +119,7 @@ impl MyPool {
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
         let mut pool = match self.pool.lock() {
             Ok(mutex) => mutex,
-            _ => return Err(MyError::MyDriverError(
-                            DriverError::PoisonedPoolMutex)),
+            _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
         };
 
         while pool.pool.is_empty() {
@@ -233,12 +233,12 @@ impl MyPool {
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.query("SELECT 42").map(|mut result| {
-///     let cell = result.next().unwrap().unwrap().pop().unwrap();
+///     let cell = result.next().unwrap().unwrap().take(0).unwrap();
 ///     assert_eq!(cell, Value::Bytes(b"42".to_vec()));
 ///     assert_eq!(from_value::<i64>(cell), 42i64);
 /// });
 /// conn.prep_exec("SELECT 42", ()).map(|mut result| {
-///     let cell = result.next().unwrap().unwrap().pop().unwrap();
+///     let cell = result.next().unwrap().unwrap().take(0).unwrap();
 ///     assert_eq!(cell, Value::Int(42i64));
 ///     assert_eq!(from_value::<i64>(cell), 42i64);
 /// });
@@ -468,7 +468,7 @@ mod test {
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
-                    assert_eq!(from_value::<u8>(x.pop().unwrap()), 2u8);
+                    assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                 }
             });
             assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
@@ -479,7 +479,7 @@ mod test {
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
-                    assert_eq!(from_value::<u8>(x.pop().unwrap()), 2u8);
+                    assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                 }
             });
             assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
@@ -490,7 +490,7 @@ mod test {
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
-                    assert_eq!(from_value::<u8>(x.pop().unwrap()), 2u8);
+                    assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                 }
             });
         }
@@ -506,7 +506,7 @@ mod test {
             }).is_ok());
             for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let mut x = x.unwrap();
-                assert_eq!(from_value::<u8>(x.pop().unwrap()), 2u8);
+                assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
             assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
@@ -515,7 +515,7 @@ mod test {
             }).is_ok());
             for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let mut x = x.unwrap();
-                assert_eq!(from_value::<u8>(x.pop().unwrap()), 2u8);
+                assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
             assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
@@ -524,7 +524,7 @@ mod test {
             }).is_ok());
             for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let mut x = x.unwrap();
-                assert_eq!(from_value::<u8>(x.pop().unwrap()), 2u8);
+                assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
         }
     }

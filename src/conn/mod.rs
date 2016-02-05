@@ -1,14 +1,18 @@
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::fs;
 use std::fmt;
 use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
 use std::net;
+use std::ops::{
+    Deref,
+    DerefMut,
+    Index,
+};
 use std::path;
-use std::ops::Deref;
-use std::ops::DerefMut;
-use std::collections::HashMap;
+use std::str::from_utf8;
 
 use super::consts;
 use super::consts::Command;
@@ -311,7 +315,7 @@ impl<'a> Stmt<'a> {
     /// // If you want to execute statement of arity > 12, then you can pass params as &[&ToValue].
     /// let params: &[&ToValue] = &[&1, &2, &3, &4, &5, &6, &7, &8, &9, &10, &11, &12, &13];
     /// for row in stmt13.execute(params).unwrap() {
-    ///     let row: Vec<u8> = row.unwrap().into_iter().map(from_value::<u8>).collect();
+    ///     let row: Vec<u8> = row.unwrap().unwrap().into_iter().map(from_value::<u8>).collect();
     ///     assert_eq!(row, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     /// }
     /// // but be aware of implicit copying, so if you have huge params and do not care
@@ -321,6 +325,7 @@ impl<'a> Stmt<'a> {
     ///     params.push(repeat('A').take(i * 1000).collect::<String>().into_value());
     /// }
     /// for row in stmt13.execute(params).unwrap() {
+    ///     let row = row.unwrap();
     ///     let row: Vec<String> = row.unwrap().into_iter().map(from_value::<String>).collect();
     ///     for i in 1..14 {
     ///         assert_eq!(row[i-1], repeat('A').take(i * 1000).collect::<String>());
@@ -415,6 +420,107 @@ impl Column {
                   flags: flags,
                   decimals: decimals,
                   default_values: default_values})
+    }
+}
+
+/// Mysql row representation.
+///
+/// Only stores values of a cells. To get column names please refer to
+/// [`QueryResult::column_index`](struct.QueryResult.html#method.column_index) and
+/// [`QueryResult::column_indexes`](struct.QueryResult.html#method.column_indexes) methods.
+///
+/// It allows you to move column values out of a row with `Row::take` method but note that it
+/// makes row incomplete. Calls to `from_row_opt` on incomplete row will return
+/// `MyError::FromRowError` and also numerical indexing on taken columns will panic.
+///
+/// ```rust
+/// # use mysql::conn::pool;
+/// # use mysql::conn::Opts;
+/// # use mysql::value::{from_value, from_row, IntoValue, ToValue, Value};
+/// # use std::thread::Thread;
+/// # use std::default::Default;
+/// # use std::iter::repeat;
+/// # fn get_opts() -> Opts {
+/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
+/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
+/// #                                .unwrap_or(3307);
+/// #     Opts {
+/// #         user: Some("root".to_string()),
+/// #         pass: Some(pwd),
+/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
+/// #         tcp_port: port,
+/// #         ..Default::default()
+/// #     }
+/// # }
+/// # let opts = get_opts();
+/// # let pool = pool::MyPool::new_manual(1, 1, opts).unwrap();
+/// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ());
+/// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
+/// #                (1, "John", 17, "foo@bar.baz"));
+/// pool.prep_exec("SELECT * FROM tmp.Users", ()).map(|mut result| {
+///     let idxs = result.column_indexes();
+///     let mut row = result.next().unwrap().unwrap();
+///
+///     assert_eq!(1, from_value::<u32>(row.take(idxs["id"]).unwrap()));
+///     assert_eq!("John", from_value::<String>(row.take(idxs["name"]).unwrap()));
+///     assert_eq!(17, from_value::<u32>(row.take(idxs["age"]).unwrap()));
+///     assert_eq!("foo@bar.baz", from_value::<String>(row.take(idxs["email"]).unwrap()));
+/// });
+/// ```
+///
+#[derive(Clone, PartialEq, Debug)]
+pub struct Row {
+    values: Vec<Option<Value>>,
+}
+
+impl Row {
+    /// Creates instance of `Row` from raw row representation
+    #[doc(hidden)]
+    pub fn new(raw_row: Vec<Value>) -> Row {
+        Row {
+            values: raw_row.into_iter().map(|value| Some(value)).collect(),
+        }
+    }
+
+    /// Returns length of a row.
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Returns reference to the value of a column with index `index` if it exists and wasn't taken
+    /// by `Row::take` method.
+    pub fn as_ref(&self, index: usize) -> Option<&Value> {
+        self.values.get(index).and_then(|x| x.as_ref())
+    }
+
+    /// Takes value of a column with index `index` if it exists and wasn't taken earlier.
+    pub fn take(&mut self, index: usize) -> Option<Value> {
+        self.values.get_mut(index).and_then(|x| x.take())
+    }
+
+    /// Unwraps values of a row.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any of columns was taken by `take` method.
+    pub fn unwrap(self) -> Vec<Value> {
+        self.values.into_iter()
+        .map(|x| x.expect("Can't unwrap row if some of columns was taken"))
+        .collect()
+    }
+
+    #[doc(hidden)]
+    pub fn place(&mut self, index: usize, value: Value) {
+        self.values[index] = Some(value);
+    }
+}
+
+impl Index<usize> for Row {
+    type Output = Value;
+
+    fn index<'a>(&'a self, index: usize) -> &'a Value {
+        self.values[index].as_ref().unwrap()
     }
 }
 
@@ -1272,7 +1378,7 @@ impl MyConn {
             match row {
                 Ok(mut r) => match r.len() {
                     0 => (),
-                    _ => return Some(r.remove(0)),
+                    _ => return r.take(0),
                 },
                 _ => (),
             }
@@ -1408,11 +1514,11 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// Mysql result set for text and binary protocols.
 ///
 /// If you want to get rows from `QueryResult` you should rely on implementation
-/// of `Iterator` over `MyResult<Vec<Value>>` on `QueryResult`.
+/// of `Iterator` over `MyResult<Row>` on `QueryResult`.
 ///
-/// `Vec<Value>` is the current row representation. To get something useful from `Vec<Value>` you
-/// should rely on `FromRow` trait implemented for tuples of `FromValue` implementors up to arity
-/// 12, or on `FromValue` trait for rows with bigger arity.
+/// [`Row`](struct.Row.html) is the current row representation. To get something useful from
+/// [`Row`](struct.Row.html) you should rely on `FromRow` trait implemented for tuples of
+/// `FromValue` implementors up to arity 12, or on `FromValue` trait for rows with higher arity.
 ///
 /// ```rust
 /// use mysql::value::from_row;
@@ -1468,7 +1574,7 @@ impl<'a> QueryResult<'a> {
         }
     }
 
-    fn handle_if_more_results(&mut self) -> Option<MyResult<Vec<Value>>> {
+    fn handle_if_more_results(&mut self) -> Option<MyResult<Row>> {
         if self.conn.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
             match self.conn.handle_result_set() {
                 Ok((cols, ok_p)) => {
@@ -1526,6 +1632,15 @@ impl<'a> QueryResult<'a> {
         None
     }
 
+    /// Returns HashMap which maps column names to column indexes.
+    pub fn column_indexes<'b, 'c>(&'b self) -> HashMap<String, usize> {
+        let mut indexes = HashMap::new();
+        for (i, column) in self.columns.iter().enumerate() {
+            indexes.insert(from_utf8(&*column.name).unwrap().to_string(), i);
+        }
+        indexes
+    }
+
     /// Returns a slice of a [`Column`s](struct.Column.html) which represents
     /// `QueryResult`'s columns if any.
     pub fn columns_ref(&self) -> &[Column] {
@@ -1557,22 +1672,22 @@ impl<'a> QueryResult<'a> {
 }
 
 impl<'a> Iterator for QueryResult<'a> {
-    type Item = MyResult<Vec<Value>>;
+    type Item = MyResult<Row>;
 
-    fn next(&mut self) -> Option<MyResult<Vec<Value>>> {
-        let r = if self.is_bin {
+    fn next(&mut self) -> Option<MyResult<Row>> {
+        let values = if self.is_bin {
             self.conn.next_bin(&self.columns)
         } else {
             self.conn.next_text(self.columns.len())
         };
-        match r {
-            Ok(r) => {
-                match r {
+        match values {
+            Ok(values) => {
+                match values {
+                    Some(values) => Some(Ok(Row::new(values))),
                     None => self.handle_if_more_results(),
-                    Some(r) => Some(Ok(r))
                 }
             },
-            Err(e) => Some(Err(e))
+            Err(e) => Some(Err(e)),
         }
     }
 }
@@ -1650,7 +1765,7 @@ mod test {
         use std::fs;
         use std::io::Write;
         use time::{Tm, now};
-        use super::super::{MyConn, Opts};
+        use super::super::{MyConn, Opts, Row};
         use super::super::super::value::{ToValue, from_value};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
@@ -1658,7 +1773,7 @@ mod test {
         #[test]
         fn should_connect() {
             let mut conn = MyConn::new(get_opts()).unwrap();
-            let mode = conn.query("SELECT @@GLOBAL.sql_mode").unwrap().next().unwrap().unwrap().remove(0);
+            let mode = conn.query("SELECT @@GLOBAL.sql_mode").unwrap().next().unwrap().unwrap().take(0).unwrap();
             let mode = from_value::<String>(mode);
             assert!(mode.contains("TRADITIONAL"));
             assert!(conn.ping());
@@ -1669,7 +1784,7 @@ mod test {
                 db_name: Some("mysql".to_string()),
                 ..get_opts()
             }).unwrap();
-            assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap(),
+            assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap().unwrap(),
                        vec![Bytes(b"mysql".to_vec())]);
         }
         #[test]
@@ -1679,7 +1794,7 @@ mod test {
                 ip_or_hostname: Some("localhost".to_string()),
                 ..get_opts()
             }).unwrap();
-            assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap(),
+            assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap().unwrap(),
                        vec![Bytes(b"mysql".to_vec())]);
         }
         #[test]
@@ -1737,7 +1852,7 @@ mod test {
             let mut conn = MyConn::new(get_opts()).unwrap();
             assert_eq!(
                 conn.query("SELECT REPEAT('A', 20000000)").unwrap().next().unwrap().unwrap(),
-                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
+                Row::new(vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())])
             );
         }
         #[test]
@@ -1774,13 +1889,13 @@ mod test {
                         assert_eq!(row[1], Int(-123i64));
                         assert_eq!(row[2], Int(123i64));
                         assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                        assert_eq!(from_value::<f64>(row.pop().unwrap()), 123.123);
+                        assert_eq!(from_value::<f64>(row.take(4).unwrap()), 123.123);
                     } else if i == 1 {
                         assert_eq!(row[0], Bytes(b"world".to_vec()));
                         assert_eq!(row[1], NULL);
                         assert_eq!(row[2], NULL);
                         assert_eq!(row[3], NULL);
-                        assert_eq!(from_value::<f64>(row.pop().unwrap()), 321.321);
+                        assert_eq!(from_value::<f64>(row.take(4).unwrap()), 321.321);
                     } else {
                         unreachable!();
                     }
@@ -1790,9 +1905,9 @@ mod test {
             let mut result = conn.prep_exec("SELECT ?, ?, ?", ("hello", 1, 1.1)).unwrap();
             let row = result.next().unwrap();
             let mut row = row.unwrap();
-            assert_eq!(from_value::<f32>(row.pop().unwrap()), 1.1);
-            assert_eq!(from_value::<i8>(row.pop().unwrap()), 1);
-            assert_eq!(from_value::<String>(row.pop().unwrap()), "hello".to_string());
+            assert_eq!(from_value::<String>(row.take(0).unwrap()), "hello".to_string());
+            assert_eq!(from_value::<i8>(row.take(1).unwrap()), 1);
+            assert_eq!(from_value::<f32>(row.take(2).unwrap()), 1.1);
         }
         #[test]
         fn should_parse_large_binary_result() {
@@ -1800,7 +1915,7 @@ mod test {
             let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
             assert_eq!(
                 stmt.execute(()).unwrap().next().unwrap().unwrap(),
-                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
+                Row::new(vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())])
             );
         }
         #[test]
@@ -1814,14 +1929,14 @@ mod test {
                 Ok(())
             }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
-                       vec![Bytes(b"2".to_vec())]);
+                       Row::new(vec![Bytes(b"2".to_vec())]));
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
                 Ok(())
                 // implicit rollback
             }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
-                       vec![Bytes(b"2".to_vec())]);
+                       Row::new(vec![Bytes(b"2".to_vec())]));
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
@@ -1829,7 +1944,7 @@ mod test {
                 Ok(())
             }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
-                       vec![Bytes(b"2".to_vec())]);
+                       Row::new(vec![Bytes(b"2".to_vec())]));
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 let _ = t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
                 .and_then(|mut stmt| {
@@ -1841,7 +1956,7 @@ mod test {
                 Ok(())
             }).unwrap();
             assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
-                       vec![Bytes(b"4".to_vec())]);
+                       Row::new(vec![Bytes(b"4".to_vec())]));
             let _ = conn.start_transaction(false, None, None). and_then(|mut t| {
                 t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", (5,)).unwrap();
                 t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", (6,)).unwrap();
@@ -1866,9 +1981,9 @@ mod test {
                                 .unwrap().enumerate() {
                 let row = row.unwrap();
                 match i {
-                    0 => assert_eq!(row, vec!(Bytes(b"AAAAAA".to_vec()))),
-                    1 => assert_eq!(row, vec!(Bytes(b"BBBBBB".to_vec()))),
-                    2 => assert_eq!(row, vec!(Bytes(b"CCCCCC".to_vec()))),
+                    0 => assert_eq!(row.unwrap(), vec!(Bytes(b"AAAAAA".to_vec()))),
+                    1 => assert_eq!(row.unwrap(), vec!(Bytes(b"BBBBBB".to_vec()))),
+                    2 => assert_eq!(row.unwrap(), vec!(Bytes(b"CCCCCC".to_vec()))),
                     _ => unreachable!()
                 }
             }
@@ -1900,7 +2015,7 @@ mod test {
             for (i, row) in conn.query("CALL multi()")
                                 .unwrap().enumerate() {
                 match i {
-                    0 | 1 => assert_eq!(row.unwrap(), vec![Bytes(b"1".to_vec())]),
+                    0 | 1 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"1".to_vec())]),
                     _ => unreachable!(),
                 }
             }
@@ -1909,13 +2024,14 @@ mod test {
             while { i += 1; result.more_results_exists() } {
                 for row in result.by_ref() {
                     match i {
-                        1 => assert_eq!(row.unwrap(), vec![Bytes(b"1".to_vec())]),
-                        2 => assert_eq!(row.unwrap(), vec![Bytes(b"2".to_vec())]),
-                        3 => assert_eq!(row.unwrap(), vec![Bytes(b"3".to_vec())]),
+                        1 => assert_eq!(row.unwrap(), Row::new(vec![Bytes(b"1".to_vec())])),
+                        2 => assert_eq!(row.unwrap(), Row::new(vec![Bytes(b"2".to_vec())])),
+                        3 => assert_eq!(row.unwrap(), Row::new(vec![Bytes(b"3".to_vec())])),
                         _ => unreachable!(),
                     }
                 }
             }
+            assert_eq!(i, 4);
         }
     }
 
