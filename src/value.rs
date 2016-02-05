@@ -292,7 +292,7 @@ pub fn from_row_opt<T: FromRow>(row: Row) -> MyResult<T> {
     FromRow::from_row_opt(row)
 }
 
-/// Trait to convert `Vec<Value>` into tuple of `FromValue` implementors up to arity 12.
+/// Trait to convert `Row` into tuple of `FromValue` implementors up to arity 12.
 pub trait FromRow {
     fn from_row(row: Row) -> Self;
     fn from_row_opt(row: Row) -> MyResult<Self> where Self: Sized;
