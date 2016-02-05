@@ -149,6 +149,7 @@ pub enum DriverError {
     CouldNotParseVersion,
     ReadOnlyTransNotSupported,
     PoisonedPoolMutex,
+    Timeout,
 }
 
 impl error::Error for DriverError {
@@ -203,6 +204,9 @@ impl fmt::Display for DriverError {
             },
             DriverError::PoisonedPoolMutex => {
                 write!(f, "Poisoned pool mutex")
+            },
+            DriverError::Timeout => {
+                write!(f, "Operation timed out")
             }
         }
     }

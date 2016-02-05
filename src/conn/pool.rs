@@ -1,4 +1,8 @@
-use std::sync::{Arc, Mutex};
+use std::fmt;
+use std::sync::{Arc, Mutex, Condvar};
+use std::time::Duration as StdDuration;
+
+use time::{Duration, SteadyTime};
 
 use super::IsolationLevel;
 use super::Transaction;
@@ -37,6 +41,7 @@ impl MyInnerPool {
         match MyConn::new(self.opts.clone()) {
             Ok(conn) => {
                 self.pool.push(conn);
+                self.count += 1;
                 Ok(())
             },
             Err(err) => Err(err)
@@ -93,10 +98,8 @@ impl MyInnerPool {
 ///
 /// For more info on how to work with mysql connection please look at
 /// [`MyPooledConn`](struct.MyPooledConn.html) documentation.
-#[derive(Clone, Debug)]
-pub struct MyPool {
-    pool: Arc<Mutex<MyInnerPool>>
-}
+#[derive(Clone)]
+pub struct MyPool(Arc<(Mutex<MyInnerPool>, Condvar)>);
 
 impl MyPool {
     /// Creates new pool with `min = 10` and `max = 100`.
@@ -107,7 +110,7 @@ impl MyPool {
     /// Same as `new` but you can set `min` and `max`.
     pub fn new_manual(min: usize, max: usize, opts: Opts) -> MyResult<MyPool> {
         let pool = try!(MyInnerPool::new(min, max, opts));
-        Ok(MyPool{ pool: Arc::new(Mutex::new(pool)) })
+        Ok(MyPool(Arc::new((Mutex::new(pool), Condvar::new()))))
     }
 
     /// Gives you a [`MyPooledConn`](struct.MyPooledConn.html).
@@ -117,20 +120,73 @@ impl MyPool {
     /// call [`MyConn::reset`](../struct.MyConn.html#method.reset) if
     /// necessary.
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
-        let mut pool = match self.pool.lock() {
+        let &(ref inner_pool, ref condvar) = &*self.0;
+        let mut pool = match inner_pool.lock() {
             Ok(mutex) => mutex,
             _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
         };
 
-        while pool.pool.is_empty() {
-            if pool.count < pool.max {
-                match pool.new_conn() {
-                    Ok(()) => {
-                        pool.count += 1;
-                        break;
-                    },
-                    Err(err) => return Err(err)
+        loop {
+            if pool.pool.is_empty() {
+                if pool.count < pool.max {
+                    match pool.new_conn() {
+                        Ok(()) => break,
+                        Err(err) => return Err(err),
+                    }
+                } else {
+                    pool = match condvar.wait(pool) {
+                        Ok(mutex) => mutex,
+                        _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
+                    }
                 }
+            } else {
+                break;
+            }
+        }
+
+        let mut conn = pool.pool.pop().unwrap();
+
+        if !conn.ping() {
+            try!(conn.reset());
+        }
+
+        Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
+    }
+
+    /// Will try to get connection for a duration of `timeout_ms` milliseconds.
+    ///
+    /// # Failure
+    /// This function will return `MyError::MyDriverError(DriverError::Timeout)` if timeout was
+    /// reached while waiting for new connection to become available.
+    pub fn try_get_conn(&self, timeout_ms: u32) -> MyResult<MyPooledConn> {
+        let start = SteadyTime::now();
+        let timeout = Duration::milliseconds(timeout_ms as i64);
+        let std_timeout = StdDuration::from_millis(timeout_ms as u64);
+
+        let &(ref inner_pool, ref condvar) = &*self.0;
+        let mut pool = match inner_pool.lock() {
+            Ok(mutex) => mutex,
+            _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
+        };
+
+        loop {
+            if pool.pool.is_empty() {
+                if pool.count < pool.max {
+                    match pool.new_conn() {
+                        Ok(()) => break,
+                        Err(err) => return Err(err),
+                    }
+                } else {
+                    if SteadyTime::now() - start > timeout {
+                        return Err(DriverError::Timeout.into());
+                    }
+                    pool = match condvar.wait_timeout(pool, std_timeout) {
+                        Ok((mutex, _)) => mutex,
+                        _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
+                    }
+                }
+            } else {
+                break;
             }
         }
 
@@ -145,10 +201,10 @@ impl MyPool {
 
     fn get_conn_by_stmt<T: AsRef<str>>(&self, query: T) -> MyResult<MyPooledConn> {
         let conn = {
-            let mut pool = match self.pool.lock() {
+            let &(ref inner_pool, _) = &*self.0;
+            let mut pool = match inner_pool.lock() {
                 Ok(mutex) => mutex,
-                _ => return Err(MyError::MyDriverError(
-                                DriverError::PoisonedPoolMutex)),
+                _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
             };
 
             let mut id = None;
@@ -197,6 +253,13 @@ impl MyPool {
                              isolation_level: Option<IsolationLevel>,
                              readonly: Option<bool>) -> MyResult<Transaction> {
         (try!(self.get_conn())).pooled_start_transaction(consistent_snapshot, isolation_level, readonly)
+    }
+}
+
+impl fmt::Debug for MyPool {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let pool = (self.0).0.lock().unwrap();
+        write!(f, "MyPool {{ min: {}, max: {} }}", pool.min, pool.max)
     }
 }
 
@@ -254,11 +317,12 @@ pub struct MyPooledConn {
 
 impl Drop for MyPooledConn {
     fn drop(&mut self) {
-        let mut pool = self.pool.pool.lock().unwrap();
+        let mut pool = (self.pool.0).0.lock().unwrap();
         if pool.count > pool.min || self.conn.is_none() {
             pool.count -= 1;
         } else {
             pool.pool.push(self.conn.take().unwrap());
+            (self.pool.0).1.notify_one();
         }
     }
 }
@@ -381,6 +445,7 @@ mod test {
         use std::thread;
         use super::super::MyPool;
         use super::super::super::super::value::from_value;
+        use super::super::super::super::error::{MyError, DriverError};
         #[test]
         fn should_execute_queryes_on_MyPooledConn() {
             let pool = MyPool::new(get_opts()).unwrap();
@@ -397,6 +462,19 @@ mod test {
             for t in threads.into_iter() {
                 assert!(t.join().is_ok());
             }
+        }
+        #[test]
+        fn should_timeout_if_no_connections_available() {
+            let pool = MyPool::new_manual(0, 1, get_opts()).unwrap();
+            let conn1 = pool.try_get_conn(357).unwrap();
+            let conn2 = pool.try_get_conn(357);
+            assert!(conn2.is_err());
+            match conn2 {
+                Err(MyError::MyDriverError(DriverError::Timeout)) => assert!(true),
+                _ => assert!(false),
+            }
+            drop(conn1);
+            assert!(pool.try_get_conn(357).is_ok());
         }
         #[test]
         fn should_execute_statements_on_MyPooledConn() {
