@@ -925,155 +925,29 @@ impl ToRow for () {
     }
 }
 
-impl<A: IntoValue> ToRow for (A,) {
-    fn to_row(self) -> Vec<Value> {
-        let (a,) = self;
-        vec![a.into_value()]
-    }
+macro_rules! to_row_impl {
+    ($([$A:ident,$a:ident]),*) => (
+        impl<$($A: IntoValue,)*> ToRow for ($($A,)*) {
+            fn to_row(self) -> Vec<Value> {
+                let ($($a,)*) = self;
+                vec![$($a.into_value(),)*]
+            }
+        }
+    );
 }
 
-impl<A: IntoValue,
-     B: IntoValue> ToRow for (A, B) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b) = self;
-        vec![a.into_value(), b.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue> ToRow for (A, B, C) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c) = self;
-        vec![a.into_value(), b.into_value(), c.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue> ToRow for (A, B, C, D) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue,
-     E: IntoValue> ToRow for (A, B, C, D, E) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d, e) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue,
-     E: IntoValue,
-     F: IntoValue> ToRow for (A, B, C, D, E, F) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d, e, f) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue,
-     E: IntoValue,
-     F: IntoValue,
-     G: IntoValue> ToRow for (A, B, C, D, E, F, G) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d, e, f, g) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue,
-     E: IntoValue,
-     F: IntoValue,
-     G: IntoValue,
-     H: IntoValue> ToRow for (A, B, C, D, E, F, G, H) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d, e, f, g, h) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue,
-     E: IntoValue,
-     F: IntoValue,
-     G: IntoValue,
-     H: IntoValue,
-     I: IntoValue> ToRow for (A, B, C, D, E, F, G, H, I) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d, e, f, g, h, i) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value(), i.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue,
-     E: IntoValue,
-     F: IntoValue,
-     G: IntoValue,
-     H: IntoValue,
-     I: IntoValue,
-     J: IntoValue> ToRow for (A, B, C, D, E, F, G, H, I, J) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d, e, f, g, h, i, j) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value(), i.into_value(), j.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue,
-     E: IntoValue,
-     F: IntoValue,
-     G: IntoValue,
-     H: IntoValue,
-     I: IntoValue,
-     J: IntoValue,
-     K: IntoValue> ToRow for (A, B, C, D, E, F, G, H, I, J, K) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d, e, f, g, h, i, j, k) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value(), i.into_value(), j.into_value(), k.into_value()]
-    }
-}
-
-impl<A: IntoValue,
-     B: IntoValue,
-     C: IntoValue,
-     D: IntoValue,
-     E: IntoValue,
-     F: IntoValue,
-     G: IntoValue,
-     H: IntoValue,
-     I: IntoValue,
-     J: IntoValue,
-     K: IntoValue,
-     L: IntoValue> ToRow for (A, B, C, D, E, F, G, H, I, J, K, L) {
-    fn to_row(self) -> Vec<Value> {
-        let (a, b, c, d, e, f, g, h, i, j, k, l) = self;
-        vec![a.into_value(), b.into_value(), c.into_value(), d.into_value(), e.into_value(), f.into_value(), g.into_value(), h.into_value(), i.into_value(), j.into_value(), k.into_value(), l.into_value()]
-    }
-}
+to_row_impl!([A,a]);
+to_row_impl!([A,a],[B,b]);
+to_row_impl!([A,a],[B,b],[C,c]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j],[K,k]);
+to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j],[K,k],[L,l]);
 
 pub trait ToValue {
     fn to_value(&self) -> Value;
