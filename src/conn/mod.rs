@@ -40,8 +40,11 @@ use super::error::MyResult;
 use super::error::DriverError::SslNotSupported;
 use super::scramble::scramble;
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
-use super::value::Value;
-use super::value::{ToRow, from_value_opt};
+use super::value::{
+    Params,
+    Value,
+    from_value_opt
+};
 #[cfg(any(feature = "pipe", feature = "socket"))]
 use super::value::from_value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
@@ -111,7 +114,7 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`MyConn#prep_exec`](struct.MyConn.html#method.prep_exec).
-    pub fn prep_exec<'c, A: AsRef<str> + 'c, T: ToRow>(&'c mut self, query: A, params: T) -> MyResult<QueryResult<'c>> {
+    pub fn prep_exec<'c, A: AsRef<str> + 'c, T: Into<Params>>(&'c mut self, query: A, params: T) -> MyResult<QueryResult<'c>> {
         self.conn.prep_exec(query, params)
     }
 
@@ -263,8 +266,7 @@ impl<'a> Stmt<'a> {
         }
     }
 
-    /// Executes prepared statement with an arguments passed as a
-    /// [`ToRow`](../value/trait.ToRow.html) implementor.
+    /// Executes prepared statement with parameters passed as a [`Into<Params>`] implementor.
     ///
     /// ```rust
     /// # use mysql::conn::pool;
@@ -332,13 +334,12 @@ impl<'a> Stmt<'a> {
     ///     }
     /// }
     /// ```
-    pub fn execute<'s, T: ToRow>(&'s mut self, params: T) -> MyResult<QueryResult<'s>> {
+    pub fn execute<'s, T: Into<Params>>(&'s mut self, params: T) -> MyResult<QueryResult<'s>> {
         self.conn.execute(&self.stmt, params)
     }
 
-    fn prep_exec<T: ToRow>(mut self, params: T) -> MyResult<QueryResult<'a>> {
-        let params = params.to_row();
-        let (columns, ok_packet) = try!(self.conn._execute(&self.stmt, &params));
+    fn prep_exec<T: Into<Params>>(mut self, params: T) -> MyResult<QueryResult<'a>> {
+        let (columns, ok_packet) = try!(self.conn._execute(&self.stmt, params.into()));
         Ok(QueryResult::new(ResultConnRef::ViaStmt(self), columns, ok_packet, true))
     }
 }
@@ -1087,63 +1088,70 @@ impl MyConn {
         Ok(())
     }
 
-    fn _execute(&mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
-        if stmt.num_params != params.len() as u16 {
-            return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, params.len())));
-        }
+    fn _execute(&mut self, stmt: &InnerStmt, params: Params) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
         let mut writer: io::Cursor<_>;
-        match stmt.params {
-            Some(ref sparams) => {
-                let (bitmap, values, large_ids) =
-                    try!(Value::to_bin_payload(sparams.as_ref(),
-                                               params,
-                                               self.max_allowed_packet));
-                match large_ids {
-                    Some(ids) => try!(self.send_long_data(stmt, params, ids)),
-                    _ => ()
+        match params {
+            Params::Empty => {
+                if stmt.num_params != 0 {
+                    return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, 0)));
                 }
-                writer = io::Cursor::new(Vec::with_capacity(9 + bitmap.len() + 1 +
-                                                            params.len() * 2 +
-                                                            values.len()));
-                try!(writer.write_u32::<LE>(stmt.statement_id));
-                try!(writer.write_u8(0u8));
-                try!(writer.write_u32::<LE>(1u32));
-                try!(writer.write_all(bitmap.as_ref()));
-                try!(writer.write_u8(1u8));
-                for i in 0..params.len() {
-                    match params[i] {
-                        NULL => try!(writer.write_all(
-                            &[sparams[i].column_type as u8, 0u8])),
-                        Bytes(..) => try!(
-                            writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0u8])),
-                        Int(..) => try!(
-                            writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0u8])),
-                        UInt(..) => try!(
-                            writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128u8])),
-                        Float(..) => try!(
-                            writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0u8])),
-                        Date(..) => try!(
-                            writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0u8])),
-                        Time(..) => try!(
-                            writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0u8]))
-                    }
-                }
-                try!(writer.write_all(values.as_ref()));
-            },
-            None => {
                 writer = io::Cursor::new(Vec::with_capacity(4 + 1 + 4));
                 try!(writer.write_u32::<LE>(stmt.statement_id));
                 try!(writer.write_u8(0u8));
                 try!(writer.write_u32::<LE>(1u32));
-            }
+            },
+            Params::Positional(params) => {
+                if stmt.num_params != params.len() as u16 {
+                    return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, params.len())));
+                }
+                if let Some(ref sparams) = stmt.params {
+                    let (bitmap, values, large_ids) =
+                        try!(Value::to_bin_payload(sparams.as_ref(),
+                                                   &params,
+                                                   self.max_allowed_packet));
+                    match large_ids {
+                        Some(ids) => try!(self.send_long_data(stmt, &params, ids)),
+                        _ => ()
+                    }
+                    writer = io::Cursor::new(Vec::with_capacity(9 + bitmap.len() + 1 +
+                                                                params.len() * 2 +
+                                                                values.len()));
+                    try!(writer.write_u32::<LE>(stmt.statement_id));
+                    try!(writer.write_u8(0u8));
+                    try!(writer.write_u32::<LE>(1u32));
+                    try!(writer.write_all(bitmap.as_ref()));
+                    try!(writer.write_u8(1u8));
+                    for i in 0..params.len() {
+                        match params[i] {
+                            NULL => try!(writer.write_all(
+                                &[sparams[i].column_type as u8, 0u8])),
+                            Bytes(..) => try!(
+                                writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0u8])),
+                            Int(..) => try!(
+                                writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0u8])),
+                            UInt(..) => try!(
+                                writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128u8])),
+                            Float(..) => try!(
+                                writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0u8])),
+                            Date(..) => try!(
+                                writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0u8])),
+                            Time(..) => try!(
+                                writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0u8]))
+                        }
+                    }
+                    try!(writer.write_all(values.as_ref()));
+                } else {
+                    unreachable!();
+                }
+            },
+            Params::Named(_) => unimplemented!(),
         }
         try!(self.write_command_data(Command::COM_STMT_EXECUTE, writer.into_inner().borrow()));
         self.handle_result_set()
     }
 
-    fn execute<'a, T: ToRow>(&'a mut self, stmt: &InnerStmt, params: T) -> MyResult<QueryResult<'a>> {
-        let params = params.to_row();
-        match self._execute(stmt, params.as_ref()) {
+    fn execute<'a, T: Into<Params>>(&'a mut self, stmt: &InnerStmt, params: T) -> MyResult<QueryResult<'a>> {
+        match self._execute(stmt, params.into()) {
             Ok((columns, ok_packet)) => {
                 Ok(QueryResult::new(ResultConnRef::ViaConnRef(self), columns, ok_packet, true))
             },
@@ -1347,8 +1355,8 @@ impl MyConn {
     /// This call will take statement from cache if has been prepared on this connection.
     pub fn prep_exec<'a, A, T>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
     where A: AsRef<str> + 'a,
-          T: ToRow {
-        try!(self.prepare(query)).prep_exec(params.to_row())
+          T: Into<Params> {
+        try!(self.prepare(query)).prep_exec(params.into())
     }
 
     fn more_results_exists(&self) -> bool {

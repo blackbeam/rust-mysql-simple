@@ -7,7 +7,7 @@ use time::{Duration, SteadyTime};
 use super::IsolationLevel;
 use super::Transaction;
 use super::super::error::{MyError, DriverError};
-use super::super::value::ToRow;
+use super::super::value::Params;
 use super::{MyConn, Opts, Stmt, QueryResult};
 use super::super::error::{MyResult};
 
@@ -242,7 +242,7 @@ impl MyPool {
     /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`.
     ///
     /// It will try to find connection which has this statement cached.
-    pub fn prep_exec<'a, A: AsRef<str>, T: ToRow>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+    pub fn prep_exec<'a, A: AsRef<str>, T: Into<Params>>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>> {
         let conn = try!(self.get_conn_by_stmt(query.as_ref()));
         conn.pooled_prep_exec(query, params)
     }
@@ -342,7 +342,7 @@ impl MyPooledConn {
 
     /// Redirects to
     /// [`MyConn#prep_exec`](../struct.MyConn.html#method.prep_exec).
-    pub fn prep_exec<'a, A: AsRef<str> + 'a, T: ToRow>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+    pub fn prep_exec<'a, A: AsRef<str> + 'a, T: Into<Params>>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
         self.conn.as_mut().unwrap().prep_exec(query, params)
     }
 
@@ -381,7 +381,10 @@ impl MyPooledConn {
         }
     }
 
-    fn pooled_prep_exec<'a, A: AsRef<str>, T: ToRow>(mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+    fn pooled_prep_exec<'a, A, T>(mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
+    where A: AsRef<str>,
+          T: Into<Params>
+    {
         let stmt = try!(self.as_mut()._prepare(query.as_ref()));
         let stmt = Stmt::new_pooled(stmt, self);
         stmt.prep_exec(params)

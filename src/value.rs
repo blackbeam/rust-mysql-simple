@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
+use std::collections::HashMap;
 use std::io;
 use std::io::Write as stdWrite;
 use std::time::Duration;
@@ -893,61 +894,75 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
     }
 }
 
-pub trait ToRow {
-    fn to_row(self) -> Vec<Value>;
+pub enum Params {
+    Empty,
+    Named(HashMap<String, Value>),
+    Positional(Vec<Value>),
 }
 
-impl<'a, T: ToRow + Clone> ToRow for &'a T {
-    fn to_row(self) -> Vec<Value> {
-        self.clone().to_row()
+impl<'a, T: Into<Params> + Clone> From<&'a T> for Params {
+    fn from(x: &'a T) -> Params {
+        x.clone().into()
     }
 }
 
-impl ToRow for Vec<Value> {
-    fn to_row(self) -> Vec<Value> {
-        self
-    }
-}
-
-impl<'a> ToRow for &'a [&'a ToValue] {
-    fn to_row(self) -> Vec<Value> {
-        let mut row: Vec<Value> = Vec::with_capacity(self.len());
-        for v in self.into_iter() {
-            row.push(v.to_value());
+impl<T: IntoValue> From<Vec<T>> for Params {
+    fn from(x: Vec<T>) -> Params {
+        let mut raw_params = Vec::with_capacity(x.len());
+        for v in x.into_iter() {
+            raw_params.push(v.into_value());
         }
-        row
+        if raw_params.len() == 0 {
+            Params::Empty
+        } else {
+            Params::Positional(raw_params)
+        }
     }
 }
 
-impl ToRow for () {
-    fn to_row(self) -> Vec<Value> {
-        Vec::new()
+impl<'a> From<&'a [&'a ToValue]> for Params {
+    fn from(x: &'a [&'a ToValue]) -> Params {
+        let mut raw_params = Vec::with_capacity(x.len());
+        for v in x.into_iter() {
+            raw_params.push(v.to_value());
+        }
+        if raw_params.len() == 0 {
+            Params::Empty
+        } else {
+            Params::Positional(raw_params)
+        }
     }
 }
 
-macro_rules! to_row_impl {
+impl From<()> for Params {
+    fn from(_: ()) -> Params {
+        Params::Empty
+    }
+}
+
+macro_rules! into_params_impl {
     ($([$A:ident,$a:ident]),*) => (
-        impl<$($A: IntoValue,)*> ToRow for ($($A,)*) {
-            fn to_row(self) -> Vec<Value> {
-                let ($($a,)*) = self;
-                vec![$($a.into_value(),)*]
+        impl<$($A: IntoValue,)*> From<($($A,)*)> for Params {
+            fn from(x: ($($A,)*)) -> Params {
+                let ($($a,)*) = x;
+                Params::Positional(vec![$($a.into_value(),)*])
             }
         }
     );
 }
 
-to_row_impl!([A,a]);
-to_row_impl!([A,a],[B,b]);
-to_row_impl!([A,a],[B,b],[C,c]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j],[K,k]);
-to_row_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j],[K,k],[L,l]);
+into_params_impl!([A,a]);
+into_params_impl!([A,a],[B,b]);
+into_params_impl!([A,a],[B,b],[C,c]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d],[E,e]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j],[K,k]);
+into_params_impl!([A,a],[B,b],[C,c],[D,d],[E,e],[F,f],[G,g],[H,h],[I,i],[J,j],[K,k],[L,l]);
 
 pub trait ToValue {
     fn to_value(&self) -> Value;
