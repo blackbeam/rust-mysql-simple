@@ -102,13 +102,13 @@ pub struct MyPool(Arc<(Mutex<MyInnerPool>, Condvar)>);
 
 impl MyPool {
     /// Creates new pool with `min = 10` and `max = 100`.
-    pub fn new(opts: Opts) -> MyResult<MyPool> {
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyPool> {
         MyPool::new_manual(10, 100, opts)
     }
 
     /// Same as `new` but you can set `min` and `max`.
-    pub fn new_manual(min: usize, max: usize, opts: Opts) -> MyResult<MyPool> {
-        let pool = try!(MyInnerPool::new(min, max, opts));
+    pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> MyResult<MyPool> {
+        let pool = try!(MyInnerPool::new(min, max, opts.into()));
         Ok(MyPool(Arc::new((Mutex::new(pool), Condvar::new()))))
     }
 
