@@ -95,7 +95,7 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    fn new_pooled(conn: pool::MyPooledConn) -> Transaction<'a> {
+    fn new_pooled(conn: pool::PooledConn) -> Transaction<'a> {
         Transaction {
             conn: ConnRef::ViaPooledConn(conn),
             committed: false,
@@ -186,7 +186,7 @@ impl InnerStmt {
 #[derive(Debug)]
 enum ConnRef<'a> {
     ViaConnRef(&'a mut Conn),
-    ViaPooledConn(pool::MyPooledConn),
+    ViaPooledConn(pool::PooledConn),
 }
 
 impl<'a> Deref for ConnRef<'a> {
@@ -225,7 +225,7 @@ impl<'a> Stmt<'a> {
         }
     }
 
-    fn new_pooled(stmt: InnerStmt, pooled_conn: pool::MyPooledConn) -> Stmt<'a> {
+    fn new_pooled(stmt: InnerStmt, pooled_conn: pool::PooledConn) -> Stmt<'a> {
         Stmt {
             stmt: stmt,
             conn: ConnRef::ViaPooledConn(pooled_conn),

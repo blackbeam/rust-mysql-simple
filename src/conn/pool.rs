@@ -49,7 +49,7 @@ impl MyInnerPool {
     }
 }
 
-/// `Pool` serves to provide you with a [`MyPooledConn`](struct.MyPooledConn.html)'s.
+/// `Pool` serves to provide you with a [`PooledConn`](struct.PooledConn.html)'s.
 /// However you can prepare statements directly on `Pool` without
 /// invoking [`Pool::get_conn`](struct.Pool.html#method.get_conn).
 ///
@@ -96,7 +96,7 @@ impl MyInnerPool {
 /// ```
 ///
 /// For more info on how to work with mysql connection please look at
-/// [`MyPooledConn`](struct.MyPooledConn.html) documentation.
+/// [`PooledConn`](struct.PooledConn.html) documentation.
 #[derive(Clone)]
 pub struct Pool(Arc<(Mutex<MyInnerPool>, Condvar)>);
 
@@ -112,13 +112,13 @@ impl Pool {
         Ok(Pool(Arc::new((Mutex::new(pool), Condvar::new()))))
     }
 
-    /// Gives you a [`MyPooledConn`](struct.MyPooledConn.html).
+    /// Gives you a [`PooledConn`](struct.PooledConn.html).
     ///
     /// `Pool` will check that connection is alive via
     /// [`Conn::ping`](../struct.Conn.html#method.ping) and will
     /// call [`Conn::reset`](../struct.Conn.html#method.reset) if
     /// necessary.
-    pub fn get_conn(&self) -> MyResult<MyPooledConn> {
+    pub fn get_conn(&self) -> MyResult<PooledConn> {
         let &(ref inner_pool, ref condvar) = &*self.0;
         let mut pool = match inner_pool.lock() {
             Ok(mutex) => mutex,
@@ -149,7 +149,7 @@ impl Pool {
             try!(conn.reset());
         }
 
-        Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
+        Ok(PooledConn {pool: self.clone(), conn: Some(conn)})
     }
 
     /// Will try to get connection for a duration of `timeout_ms` milliseconds.
@@ -157,7 +157,7 @@ impl Pool {
     /// # Failure
     /// This function will return `MyError::MyDriverError(DriverError::Timeout)` if timeout was
     /// reached while waiting for new connection to become available.
-    pub fn try_get_conn(&self, timeout_ms: u32) -> MyResult<MyPooledConn> {
+    pub fn try_get_conn(&self, timeout_ms: u32) -> MyResult<PooledConn> {
         let start = SteadyTime::now();
         let timeout = Duration::milliseconds(timeout_ms as i64);
         let std_timeout = StdDuration::from_millis(timeout_ms as u64);
@@ -195,10 +195,10 @@ impl Pool {
             try!(conn.reset());
         }
 
-        Ok(MyPooledConn {pool: self.clone(), conn: Some(conn)})
+        Ok(PooledConn {pool: self.clone(), conn: Some(conn)})
     }
 
-    fn get_conn_by_stmt<T: AsRef<str>>(&self, query: T) -> MyResult<MyPooledConn> {
+    fn get_conn_by_stmt<T: AsRef<str>>(&self, query: T) -> MyResult<PooledConn> {
         let conn = {
             let &(ref inner_pool, _) = &*self.0;
             let mut pool = match inner_pool.lock() {
@@ -219,7 +219,7 @@ impl Pool {
                 if !conn.ping() {
                     try!(conn.reset());
                 }
-                Some(MyPooledConn {pool: self.clone(), conn: Some(conn)})
+                Some(PooledConn {pool: self.clone(), conn: Some(conn)})
             } else {
                 None
             }
@@ -309,12 +309,12 @@ impl fmt::Debug for Pool {
 /// For more info on how to work with query results please look at
 /// [`QueryResult`](../struct.QueryResult.html) documentation.
 #[derive(Debug)]
-pub struct MyPooledConn {
+pub struct PooledConn {
     pool: Pool,
     conn: Option<Conn>
 }
 
-impl Drop for MyPooledConn {
+impl Drop for PooledConn {
     fn drop(&mut self) {
         let mut pool = (self.pool.0).0.lock().unwrap();
         if pool.count > pool.min || self.conn.is_none() {
@@ -326,7 +326,7 @@ impl Drop for MyPooledConn {
     }
 }
 
-impl MyPooledConn {
+impl PooledConn {
     /// Redirects to
     /// [`Conn#query`](../struct.Conn.html#method.query).
     pub fn query<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<QueryResult<'a>> {
@@ -449,7 +449,7 @@ mod test {
         use super::super::super::super::value::from_value;
         use super::super::super::super::error::{MyError, DriverError};
         #[test]
-        fn should_execute_queryes_on_MyPooledConn() {
+        fn should_execute_queryes_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {
@@ -479,7 +479,7 @@ mod test {
             assert!(pool.try_get_conn(357).is_ok());
         }
         #[test]
-        fn should_execute_statements_on_MyPooledConn() {
+        fn should_execute_statements_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {
@@ -575,7 +575,7 @@ mod test {
             });
         }
         #[test]
-        fn should_start_transaction_on_MyPooledConn() {
+        fn should_start_transaction_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
