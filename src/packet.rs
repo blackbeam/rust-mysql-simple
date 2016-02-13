@@ -106,7 +106,7 @@ impl EOFPacket {
 /// (major, minor, micro) mysql server version.
 pub type ServerVersion = (u16, u16, u16);
 
-fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
+fn parse_version(bytes: &[u8]) -> error::Result<ServerVersion> {
     let ver_str = String::from_utf8_lossy(bytes).into_owned();
     let version_re = Regex::new(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)").unwrap();
     version_re.captures(&ver_str[..])
@@ -138,7 +138,7 @@ pub struct HandshakePacket {
 }
 
 impl HandshakePacket {
-    pub fn from_payload(pld: &[u8]) -> error::MyResult<HandshakePacket> {
+    pub fn from_payload(pld: &[u8]) -> error::Result<HandshakePacket> {
         let mut length_of_auth_plugin_data = 0i16;
         let mut auth_plugin_data: Vec<u8> = Vec::with_capacity(32);
         let mut auth_plugin_name: Vec<u8> = Vec::with_capacity(32);

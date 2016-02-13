@@ -1,7 +1,8 @@
-use std::io;
+use std::error;
 use std::fmt;
 use std::fmt::Display;
-use std::error;
+use std::io;
+use std::result;
 
 use byteorder::Error as BoError;
 #[cfg(feature = "openssl")]
@@ -218,7 +219,7 @@ impl fmt::Debug for DriverError {
     }
 }
 
-pub type MyResult<T> = Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 /// Server error codes (u16)
 #[allow(non_camel_case_types)]

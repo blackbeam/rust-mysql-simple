@@ -18,7 +18,7 @@ use super::consts;
 use super::conn::{Column};
 use super::error::{
     Error,
-    MyResult,
+    Result as MyResult,
 };
 use super::io::{Write, Read};
 use super::conn::Row;

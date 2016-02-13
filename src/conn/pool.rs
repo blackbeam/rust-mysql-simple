@@ -9,10 +9,10 @@ use super::Transaction;
 use super::super::error::{Error, DriverError};
 use super::super::value::Params;
 use super::{Conn, Opts, Stmt, QueryResult};
-use super::super::error::{MyResult};
+use super::super::error::Result as MyResult;
 
 #[derive(Debug)]
-struct MyInnerPool {
+struct InnerPool {
     opts: Opts,
     pool: Vec<Conn>,
     min: usize,
@@ -20,12 +20,12 @@ struct MyInnerPool {
     count: usize
 }
 
-impl MyInnerPool {
-    fn new(min: usize, max: usize, opts: Opts) -> MyResult<MyInnerPool> {
+impl InnerPool {
+    fn new(min: usize, max: usize, opts: Opts) -> MyResult<InnerPool> {
         if min > max || max == 0 {
             return Err(Error::DriverError(DriverError::InvalidPoolConstraints));
         }
-        let mut pool = MyInnerPool {
+        let mut pool = InnerPool {
             opts: opts,
             pool: Vec::with_capacity(max),
             max: max,
@@ -98,7 +98,7 @@ impl MyInnerPool {
 /// For more info on how to work with mysql connection please look at
 /// [`PooledConn`](struct.PooledConn.html) documentation.
 #[derive(Clone)]
-pub struct Pool(Arc<(Mutex<MyInnerPool>, Condvar)>);
+pub struct Pool(Arc<(Mutex<InnerPool>, Condvar)>);
 
 impl Pool {
     /// Creates new pool with `min = 10` and `max = 100`.
@@ -108,7 +108,7 @@ impl Pool {
 
     /// Same as `new` but you can set `min` and `max`.
     pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> MyResult<Pool> {
-        let pool = try!(MyInnerPool::new(min, max, opts.into()));
+        let pool = try!(InnerPool::new(min, max, opts.into()));
         Ok(Pool(Arc::new((Mutex::new(pool), Condvar::new()))))
     }
 

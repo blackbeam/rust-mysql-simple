@@ -35,7 +35,7 @@ use super::error::DriverError::{
     SetupError,
     ReadOnlyTransNotSupported,
 };
-use super::error::MyResult;
+use super::error::Result as MyResult;
 #[cfg(feature = "ssl")]
 use super::error::DriverError::SslNotSupported;
 use super::scramble::scramble;

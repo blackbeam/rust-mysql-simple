@@ -12,7 +12,7 @@ use super::consts::ColumnType;
 use super::error::Error::DriverError;
 use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
-use super::error::MyResult;
+use super::error::Result as MyResult;
 
 #[cfg(feature = "openssl")]
 use openssl::{ssl, x509};
