@@ -16,7 +16,7 @@ pub enum Error {
     MySqlError(ErrPacket),
     DriverError(DriverError),
     #[cfg(feature = "openssl")]
-    MySslError(SslError),
+    SslError(SslError),
     FromValueError(Value),
     FromRowError(Row),
 }
@@ -28,7 +28,7 @@ impl error::Error for Error {
             Error::IoError(_) => "I/O Error",
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
-            Error::MySslError(_) => "ssl error",
+            Error::SslError(_) => "ssl error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
         }
@@ -76,7 +76,7 @@ impl From<DriverError> for Error {
 #[cfg(feature = "openssl")]
 impl From<SslError> for Error {
     fn from(err: SslError) -> Error {
-        Error::MySslError(err)
+        Error::SslError(err)
     }
 }
 
@@ -87,7 +87,7 @@ impl fmt::Display for Error {
             Error::IoError(ref io_err) => io_err.fmt(f),
             Error::MySqlError(ref err_packet) => err_packet.fmt(f),
             Error::DriverError(ref driver_err) => driver_err.fmt(f),
-            Error::MySslError(ref ssl_error) => ssl_error.fmt(f),
+            Error::SslError(ref ssl_error) => ssl_error.fmt(f),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
@@ -114,7 +114,7 @@ impl fmt::Debug for Error {
             Error::IoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
             Error::DriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
-            Error::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
+            Error::SslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
             Error::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
             Error::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
         }
