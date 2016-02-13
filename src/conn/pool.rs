@@ -6,7 +6,7 @@ use time::{Duration, SteadyTime};
 
 use super::IsolationLevel;
 use super::Transaction;
-use super::super::error::{MyError, DriverError};
+use super::super::error::{Error, DriverError};
 use super::super::value::Params;
 use super::{Conn, Opts, Stmt, QueryResult};
 use super::super::error::{MyResult};
@@ -23,7 +23,7 @@ struct MyInnerPool {
 impl MyInnerPool {
     fn new(min: usize, max: usize, opts: Opts) -> MyResult<MyInnerPool> {
         if min > max || max == 0 {
-            return Err(MyError::MyDriverError(DriverError::InvalidPoolConstraints));
+            return Err(Error::MyDriverError(DriverError::InvalidPoolConstraints));
         }
         let mut pool = MyInnerPool {
             opts: opts,
@@ -122,7 +122,7 @@ impl Pool {
         let &(ref inner_pool, ref condvar) = &*self.0;
         let mut pool = match inner_pool.lock() {
             Ok(mutex) => mutex,
-            _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
+            _ => return Err(Error::MyDriverError(DriverError::PoisonedPoolMutex)),
         };
 
         loop {
@@ -135,7 +135,7 @@ impl Pool {
                 } else {
                     pool = match condvar.wait(pool) {
                         Ok(mutex) => mutex,
-                        _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
+                        _ => return Err(Error::MyDriverError(DriverError::PoisonedPoolMutex)),
                     }
                 }
             } else {
@@ -155,7 +155,7 @@ impl Pool {
     /// Will try to get connection for a duration of `timeout_ms` milliseconds.
     ///
     /// # Failure
-    /// This function will return `MyError::MyDriverError(DriverError::Timeout)` if timeout was
+    /// This function will return `Error::MyDriverError(DriverError::Timeout)` if timeout was
     /// reached while waiting for new connection to become available.
     pub fn try_get_conn(&self, timeout_ms: u32) -> MyResult<PooledConn> {
         let start = SteadyTime::now();
@@ -165,7 +165,7 @@ impl Pool {
         let &(ref inner_pool, ref condvar) = &*self.0;
         let mut pool = match inner_pool.lock() {
             Ok(mutex) => mutex,
-            _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
+            _ => return Err(Error::MyDriverError(DriverError::PoisonedPoolMutex)),
         };
 
         loop {
@@ -181,7 +181,7 @@ impl Pool {
                     }
                     pool = match condvar.wait_timeout(pool, std_timeout) {
                         Ok((mutex, _)) => mutex,
-                        _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
+                        _ => return Err(Error::MyDriverError(DriverError::PoisonedPoolMutex)),
                     }
                 }
             } else {
@@ -203,7 +203,7 @@ impl Pool {
             let &(ref inner_pool, _) = &*self.0;
             let mut pool = match inner_pool.lock() {
                 Ok(mutex) => mutex,
-                _ => return Err(MyError::MyDriverError(DriverError::PoisonedPoolMutex)),
+                _ => return Err(Error::MyDriverError(DriverError::PoisonedPoolMutex)),
             };
 
             let mut id = None;
@@ -447,7 +447,7 @@ mod test {
         use std::thread;
         use super::super::Pool;
         use super::super::super::super::value::from_value;
-        use super::super::super::super::error::{MyError, DriverError};
+        use super::super::super::super::error::{Error, DriverError};
         #[test]
         fn should_execute_queryes_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
@@ -472,7 +472,7 @@ mod test {
             let conn2 = pool.try_get_conn(357);
             assert!(conn2.is_err());
             match conn2 {
-                Err(MyError::MyDriverError(DriverError::Timeout)) => assert!(true),
+                Err(Error::MyDriverError(DriverError::Timeout)) => assert!(true),
                 _ => assert!(false),
             }
             drop(conn1);

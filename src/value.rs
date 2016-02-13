@@ -17,7 +17,7 @@ use time::{
 use super::consts;
 use super::conn::{Column};
 use super::error::{
-    MyError,
+    Error,
     MyResult,
 };
 use super::io::{Write, Read};
@@ -278,7 +278,7 @@ impl Value {
 macro_rules! rollback {
     ($x:ident) => (match $x {
         Ok(x) => x.rollback(),
-        Err(MyError::FromValueError(x)) => x,
+        Err(Error::FromValueError(x)) => x,
         _ => unreachable!(),
     });
 }
@@ -307,14 +307,14 @@ macro_rules! take_or_place {
             Some(value) => {
                 match $t::get_intermediate(value) {
                     Ok(ir) => ir,
-                    Err(MyError::FromValueError(value)) => {
+                    Err(Error::FromValueError(value)) => {
                         $row.place($index, value);
-                        return Err(MyError::FromRowError($row));
+                        return Err(Error::FromRowError($row));
                     },
                     _ => unreachable!(),
                 }
             },
-            None => return Err(MyError::FromRowError($row)),
+            None => return Err(Error::FromRowError($row)),
         }
     );
     ($row:expr, $index:expr, $t:ident, $( [$idx:expr, $ir:expr] ),*) => (
@@ -322,15 +322,15 @@ macro_rules! take_or_place {
             Some(value) => {
                 match $t::get_intermediate(value) {
                     Ok(ir) => ir,
-                    Err(MyError::FromValueError(value)) => {
+                    Err(Error::FromValueError(value)) => {
                         $($row.place($idx, $ir.rollback());)*
                         $row.place($index, value);
-                        return Err(MyError::FromRowError($row));
+                        return Err(Error::FromRowError($row));
                     },
                     _ => unreachable!(),
                 }
             },
-            None => return Err(MyError::FromRowError($row)),
+            None => return Err(Error::FromRowError($row)),
         }
     );
 }
@@ -346,7 +346,7 @@ where Ir: ConvIr<T>,
         if row.len() == 1 {
             Ok(take_or_place!(row, 0, T).commit())
         } else {
-            Err(MyError::FromRowError(row))
+            Err(Error::FromRowError(row))
         }
     }
 }
@@ -373,7 +373,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
     }
     fn from_row_opt(mut row: Row) -> MyResult<(T1, T2)> {
         if row.len() != 2 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -393,7 +393,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
     }
     fn from_row_opt(mut row: Row) -> MyResult<(T1, T2, T3)> {
         if row.len() != 3 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -420,7 +420,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
     }
     fn from_row_opt(mut row: Row) -> MyResult<(T1, T2, T3, T4)> {
         if row.len() != 4 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -451,7 +451,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
     }
     fn from_row_opt(mut row: Row) -> MyResult<(T1, T2, T3, T4, T5)> {
         if row.len() != 5 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -488,7 +488,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
         MyResult<(T1, T2, T3, T4, T5, T6)>
     {
         if row.len() != 6 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -529,7 +529,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
         MyResult<(T1, T2, T3, T4, T5, T6, T7)>
     {
         if row.len() != 7 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -575,7 +575,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8)>
     {
         if row.len() != 8 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -630,7 +630,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9)>
     {
         if row.len() != 9 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -693,7 +693,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)>
     {
         if row.len() != 10 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -764,7 +764,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)>
     {
         if row.len() != 11 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -843,7 +843,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
         MyResult<(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)>
     {
         if row.len() != 12 {
-            return Err(MyError::FromRowError(row));
+            return Err(Error::FromRowError(row));
         }
         let ir1 = take_or_place!(row, 0, T1);
         let ir2 = take_or_place!(row, 1, T2, [0, ir1]);
@@ -1150,9 +1150,9 @@ pub trait ConvIr<T>: Sized {
 ///         match v {
 ///             Value::Bytes(bytes) => match from_utf8(&*bytes) {
 ///                 Ok(_) => Ok(StringIr { bytes: bytes }),
-///                 Err(_) => Err(MyError::FromValueError(Value::Bytes(bytes))),
+///                 Err(_) => Err(Error::FromValueError(Value::Bytes(bytes))),
 ///             },
-///             v => Err(MyError::FromValueError(v)),
+///             v => Err(Error::FromValueError(v)),
 ///         }
 ///     }
 ///     fn commit(self) -> String {
@@ -1175,13 +1175,13 @@ pub trait FromValue: Sized {
         Self::from_value_opt(v).ok().expect("Could not retrieve Self from Value")
     }
 
-    /// Will return `Err(MyError::FromValueError(v))` if could not convert `v` to `Self`.
+    /// Will return `Err(Error::FromValueError(v))` if could not convert `v` to `Self`.
     fn from_value_opt(v: Value) -> MyResult<Self> {
         let ir = try!(Self::Intermediate::new(v));
         Ok(ir.commit())
     }
 
-    /// Will return `Err(MyError::FromValueError(v))` if `v` is not convertible to `Self`.
+    /// Will return `Err(Error::FromValueError(v))` if `v` is not convertible to `Self`.
     fn get_intermediate(v: Value) -> MyResult<Self::Intermediate> {
         Self::Intermediate::new(v)
     }
@@ -1231,7 +1231,7 @@ macro_rules! impl_from_value_num_2 {
                                 output: x as $t,
                             })
                         } else {
-                            Err(MyError::FromValueError(Value::Int(x)))
+                            Err(Error::FromValueError(Value::Int(x)))
                         }
                     },
                     Value::UInt(x) if x <= ::std::$t::MAX as u64 => Ok(ParseIr {
@@ -1247,10 +1247,10 @@ macro_rules! impl_from_value_num_2 {
                                 value: Value::Bytes(bytes),
                                 output: x,
                             }),
-                            None => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                            None => Err(Error::FromValueError(Value::Bytes(bytes))),
                         }
                     },
-                    v => Err(MyError::FromValueError(v)),
+                    v => Err(Error::FromValueError(v)),
                 }
             }
             fn commit(self) -> $t {
@@ -1286,8 +1286,8 @@ where T: FromValue<Intermediate=Ir>,
                         value: None,
                         ir: Some(ir),
                     }),
-                    Err(MyError::FromValueError(v)) => {
-                        Err(MyError::FromValueError(v))
+                    Err(Error::FromValueError(v)) => {
+                        Err(Error::FromValueError(v))
                     },
                     _ => unreachable!(),
                 }
@@ -1353,9 +1353,9 @@ impl ConvIr<String> for StringIr {
         match v {
             Value::Bytes(bytes) => match from_utf8(&*bytes) {
                 Ok(_) => Ok(StringIr { bytes: bytes }),
-                Err(_) => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                Err(_) => Err(Error::FromValueError(Value::Bytes(bytes))),
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> String {
@@ -1384,10 +1384,10 @@ impl ConvIr<i64> for ParseIr<i64> {
                         value: Value::Bytes(bytes),
                         output: x,
                     }),
-                    None => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                    None => Err(Error::FromValueError(Value::Bytes(bytes))),
                 }
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> i64 {
@@ -1416,10 +1416,10 @@ impl ConvIr<u64> for ParseIr<u64> {
                         value: Value::Bytes(bytes),
                         output: x,
                     }),
-                    _ => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                    _ => Err(Error::FromValueError(Value::Bytes(bytes))),
                 }
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> u64 {
@@ -1446,10 +1446,10 @@ impl ConvIr<f32> for ParseIr<f32> {
                         value: Value::Bytes(bytes),
                         output: x,
                     }),
-                    None => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                    None => Err(Error::FromValueError(Value::Bytes(bytes))),
                 }
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> f32 {
@@ -1474,10 +1474,10 @@ impl ConvIr<f64> for ParseIr<f64> {
                         value: Value::Bytes(bytes),
                         output: x,
                     }),
-                    _ => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                    _ => Err(Error::FromValueError(Value::Bytes(bytes))),
                 }
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> f64 {
@@ -1510,13 +1510,13 @@ impl ConvIr<bool> for ParseIr<bool> {
                             value: Value::Bytes(bytes),
                             output: true,
                         }),
-                        _ => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                        _ => Err(Error::FromValueError(Value::Bytes(bytes))),
                     }
                 } else {
-                    Err(MyError::FromValueError(Value::Bytes(bytes)))
+                    Err(Error::FromValueError(Value::Bytes(bytes)))
                 }
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> bool {
@@ -1533,7 +1533,7 @@ impl ConvIr<Vec<u8>> for BytesIr {
             Value::Bytes(bytes) => Ok(BytesIr {
                 bytes: bytes,
             }),
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> Vec<u8> {
@@ -1576,10 +1576,10 @@ impl ConvIr<Timespec> for ParseIr<Timespec> {
                         value: Value::Bytes(bytes),
                         output: timespec,
                     }),
-                    None => Err(MyError::FromValueError(Value::Bytes(bytes))),
+                    None => Err(Error::FromValueError(Value::Bytes(bytes))),
                 }
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> Timespec {
@@ -1664,14 +1664,14 @@ impl ConvIr<Duration> for ParseIr<Duration> {
                                  + hours as u64 * 60 * 60;
                         Duration::new(secs, nanos)
                     },
-                    _ => return Err(MyError::FromValueError(Value::Bytes(val_bytes))),
+                    _ => return Err(Error::FromValueError(Value::Bytes(val_bytes))),
                 };
                 Ok(ParseIr {
                     value: Value::Bytes(val_bytes),
                     output: duration,
                 })
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> Duration {
@@ -1705,14 +1705,14 @@ impl ConvIr<time::Duration> for ParseIr<time::Duration> {
                                      + time::Duration::microseconds(microseconds as i64);
                         if is_neg { -duration } else { duration }
                     },
-                    _ => return Err(MyError::FromValueError(Value::Bytes(val_bytes))),
+                    _ => return Err(Error::FromValueError(Value::Bytes(val_bytes))),
                 };
                 Ok(ParseIr {
                     value: Value::Bytes(val_bytes),
                     output: duration,
                 })
             },
-            v => Err(MyError::FromValueError(v)),
+            v => Err(Error::FromValueError(v)),
         }
     }
     fn commit(self) -> time::Duration {
@@ -1943,7 +1943,7 @@ mod test {
     mod from_row {
         use time::{Timespec, now};
         use super::super::{from_row, from_row_opt, Value};
-        use super::super::super::error::MyError;
+        use super::super::super::error::Error;
         use super::super::super::conn::Row;
 
         #[test]
@@ -2052,51 +2052,51 @@ mod test {
                                t1.clone(), t2.clone(), t3.clone(), t4.clone()]);
 
             match from_row_opt::<f32>(v1.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v1, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v1, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8)>(v2.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v2, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v2, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8)>(v3.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v3, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v3, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8)>(v4.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v4, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v4, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8,u8)>(v5.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v5, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v5, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8,u8,u8)>(v6.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v6, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v6, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8)>(v7.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v7, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v7, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8)>(v8.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v8, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v8, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8,u8)>(v9.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v9, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v9, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8,u8,u8)>(v10.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v10, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v10, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8,u8,u8,u8)>(v11.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v11, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v11, e),
                 _ => unreachable!(),
             }
             match from_row_opt::<(f32,u8,u8,u8,u8,u8,u8,u8,u8,u8,u8,u8)>(v12.clone()) {
-                Err(MyError::FromRowError(e)) => assert_eq!(v12, e),
+                Err(Error::FromRowError(e)) => assert_eq!(v12, e),
                 _ => unreachable!(),
             }
         }

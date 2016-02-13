@@ -3,7 +3,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::error;
 
-use byteorder::Error;
+use byteorder::Error as BoError;
 #[cfg(feature = "openssl")]
 use openssl::ssl::error::{SslError};
 
@@ -11,7 +11,7 @@ pub use super::packet::ErrPacket;
 use super::conn::Row;
 use super::value::Value;
 
-pub enum MyError {
+pub enum Error {
     MyIoError(io::Error),
     MySqlError(ErrPacket),
     MyDriverError(DriverError),
@@ -21,115 +21,115 @@ pub enum MyError {
     FromRowError(Row),
 }
 
-impl error::Error for MyError {
+impl error::Error for Error {
     #[cfg(feature = "ssl")]
     fn description(&self) -> &str {
         match *self {
-            MyError::MyIoError(_) => "I/O Error",
-            MyError::MySqlError(_) => "MySql server error",
-            MyError::MyDriverError(_) => "driver error",
-            MyError::MySslError(_) => "ssl error",
-            MyError::FromRowError(_) => "from row conversion error",
-            MyError::FromValueError(_) => "from value conversion error",
+            Error::MyIoError(_) => "I/O Error",
+            Error::MySqlError(_) => "MySql server error",
+            Error::MyDriverError(_) => "driver error",
+            Error::MySslError(_) => "ssl error",
+            Error::FromRowError(_) => "from row conversion error",
+            Error::FromValueError(_) => "from value conversion error",
         }
     }
 
     #[cfg(not(feature = "ssl"))]
     fn description(&self) -> &str {
         match *self {
-            MyError::MyIoError(_) => "I/O Error",
-            MyError::MySqlError(_) => "MySql server error",
-            MyError::MyDriverError(_) => "driver error",
-            MyError::FromRowError(_) => "from row conversion error",
-            MyError::FromValueError(_) => "from value conversion error",
+            Error::MyIoError(_) => "I/O Error",
+            Error::MySqlError(_) => "MySql server error",
+            Error::MyDriverError(_) => "driver error",
+            Error::FromRowError(_) => "from row conversion error",
+            Error::FromValueError(_) => "from value conversion error",
         }
     }
 
     fn cause(&self) -> Option<&error::Error> {
         match *self {
-            MyError::MyIoError(ref err) => Some(err),
-            MyError::MyDriverError(ref err) => Some(err),
+            Error::MyIoError(ref err) => Some(err),
+            Error::MyDriverError(ref err) => Some(err),
             _ => None
         }
     }
 }
 
-impl From<io::Error> for MyError {
-    fn from(err: io::Error) -> MyError {
-        MyError::MyIoError(err)
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Error {
+        Error::MyIoError(err)
     }
 }
 
-impl From<Error> for MyError {
-    fn from(err: Error) -> MyError {
+impl From<BoError> for Error {
+    fn from(err: BoError) -> Error {
         let io_err: io::Error = From::from(err);
         From::from(io_err)
     }
 }
 
-impl From<DriverError> for MyError {
-    fn from(err: DriverError) -> MyError {
-        MyError::MyDriverError(err)
+impl From<DriverError> for Error {
+    fn from(err: DriverError) -> Error {
+        Error::MyDriverError(err)
     }
 }
 
 #[cfg(feature = "openssl")]
-impl From<SslError> for MyError {
-    fn from(err: SslError) -> MyError {
-        MyError::MySslError(err)
+impl From<SslError> for Error {
+    fn from(err: SslError) -> Error {
+        Error::MySslError(err)
     }
 }
 
 #[cfg(feature = "ssl")]
-impl fmt::Display for MyError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            MyError::MyIoError(ref io_err) => io_err.fmt(f),
-            MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
-            MyError::MyDriverError(ref driver_err) => driver_err.fmt(f),
-            MyError::MySslError(ref ssl_error) => ssl_error.fmt(f),
-            MyError::FromRowError(_) => "from row conversion error".fmt(f),
-            MyError::FromValueError(_) => "from value conversion error".fmt(f),
+            Error::MyIoError(ref io_err) => io_err.fmt(f),
+            Error::MySqlError(ref err_packet) => err_packet.fmt(f),
+            Error::MyDriverError(ref driver_err) => driver_err.fmt(f),
+            Error::MySslError(ref ssl_error) => ssl_error.fmt(f),
+            Error::FromRowError(_) => "from row conversion error".fmt(f),
+            Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
     }
 }
 
 #[cfg(not(feature = "ssl"))]
-impl fmt::Display for MyError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            MyError::MyIoError(ref io_err) => io_err.fmt(f),
-            MyError::MySqlError(ref err_packet) => err_packet.fmt(f),
-            MyError::MyDriverError(ref driver_err) => driver_err.fmt(f),
-            MyError::FromRowError(_) => "from row conversion error".fmt(f),
-            MyError::FromValueError(_) => "from value conversion error".fmt(f),
+            Error::MyIoError(ref io_err) => io_err.fmt(f),
+            Error::MySqlError(ref err_packet) => err_packet.fmt(f),
+            Error::MyDriverError(ref driver_err) => driver_err.fmt(f),
+            Error::FromRowError(_) => "from row conversion error".fmt(f),
+            Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
     }
 }
 
 #[cfg(feature = "ssl")]
-impl fmt::Debug for MyError {
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
-            MyError::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
-            MyError::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
-            MyError::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
-            MyError::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
-            MyError::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
+            Error::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
+            Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
+            Error::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
+            Error::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
+            Error::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
+            Error::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
         }
     }
 }
 
 #[cfg(not(feature = "ssl"))]
-impl fmt::Debug for MyError {
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            MyError::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
-            MyError::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
-            MyError::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
-            MyError::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
-            MyError::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
+            Error::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
+            Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
+            Error::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
+            Error::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
+            Error::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
         }
     }
 }
@@ -218,7 +218,7 @@ impl fmt::Debug for DriverError {
     }
 }
 
-pub type MyResult<T> = Result<T, MyError>;
+pub type MyResult<T> = Result<T, Error>;
 
 /// Server error codes (u16)
 #[allow(non_camel_case_types)]

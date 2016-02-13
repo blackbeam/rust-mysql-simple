@@ -9,7 +9,7 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
-use super::error::MyError::MyDriverError;
+use super::error::Error::MyDriverError;
 use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
 use super::error::MyResult;

@@ -21,7 +21,7 @@ use super::io::Read as MyRead;
 use super::io::Write;
 use super::io::Stream;
 use super::io::TcpStream::Insecure;
-use super::error::MyError::{
+use super::error::Error::{
     MyIoError,
     MySqlError,
     MyDriverError
@@ -432,7 +432,7 @@ impl Column {
 ///
 /// It allows you to move column values out of a row with `Row::take` method but note that it
 /// makes row incomplete. Calls to `from_row_opt` on incomplete row will return
-/// `MyError::FromRowError` and also numerical indexing on taken columns will panic.
+/// `Error::FromRowError` and also numerical indexing on taken columns will panic.
 ///
 /// ```rust
 /// # use mysql::conn::pool;

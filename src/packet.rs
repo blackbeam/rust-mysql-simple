@@ -11,7 +11,7 @@ use super::consts::StatusFlags;
 use super::consts::CapabilityFlags;
 use super::error;
 use super::error::DriverError;
-use super::error::MyError::MyDriverError;
+use super::error::Error::MyDriverError;
 use super::io::Read;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
