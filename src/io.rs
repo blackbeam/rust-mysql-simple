@@ -9,7 +9,7 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
-use super::error::Error::MyDriverError;
+use super::error::Error::DriverError;
 use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
 use super::error::MyResult;
@@ -178,7 +178,7 @@ pub trait Read: ReadBytesExt {
             let payload_len = try!(self.read_uint::<LE>(3)) as usize;
             let srv_seq_id = try!(self.read_u8());
             if srv_seq_id != seq_id {
-                return Err(MyDriverError(PacketOutOfSync));
+                return Err(DriverError(PacketOutOfSync));
             }
             seq_id = seq_id.wrapping_add(1);
             if payload_len == consts::MAX_PAYLOAD_LEN {
@@ -241,7 +241,7 @@ pub trait Write: WriteBytesExt {
     fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: usize) -> MyResult<u8> {
         if data.len() > max_allowed_packet &&
            max_allowed_packet < consts::MAX_PAYLOAD_LEN {
-            return Err(MyDriverError(PacketTooLarge));
+            return Err(DriverError(PacketTooLarge));
         }
         if data.len() == 0 {
             try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));

@@ -11,7 +11,6 @@ use super::consts::StatusFlags;
 use super::consts::CapabilityFlags;
 use super::error;
 use super::error::DriverError;
-use super::error::Error::MyDriverError;
 use super::io::Read;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -123,7 +122,7 @@ fn parse_version(bytes: &[u8]) -> error::MyResult<ServerVersion> {
         } else {
             Some(version)
         }
-    }).ok_or(MyDriverError(DriverError::CouldNotParseVersion))
+    }).ok_or(DriverError::CouldNotParseVersion.into())
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]

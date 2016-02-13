@@ -14,7 +14,7 @@ use super::value::Value;
 pub enum Error {
     IoError(io::Error),
     MySqlError(ErrPacket),
-    MyDriverError(DriverError),
+    DriverError(DriverError),
     #[cfg(feature = "openssl")]
     MySslError(SslError),
     FromValueError(Value),
@@ -27,7 +27,7 @@ impl error::Error for Error {
         match *self {
             Error::IoError(_) => "I/O Error",
             Error::MySqlError(_) => "MySql server error",
-            Error::MyDriverError(_) => "driver error",
+            Error::DriverError(_) => "driver error",
             Error::MySslError(_) => "ssl error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
@@ -39,7 +39,7 @@ impl error::Error for Error {
         match *self {
             Error::IoError(_) => "I/O Error",
             Error::MySqlError(_) => "MySql server error",
-            Error::MyDriverError(_) => "driver error",
+            Error::DriverError(_) => "driver error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
         }
@@ -48,7 +48,7 @@ impl error::Error for Error {
     fn cause(&self) -> Option<&error::Error> {
         match *self {
             Error::IoError(ref err) => Some(err),
-            Error::MyDriverError(ref err) => Some(err),
+            Error::DriverError(ref err) => Some(err),
             _ => None
         }
     }
@@ -69,7 +69,7 @@ impl From<BoError> for Error {
 
 impl From<DriverError> for Error {
     fn from(err: DriverError) -> Error {
-        Error::MyDriverError(err)
+        Error::DriverError(err)
     }
 }
 
@@ -86,7 +86,7 @@ impl fmt::Display for Error {
         match *self {
             Error::IoError(ref io_err) => io_err.fmt(f),
             Error::MySqlError(ref err_packet) => err_packet.fmt(f),
-            Error::MyDriverError(ref driver_err) => driver_err.fmt(f),
+            Error::DriverError(ref driver_err) => driver_err.fmt(f),
             Error::MySslError(ref ssl_error) => ssl_error.fmt(f),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
@@ -100,7 +100,7 @@ impl fmt::Display for Error {
         match *self {
             Error::IoError(ref io_err) => io_err.fmt(f),
             Error::MySqlError(ref err_packet) => err_packet.fmt(f),
-            Error::MyDriverError(ref driver_err) => driver_err.fmt(f),
+            Error::DriverError(ref driver_err) => driver_err.fmt(f),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
@@ -113,7 +113,7 @@ impl fmt::Debug for Error {
         match *self {
             Error::IoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
-            Error::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
+            Error::DriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
             Error::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
             Error::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
             Error::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
@@ -127,7 +127,7 @@ impl fmt::Debug for Error {
         match *self {
             Error::IoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
-            Error::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
+            Error::DriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
             Error::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
             Error::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
         }

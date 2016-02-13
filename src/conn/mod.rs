@@ -24,7 +24,7 @@ use super::io::TcpStream::Insecure;
 use super::error::Error::{
     IoError,
     MySqlError,
-    MyDriverError
+    DriverError
 };
 use super::error::DriverError::{
     CouldNotConnect,
@@ -785,11 +785,11 @@ impl Conn {
                     Ok(())
                 },
                 _ => {
-                    Err(MyDriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
+                    Err(DriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
                 }
             }
         } else {
-            Err(MyDriverError(CouldNotConnect(None)))
+            Err(DriverError(CouldNotConnect(None)))
         }
     }
 
@@ -803,7 +803,7 @@ impl Conn {
                 },
                 _ => {
                     let path_str = format!("{}", self.opts.unix_addr.as_ref().unwrap().display());
-                    Err(MyDriverError(CouldNotConnect(Some(path_str))))
+                    Err(DriverError(CouldNotConnect(Some(path_str))))
                 }
             }
         } else if self.opts.ip_or_hostname.is_some() {
@@ -815,11 +815,11 @@ impl Conn {
                     Ok(())
                 },
                 _ => {
-                    Err(MyDriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
+                    Err(DriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
                 }
             }
         } else {
-            Err(MyDriverError(CouldNotConnect(None)))
+            Err(DriverError(CouldNotConnect(None)))
         }
     }
 
@@ -834,11 +834,11 @@ impl Conn {
                     Ok(())
                 },
                 _ => {
-                    Err(MyDriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
+                    Err(DriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
                 }
             }
         } else {
-            Err(MyDriverError(CouldNotConnect(None)))
+            Err(DriverError(CouldNotConnect(None)))
         }
     }
 
@@ -886,10 +886,10 @@ impl Conn {
                 _ => {
                     let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
                     if handshake.protocol_version != 10u8 {
-                        return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
+                        return Err(DriverError(UnsupportedProtocol(handshake.protocol_version)));
                     }
                     if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
-                        return Err(MyDriverError(Protocol41NotSet));
+                        return Err(DriverError(Protocol41NotSet));
                     }
                     self.handle_handshake(&handshake);
                     self.do_handshake_response(&handshake)
@@ -909,7 +909,7 @@ impl Conn {
                                                            self.capability_flags));
                     Err(MySqlError(err))
                 },
-                _ => Err(MyDriverError(UnexpectedPacket))
+                _ => Err(DriverError(UnexpectedPacket))
             }
         })
     }
@@ -926,16 +926,16 @@ impl Conn {
                 _ => {
                     let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
                     if handshake.protocol_version != 10u8 {
-                        return Err(MyDriverError(UnsupportedProtocol(handshake.protocol_version)));
+                        return Err(DriverError(UnsupportedProtocol(handshake.protocol_version)));
                     }
                     if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
-                        return Err(MyDriverError(Protocol41NotSet));
+                        return Err(DriverError(Protocol41NotSet));
                     }
                     self.handle_handshake(&handshake);
                     if self.opts.ssl_opts.is_some() && self.stream.is_some() {
                         if self.stream.as_ref().unwrap().is_insecure() {
                             if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
-                                return Err(MyDriverError(SslNotSupported));
+                                return Err(DriverError(SslNotSupported));
                             } else {
                                 try!(self.do_ssl_request());
                                 try!(self.switch_to_ssl());
@@ -959,7 +959,7 @@ impl Conn {
                                                            self.capability_flags));
                     Err(MySqlError(err))
                 },
-                _ => Err(MyDriverError(UnexpectedPacket))
+                _ => Err(DriverError(UnexpectedPacket))
             }
         })
     }
@@ -1093,7 +1093,7 @@ impl Conn {
         match params {
             Params::Empty => {
                 if stmt.num_params != 0 {
-                    return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, 0)));
+                    return Err(DriverError(MismatchedStmtParams(stmt.num_params, 0)));
                 }
                 writer = io::Cursor::new(Vec::with_capacity(4 + 1 + 4));
                 try!(writer.write_u32::<LE>(stmt.statement_id));
@@ -1102,7 +1102,7 @@ impl Conn {
             },
             Params::Positional(params) => {
                 if stmt.num_params != params.len() as u16 {
-                    return Err(MyDriverError(MismatchedStmtParams(stmt.num_params, params.len())));
+                    return Err(DriverError(MismatchedStmtParams(stmt.num_params, params.len())));
                 }
                 if let Some(ref sparams) = stmt.params {
                     let (bitmap, values, large_ids) =
@@ -1168,7 +1168,7 @@ impl Conn {
         }
         if let Some(readonly) = readonly {
             if self.server_version < (5, 6, 5) {
-                return Err(MyDriverError(ReadOnlyTransNotSupported));
+                return Err(DriverError(ReadOnlyTransNotSupported));
             }
             let _ = if readonly {
                 try!(self.query("SET TRANSACTION READ ONLY"))
@@ -1372,7 +1372,7 @@ impl Conn {
                .unwrap_or(0))
         }).and_then(|max_allowed_packet| {
             if max_allowed_packet == 0 {
-                Err(MyDriverError(SetupError))
+                Err(DriverError(SetupError))
             } else {
                 self.max_allowed_packet = max_allowed_packet;
                 self.connected = true;
