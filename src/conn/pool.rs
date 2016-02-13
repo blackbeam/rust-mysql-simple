@@ -63,7 +63,6 @@ impl MyInnerPool {
 /// use std::default::Default;
 /// use mysql::conn::Opts;
 /// # use mysql::conn::Row;
-/// use mysql::value::IntoValue;
 /// use std::thread;
 ///
 /// fn get_opts() -> Opts {
@@ -88,7 +87,7 @@ impl MyInnerPool {
 ///     let pool = pool.clone();
 ///     threads.push(thread::spawn(move || {
 ///         let mut result = pool.prep_exec("SELECT 1", ()).unwrap();
-///         assert_eq!(result.next().unwrap().unwrap(), Row::new(vec![1.into_value()]));
+///         assert_eq!(result.next().unwrap().unwrap(), Row::new(vec![1.into()]));
 ///     }));
 /// }
 /// for t in threads.into_iter() {

@@ -271,7 +271,7 @@ impl<'a> Stmt<'a> {
     /// ```rust
     /// # use mysql::conn::pool;
     /// # use mysql::conn::Opts;
-    /// # use mysql::value::{from_value, from_row, IntoValue, ToValue, Value};
+    /// # use mysql::value::{from_value, from_row, ToValue, Value};
     /// # use std::thread::Thread;
     /// # use std::default::Default;
     /// # use std::iter::repeat;
@@ -324,7 +324,7 @@ impl<'a> Stmt<'a> {
     /// // about ownership, then better to use plain Vec<Value>.
     /// let mut params: Vec<Value> = Vec::with_capacity(13);
     /// for i in 1..14 {
-    ///     params.push(repeat('A').take(i * 1000).collect::<String>().into_value());
+    ///     params.push(repeat('A').take(i * 1000).collect::<String>().into());
     /// }
     /// for row in stmt13.execute(params).unwrap() {
     ///     let row = row.unwrap();
@@ -437,7 +437,7 @@ impl Column {
 /// ```rust
 /// # use mysql::conn::pool;
 /// # use mysql::conn::Opts;
-/// # use mysql::value::{from_value, from_row, IntoValue, ToValue, Value};
+/// # use mysql::value::{from_value, from_row, ToValue, Value};
 /// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # use std::iter::repeat;

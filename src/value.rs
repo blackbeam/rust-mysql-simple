@@ -5,7 +5,14 @@ use std::collections::HashMap;
 use std::io;
 use std::io::Write as stdWrite;
 use std::time::Duration;
-use time::{Tm, Timespec, now, strptime, at};
+use time::{
+    Timespec,
+    Tm,
+    at,
+    now,
+    self,
+    strptime,
+};
 
 use super::consts;
 use super::conn::{Column};
@@ -26,10 +33,6 @@ lazy_static! {
     static ref TM_ISDST: i32 = now().tm_isdst;
 }
 
-/// A way to store negativeness of mysql's time. `.0 == true` means negative.
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
-pub struct SignedDuration(pub bool, pub Duration);
-
 /// `Value` enumerates possible values in mysql cells. Also `Value` used to fill
 /// prepared statements.
 ///
@@ -40,8 +43,7 @@ pub struct SignedDuration(pub bool, pub Duration);
 /// [`FromValue`](trait.FromValue.html) on it. To get `T: FromValue` from
 /// nullable value you should rely on `FromValue` implemented on `Option<T>`.
 ///
-/// To convert something to `Value` you should implement
-/// [`IntoValue`](trait.IntoValue.html) on it.
+/// To convert something to `Value` you should implement `Into<Value>` for it.
 ///
 /// ```rust
 /// # use mysql::conn::pool;
@@ -906,11 +908,11 @@ impl<'a, T: Into<Params> + Clone> From<&'a T> for Params {
     }
 }
 
-impl<T: IntoValue> From<Vec<T>> for Params {
+impl<T: Into<Value>> From<Vec<T>> for Params {
     fn from(x: Vec<T>) -> Params {
         let mut raw_params = Vec::with_capacity(x.len());
         for v in x.into_iter() {
-            raw_params.push(v.into_value());
+            raw_params.push(v.into());
         }
         if raw_params.len() == 0 {
             Params::Empty
@@ -942,10 +944,10 @@ impl From<()> for Params {
 
 macro_rules! into_params_impl {
     ($([$A:ident,$a:ident]),*) => (
-        impl<$($A: IntoValue,)*> From<($($A,)*)> for Params {
+        impl<$($A: Into<Value>,)*> From<($($A,)*)> for Params {
             fn from(x: ($($A,)*)) -> Params {
                 let ($($a,)*) = x;
-                Params::Positional(vec![$($a.into_value(),)*])
+                Params::Positional(vec![$($a.into(),)*])
             }
         }
     );
@@ -968,120 +970,115 @@ pub trait ToValue {
     fn to_value(&self) -> Value;
 }
 
-impl<T: IntoValue + Clone> ToValue for T {
+impl<T: Into<Value> + Clone> ToValue for T {
     fn to_value(&self) -> Value {
-        self.clone().into_value()
+        self.clone().into()
     }
 }
 
-/// Implement this trait if you want to convert something to `Value`.
-pub trait IntoValue {
-    fn into_value(self) -> Value;
-}
-
-impl<'a, T: ToValue> IntoValue for &'a T {
-    fn into_value(self) -> Value {
-        self.to_value()
+impl<'a, T: ToValue> From<&'a T> for Value {
+    fn from(x: &'a T) -> Value {
+        x.to_value()
     }
 }
 
-impl<T: IntoValue> IntoValue for Option<T> {
-    fn into_value(self) -> Value {
-        match self {
+impl<T: Into<Value>> From<Option<T>> for Value {
+    fn from(x: Option<T>) -> Value {
+        match x {
             None => Value::NULL,
-            Some(x) => x.into_value(),
+            Some(x) => x.into(),
         }
     }
 }
 
-macro_rules! into_value_impl_num(
+macro_rules! into_value_impl (
     (i64) => (
-        impl IntoValue for i64 {
-            fn into_value(self) -> Value {
-                Value::Int(self)
+        impl From<i64> for Value {
+            fn from(x: i64) -> Value {
+                Value::Int(x)
             }
         }
     );
     ($t:ty) => (
-        impl IntoValue for $t {
-            fn into_value(self) -> Value {
-                Value::Int(self as i64)
+        impl From<$t> for Value {
+            fn from(x: $t) -> Value {
+                Value::Int(x as i64)
             }
         }
-    )
+    );
 );
 
-into_value_impl_num!(i8);
-into_value_impl_num!(u8);
-into_value_impl_num!(i16);
-into_value_impl_num!(u16);
-into_value_impl_num!(i32);
-into_value_impl_num!(u32);
-into_value_impl_num!(isize);
-into_value_impl_num!(i64);
+into_value_impl!(i8);
+into_value_impl!(u8);
+into_value_impl!(i16);
+into_value_impl!(u16);
+into_value_impl!(i32);
+into_value_impl!(u32);
+into_value_impl!(isize);
+into_value_impl!(i64);
 
-impl IntoValue for u64 {
-    fn into_value(self) -> Value {
-        Value::UInt(self)
+impl From<u64> for Value {
+    fn from(x: u64) -> Value {
+        Value::UInt(x)
     }
 }
 
-impl IntoValue for usize {
-    fn into_value(self) -> Value {
-        if self as u64 <= ::std::usize::MAX as u64 {
-            Value::Int(self as i64)
+impl From<usize> for Value {
+    fn from(x: usize) -> Value {
+        if x as u64 <= ::std::i64::MAX as u64 {
+            Value::Int(x as i64)
         } else {
-            Value::UInt(self as u64)
+            Value::UInt(x as u64)
         }
     }
 }
 
-impl IntoValue for f32 {
-    fn into_value(self) -> Value {
-        Value::Float(self as f64)
+impl From<f32> for Value {
+    fn from(x: f32) -> Value {
+        Value::Float(x as f64)
     }
 }
 
-impl IntoValue for f64 {
-    fn into_value(self) -> Value {
-        Value::Float(self)
+impl From<f64> for Value {
+    fn from(x: f64) -> Value {
+        Value::Float(x)
     }
 }
 
-impl IntoValue for bool {
-    fn into_value(self) -> Value {
-        Value::Int(if self {1} else {0})
+impl From<bool> for Value {
+    fn from(x: bool) -> Value {
+        Value::Int(if x {1} else {0})
     }
 }
 
-impl<'a> IntoValue for &'a [u8] {
-    fn into_value(self) -> Value {
-        Value::Bytes(self.into())
+impl<'a> From<&'a [u8]> for Value {
+    fn from(x: &'a [u8]) -> Value {
+        Value::Bytes(x.into())
     }
 }
 
-impl IntoValue for Vec<u8> {
-    fn into_value(self) -> Value {
-        Value::Bytes(self)
+impl From<Vec<u8>> for Value {
+    fn from(x: Vec<u8>) -> Value {
+        Value::Bytes(x)
     }
 }
 
-impl<'a> IntoValue for &'a str {
-    fn into_value(self) -> Value {
-        let string: String = self.into();
+impl<'a> From<&'a str> for Value {
+    fn from(x: &'a str) -> Value {
+        let string: String = x.into();
         Value::Bytes(string.into_bytes())
     }
 }
 
-impl IntoValue for String {
-    fn into_value(self) -> Value {
-        Value::Bytes(self.into_bytes())
+impl From<String> for Value {
+    fn from(x: String) -> Value {
+        Value::Bytes(x.into_bytes())
     }
 }
 
-impl IntoValue for Timespec {
-    fn into_value(self) -> Value {
-        let t = at(self);
+impl From<Timespec> for Value {
+    fn from(x: Timespec) -> Value {
+        let t = at(x);
         Value::Date(
              t.tm_year as u16 + 1_900,
              (t.tm_mon + 1) as u8,
@@ -1093,10 +1090,10 @@ impl IntoValue for Timespec {
     }
 }
 
-impl IntoValue for Duration {
-    fn into_value(self) -> Value {
-        let mut secs_total = self.as_secs();
-        let micros = (self.subsec_nanos() as f64 / 1000_f64).round() as u32;
+impl From<Duration> for Value {
+    fn from(x: Duration) -> Value {
+        let mut secs_total = x.as_secs();
+        let micros = (x.subsec_nanos() as f64 / 1000_f64).round() as u32;
         let seconds = (secs_total % 60) as u8;
         secs_total -= seconds as u64;
         let minutes = ((secs_total % (60 * 60)) / 60) as u8;
@@ -1107,20 +1104,22 @@ impl IntoValue for Duration {
     }
 }
 
-impl IntoValue for SignedDuration {
-    fn into_value(self) -> Value {
-        let SignedDuration(is_neg, duration) = self;
-        if let Value::Time(_, days, hours, minutes, seconds, micros) = duration.into_value() {
-            Value::Time(is_neg, days, hours, minutes, seconds, micros)
-        } else {
-            unreachable!()
+impl From<time::Duration> for Value {
+    fn from(mut x: time::Duration) -> Value {
+        let negative = x < time::Duration::zero();
+        if negative {
+            x = -x;
         }
-    }
-}
-
-impl IntoValue for Value {
-    fn into_value(self) -> Value {
-        self
+        let days = x.num_days() as u32;
+        x = x - time::Duration::days(x.num_days());
+        let hours = x.num_hours() as u8;
+        x = x - time::Duration::hours(x.num_hours());
+        let minutes = x.num_minutes() as u8;
+        x = x - time::Duration::minutes(x.num_minutes());
+        let seconds = x.num_seconds() as u8;
+        x = x - time::Duration::seconds(x.num_seconds());
+        let microseconds = x.num_microseconds().unwrap_or(0) as u32;
+        Value::Time(negative, days, hours, minutes, seconds, microseconds)
     }
 }
 
@@ -1591,82 +1590,132 @@ impl ConvIr<Timespec> for ParseIr<Timespec> {
     }
 }
 
-impl ConvIr<SignedDuration> for ParseIr<SignedDuration> {
-    fn new(v: Value) -> MyResult<ParseIr<SignedDuration>> {
+/// Returns (is_neg, hours, minutes, seconds, microseconds)
+fn parse_mysql_time_string(mut bytes: &[u8]) -> Option<(bool, u32, u32, u32, u32)> {
+    if bytes.len() == 0 {
+        return None;
+    }
+    let is_neg = bytes[0] == b'-';
+    if is_neg {
+        bytes = &bytes[1..];
+    }
+    from_utf8(bytes).ok().and_then(|time_str| {
+        let t_ref = time_str.as_ref();
+        Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)$").unwrap().captures(t_ref)
+        .or_else(|| {
+            Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)\.(\d{1,6})$")
+                  .unwrap()
+                  .captures(t_ref)
+        }).or_else(|| {
+            Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)$")
+                  .unwrap()
+                  .captures(t_ref)
+        }).or_else(|| {
+            Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{1,6})$")
+                  .unwrap()
+                  .captures(t_ref)
+        })
+    }).map(|capts| {
+        let hours = capts.at(1).unwrap().parse::<u32>().unwrap();
+        let minutes = capts.at(2).unwrap().parse::<u32>().unwrap();
+        let seconds = capts.at(3).unwrap().parse::<u32>().unwrap();
+        let microseconds = if capts.len() == 5 {
+            let micros_str = capts.at(4).unwrap();
+            let mut left_zero_cnt = 0;
+            for b in micros_str.bytes() {
+                if b == b'0' {
+                    left_zero_cnt += 1;
+                } else {
+                    break;
+                }
+            }
+            let mut micros = capts.at(4).unwrap().parse::<u32>().unwrap();
+            for _ in 0..(6 - left_zero_cnt - (micros_str.len() - left_zero_cnt)) {
+                micros *= 10;
+            }
+            micros
+        } else {
+            0
+        };
+        (is_neg, hours, minutes, seconds, microseconds)
+    })
+}
+
+impl ConvIr<Duration> for ParseIr<Duration> {
+    fn new(v: Value) -> MyResult<ParseIr<Duration>> {
         match v {
-            Value::Time(is_neg, days, hours, minutes, seconds, micros) => {
-                let mut secs_total = seconds as u64;
-                secs_total += minutes as u64 * 60;
-                secs_total += hours as u64 * 60 * 60;
-                secs_total += days as u64 * 24 * 60 * 60;
+            Value::Time(false, days, hours, minutes, seconds, microseconds) => {
+                let nanos = (microseconds as u32) * 1000;
+                let secs = seconds as u64
+                         + minutes as u64 * 60
+                         + hours as u64 * 60 * 60
+                         + days as u64 * 60 * 60 * 24;
                 Ok(ParseIr {
-                    value: Value::Time(is_neg, days, hours, minutes, seconds, micros),
-                    output: SignedDuration(is_neg, Duration::new(secs_total, micros * 1000)),
+                    value: Value::Time(false, days, hours, minutes, seconds, microseconds),
+                    output: Duration::new(secs, nanos),
                 })
             },
             Value::Bytes(val_bytes) => {
-                let val = {
-                    let mut bytes = &val_bytes[..];
-                    let is_neg = bytes[0] == b'-';
-                    if is_neg {
-                        bytes = &bytes[1..];
-                    }
-                    from_utf8(bytes).ok().and_then(|time_str| {
-                        let t_ref = time_str.as_ref();
-                        Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)$").unwrap().captures(t_ref)
-                        .or_else(|| {
-                            Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)\.(\d{1,6})$")
-                                  .unwrap()
-                                  .captures(t_ref)
-                        }).or_else(|| {
-                            Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)$")
-                                  .unwrap()
-                                  .captures(t_ref)
-                        }).or_else(|| {
-                            Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{1,6})$")
-                                  .unwrap()
-                                  .captures(t_ref)
-                        })
-                    }).and_then(|capts| {
-                        let hours = capts.at(1).unwrap().parse::<u64>().unwrap();
-                        let minutes = capts.at(2).unwrap().parse::<u64>().unwrap();
-                        let seconds = capts.at(3).unwrap().parse::<u64>().unwrap();
-                        let micros = if capts.len() == 5 {
-                            let micros_str = capts.at(4).unwrap();
-                            let mut left_zero_count = 0;
-                            for b in micros_str.bytes() {
-                                if b == b'0' {
-                                    left_zero_count += 1;
-                                } else {
-                                    break;
-                                }
-                            }
-                            let mut micros = capts.at(4).unwrap().parse::<u32>().unwrap();
-                            for _ in 0..(6 - left_zero_count - (micros_str.len() - left_zero_count)) {
-                                micros *= 10;
-                            }
-                            micros
-                        } else {
-                            0
-                        };
-                        let mut secs_total = seconds;
-                        secs_total += minutes * 60;
-                        secs_total += hours * 60 * 60;
-                        Some(SignedDuration(is_neg, Duration::new(secs_total, micros * 1_000)))
-                    })
+                let duration = match parse_mysql_time_string(&*val_bytes) {
+                    Some((false, hours, minutes, seconds, microseconds)) => {
+                        let nanos = microseconds * 1000;
+                        let secs = seconds as u64
+                                 + minutes as u64 * 60
+                                 + hours as u64 * 60 * 60;
+                        Duration::new(secs, nanos)
+                    },
+                    _ => return Err(MyError::FromValueError(Value::Bytes(val_bytes))),
                 };
-                match val {
-                    Some(sig_dur) => Ok(ParseIr {
-                        value: Value::Bytes(val_bytes),
-                        output: sig_dur,
-                    }),
-                    None => Err(MyError::FromValueError(Value::Bytes(val_bytes)))
-                }
+                Ok(ParseIr {
+                    value: Value::Bytes(val_bytes),
+                    output: duration,
+                })
             },
             v => Err(MyError::FromValueError(v)),
         }
     }
-    fn commit(self) -> SignedDuration {
+    fn commit(self) -> Duration {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl ConvIr<time::Duration> for ParseIr<time::Duration> {
+    fn new(v: Value) -> MyResult<ParseIr<time::Duration>> {
+        match v {
+            Value::Time(is_neg, days, hours, minutes, seconds, microseconds) => {
+                let duration = time::Duration::days(days as i64)
+                             + time::Duration::hours(hours as i64)
+                             + time::Duration::minutes(minutes as i64)
+                             + time::Duration::seconds(seconds as i64)
+                             + time::Duration::microseconds(microseconds as i64);
+                Ok(ParseIr {
+                    value: Value::Time(is_neg, days, hours, minutes, seconds, microseconds),
+                    output: if is_neg { -duration } else { duration }
+                })
+            },
+            Value::Bytes(val_bytes) => {
+                let duration = match parse_mysql_time_string(&*val_bytes) {
+                    Some((is_neg, hours, minutes, seconds, microseconds)) => {
+                        let duration = time::Duration::hours(hours as i64)
+                                     + time::Duration::minutes(minutes as i64)
+                                     + time::Duration::seconds(seconds as i64)
+                                     + time::Duration::microseconds(microseconds as i64);
+                        if is_neg { -duration } else { duration }
+                    },
+                    _ => return Err(MyError::FromValueError(Value::Bytes(val_bytes))),
+                };
+                Ok(ParseIr {
+                    value: Value::Bytes(val_bytes),
+                    output: duration,
+                })
+            },
+            v => Err(MyError::FromValueError(v)),
+        }
+    }
+    fn commit(self) -> time::Duration {
         self.output
     }
     fn rollback(self) -> Value {
@@ -1675,8 +1724,9 @@ impl ConvIr<SignedDuration> for ParseIr<SignedDuration> {
 }
 
 impl_from_value!(Timespec, ParseIr<Timespec>, "Could not retrieve Timespec from Value");
-impl_from_value!(SignedDuration, ParseIr<SignedDuration>,
-                 "Could not retrieve Timespec from Value");
+impl_from_value!(Duration, ParseIr<Duration>, "Could not retrieve Duration from Value");
+impl_from_value!(time::Duration, ParseIr<time::Duration>,
+                 "Could not retrieve time::Duration from Value");
 impl_from_value!(String, StringIr, "Could not retrieve String from Value");
 impl_from_value!(Vec<u8>, BytesIr, "Could not retrieve Vec<u8> from Value");
 impl_from_value!(bool, ParseIr<bool>, "Could not retrieve bool from Value");
@@ -1765,9 +1815,9 @@ mod test {
 
     mod from_value {
         use std::time::Duration;
-        use super::super::{from_value, SignedDuration};
+        use super::super::from_value;
         use super::super::Value::{Bytes, Date, Int};
-        use time::{Timespec, now};
+        use time::{Timespec, now, self};
         use super::super::super::conn::{MyConn, Opts};
 
         static USER: &'static str = "root";
@@ -1846,12 +1896,12 @@ mod test {
         }
 
         #[test]
-        fn should_convert_Bytes_to_Duration() {
-            assert_eq!(SignedDuration(true, Duration::from_millis(433830500)),
+        fn should_convert_Bytes_to_time_Duration() {
+            assert_eq!(-time::Duration::milliseconds(433830500),
                        from_value(Bytes(b"-120:30:30.5".to_vec())));
-            assert_eq!(SignedDuration(true, Duration::from_millis(433830500)),
+            assert_eq!(-time::Duration::milliseconds(433830500),
                        from_value(Bytes(b"-120:30:30.500000".to_vec())));
-            assert_eq!(SignedDuration(true, Duration::from_millis(433830005)),
+            assert_eq!(-time::Duration::milliseconds(433830005),
                        from_value(Bytes(b"-120:30:30.005".to_vec())));
         }
 
@@ -1869,9 +1919,9 @@ mod test {
 
     mod to_value {
         use std::time::Duration;
-        use super::super::{IntoValue, SignedDuration};
+        use super::super::Value;
         use super::super::Value::{Date, Time};
-        use time::{Timespec, now};
+        use time::{Timespec, now, self};
 
         #[test]
         fn should_convert_Time_to_Date() {
@@ -1879,14 +1929,14 @@ mod test {
                 sec: 1414866780 - now().tm_utcoff as i64,
                 nsec: 1000,
             };
-            assert_eq!(ts.into_value(), Date(2014, 11, 1, 18, 33, 00, 1));
+            assert_eq!(Value::from(ts), Date(2014, 11, 1, 18, 33, 00, 1));
         }
         #[test]
-        fn should_convert_Duration_to_Time() {
-            assert_eq!(Duration::from_millis(433830500).into_value(),
-                       Time(false, 5, 0, 30, 30, 500000));
-            assert_eq!(SignedDuration(true, Duration::from_millis(433830500)).into_value(),
-                       Time(true, 5, 0, 30, 30, 500000));
+        fn should_convert_time_Duration_to_Time() {
+            let pos_dur = time::Duration::milliseconds(433830500);
+            let neg_dur = -pos_dur;
+            assert_eq!(Value::from(pos_dur), Time(false, 5, 0, 30, 30, 500000));
+            assert_eq!(Value::from(neg_dur), Time(true, 5, 0, 30, 30, 500000));
         }
     }
 
