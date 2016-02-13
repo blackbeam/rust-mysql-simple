@@ -65,7 +65,7 @@ lazy_static! {
 /// #     }
 /// # }
 /// # let opts = get_opts();
-/// # let pool = pool::MyPool::new(opts).unwrap();
+/// # let pool = pool::Pool::new(opts).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// let result = conn.prep_exec("SELECT ? * ?", (20i32, 0.8_f32)).unwrap();

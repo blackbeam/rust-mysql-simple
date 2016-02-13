@@ -289,7 +289,7 @@ impl<'a> Stmt<'a> {
     /// #     }
     /// # }
     /// # let opts = get_opts();
-    /// # let pool = pool::MyPool::new(opts).unwrap();
+    /// # let pool = pool::Pool::new(opts).unwrap();
     /// let mut stmt0 = pool.prepare("SELECT 42").unwrap();
     /// let mut stmt1 = pool.prepare("SELECT ?").unwrap();
     /// let mut stmt2 = pool.prepare("SELECT ?, ?").unwrap();
@@ -455,7 +455,7 @@ impl Column {
 /// #     }
 /// # }
 /// # let opts = get_opts();
-/// # let pool = pool::MyPool::new_manual(1, 1, opts).unwrap();
+/// # let pool = pool::Pool::new_manual(1, 1, opts).unwrap();
 /// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ());
 /// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
 /// #                (1, "John", 17, "foo@bar.baz"));
@@ -1549,7 +1549,7 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// #     }
 /// # }
 /// # let opts = get_opts();
-/// # let pool = pool::MyPool::new(opts).unwrap();
+/// # let pool = pool::Pool::new(opts).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// for row in conn.prep_exec("SELECT ?, ?", (42, 2.5)).unwrap() {

@@ -34,7 +34,7 @@
 //! #### Use
 //! You should start by creating [`Opts`](conn/struct.Opts.html) struct.
 //!
-//! Then you can create [`MyPool`](conn/pool/struct.MyPool.html) which should be
+//! Then you can create [`Pool`](conn/pool/struct.Pool.html) which should be
 //! enough to work with mysql server.
 //!
 //! ##### Example
@@ -43,7 +43,7 @@
 //! use std::default::Default;
 //!
 //! use mysql::conn::Opts;
-//! use mysql::conn::pool::MyPool;
+//! use mysql::conn::pool::Pool;
 //! use mysql::value::from_row;
 //!
 //! #[derive(Debug, PartialEq, Eq)]
@@ -54,7 +54,7 @@
 //! }
 //!
 //! fn main() {
-//!     let pool = MyPool::new("mysql://root:password@localhost:3307").unwrap();
+//!     let pool = Pool::new("mysql://root:password@localhost:3307").unwrap();
 //! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 //! #   let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 //! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
@@ -66,7 +66,7 @@
 //! #         tcp_port: port,
 //! #         ..Default::default()
 //! #   };
-//! #   let pool = MyPool::new(opts).unwrap();
+//! #   let pool = Pool::new(opts).unwrap();
 //!
 //!     // Let's create payment table.
 //!     // It is temporary so we do not need `tmp` database to exist.

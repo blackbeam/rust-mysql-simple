@@ -49,14 +49,14 @@ impl MyInnerPool {
     }
 }
 
-/// `MyPool` serves to provide you with a [`MyPooledConn`](struct.MyPooledConn.html)'s.
-/// However you can prepare statements directly on `MyPool` without
-/// invoking [`MyPool::get_conn`](struct.MyPool.html#method.get_conn).
+/// `Pool` serves to provide you with a [`MyPooledConn`](struct.MyPooledConn.html)'s.
+/// However you can prepare statements directly on `Pool` without
+/// invoking [`Pool::get_conn`](struct.Pool.html#method.get_conn).
 ///
-/// `MyPool` will hold at least `min` connections and will create as many as `max`
+/// `Pool` will hold at least `min` connections and will create as many as `max`
 /// connections.
 ///
-/// Example of multithreaded `MyPool` usage:
+/// Example of multithreaded `Pool` usage:
 ///
 /// ```rust
 /// use mysql::conn::pool;
@@ -81,7 +81,7 @@ impl MyInnerPool {
 /// }
 ///
 /// let opts = get_opts();
-/// let pool = pool::MyPool::new(opts).unwrap();
+/// let pool = pool::Pool::new(opts).unwrap();
 /// let mut threads = Vec::new();
 /// for _ in 0..100 {
 ///     let pool = pool.clone();
@@ -98,23 +98,23 @@ impl MyInnerPool {
 /// For more info on how to work with mysql connection please look at
 /// [`MyPooledConn`](struct.MyPooledConn.html) documentation.
 #[derive(Clone)]
-pub struct MyPool(Arc<(Mutex<MyInnerPool>, Condvar)>);
+pub struct Pool(Arc<(Mutex<MyInnerPool>, Condvar)>);
 
-impl MyPool {
+impl Pool {
     /// Creates new pool with `min = 10` and `max = 100`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyPool> {
-        MyPool::new_manual(10, 100, opts)
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Pool> {
+        Pool::new_manual(10, 100, opts)
     }
 
     /// Same as `new` but you can set `min` and `max`.
-    pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> MyResult<MyPool> {
+    pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> MyResult<Pool> {
         let pool = try!(MyInnerPool::new(min, max, opts.into()));
-        Ok(MyPool(Arc::new((Mutex::new(pool), Condvar::new()))))
+        Ok(Pool(Arc::new((Mutex::new(pool), Condvar::new()))))
     }
 
     /// Gives you a [`MyPooledConn`](struct.MyPooledConn.html).
     ///
-    /// `MyPool` will check that connection is alive via
+    /// `Pool` will check that connection is alive via
     /// [`Conn::ping`](../struct.Conn.html#method.ping) and will
     /// call [`Conn::reset`](../struct.Conn.html#method.reset) if
     /// necessary.
@@ -255,10 +255,10 @@ impl MyPool {
     }
 }
 
-impl fmt::Debug for MyPool {
+impl fmt::Debug for Pool {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let pool = (self.0).0.lock().unwrap();
-        write!(f, "MyPool {{ min: {}, max: {} }}", pool.min, pool.max)
+        write!(f, "Pool {{ min: {}, max: {} }}", pool.min, pool.max)
     }
 }
 
@@ -291,7 +291,7 @@ impl fmt::Debug for MyPool {
 /// #     }
 /// # }
 /// # let opts = get_opts();
-/// # let pool = pool::MyPool::new(opts).unwrap();
+/// # let pool = pool::Pool::new(opts).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.query("SELECT 42").map(|mut result| {
@@ -310,7 +310,7 @@ impl fmt::Debug for MyPool {
 /// [`QueryResult`](../struct.QueryResult.html) documentation.
 #[derive(Debug)]
 pub struct MyPooledConn {
-    pool: MyPool,
+    pool: Pool,
     conn: Option<Conn>
 }
 
@@ -445,12 +445,12 @@ mod test {
     mod pool {
         use super::get_opts;
         use std::thread;
-        use super::super::MyPool;
+        use super::super::Pool;
         use super::super::super::super::value::from_value;
         use super::super::super::super::error::{MyError, DriverError};
         #[test]
         fn should_execute_queryes_on_MyPooledConn() {
-            let pool = MyPool::new(get_opts()).unwrap();
+            let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {
                 let pool = pool.clone();
@@ -467,7 +467,7 @@ mod test {
         }
         #[test]
         fn should_timeout_if_no_connections_available() {
-            let pool = MyPool::new_manual(0, 1, get_opts()).unwrap();
+            let pool = Pool::new_manual(0, 1, get_opts()).unwrap();
             let conn1 = pool.try_get_conn(357).unwrap();
             let conn2 = pool.try_get_conn(357);
             assert!(conn2.is_err());
@@ -480,7 +480,7 @@ mod test {
         }
         #[test]
         fn should_execute_statements_on_MyPooledConn() {
-            let pool = MyPool::new(get_opts()).unwrap();
+            let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {
                 let pool = pool.clone();
@@ -494,7 +494,7 @@ mod test {
                 assert!(t.join().is_ok());
             }
 
-            let pool = MyPool::new(get_opts()).unwrap();
+            let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {
                 let pool = pool.clone();
@@ -508,8 +508,8 @@ mod test {
             }
         }
         #[test]
-        fn should_execute_statements_on_MyPool() {
-            let pool = MyPool::new(get_opts()).unwrap();
+        fn should_execute_statements_on_Pool() {
+            let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {
                 let pool = pool.clone();
@@ -522,7 +522,7 @@ mod test {
                 assert!(t.join().is_ok());
             }
 
-            let pool = MyPool::new(get_opts()).unwrap();
+            let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {
                 let pool = pool.clone();
@@ -535,8 +535,8 @@ mod test {
             }
         }
         #[test]
-        fn should_start_transaction_on_MyPool() {
-            let pool = MyPool::new(get_opts()).unwrap();
+        fn should_start_transaction_on_Pool() {
+            let pool = Pool::new(get_opts()).unwrap();
             pool.prepare("CREATE TEMPORARY TABLE x.tbl(a INT)").ok().map(|mut stmt| {
                 assert!(stmt.execute(()).is_ok());
             });
@@ -576,7 +576,7 @@ mod test {
         }
         #[test]
         fn should_start_transaction_on_MyPooledConn() {
-            let pool = MyPool::new(get_opts()).unwrap();
+            let pool = Pool::new(get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
             assert!(conn.start_transaction(false, None, None).and_then(|mut t| {
