@@ -8,13 +8,13 @@ use super::IsolationLevel;
 use super::Transaction;
 use super::super::error::{MyError, DriverError};
 use super::super::value::Params;
-use super::{MyConn, Opts, Stmt, QueryResult};
+use super::{Conn, Opts, Stmt, QueryResult};
 use super::super::error::{MyResult};
 
 #[derive(Debug)]
 struct MyInnerPool {
     opts: Opts,
-    pool: Vec<MyConn>,
+    pool: Vec<Conn>,
     min: usize,
     max: usize,
     count: usize
@@ -38,7 +38,7 @@ impl MyInnerPool {
         Ok(pool)
     }
     fn new_conn(&mut self) -> MyResult<()> {
-        match MyConn::new(self.opts.clone()) {
+        match Conn::new(self.opts.clone()) {
             Ok(conn) => {
                 self.pool.push(conn);
                 self.count += 1;
@@ -115,8 +115,8 @@ impl MyPool {
     /// Gives you a [`MyPooledConn`](struct.MyPooledConn.html).
     ///
     /// `MyPool` will check that connection is alive via
-    /// [`MyConn::ping`](../struct.MyConn.html#method.ping) and will
-    /// call [`MyConn::reset`](../struct.MyConn.html#method.reset) if
+    /// [`Conn::ping`](../struct.Conn.html#method.ping) and will
+    /// call [`Conn::reset`](../struct.Conn.html#method.reset) if
     /// necessary.
     pub fn get_conn(&self) -> MyResult<MyPooledConn> {
         let &(ref inner_pool, ref condvar) = &*self.0;
@@ -311,7 +311,7 @@ impl fmt::Debug for MyPool {
 #[derive(Debug)]
 pub struct MyPooledConn {
     pool: MyPool,
-    conn: Option<MyConn>
+    conn: Option<Conn>
 }
 
 impl Drop for MyPooledConn {
@@ -328,25 +328,25 @@ impl Drop for MyPooledConn {
 
 impl MyPooledConn {
     /// Redirects to
-    /// [`MyConn#query`](../struct.MyConn.html#method.query).
+    /// [`Conn#query`](../struct.Conn.html#method.query).
     pub fn query<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<QueryResult<'a>> {
         self.conn.as_mut().unwrap().query(query)
     }
 
     /// Redirects to
-    /// [`MyConn#prepare`](../struct.MyConn.html#method.prepare).
+    /// [`Conn#prepare`](../struct.Conn.html#method.prepare).
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
         self.conn.as_mut().unwrap().prepare(query)
     }
 
     /// Redirects to
-    /// [`MyConn#prep_exec`](../struct.MyConn.html#method.prep_exec).
+    /// [`Conn#prep_exec`](../struct.Conn.html#method.prep_exec).
     pub fn prep_exec<'a, A: AsRef<str> + 'a, T: Into<Params>>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
         self.conn.as_mut().unwrap().prep_exec(query, params)
     }
 
     /// Redirects to
-    /// [`MyConn#start_transaction`](../struct.MyConn.html#method.start_transaction)
+    /// [`Conn#start_transaction`](../struct.Conn.html#method.start_transaction)
     pub fn start_transaction<'a>(&'a mut self,
                                  consistent_snapshot: bool,
                                  isolation_level: Option<IsolationLevel>,
@@ -357,19 +357,19 @@ impl MyPooledConn {
     }
 
     /// Gives mutable reference to the wrapped
-    /// [`MyConn`](../struct.MyConn.html).
-    pub fn as_mut<'a>(&'a mut self) -> &'a mut MyConn {
+    /// [`Conn`](../struct.Conn.html).
+    pub fn as_mut<'a>(&'a mut self) -> &'a mut Conn {
         self.conn.as_mut().unwrap()
     }
 
     /// Gives reference to the wrapped
-    /// [`MyConn`](../struct.MyConn.html).
-    pub fn as_ref<'a>(&'a self) -> &'a MyConn {
+    /// [`Conn`](../struct.Conn.html).
+    pub fn as_ref<'a>(&'a self) -> &'a Conn {
         self.conn.as_ref().unwrap()
     }
 
-    /// Unwraps wrapped [`MyConn`](../struct.MyConn.html).
-    pub fn unwrap(mut self) -> MyConn {
+    /// Unwraps wrapped [`Conn`](../struct.Conn.html).
+    pub fn unwrap(mut self) -> Conn {
         self.conn.take().unwrap()
     }
 

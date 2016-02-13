@@ -87,7 +87,7 @@ pub struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
-    fn new(conn: &'a mut MyConn) -> Transaction<'a> {
+    fn new(conn: &'a mut Conn) -> Transaction<'a> {
         Transaction {
             conn: ConnRef::ViaConnRef(conn),
             committed: false,
@@ -103,17 +103,17 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    /// See [`MyConn#query`](struct.MyConn.html#method.query).
+    /// See [`Conn#query`](struct.Conn.html#method.query).
     pub fn query<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<QueryResult<'c>> {
         self.conn.query(query)
     }
 
-    /// See [`MyConn#prepare`](struct.MyConn.html#method.prepare).
+    /// See [`Conn#prepare`](struct.Conn.html#method.prepare).
     pub fn prepare<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<Stmt<'c>> {
         self.conn.prepare(query)
     }
 
-    /// See [`MyConn#prep_exec`](struct.MyConn.html#method.prep_exec).
+    /// See [`Conn#prep_exec`](struct.Conn.html#method.prep_exec).
     pub fn prep_exec<'c, A: AsRef<str> + 'c, T: Into<Params>>(&'c mut self, query: A, params: T) -> MyResult<QueryResult<'c>> {
         self.conn.prep_exec(query, params)
     }
@@ -185,14 +185,14 @@ impl InnerStmt {
 /// Possible ways to pass conn to a statement or transaction
 #[derive(Debug)]
 enum ConnRef<'a> {
-    ViaConnRef(&'a mut MyConn),
+    ViaConnRef(&'a mut Conn),
     ViaPooledConn(pool::MyPooledConn),
 }
 
 impl<'a> Deref for ConnRef<'a> {
-    type Target = MyConn;
+    type Target = Conn;
 
-    fn deref<'c>(&'c self) -> &'c MyConn {
+    fn deref<'c>(&'c self) -> &'c Conn {
         match *self {
             ConnRef::ViaConnRef(ref conn_ref) => conn_ref,
             ConnRef::ViaPooledConn(ref conn) => conn.as_ref(),
@@ -201,7 +201,7 @@ impl<'a> Deref for ConnRef<'a> {
 }
 
 impl<'a> DerefMut for ConnRef<'a> {
-    fn deref_mut<'c>(&'c mut self) -> &'c mut MyConn {
+    fn deref_mut<'c>(&'c mut self) -> &'c mut Conn {
         match *self {
             ConnRef::ViaConnRef(ref mut conn_ref) => conn_ref,
             ConnRef::ViaPooledConn(ref mut conn) => conn.as_mut(),
@@ -218,7 +218,7 @@ pub struct Stmt<'a> {
 }
 
 impl<'a> Stmt<'a> {
-    fn new(stmt: InnerStmt, conn: &'a mut MyConn) -> Stmt<'a> {
+    fn new(stmt: InnerStmt, conn: &'a mut Conn) -> Stmt<'a> {
         Stmt {
             stmt: stmt,
             conn: ConnRef::ViaConnRef(conn),
@@ -541,7 +541,7 @@ impl Index<usize> for Row {
 
 /// Mysql connection.
 #[derive(Debug)]
-pub struct MyConn {
+pub struct Conn {
     opts: Opts,
     stream: Option<Stream>,
     stmts: HashMap<String, InnerStmt>,
@@ -559,9 +559,9 @@ pub struct MyConn {
     has_results: bool,
 }
 
-impl MyConn {
-    fn empty<T: Into<Opts>>(opts: T) -> MyConn {
-        MyConn {
+impl Conn {
+    fn empty<T: Into<Opts>>(opts: T) -> Conn {
+        Conn {
             opts: opts.into(),
             stream: None,
             stmts: HashMap::new(),
@@ -581,9 +581,9 @@ impl MyConn {
     }
 
     #[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
-    /// Creates new `MyConn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
-        let mut conn = MyConn::empty(opts);
+    /// Creates new `Conn`.
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
+        let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
@@ -595,7 +595,7 @@ impl MyConn {
                             unix_addr: Some(From::from(path)),
                             ..conn.opts.clone()
                         };
-                        return MyConn::new(opts).or(Ok(conn));
+                        return Conn::new(opts).or(Ok(conn));
                     },
                     _ => return Ok(conn)
                 }
@@ -608,9 +608,9 @@ impl MyConn {
     }
 
     #[cfg(all(not(feature = "ssl"), not(feature = "socket"), feature = "pipe"))]
-    /// Creates new `MyConn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
-        let mut conn = MyConn::empty(opts);
+    /// Creates new `Conn`.
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
+        let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         if conn.opts.pipe_name.is_none() && conn.opts.prefer_socket {
@@ -622,7 +622,7 @@ impl MyConn {
                             pipe_name: Some(name),
                             ..conn.opts.clone()
                         };
-                        return MyConn::new(opts).or(Ok(conn));
+                        return Conn::new(opts).or(Ok(conn));
                     },
                     _ => return Ok(conn)
                 }
@@ -635,9 +635,9 @@ impl MyConn {
     }
 
     #[cfg(all(feature = "ssl", feature = "socket"))]
-    /// Creates new `MyConn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
-        let mut conn = MyConn::empty(opts);
+    /// Creates new `Conn`.
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
+        let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         if let None = conn.opts.ssl_opts {
@@ -650,7 +650,7 @@ impl MyConn {
                                 unix_addr: Some(From::from(path)),
                                 ..conn.opts.clone()
                             };
-                            return MyConn::new(opts).or(Ok(conn));
+                            return Conn::new(opts).or(Ok(conn));
                         },
                         _ => return Ok(conn)
                     }
@@ -664,9 +664,9 @@ impl MyConn {
     }
 
     #[cfg(all(feature = "ssl", not(feature = "socket"), feature = "pipe"))]
-    /// Creates new `MyConn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
-        let mut conn = MyConn::empty(opts);
+    /// Creates new `Conn`.
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
+        let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         if let None = conn.opts.ssl_opts {
@@ -679,7 +679,7 @@ impl MyConn {
                                 pipe_name: Some(name),
                                 ..conn.opts.clone()
                             };
-                            return MyConn::new(opts).or(Ok(conn));
+                            return Conn::new(opts).or(Ok(conn));
                         },
                         _ => return Ok(conn)
                     }
@@ -693,9 +693,9 @@ impl MyConn {
     }
 
     #[cfg(all(not(feature = "ssl"), not(feature = "socket"), not(feature = "pipe")))]
-    /// Creates new `MyConn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
-        let mut conn = MyConn::empty(opts);
+    /// Creates new `Conn`.
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
+        let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         for cmd in conn.opts.init.clone() {
@@ -705,9 +705,9 @@ impl MyConn {
     }
 
     #[cfg(all(feature = "ssl", not(feature = "socket"), not(feature = "pipe")))]
-    /// Creates new `MyConn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<MyConn> {
-        let mut conn = MyConn::empty(opts);
+    /// Creates new `Conn`.
+    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
+        let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
         for cmd in conn.opts.init.clone() {
@@ -716,7 +716,7 @@ impl MyConn {
         return Ok(conn);
     }
 
-    /// Resets `MyConn` (drops state then reconnects).
+    /// Resets `Conn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
         if self.server_version > (5, 7, 2) {
             try!(self.write_command(Command::COM_RESET_CONNECTION));
@@ -1259,7 +1259,7 @@ impl MyConn {
     }
 
     /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
-    /// on `MyConn`. Return `true` on success or `false` on error.
+    /// on `Conn`. Return `true` on success or `false` on error.
     pub fn ping(&mut self) -> bool {
         match self.write_command(Command::COM_PING) {
             Ok(_) => {
@@ -1283,8 +1283,8 @@ impl MyConn {
 
     /// Implements text protocol of mysql server.
     ///
-    /// Executes mysql query on `MyConn`. [`QueryResult`](struct.QueryResult.html)
-    /// will borrow `MyConn` until the end of its scope.
+    /// Executes mysql query on `Conn`. [`QueryResult`](struct.QueryResult.html)
+    /// will borrow `Conn` until the end of its scope.
     pub fn query<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<QueryResult<'a>> {
         match self._query(query.as_ref()) {
             Ok((columns, ok_packet)) => {
@@ -1339,8 +1339,8 @@ impl MyConn {
 
     /// Implements binary protocol of mysql server.
     ///
-    /// Prepares mysql statement on `MyConn`. [`Stmt`](struct.Stmt.html) will
-    /// borrow `MyConn` until the end of its scope.
+    /// Prepares mysql statement on `Conn`. [`Stmt`](struct.Stmt.html) will
+    /// borrow `Conn` until the end of its scope.
     ///
     /// This call will take statement from cache if has been prepared on this connection.
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
@@ -1463,7 +1463,7 @@ impl MyConn {
     }
 }
 
-impl Drop for MyConn {
+impl Drop for Conn {
     fn drop(&mut self) {
         let keys: Vec<String> = self.stmts.keys().map(Clone::clone).collect();
         for key in keys {
@@ -1495,14 +1495,14 @@ impl Drop for MyConn {
 /// Possible ways to pass conn to a query result
 #[derive(Debug)]
 enum ResultConnRef<'a> {
-    ViaConnRef(&'a mut MyConn),
+    ViaConnRef(&'a mut Conn),
     ViaStmt(Stmt<'a>)
 }
 
 impl<'a> Deref for ResultConnRef<'a> {
-    type Target = MyConn;
+    type Target = Conn;
 
-    fn deref<'c>(&'c self) -> &'c MyConn {
+    fn deref<'c>(&'c self) -> &'c Conn {
         match *self {
             ResultConnRef::ViaConnRef(ref conn_ref) => conn_ref,
             ResultConnRef::ViaStmt(ref stmt) => stmt.conn.deref(),
@@ -1511,7 +1511,7 @@ impl<'a> Deref for ResultConnRef<'a> {
 }
 
 impl<'a> DerefMut for ResultConnRef<'a> {
-    fn deref_mut<'c>(&'c mut self) -> &'c mut MyConn {
+    fn deref_mut<'c>(&'c mut self) -> &'c mut Conn {
         match *self {
             ResultConnRef::ViaConnRef(ref mut conn_ref) => conn_ref,
             ResultConnRef::ViaStmt(ref mut stmt) => stmt.conn.deref_mut(),
@@ -1773,14 +1773,14 @@ mod test {
         use std::fs;
         use std::io::Write;
         use time::{Tm, now};
-        use super::super::{MyConn, Opts, Row};
+        use super::super::{Conn, Opts, Row};
         use super::super::super::value::{ToValue, from_value};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
 
         #[test]
         fn should_connect() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             let mode = conn.query("SELECT @@GLOBAL.sql_mode").unwrap().next().unwrap().unwrap().take(0).unwrap();
             let mode = from_value::<String>(mode);
             assert!(mode.contains("TRADITIONAL"));
@@ -1788,7 +1788,7 @@ mod test {
         }
         #[test]
         fn should_connect_with_database() {
-            let mut conn = MyConn::new(Opts {
+            let mut conn = Conn::new(Opts {
                 db_name: Some("mysql".to_string()),
                 ..get_opts()
             }).unwrap();
@@ -1797,7 +1797,7 @@ mod test {
         }
         #[test]
         fn should_connect_by_hostname() {
-            let mut conn = MyConn::new(Opts {
+            let mut conn = Conn::new(Opts {
                 db_name: Some("mysql".to_string()),
                 ip_or_hostname: Some("localhost".to_string()),
                 ..get_opts()
@@ -1807,7 +1807,7 @@ mod test {
         }
         #[test]
         fn should_execute_queryes_and_parse_results() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(\
                                     a TEXT,\
                                     b INT,\
@@ -1857,7 +1857,7 @@ mod test {
         }
         #[test]
         fn should_parse_large_text_result() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             assert_eq!(
                 conn.query("SELECT REPEAT('A', 20000000)").unwrap().next().unwrap().unwrap(),
                 Row::new(vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())])
@@ -1865,7 +1865,7 @@ mod test {
         }
         #[test]
         fn should_execute_statements_and_parse_results() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(\
                                     a TEXT,\
                                     b INT,\
@@ -1919,7 +1919,7 @@ mod test {
         }
         #[test]
         fn should_parse_large_binary_result() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
             assert_eq!(
                 stmt.execute(()).unwrap().next().unwrap().unwrap(),
@@ -1928,7 +1928,7 @@ mod test {
         }
         #[test]
         fn should_start_commit_and_rollback_transactions() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
@@ -1973,7 +1973,7 @@ mod test {
         }
         #[test]
         fn should_handle_LOCAL_INFILE() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
             let path = ::std::path::PathBuf::from("local_infile.txt");
             {
@@ -1999,7 +1999,7 @@ mod test {
         }
         #[test]
         fn should_reset_connection() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             assert!(conn.query("CREATE TEMPORARY TABLE `db`.`test` \
                                 (`test` VARCHAR(255) NULL);").is_ok());
             assert!(conn.query("SELECT * FROM `db`.`test`;").is_ok());
@@ -2010,7 +2010,7 @@ mod test {
         #[test]
         #[cfg(any(feature = "pipe", feature = "socket"))]
         fn should_handle_multi_resultset() {
-            let mut conn = MyConn::new(Opts {
+            let mut conn = Conn::new(Opts {
                 prefer_socket: false,
                 db_name: Some("mysql".to_string()),
                 ..get_opts()
@@ -2047,25 +2047,25 @@ mod test {
     mod bench {
         use test;
         use super::get_opts;
-        use super::super::{MyConn};
+        use super::super::{Conn};
         use super::super::super::value::Value::NULL;
 
         #[bench]
         fn simple_exec(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| { let _ = conn.query("DO 1"); })
         }
 
         #[bench]
         fn prepared_exec(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("DO 1").unwrap();
             bencher.iter(|| { let _ = stmt.execute(()); })
         }
 
         #[bench]
         fn prepare_and_exec(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
                 let mut stmt = conn.prepare("SELECT ?").unwrap();
                 let _ = stmt.execute((0,)).unwrap();
@@ -2074,27 +2074,27 @@ mod test {
 
         #[bench]
         fn simple_query_row(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| { let _ = conn.query("SELECT 1"); })
         }
 
         #[bench]
         fn simple_prepared_query_row(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT 1").unwrap();
             bencher.iter(|| { let _ = stmt.execute(()); })
         }
 
         #[bench]
         fn simple_prepared_query_row_with_param(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?").unwrap();
             bencher.iter(|| { let _ = stmt.execute((0,)); })
         }
 
         #[bench]
         fn simple_prepared_query_row_with_5_params(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
             let params = (42i8, b"123456".to_vec(), 1.618f64, NULL, 1i8);
             bencher.iter(|| { let _ = stmt.execute(&params); })
@@ -2102,13 +2102,13 @@ mod test {
 
         #[bench]
         fn select_large_string(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| { let _ = conn.query("SELECT REPEAT('A', 10000)"); })
         }
 
         #[bench]
         fn select_prepared_large_string(bencher: &mut test::Bencher) {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
             bencher.iter(|| { let _ = stmt.execute(()); })
         }

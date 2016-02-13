@@ -1818,7 +1818,7 @@ mod test {
         use super::super::from_value;
         use super::super::Value::{Bytes, Date, Int};
         use time::{Timespec, now, self};
-        use super::super::super::conn::{MyConn, Opts};
+        use super::super::super::conn::{Conn, Opts};
 
         static USER: &'static str = "root";
         static PASS: &'static str = "password";
@@ -1877,7 +1877,7 @@ mod test {
 
         #[test]
         fn stored_and_retrieved_timestamp_should_match() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             conn.query("CREATE TEMPORARY TABLE x.t (ts TIMESTAMP)").unwrap();
             let ts = Timespec { sec: 1414866780, nsec: 0 };
             conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
@@ -1887,7 +1887,7 @@ mod test {
 
         #[test]
         fn stored_and_retrieved_datetime_should_match() {
-            let mut conn = MyConn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts()).unwrap();
             conn.query("CREATE TEMPORARY TABLE x.t (ts DATETIME)").unwrap();
             let ts = Timespec { sec: 1414866780, nsec: 0 };
             conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
