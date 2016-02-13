@@ -22,7 +22,7 @@ use super::io::Write;
 use super::io::Stream;
 use super::io::TcpStream::Insecure;
 use super::error::Error::{
-    MyIoError,
+    IoError,
     MySqlError,
     MyDriverError
 };
@@ -1201,7 +1201,7 @@ impl Conn {
                     }
                 },
                 Err(e) => {
-                    return Err(MyIoError(e));
+                    return Err(IoError(e));
                 }
             }
             r = file.read(&mut chunk[..]);
@@ -1417,7 +1417,7 @@ impl Conn {
             Ok(p) => Ok(Some(p)),
             Err(e) => {
                 self.has_results = false;
-                Err(MyIoError(e))
+                Err(IoError(e))
             }
         }
     }
@@ -1444,7 +1444,7 @@ impl Conn {
                 let p = ErrPacket::from_payload(pld.as_ref(), self.capability_flags);
                 match p {
                     Ok(p) => return Err(MySqlError(p)),
-                    Err(err) => return Err(MyIoError(err))
+                    Err(err) => return Err(IoError(err))
                 }
             }
         }
@@ -1453,7 +1453,7 @@ impl Conn {
             Ok(p) => Ok(Some(p)),
             Err(err) => {
                 self.has_results = false;
-                Err(MyIoError(err))
+                Err(IoError(err))
             }
         }
     }

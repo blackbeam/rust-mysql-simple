@@ -12,7 +12,7 @@ use super::conn::Row;
 use super::value::Value;
 
 pub enum Error {
-    MyIoError(io::Error),
+    IoError(io::Error),
     MySqlError(ErrPacket),
     MyDriverError(DriverError),
     #[cfg(feature = "openssl")]
@@ -25,7 +25,7 @@ impl error::Error for Error {
     #[cfg(feature = "ssl")]
     fn description(&self) -> &str {
         match *self {
-            Error::MyIoError(_) => "I/O Error",
+            Error::IoError(_) => "I/O Error",
             Error::MySqlError(_) => "MySql server error",
             Error::MyDriverError(_) => "driver error",
             Error::MySslError(_) => "ssl error",
@@ -37,7 +37,7 @@ impl error::Error for Error {
     #[cfg(not(feature = "ssl"))]
     fn description(&self) -> &str {
         match *self {
-            Error::MyIoError(_) => "I/O Error",
+            Error::IoError(_) => "I/O Error",
             Error::MySqlError(_) => "MySql server error",
             Error::MyDriverError(_) => "driver error",
             Error::FromRowError(_) => "from row conversion error",
@@ -47,7 +47,7 @@ impl error::Error for Error {
 
     fn cause(&self) -> Option<&error::Error> {
         match *self {
-            Error::MyIoError(ref err) => Some(err),
+            Error::IoError(ref err) => Some(err),
             Error::MyDriverError(ref err) => Some(err),
             _ => None
         }
@@ -56,7 +56,7 @@ impl error::Error for Error {
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
-        Error::MyIoError(err)
+        Error::IoError(err)
     }
 }
 
@@ -84,7 +84,7 @@ impl From<SslError> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::MyIoError(ref io_err) => io_err.fmt(f),
+            Error::IoError(ref io_err) => io_err.fmt(f),
             Error::MySqlError(ref err_packet) => err_packet.fmt(f),
             Error::MyDriverError(ref driver_err) => driver_err.fmt(f),
             Error::MySslError(ref ssl_error) => ssl_error.fmt(f),
@@ -98,7 +98,7 @@ impl fmt::Display for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::MyIoError(ref io_err) => io_err.fmt(f),
+            Error::IoError(ref io_err) => io_err.fmt(f),
             Error::MySqlError(ref err_packet) => err_packet.fmt(f),
             Error::MyDriverError(ref driver_err) => driver_err.fmt(f),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
@@ -111,7 +111,7 @@ impl fmt::Display for Error {
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
+            Error::IoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
             Error::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
             Error::MySslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
@@ -125,7 +125,7 @@ impl fmt::Debug for Error {
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::MyIoError(ref io_err) => fmt::Debug::fmt(io_err, f),
+            Error::IoError(ref io_err) => fmt::Debug::fmt(io_err, f),
             Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
             Error::MyDriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
             Error::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
