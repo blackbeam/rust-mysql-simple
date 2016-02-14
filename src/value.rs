@@ -1814,7 +1814,6 @@ mod test {
     }
 
     mod from_value {
-        use std::time::Duration;
         use super::super::from_value;
         use super::super::Value::{Bytes, Date, Int};
         use time::{Timespec, now, self};
