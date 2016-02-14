@@ -167,7 +167,7 @@ pub use conn::pool::Pool;
 pub use conn::pool::PooledConn;
 pub use error::DriverError;
 pub use error::Error;
-pub use error::ErrPacket;
+pub use error::MySqlError;
 pub use error::Result;
 pub use error::ServerError;
 pub use value::ConvIr;

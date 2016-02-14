@@ -1,4 +1,3 @@
-use std::fmt;
 use std::io;
 use std::io::Read as StdRead;
 
@@ -71,19 +70,14 @@ impl ErrPacket {
     }
 }
 
-impl fmt::Display for ErrPacket {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,
-               "ERROR {} ({}): {}",
-               self.error_code,
-               String::from_utf8_lossy(&self.sql_state[..]).into_owned(),
-               String::from_utf8_lossy(&self.error_message[..]).into_owned())
-    }
-}
-
-impl fmt::Debug for ErrPacket {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
+impl From<ErrPacket> for error::MySqlError {
+    fn from(x: ErrPacket) -> error::MySqlError {
+        let ErrPacket {sql_state, error_message, error_code} = x;
+        error::MySqlError {
+            state: String::from_utf8_lossy(&*sql_state).into_owned(),
+            code: error_code,
+            message: String::from_utf8_lossy(&*error_message).into_owned(),
+        }
     }
 }
 

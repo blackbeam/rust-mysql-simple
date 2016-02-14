@@ -8,13 +8,37 @@ use byteorder::Error as BoError;
 #[cfg(feature = "openssl")]
 use openssl::ssl::error::{SslError};
 
-pub use super::packet::ErrPacket;
 use super::conn::Row;
 use super::value::Value;
 
+#[derive(Eq, PartialEq, Clone)]
+pub struct MySqlError {
+    pub state: String,
+    pub message: String,
+    pub code: u16,
+}
+
+impl fmt::Display for MySqlError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ERROR {} ({}): {}", self.code, self.state, self.message)
+    }
+}
+
+impl fmt::Debug for MySqlError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl error::Error for MySqlError {
+    fn description(&self) -> &str {
+        "Error returned by a server"
+    }
+}
+
 pub enum Error {
     IoError(io::Error),
-    MySqlError(ErrPacket),
+    MySqlError(MySqlError),
     DriverError(DriverError),
     #[cfg(feature = "openssl")]
     SslError(SslError),
@@ -50,6 +74,7 @@ impl error::Error for Error {
         match *self {
             Error::IoError(ref err) => Some(err),
             Error::DriverError(ref err) => Some(err),
+            Error::MySqlError(ref err) => Some(err),
             _ => None
         }
     }
@@ -74,6 +99,12 @@ impl From<DriverError> for Error {
     }
 }
 
+impl From<MySqlError> for Error {
+    fn from(x: MySqlError) -> Error {
+        Error::MySqlError(x)
+    }
+}
+
 #[cfg(feature = "openssl")]
 impl From<SslError> for Error {
     fn from(err: SslError) -> Error {
@@ -86,7 +117,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Error::IoError(ref io_err) => io_err.fmt(f),
-            Error::MySqlError(ref err_packet) => err_packet.fmt(f),
+            Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref driver_err) => driver_err.fmt(f),
             Error::SslError(ref ssl_error) => ssl_error.fmt(f),
             Error::FromRowError(_) => "from row conversion error".fmt(f),

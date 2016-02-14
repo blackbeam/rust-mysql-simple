@@ -732,7 +732,7 @@ impl Conn {
                     },
                     _ => {
                         let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
-                        Err(MySqlError(err))
+                        Err(MySqlError(err.into()))
                     }
                 }
             })
@@ -881,7 +881,7 @@ impl Conn {
                 0xFF => {
                     let error_packet = try!(ErrPacket::from_payload(pld.as_ref(),
                                                                     self.capability_flags));
-                    Err(MySqlError(error_packet))
+                    Err(MySqlError(error_packet.into()))
                 },
                 _ => {
                     let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
@@ -907,7 +907,7 @@ impl Conn {
                 0xffu8 => {
                     let err = try!(ErrPacket::from_payload(pld.as_ref(),
                                                            self.capability_flags));
-                    Err(MySqlError(err))
+                    Err(MySqlError(err.into()))
                 },
                 _ => Err(DriverError(UnexpectedPacket))
             }
@@ -921,7 +921,7 @@ impl Conn {
                 0xFF => {
                     let error_packet = try!(ErrPacket::from_payload(pld.as_ref(),
                                                                     self.capability_flags));
-                    Err(MySqlError(error_packet))
+                    Err(MySqlError(error_packet.into()))
                 },
                 _ => {
                     let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
@@ -957,7 +957,7 @@ impl Conn {
                 0xffu8 => {
                     let err = try!(ErrPacket::from_payload(pld.as_ref(),
                                                            self.capability_flags));
-                    Err(MySqlError(err))
+                    Err(MySqlError(err.into()))
                 },
                 _ => Err(DriverError(UnexpectedPacket))
             }
@@ -1235,7 +1235,7 @@ impl Conn {
             },
             0xff => {
                 let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
-                Err(MySqlError(err))
+                Err(MySqlError(err.into()))
             },
             _ => {
                 let mut reader = &pld[..];
@@ -1300,7 +1300,7 @@ impl Conn {
         match pld[0] {
             0xff => {
                 let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
-                Err(MySqlError(err))
+                Err(MySqlError(err.into()))
             },
             _ => {
                 let mut stmt = try!(InnerStmt::from_payload(pld.as_ref()));
@@ -1443,7 +1443,7 @@ impl Conn {
             } else /* x == 0xff */ {
                 let p = ErrPacket::from_payload(pld.as_ref(), self.capability_flags);
                 match p {
-                    Ok(p) => return Err(MySqlError(p)),
+                    Ok(p) => return Err(MySqlError(p.into())),
                     Err(err) => return Err(IoError(err))
                 }
             }
