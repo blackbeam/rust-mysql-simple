@@ -4,6 +4,9 @@ rust-mysql-simple
 
 Mysql client library implemented in rust. Feel free to open a new issues and pull requests.
 
+### Changelog
+Available [here](https://github.com/blackbeam/rust-mysql-simple/releases)
+
 ### Documentation
 Latest crate API docs hosted [here](http://blackbeam.org/doc/mysql/index.html).
 
