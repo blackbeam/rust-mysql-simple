@@ -11,6 +11,8 @@ use openssl::ssl::error::{SslError};
 use super::conn::Row;
 use super::value::Value;
 
+use url::ParseError;
+
 #[derive(Eq, PartialEq, Clone)]
 pub struct MySqlError {
     pub state: String,
@@ -40,6 +42,7 @@ pub enum Error {
     IoError(io::Error),
     MySqlError(MySqlError),
     DriverError(DriverError),
+    UrlError(UrlError),
     #[cfg(feature = "openssl")]
     SslError(SslError),
     FromValueError(Value),
@@ -53,6 +56,7 @@ impl error::Error for Error {
             Error::IoError(_) => "I/O Error",
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
+            Error::UrlError(_) => "url error",
             Error::SslError(_) => "ssl error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
@@ -65,6 +69,7 @@ impl error::Error for Error {
             Error::IoError(_) => "I/O Error",
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
+            Error::UrlError(_) => "url error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
         }
@@ -76,6 +81,7 @@ impl error::Error for Error {
             Error::IoError(ref err) => Some(err),
             Error::DriverError(ref err) => Some(err),
             Error::MySqlError(ref err) => Some(err),
+            Error::UrlError(ref err) => Some(err),
             Error::SslError(ref err) => Some(err),
             _ => None
         }
@@ -87,6 +93,7 @@ impl error::Error for Error {
             Error::IoError(ref err) => Some(err),
             Error::DriverError(ref err) => Some(err),
             Error::MySqlError(ref err) => Some(err),
+            Error::UrlError(ref err) => Some(err),
             _ => None
         }
     }
@@ -124,6 +131,12 @@ impl From<SslError> for Error {
     }
 }
 
+impl From<UrlError> for Error {
+    fn from(err: UrlError) -> Error {
+        Error::UrlError(err)
+    }
+}
+
 #[cfg(feature = "ssl")]
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -131,6 +144,7 @@ impl fmt::Display for Error {
             Error::IoError(ref err) => write!(f, "IoError {{ {} }}", err),
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
+            Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
             Error::SslError(ref err) => write!(f, "SslError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
@@ -145,6 +159,7 @@ impl fmt::Display for Error {
             Error::IoError(ref err) => write!(f, "IoError {{ {} }}", err),
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
+            Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
@@ -237,6 +252,53 @@ impl fmt::Display for DriverError {
 impl fmt::Debug for DriverError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
+    }
+}
+
+#[derive(Eq, PartialEq, Clone)]
+pub enum UrlError {
+    ParseError(ParseError),
+    UnsupportedScheme(String),
+    /// (feature_name, parameter_name)
+    FeatureRequired(String, String),
+    /// (feature_name, value)
+    InvalidValue(String, String),
+    UnknownParameter(String),
+}
+
+impl error::Error for UrlError {
+    fn description(&self) -> &str {
+        "Database connection URL error"
+    }
+}
+
+impl fmt::Display for UrlError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            UrlError::ParseError(ref err) => write!(f, "URL ParseError {{ {} }}", err),
+            UrlError::UnsupportedScheme(ref s) => write!(f, "URL scheme `{}' is not supported", s),
+            UrlError::FeatureRequired(ref feature, ref parameter) => {
+                write!(f, "Url parameter `{}' requires {} feature", parameter, feature)
+            },
+            UrlError::InvalidValue(ref parameter, ref value) => {
+                write!(f, "Invalid value `{}' for URL parameter `{}'", value, parameter)
+            },
+            UrlError::UnknownParameter(ref parameter) => {
+                write!(f, "Unknown URL parameter `{}'", parameter)
+            },
+        }
+    }
+}
+
+impl fmt::Debug for UrlError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl From<ParseError> for UrlError {
+    fn from(x: ParseError) -> UrlError {
+        UrlError::ParseError(x)
     }
 }
 

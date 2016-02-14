@@ -170,6 +170,7 @@ pub use error::Error;
 pub use error::MySqlError;
 pub use error::Result;
 pub use error::ServerError;
+pub use error::UrlError;
 pub use value::ConvIr;
 pub use value::FromRow;
 pub use value::FromValue;

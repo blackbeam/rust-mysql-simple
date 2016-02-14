@@ -1,5 +1,3 @@
-use std::error::Error;
-
 #[cfg(any(feature = "socket", feature = "pipe"))]
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -8,6 +6,8 @@ use std::path;
 
 #[cfg(any(feature = "socket", feature = "pipe"))]
 use std::str::FromStr;
+
+use super::super::error::UrlError;
 
 use url::{
     UrlParser,
@@ -90,6 +90,10 @@ impl Opts {
         } else {
             false
         }
+    }
+
+    pub fn from_url(url: &str) -> Result<Opts, UrlError> {
+        from_url(url)
     }
 
     #[cfg(any(feature = "socket", feature = "pipe"))]
@@ -213,7 +217,7 @@ impl Default for Opts {
     }
 }
 
-fn from_url_basic(url: &str) -> (Opts, Vec<(String, String)>) {
+fn from_url_basic(url: &str) -> Result<(Opts, Vec<(String, String)>), UrlError> {
     fn scheme_type_mapper(scheme: &str) -> SchemeType {
         match scheme {
             "mysql" => SchemeType::Relative(3306),
@@ -223,14 +227,10 @@ fn from_url_basic(url: &str) -> (Opts, Vec<(String, String)>) {
 
     let mut parser = UrlParser::new();
     parser.scheme_type_mapper(scheme_type_mapper);
-    let url = match parser.parse(url) {
-        Ok(url) => url,
-        Err(err) => panic!("Invalid connection URL: {}", err.description()),
-    };
+    let url = try!(parser.parse(url));
     if url.scheme != "mysql" {
-        panic!("Invalid connection URL: Only supported scheme is `mysql'");
+        return Err(UrlError::UnsupportedScheme(url.scheme))
     }
-    println!("{:?}", url.non_relative_scheme_data());
     let user = url.lossy_percent_decode_username();
     let pass = url.lossy_percent_decode_password();
     let ip_or_hostname = match url.domain() {
@@ -257,42 +257,51 @@ fn from_url_basic(url: &str) -> (Opts, Vec<(String, String)>) {
         db_name: db_name,
         ..Opts::default()
     };
-    (opts, query_pairs)
+    Ok((opts, query_pairs))
+}
+
+fn from_url(url: &str) -> Result<Opts, UrlError> {
+    let (mut opts, query_pairs) = try!(from_url_basic(url));
+    for (key, value) in query_pairs {
+        if key == "prefer_socket" {
+            if cfg!(all(not(feature = "socket"), not(feature = "pipe"))) {
+                return Err(
+                    UrlError::FeatureRequired("`socket' or `pipe'".into(), "prefer_socket".into())
+                );
+            } else {
+                if value == "true" {
+                    opts.set_prefer_socket(true);
+                } else if value == "false" {
+                    opts.set_prefer_socket(false);
+                } else {
+                    return Err(UrlError::InvalidValue("prefer_socket".into(), value));
+                }
+            }
+        } else if key == "verify_peer" {
+            if cfg!(not(feature = "ssl")) {
+                return Err(UrlError::FeatureRequired("`ssl'".into(), "verify_peer".into()));
+            } else {
+                if value == "true" {
+                    opts.set_verify_peer(true);
+                } else if value == "false" {
+                    opts.set_verify_peer(false);
+                } else {
+                    return Err(UrlError::InvalidValue("verify_peer".into(), value));
+                }
+            }
+        } else {
+            return Err(UrlError::UnknownParameter(key));
+        }
+    }
+    Ok(opts)
 }
 
 impl<'a> From<&'a str> for Opts {
     fn from(url: &'a str) -> Opts {
-        let (mut opts, query_pairs) = from_url_basic(url);
-        for (key, value) in query_pairs {
-            if key == "prefer_socket" {
-                if cfg!(all(not(feature = "socket"), not(feature = "pipe"))) {
-                    panic!("Invalid connection URL: `prefer_socket' option requires `socket' or `pipe' features");
-                } else {
-                    if value == "true" {
-                        opts.set_prefer_socket(true);
-                    } else if value == "false" {
-                        opts.set_prefer_socket(false);
-                    } else {
-                        panic!("Invalid connection URL: only `true' or `false' supported as `prefer_socket' option value");
-                    }
-                }
-            } else if key == "verify_peer" {
-                if cfg!(not(feature = "ssl")) {
-                    panic!("Invalid connection URL: `varify_peer' option requires `ssl' feature");
-                } else {
-                    if value == "true" {
-                        opts.set_verify_peer(true);
-                    } else if value == "false" {
-                        opts.set_verify_peer(false);
-                    } else {
-                        panic!("Invalid connection URL: only `true' or `false' supported as `verify_peer' option value");
-                    }
-                }
-            } else {
-                panic!("Invalid connection URL: `{}' option is unknown", key);
-            }
+        match from_url(url) {
+            Ok(opts) => opts,
+            Err(err) => panic!("{}", err),
         }
-        opts
     }
 }
 
