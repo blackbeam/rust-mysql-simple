@@ -51,19 +51,23 @@
 //! }
 //!
 //! fn main() {
-//!     let pool = my::Pool::new("mysql://root:password@localhost:3307").unwrap();
-//! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 //! #   let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 //! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
 //! #                              .unwrap_or(3307);
-//! #   let opts = my::Opts {
-//! #         user: Some("root".to_string()),
-//! #         pass: Some(pwd),
-//! #         ip_or_hostname: Some("127.0.0.1".to_string()),
-//! #         tcp_port: port,
-//! #         ..Default::default()
+//! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
+//! #   let pool = if port == 3307 && pwd == "password" {
+//!     let pool = my::Pool::new("mysql://root:password@localhost:3307").unwrap();
+//! #       pool
+//! #   } else {
+//! #       let opts = my::Opts {
+//! #             user: Some("root".to_string()),
+//! #             pass: Some(pwd),
+//! #             ip_or_hostname: Some("127.0.0.1".to_string()),
+//! #             tcp_port: port,
+//! #             ..Default::default()
+//! #       };
+//! #       my::Pool::new(opts).unwrap()
 //! #   };
-//! #   let pool = my::Pool::new(opts).unwrap();
 //!
 //!     // Let's create payment table.
 //!     // It is temporary so we do not need `tmp` database to exist.
