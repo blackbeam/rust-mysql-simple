@@ -729,7 +729,7 @@ impl Conn {
                 },
                 _ => {
                     let err = try!(ErrPacket::from_payload(&*pld, self.capability_flags));
-                    Err(MySqlError(err))
+                    Err(MySqlError(err.into()))
                 },
             }
         })
