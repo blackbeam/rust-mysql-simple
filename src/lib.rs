@@ -41,10 +41,7 @@
 //!
 //! ```rust
 //! use std::default::Default;
-//!
-//! use mysql::conn::Opts;
-//! use mysql::conn::pool::Pool;
-//! use mysql::value::from_row;
+//! use mysql as my;
 //!
 //! #[derive(Debug, PartialEq, Eq)]
 //! struct Payment {
@@ -54,19 +51,19 @@
 //! }
 //!
 //! fn main() {
-//!     let pool = Pool::new("mysql://root:password@localhost:3307").unwrap();
+//!     let pool = my::Pool::new("mysql://root:password@localhost:3307").unwrap();
 //! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 //! #   let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 //! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
 //! #                              .unwrap_or(3307);
-//! #   let opts = Opts {
+//! #   let opts = my::Opts {
 //! #         user: Some("root".to_string()),
 //! #         pass: Some(pwd),
 //! #         ip_or_hostname: Some("127.0.0.1".to_string()),
 //! #         tcp_port: port,
 //! #         ..Default::default()
 //! #   };
-//! #   let pool = Pool::new(opts).unwrap();
+//! #   let pool = my::Pool::new(opts).unwrap();
 //!
 //!     // Let's create payment table.
 //!     // It is temporary so we do not need `tmp` database to exist.
@@ -107,7 +104,7 @@
 //!         // will map each `MyResult` to contained `row` (no proper error handling)
 //!         // and second call to `map` will map each `row` to `Payment`
 //!         result.map(|x| x.unwrap()).map(|row| {
-//!             let (customer_id, amount, account_name) = from_row(row);
+//!             let (customer_id, amount, account_name) = my::from_row(row);
 //!             Payment {
 //!                 customer_id: customer_id,
 //!                 amount: amount,
