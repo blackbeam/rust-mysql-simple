@@ -70,6 +70,18 @@ impl error::Error for Error {
         }
     }
 
+    #[cfg(feature = "ssl")]
+    fn cause(&self) -> Option<&error::Error> {
+        match *self {
+            Error::IoError(ref err) => Some(err),
+            Error::DriverError(ref err) => Some(err),
+            Error::MySqlError(ref err) => Some(err),
+            Error::SslError(ref err) => Some(err),
+            _ => None
+        }
+    }
+
+    #[cfg(not(feature = "ssl"))]
     fn cause(&self) -> Option<&error::Error> {
         match *self {
             Error::IoError(ref err) => Some(err),
@@ -116,10 +128,10 @@ impl From<SslError> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::IoError(ref io_err) => io_err.fmt(f),
+            Error::IoError(ref err) => write!(f, "IoError {{ {} }}", err),
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
-            Error::DriverError(ref driver_err) => driver_err.fmt(f),
-            Error::SslError(ref ssl_error) => ssl_error.fmt(f),
+            Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
+            Error::SslError(ref err) => write!(f, "SslError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
@@ -130,39 +142,18 @@ impl fmt::Display for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::IoError(ref io_err) => io_err.fmt(f),
-            Error::MySqlError(ref err_packet) => err_packet.fmt(f),
-            Error::DriverError(ref driver_err) => driver_err.fmt(f),
+            Error::IoError(ref err) => write!(f, "IoError {{ {} }}", err),
+            Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
+            Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
     }
 }
 
-#[cfg(feature = "ssl")]
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::IoError(ref io_err) => fmt::Debug::fmt(io_err, f),
-            Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
-            Error::DriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
-            Error::SslError(ref ssl_error) => fmt::Debug::fmt(ssl_error, f),
-            Error::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
-            Error::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
-        }
-    }
-}
-
-#[cfg(not(feature = "ssl"))]
-impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::IoError(ref io_err) => fmt::Debug::fmt(io_err, f),
-            Error::MySqlError(ref err_packet) => fmt::Debug::fmt(err_packet, f),
-            Error::DriverError(ref driver_err) => fmt::Debug::fmt(driver_err, f),
-            Error::FromRowError(_) => fmt::Debug::fmt("from row conversion error", f),
-            Error::FromValueError(_) => fmt::Debug::fmt("from value conversion error", f),
-        }
+        fmt::Display::fmt(self, f)
     }
 }
 
@@ -231,8 +222,7 @@ impl fmt::Display for DriverError {
                 write!(f, "Could not parse MySQL version")
             },
             DriverError::ReadOnlyTransNotSupported => {
-                write!(f, "Read-only transactions does not \
-                           supported in your MySQL version")
+                write!(f, "Read-only transactions does not supported in your MySQL version")
             },
             DriverError::PoisonedPoolMutex => {
                 write!(f, "Poisoned pool mutex")
