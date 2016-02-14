@@ -113,7 +113,7 @@
 //!         }).collect() // Collect payments so now `QueryResult` is mapped to `Vec<Payment>`
 //!     }).unwrap(); // Unwrap `Vec<Payment>`
 //!
-//!     // Now make shure that `payments` equals to `selected_payments`.
+//!     // Now make sure that `payments` equals to `selected_payments`.
 //!     // Mysql gives no guaranties on order of returned rows without `ORDER BY`
 //!     // so assume we are lukky.
 //!     assert_eq!(payments, selected_payments);

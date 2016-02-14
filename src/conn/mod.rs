@@ -716,42 +716,52 @@ impl Conn {
         return Ok(conn);
     }
 
-    /// Resets `Conn` (drops state then reconnects).
+    fn soft_reset(&mut self) -> MyResult<()> {
+        try!(self.write_command(Command::COM_RESET_CONNECTION));
+        self.read_packet().and_then(|pld| {
+            match pld[0] {
+                0 => {
+                    let ok = try!(OkPacket::from_payload(&*pld));
+                    self.handle_ok(&ok);
+                    self.last_command = 0;
+                    self.stmts.clear();
+                    Ok(())
+                },
+                _ => {
+                    let err = try!(ErrPacket::from_payload(&*pld, self.capability_flags));
+                    Err(MySqlError(err))
+                },
+            }
+        })
+    }
+
+    fn hard_reset(&mut self) -> MyResult<()> {
+        self.stream = None;
+        self.stmts.clear();
+        self.seq_id = 0;
+        self.capability_flags = consts::CapabilityFlags::empty();
+        self.status_flags = consts::StatusFlags::empty();
+        self.connection_id = 0;
+        self.character_set = 0;
+        self.affected_rows = 0;
+        self.last_insert_id = 0;
+        self.last_command = 0;
+        self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
+        self.connected = false;
+        self.has_results = false;
+        try!(self.connect_stream());
+        self.connect()
+    }
+
+    /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
         if self.server_version > (5, 7, 2) {
-            try!(self.write_command(Command::COM_RESET_CONNECTION));
-            self.read_packet()
-            .and_then(|pld| {
-                match pld[0] {
-                    0 => {
-                        let ok = try!(OkPacket::from_payload(pld.as_ref()));
-                        self.handle_ok(&ok);
-                        self.last_command = 0;
-                        self.stmts.clear();
-                        Ok(())
-                    },
-                    _ => {
-                        let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
-                        Err(MySqlError(err.into()))
-                    }
-                }
-            })
+            match self.soft_reset() {
+                Ok(_) => Ok(()),
+                _ => self.hard_reset()
+            }
         } else {
-            self.stream = None;
-            self.stmts.clear();
-            self.seq_id = 0;
-            self.capability_flags = consts::CapabilityFlags::empty();
-            self.status_flags = consts::StatusFlags::empty();
-            self.connection_id = 0;
-            self.character_set = 0;
-            self.affected_rows = 0;
-            self.last_insert_id = 0;
-            self.last_command = 0;
-            self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
-            self.connected = false;
-            self.has_results = false;
-            try!(self.connect_stream());
-            self.connect()
+            self.hard_reset()
         }
     }
 
@@ -1263,9 +1273,7 @@ impl Conn {
     pub fn ping(&mut self) -> bool {
         match self.write_command(Command::COM_PING) {
             Ok(_) => {
-                // ommit ok packet
-                let _ = self.read_packet();
-                true
+                self.read_packet().is_ok()
             },
             _ => false
         }
