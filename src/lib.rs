@@ -156,29 +156,55 @@ mod io;
 pub mod value;
 pub mod conn;
 
+#[doc(inline)]
 pub use conn::Column;
+#[doc(inline)]
 pub use conn::Conn;
+#[doc(inline)]
 pub use conn::IsolationLevel;
+#[doc(inline)]
 pub use conn::Opts;
+#[doc(inline)]
 pub use conn::QueryResult;
+#[doc(inline)]
 pub use conn::Row;
+#[doc(inline)]
 pub use conn::Stmt;
+#[doc(inline)]
 pub use conn::Transaction;
+#[doc(inline)]
 pub use conn::pool::Pool;
+#[doc(inline)]
 pub use conn::pool::PooledConn;
+#[doc(inline)]
 pub use error::DriverError;
+#[doc(inline)]
 pub use error::Error;
+#[doc(inline)]
 pub use error::MySqlError;
+#[doc(inline)]
 pub use error::Result;
+#[doc(inline)]
 pub use error::ServerError;
+#[doc(inline)]
 pub use error::UrlError;
+#[doc(inline)]
 pub use value::ConvIr;
+#[doc(inline)]
 pub use value::FromRow;
+#[doc(inline)]
 pub use value::FromValue;
+#[doc(inline)]
 pub use value::Params;
+#[doc(inline)]
 pub use value::ToValue;
+#[doc(inline)]
 pub use value::Value;
+#[doc(inline)]
 pub use value::from_row;
+#[doc(inline)]
 pub use value::from_row_opt;
+#[doc(inline)]
 pub use value::from_value;
+#[doc(inline)]
 pub use value::from_value_opt;
