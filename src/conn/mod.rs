@@ -49,6 +49,7 @@ use super::value::{
 use super::value::from_value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
+use bufstream::BufStream;
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 #[cfg(feature = "socket")]
@@ -784,14 +785,15 @@ impl Conn {
         if self.opts.pipe_name.is_some() {
             let mut full_name: String = r"\\.\pipe\".into();
             full_name.push_str(self.opts.pipe_name.as_ref().unwrap().as_ref());
-            self.stream = Some(Stream::PipeStream(try!(np::PipeClient::connect(full_name))));
+            let pipe_stream = try!(np::PipeClient::connect(full_name));
+            self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
             Ok(())
         } else if self.opts.ip_or_hostname.is_some() {
             match net::TcpStream::connect(&(self.opts.ip_or_hostname.as_ref().unwrap().as_ref(),
                                              self.opts.tcp_port))
             {
                 Ok(stream) => {
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(stream))));
+                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
                 _ => {
@@ -808,7 +810,7 @@ impl Conn {
         if self.opts.unix_addr.is_some() {
             match us::UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
                 Ok(stream) => {
-                    self.stream = Some(Stream::UnixStream(stream));
+                    self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
                     Ok(())
                 },
                 _ => {
@@ -821,7 +823,7 @@ impl Conn {
                                             self.opts.tcp_port))
             {
                 Ok(stream) => {
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(stream))));
+                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
                 _ => {
@@ -840,7 +842,7 @@ impl Conn {
                                             self.opts.tcp_port))
             {
                 Ok(stream) => {
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(stream))));
+                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
                 _ => {
@@ -2119,6 +2121,19 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
             bencher.iter(|| { let _ = stmt.execute(()); })
+        }
+
+        #[bench]
+        fn many_small_rows(bencher: &mut test::Bencher) {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            conn.query("CREATE TEMPORARY TABLE x.x (id INT)").unwrap();
+            for _ in 0..512 {
+                conn.query("INSERT INTO x.x VALUES (256)").unwrap();
+            }
+            let mut stmt = conn.prepare("SELECT * FROM x.x").unwrap();
+            bencher.iter(|| {
+                let _ = stmt.execute(());
+            });
         }
     }
 }

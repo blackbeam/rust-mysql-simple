@@ -147,6 +147,7 @@ extern crate unix_socket;
 #[cfg(feature = "pipe")]
 extern crate named_pipe;
 extern crate url;
+extern crate bufstream;
 
 mod scramble;
 pub mod consts;

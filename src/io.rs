@@ -16,6 +16,7 @@ use super::error::Result as MyResult;
 
 #[cfg(feature = "openssl")]
 use openssl::{ssl, x509};
+use bufstream::BufStream;
 use byteorder::ByteOrder;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
@@ -245,6 +246,7 @@ pub trait Write: WriteBytesExt {
         }
         if data.len() == 0 {
             try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
+            try!(self.flush());
             return Ok(seq_id + 1);
         }
         let mut last_was_max = false;
@@ -262,6 +264,7 @@ pub trait Write: WriteBytesExt {
             try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
             seq_id += 1;
         }
+        try!(self.flush());
         Ok(seq_id)
     }
 }
@@ -271,9 +274,9 @@ impl<T: WriteBytesExt> Write for T {}
 #[derive(Debug)]
 pub enum Stream {
     #[cfg(feature = "socket")]
-    UnixStream(us::UnixStream),
+    UnixStream(BufStream<us::UnixStream>),
     #[cfg(feature = "pipe")]
-    PipeStream(np::PipeClient),
+    PipeStream(BufStream<np::PipeClient>),
     TcpStream(Option<TcpStream>),
 }
 
@@ -313,8 +316,8 @@ impl Stream {
                     let stream = opt_stream.take().unwrap();
                     match stream {
                         TcpStream::Insecure(stream) => {
-                            let ssl_stream = try!(ssl::SslStream::connect(&ctx, stream));
-                            Ok(Stream::TcpStream(Some(TcpStream::Secure(ssl_stream))))
+                            let sstream = try!(ssl::SslStream::connect(&ctx, stream.into_inner().unwrap()));
+                            Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(sstream)))))
                         },
                         _ => unreachable!(),
                     }
@@ -422,8 +425,8 @@ impl io::Write for Stream {
 
 pub enum TcpStream {
     #[cfg(feature = "openssl")]
-    Secure(ssl::SslStream<net::TcpStream>),
-    Insecure(net::TcpStream),
+    Secure(BufStream<ssl::SslStream<net::TcpStream>>),
+    Insecure(BufStream<net::TcpStream>),
 }
 
 #[cfg(feature = "ssl")]
