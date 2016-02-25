@@ -1,6 +1,6 @@
 use std::io;
-use std::io::Read as NewRead;
-use std::io::Write as NewWrite;
+use std::io::Read as StdRead;
+use std::io::Write as StdWrite;
 use std::net;
 use std::fmt;
 
@@ -210,7 +210,7 @@ pub trait Write: WriteBytesExt {
             buf[offset] = (((0xFF << (offset * 8)) & x) >> (offset * 8)) as u8;
             offset += 1;
         }
-        NewWrite::write_all(self, &buf[..len])
+        StdWrite::write_all(self, &buf[..len])
     }
 
     fn write_lenenc_int(&mut self, x: u64) -> io::Result<()> {
@@ -235,29 +235,26 @@ pub trait Write: WriteBytesExt {
     }
 
     fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: usize) -> MyResult<u8> {
-        if data.len() > max_allowed_packet &&
-           max_allowed_packet < consts::MAX_PAYLOAD_LEN {
+        if data.len() > max_allowed_packet && max_allowed_packet < consts::MAX_PAYLOAD_LEN {
             return Err(DriverError(PacketTooLarge));
         }
         if data.len() == 0 {
-            try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
-            try!(self.flush());
-            return Ok(seq_id + 1);
-        }
-        let mut last_was_max = false;
-        for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
-            let chunk_len = chunk.len();
-            let mut writer = Vec::with_capacity(4 + chunk_len);
-            try!(writer.write_le_uint_n(chunk_len as u64, 3));
-            try!(writer.write_u8(seq_id));
-            try!(writer.write_all(chunk));
-            try!(self.write_all(&writer[..]));
-            last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
+            try!(self.write_all(&[0, 0, 0, seq_id]));
             seq_id += 1;
-        }
-        if last_was_max {
-            try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
-            seq_id += 1;
+        } else {
+            let mut last_was_max = false;
+            for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
+                let chunk_len = chunk.len();
+                try!(self.write_le_uint_n(chunk_len as u64, 3));
+                try!(self.write_u8(seq_id));
+                try!(self.write_all(chunk));
+                last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
+                seq_id += 1;
+            }
+            if last_was_max {
+                try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
+                seq_id += 1;
+            }
         }
         try!(self.flush());
         Ok(seq_id)
