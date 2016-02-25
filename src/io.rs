@@ -182,14 +182,7 @@ pub trait Read: ReadBytesExt {
                 return Err(DriverError(PacketOutOfSync));
             }
             seq_id = seq_id.wrapping_add(1);
-            if payload_len == consts::MAX_PAYLOAD_LEN {
-                output.reserve(consts::MAX_PAYLOAD_LEN);
-                let mut chunk = self.take(consts::MAX_PAYLOAD_LEN as u64);
-                let count = try!(chunk.read_to_end(&mut output));
-                if count != consts::MAX_PAYLOAD_LEN {
-                    return Err(io::Error::new(Other, "Unexpected EOF while reading packet").into())
-                }
-            } else if payload_len == 0 {
+            if payload_len == 0 {
                 break;
             } else {
                 output.reserve(payload_len);
@@ -198,7 +191,9 @@ pub trait Read: ReadBytesExt {
                 if count != payload_len {
                     return Err(io::Error::new(Other, "Unexpected EOF while reading packet").into())
                 }
-                break;
+                if payload_len != consts::MAX_PAYLOAD_LEN {
+                    break;
+                }
             }
         }
         Ok((output, seq_id))
