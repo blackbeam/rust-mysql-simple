@@ -79,9 +79,9 @@ impl Opts {
             let v6addr: Option<Ipv6Addr> = FromStr::from_str(
                 self.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
             if let Some(addr) = v4addr {
-                addr.octets()[0] == 127
+                addr.is_loopback()
             } else if let Some(addr) = v6addr {
-                addr.segments() == [0, 0, 0, 0, 0, 0, 0, 1]
+                addr.is_loopback()
             } else if self.ip_or_hostname.as_ref().unwrap() == "localhost" {
                 true
             } else {
