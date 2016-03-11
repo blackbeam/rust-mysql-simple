@@ -2,6 +2,7 @@ use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
+use std::hash::BuildHasherDefault as BldHshrDflt;
 use std::io;
 use std::io::Write as stdWrite;
 use std::time::Duration;
@@ -27,6 +28,8 @@ use regex::Regex;
 
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, WriteBytesExt};
+
+use fnv::FnvHasher;
 
 lazy_static! {
     static ref TM_UTCOFF: i32 = now().tm_utcoff;
@@ -898,7 +901,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
 
 pub enum Params {
     Empty,
-    Named(HashMap<String, Value>),
+    Named(HashMap<String, Value, BldHshrDflt<FnvHasher>>),
     Positional(Vec<Value>),
 }
 

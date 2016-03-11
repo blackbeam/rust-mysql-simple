@@ -148,6 +148,7 @@ extern crate unix_socket;
 extern crate named_pipe;
 extern crate url;
 extern crate bufstream;
+extern crate fnv;
 
 mod scramble;
 pub mod consts;

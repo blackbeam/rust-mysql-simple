@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fs;
 use std::fmt;
+use std::hash::BuildHasherDefault as BldHshrDflt;
 use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
@@ -52,6 +53,7 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use bufstream::BufStream;
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
+use fnv::FnvHasher;
 #[cfg(feature = "socket")]
 use unix_socket as us;
 #[cfg(feature = "pipe")]
@@ -545,7 +547,7 @@ impl Index<usize> for Row {
 pub struct Conn {
     opts: Opts,
     stream: Option<Stream>,
-    stmts: HashMap<String, InnerStmt>,
+    stmts: HashMap<String, InnerStmt, BldHshrDflt<FnvHasher>>,
     server_version: ServerVersion,
     affected_rows: u64,
     last_insert_id: u64,
@@ -565,7 +567,7 @@ impl Conn {
         Conn {
             opts: opts.into(),
             stream: None,
-            stmts: HashMap::new(),
+            stmts: HashMap::default(),
             seq_id: 0u8,
             capability_flags: consts::CapabilityFlags::empty(),
             status_flags: consts::StatusFlags::empty(),
@@ -1651,8 +1653,8 @@ impl<'a> QueryResult<'a> {
     }
 
     /// Returns HashMap which maps column names to column indexes.
-    pub fn column_indexes<'b, 'c>(&'b self) -> HashMap<String, usize> {
-        let mut indexes = HashMap::new();
+    pub fn column_indexes<'b, 'c>(&'b self) -> HashMap<String, usize, BldHshrDflt<FnvHasher>> {
+        let mut indexes = HashMap::default();
         for (i, column) in self.columns.iter().enumerate() {
             indexes.insert(from_utf8(&*column.name).unwrap().to_string(), i);
         }
