@@ -101,6 +101,88 @@ impl InnerPool {
 pub struct Pool(Arc<(Mutex<InnerPool>, Condvar)>);
 
 impl Pool {
+    /// Will return connection taken from a pool.
+    ///
+    /// Will verify and fix it via `Conn::ping` and `Conn::reset` if `call_ping` is `true`.
+    /// Will try to get concrete connection if `id` is `Some(_)`.
+    /// Will wait til timeout if `timeout_ms` is `Some(_)`
+    fn _get_conn<T: AsRef<str>>(&self,
+                                stmt: Option<T>,
+                                timeout_ms: Option<u32>,
+                                call_ping: bool) -> MyResult<PooledConn> {
+        let times = if let Some(timeout_ms) = timeout_ms {
+            Some ((
+                SteadyTime::now(),
+                Duration::milliseconds(timeout_ms as i64),
+                StdDuration::from_millis(timeout_ms as u64),
+            ))
+        } else {
+            None
+        };
+
+        let &(ref inner_pool, ref condvar) = &*self.0;
+        let mut pool = match inner_pool.lock() {
+            Ok(mutex) => mutex,
+            _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
+        };
+
+        let mut id = None;
+        if let Some(query) = stmt {
+            for (i, conn) in pool.pool.iter().enumerate() {
+                if conn.has_stmt(query.as_ref()) {
+                    id = Some(i);
+                    break;
+                }
+            }
+        }
+
+        loop {
+            if pool.pool.is_empty() {
+                if pool.count < pool.max {
+                    match pool.new_conn() {
+                        Ok(()) => break,
+                        Err(err) => return Err(err),
+                    }
+                } else {
+                    pool = if let Some((start, timeout, std_timeout)) = times {
+                        if SteadyTime::now() - start > timeout {
+                            return Err(DriverError::Timeout.into());
+                        }
+                        match condvar.wait_timeout(pool, std_timeout) {
+                            Ok((mutex, _)) => mutex,
+                            _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
+                        }
+                    } else {
+                        match condvar.wait(pool) {
+                            Ok(mutex) => mutex,
+                            _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+
+        let mut conn = if let Some(id) = id {
+            if id < pool.pool.len() {
+                pool.pool.remove(id)
+            } else {
+                pool.pool.pop().unwrap()
+            }
+        } else {
+            pool.pool.pop().unwrap()
+        };
+
+        if call_ping {
+            if !conn.ping() {
+                try!(conn.reset());
+            }
+        }
+
+        Ok(PooledConn {pool: self.clone(), conn: Some(conn)})
+    }
+
     /// Creates new pool with `min = 10` and `max = 100`.
     pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Pool> {
         Pool::new_manual(10, 100, opts)
@@ -119,37 +201,7 @@ impl Pool {
     /// call [`Conn::reset`](../struct.Conn.html#method.reset) if
     /// necessary.
     pub fn get_conn(&self) -> MyResult<PooledConn> {
-        let &(ref inner_pool, ref condvar) = &*self.0;
-        let mut pool = match inner_pool.lock() {
-            Ok(mutex) => mutex,
-            _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
-        };
-
-        loop {
-            if pool.pool.is_empty() {
-                if pool.count < pool.max {
-                    match pool.new_conn() {
-                        Ok(()) => break,
-                        Err(err) => return Err(err),
-                    }
-                } else {
-                    pool = match condvar.wait(pool) {
-                        Ok(mutex) => mutex,
-                        _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-
-        let mut conn = pool.pool.pop().unwrap();
-
-        if !conn.ping() {
-            try!(conn.reset());
-        }
-
-        Ok(PooledConn {pool: self.clone(), conn: Some(conn)})
+        self._get_conn(None::<String>, None, true)
     }
 
     /// Will try to get connection for a duration of `timeout_ms` milliseconds.
@@ -158,81 +210,18 @@ impl Pool {
     /// This function will return `Error::DriverError(DriverError::Timeout)` if timeout was
     /// reached while waiting for new connection to become available.
     pub fn try_get_conn(&self, timeout_ms: u32) -> MyResult<PooledConn> {
-        let start = SteadyTime::now();
-        let timeout = Duration::milliseconds(timeout_ms as i64);
-        let std_timeout = StdDuration::from_millis(timeout_ms as u64);
-
-        let &(ref inner_pool, ref condvar) = &*self.0;
-        let mut pool = match inner_pool.lock() {
-            Ok(mutex) => mutex,
-            _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
-        };
-
-        loop {
-            if pool.pool.is_empty() {
-                if pool.count < pool.max {
-                    match pool.new_conn() {
-                        Ok(()) => break,
-                        Err(err) => return Err(err),
-                    }
-                } else {
-                    if SteadyTime::now() - start > timeout {
-                        return Err(DriverError::Timeout.into());
-                    }
-                    pool = match condvar.wait_timeout(pool, std_timeout) {
-                        Ok((mutex, _)) => mutex,
-                        _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-
-        let mut conn = pool.pool.pop().unwrap();
-
-        if !conn.ping() {
-            try!(conn.reset());
-        }
-
-        Ok(PooledConn {pool: self.clone(), conn: Some(conn)})
+        self._get_conn(None::<String>, Some(timeout_ms), true)
     }
 
     fn get_conn_by_stmt<T: AsRef<str>>(&self, query: T) -> MyResult<PooledConn> {
-        let conn = {
-            let &(ref inner_pool, _) = &*self.0;
-            let mut pool = match inner_pool.lock() {
-                Ok(mutex) => mutex,
-                _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
-            };
-
-            let mut id = None;
-            for (i, conn) in pool.pool.iter().enumerate() {
-                if conn.has_stmt(query.as_ref()) {
-                    id = Some(i);
-                    break;
-                }
-            }
-
-            if let Some(id) = id {
-                let mut conn = pool.pool.remove(id);
-                if !conn.ping() {
-                    try!(conn.reset());
-                }
-                Some(PooledConn {pool: self.clone(), conn: Some(conn)})
-            } else {
-                None
-            }
-        };
-        match conn {
-            Some(pooled_conn) => Ok(pooled_conn),
-            None => self.get_conn(),
-        }
+        self._get_conn(Some(query), None, false)
     }
 
     /// Will prepare statement.
     ///
     /// It will try to find connection which has this statement cached.
+    ///
+    /// Will not check or fix connection health.
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a self, query: T) -> MyResult<Stmt<'a>> {
         let conn = try!(self.get_conn_by_stmt(query.as_ref()));
         conn.pooled_prepare(query)
@@ -241,7 +230,11 @@ impl Pool {
     /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`.
     ///
     /// It will try to find connection which has this statement cached.
-    pub fn prep_exec<'a, A: AsRef<str>, T: Into<Params>>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+    ///
+    /// Will not check or fix connection health.
+    pub fn prep_exec<'a, A, T>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>>
+    where A: AsRef<str>,
+          T: Into<Params> {
         let conn = try!(self.get_conn_by_stmt(query.as_ref()));
         conn.pooled_prep_exec(query, params)
     }
@@ -251,7 +244,9 @@ impl Pool {
                              consistent_snapshot: bool,
                              isolation_level: Option<IsolationLevel>,
                              readonly: Option<bool>) -> MyResult<Transaction> {
-        (try!(self.get_conn())).pooled_start_transaction(consistent_snapshot, isolation_level, readonly)
+        (try!(self.get_conn())).pooled_start_transaction(consistent_snapshot,
+                                                         isolation_level,
+                                                         readonly)
     }
 }
 
