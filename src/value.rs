@@ -2348,10 +2348,10 @@ mod test {
                        o1, o2.clone(), o3.clone(), o4.clone(),
                        o1, o2.clone(), o3.clone(), o4.clone());
 
-            assert_eq!(o1, from_row(Row::new(vec![t1])));
+            assert_eq!(o1, from_row::<u8>(Row::new(vec![t1])));
             assert_eq!(o2, from_row::<String>(Row::new(vec![t2])));
             assert_eq!(o3, from_row::<Vec<u8>>(Row::new(vec![t3])));
-            assert_eq!(o4, from_row(Row::new(vec![t4])));
+            assert_eq!(o4, from_row::<Timespec>(Row::new(vec![t4])));
             assert_eq!(r1, from_row(Row::new(v1)));
             assert_eq!(r2, from_row(Row::new(v2)));
             assert_eq!(r3, from_row(Row::new(v3)));
