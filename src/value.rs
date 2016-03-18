@@ -26,6 +26,14 @@ use super::conn::Row;
 
 use regex::Regex;
 
+use chrono::{
+    NaiveDate,
+    NaiveTime,
+    NaiveDateTime,
+    Datelike,
+    Timelike,
+};
+
 use byteorder::LittleEndian as LE;
 use byteorder::{ByteOrder, WriteBytesExt};
 
@@ -45,6 +53,15 @@ lazy_static! {
     };
     static ref TIME_RE_HH_MM_SS_MS: Regex = {
         Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{1,6})$").unwrap()
+    };
+    static ref DATETIME_RE_YMD: Regex = {
+        Regex::new(r"^(\d{4})-(\d{2})-(\d{2})$").unwrap()
+    };
+    static ref DATETIME_RE_YMD_HMS: Regex = {
+        Regex::new(r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$").unwrap()
+    };
+    static ref DATETIME_RE_YMD_HMS_NS: Regex = {
+        Regex::new(r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{1,6})$").unwrap()
     };
 }
 
@@ -1091,6 +1108,53 @@ impl From<String> for Value {
     }
 }
 
+impl From<NaiveDateTime> for Value {
+    fn from(x: NaiveDateTime) -> Value {
+        if 1000 > x.year() || x.year() > 9999 {
+            panic!("Year `{}` not in supported range [1000, 9999]", x.year())
+        }
+        Value::Date(
+            x.year() as u16,
+            x.month() as u8,
+            x.day() as u8,
+            x.hour() as u8,
+            x.minute() as u8,
+            x.second() as u8,
+            x.nanosecond() / 1000,
+        )
+    }
+}
+
+impl From<NaiveDate> for Value {
+    fn from(x: NaiveDate) -> Value {
+        if 1000 > x.year() || x.year() > 9999 {
+            panic!("Year `{}` not in supported range [1000, 9999]", x.year())
+        }
+        Value::Date(
+            x.year() as u16,
+            x.month() as u8,
+            x.day() as u8,
+            0,
+            0,
+            0,
+            0
+        )
+    }
+}
+
+impl From<NaiveTime> for Value {
+    fn from(x: NaiveTime) -> Value {
+        Value::Time(
+            false,
+            0,
+            x.hour() as u8,
+            x.minute() as u8,
+            x.second() as u8,
+            x.nanosecond() / 1000,
+        )
+    }
+}
+
 impl From<Timespec> for Value {
     fn from(x: Timespec) -> Value {
         let t = at(x);
@@ -1605,6 +1669,137 @@ impl ConvIr<Timespec> for ParseIr<Timespec> {
     }
 }
 
+impl ConvIr<NaiveDateTime> for ParseIr<NaiveDateTime> {
+    fn new (v: Value) -> MyResult<ParseIr<NaiveDateTime>> {
+        let result = match v {
+            Value::Date(y, m, d, h, i, s, u) => {
+                let date = NaiveDate::from_ymd_opt(y as i32, m as u32, d as u32);
+                let time = NaiveTime::from_hms_micro_opt(h as u32, i as u32, s as u32, u);
+                Ok((date, time, Value::Date(y, m, d, h, i, s, u)))
+            },
+            Value::Bytes(bytes) => {
+                if let Some((y, m, d, h, i, s, u)) = parse_mysql_datetime_string(&*bytes) {
+                    let date = NaiveDate::from_ymd_opt(y as i32, m, d);
+                    let time = NaiveTime::from_hms_micro_opt(h, i, s, u);
+                    Ok((date, time, Value::Bytes(bytes)))
+                } else {
+                    Err(Error::FromValueError(Value::Bytes(bytes)))
+                }
+            },
+            v => Err(Error::FromValueError(v)),
+        };
+
+        let (date, time, value) = try!(result);
+
+        if date.is_some() && time.is_some() {
+            Ok(ParseIr {
+                value: value,
+                output: NaiveDateTime::new(date.unwrap(), time.unwrap()),
+            })
+        } else {
+            Err(Error::FromValueError(value))
+        }
+    }
+    fn commit(self) -> NaiveDateTime {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl ConvIr<NaiveDate> for ParseIr<NaiveDate> {
+    fn new (v: Value) -> MyResult<ParseIr<NaiveDate>> {
+        let result = match v {
+            Value::Date(y, m, d, h, i, s, u) => {
+                let date = NaiveDate::from_ymd_opt(y as i32, m as u32, d as u32);
+                Ok((date, Value::Date(y, m, d, h, i, s, u)))
+            },
+            Value::Bytes(bytes) => {
+                if let Some((y, m, d, _, _, _, _)) = parse_mysql_datetime_string(&*bytes) {
+                    let date = NaiveDate::from_ymd_opt(y as i32, m, d);
+                    Ok((date, Value::Bytes(bytes)))
+                } else {
+                    Err(Error::FromValueError(Value::Bytes(bytes)))
+                }
+            },
+            v => Err(Error::FromValueError(v)),
+        };
+
+        let (date, value) = try!(result);
+
+        if date.is_some() {
+            Ok(ParseIr {
+                value: value,
+                output: date.unwrap(),
+            })
+        } else {
+            Err(Error::FromValueError(value))
+        }
+    }
+    fn commit(self) -> NaiveDate {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+/// Returns (year, month, day, hour, minute, second, micros)
+fn parse_mysql_datetime_string(bytes: &[u8]) -> Option<(u32, u32, u32, u32, u32, u32, u32)> {
+    if bytes.len() == 0 {
+        return None;
+    }
+    from_utf8(&*bytes).ok().and_then(|s| {
+        let s_ref = s.as_ref();
+        DATETIME_RE_YMD_HMS.captures(s_ref)
+        .or_else(|| {
+            DATETIME_RE_YMD.captures(s_ref)
+        }).or_else(|| {
+            DATETIME_RE_YMD_HMS_NS.captures(s_ref)
+        })
+    }).map(|capts| {
+        let year = capts.at(1).unwrap().parse::<u32>().unwrap();
+        let month = capts.at(2).unwrap().parse::<u32>().unwrap();
+        let day = capts.at(3).unwrap().parse::<u32>().unwrap();
+        let (hour, minute, second, micros) = if capts.len() > 4 {
+            let hour = capts.at(4).unwrap().parse::<u32>().unwrap();
+            let minute = capts.at(5).unwrap().parse::<u32>().unwrap();
+            let second = capts.at(6).unwrap().parse::<u32>().unwrap();
+            let micros = if capts.len() == 8 {
+                let micros_str = capts.at(7).unwrap();
+                let mut left_zero_cnt = 0;
+                for b in micros_str.bytes() {
+                    if b == b'0' {
+                        left_zero_cnt += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let mut micros = micros_str.parse::<u32>().unwrap();
+                for _ in 0..(6 - left_zero_cnt - (micros_str.len() - left_zero_cnt)) {
+                    micros *= 10;
+                }
+                micros
+            } else {
+                0
+            };
+            (hour, minute, second, micros)
+        } else {
+            (0, 0, 0, 0)
+        };
+        (
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            micros,
+        )
+    })
+}
+
 /// Returns (is_neg, hours, minutes, seconds, microseconds)
 fn parse_mysql_time_string(mut bytes: &[u8]) -> Option<(bool, u32, u32, u32, u32)> {
     if bytes.len() == 0 {
@@ -1648,6 +1843,43 @@ fn parse_mysql_time_string(mut bytes: &[u8]) -> Option<(bool, u32, u32, u32, u32
         };
         (is_neg, hours, minutes, seconds, microseconds)
     })
+}
+
+impl ConvIr<NaiveTime> for ParseIr<NaiveTime> {
+    fn new(v: Value) -> MyResult<ParseIr<NaiveTime>> {
+        let result = match v {
+            Value::Time(false, 0, h, m, s, u) => {
+                let time = NaiveTime::from_hms_micro_opt(h as u32, m as u32, s as u32, u);
+                Ok((time, Value::Time(false, 0, h, m, s, u)))
+            },
+            Value::Bytes(bytes) => {
+                if let Some((false, h, m, s, u)) = parse_mysql_time_string(&*bytes) {
+                    let time = NaiveTime::from_hms_micro_opt(h, m, s, u);
+                    Ok((time, Value::Bytes(bytes)))
+                } else {
+                    Err(Error::FromValueError(Value::Bytes(bytes)))
+                }
+            },
+            v => Err(Error::FromValueError(v))
+        };
+
+        let (time, value) = try!(result);
+
+        if time.is_some() {
+            Ok(ParseIr {
+                value: value,
+                output: time.unwrap(),
+            })
+        } else {
+            Err(Error::FromValueError(value))
+        }
+    }
+    fn commit(self) -> NaiveTime {
+        self.output
+    }
+    fn rollback(self) -> Value {
+        self.value
+    }
 }
 
 impl ConvIr<Duration> for ParseIr<Duration> {
@@ -1732,6 +1964,10 @@ impl ConvIr<time::Duration> for ParseIr<time::Duration> {
     }
 }
 
+impl_from_value!(NaiveDateTime, ParseIr<NaiveDateTime>,
+                 "Could not retrieve NaiveDateTime from Value");
+impl_from_value!(NaiveDate, ParseIr<NaiveDate>, "Could not retrieve NaiveDate from Value");
+impl_from_value!(NaiveTime, ParseIr<NaiveTime>, "Could not retrieve NaiveTime from Value");
 impl_from_value!(Timespec, ParseIr<Timespec>, "Could not retrieve Timespec from Value");
 impl_from_value!(Duration, ParseIr<Duration>, "Could not retrieve Duration from Value");
 impl_from_value!(time::Duration, ParseIr<time::Duration>,
@@ -1824,9 +2060,14 @@ mod test {
 
     mod from_value {
         use super::super::from_value;
-        use super::super::Value::{Bytes, Date, Int};
+        use super::super::Value::{Bytes, Date, Int, Time};
         use time::{Timespec, now, self};
         use super::super::super::conn::{Conn, Opts};
+        use chrono::{
+            NaiveDate,
+            NaiveTime,
+            NaiveDateTime,
+        };
 
         static USER: &'static str = "root";
         static PASS: &'static str = "password";
@@ -1884,6 +2125,78 @@ mod test {
         }
 
         #[test]
+        fn should_convert_Bytes_to_NaiveDateTime() {
+            assert_eq!(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd(2014, 11, 1),
+                    NaiveTime::from_hms_micro(18, 33, 00, 1),
+                ),
+                from_value::<NaiveDateTime>(Bytes(b"2014-11-01 18:33:00.000001".to_vec()))
+            );
+            assert_eq!(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd(2014, 11, 1),
+                    NaiveTime::from_hms(18, 33, 00),
+                ),
+                from_value::<NaiveDateTime>(Bytes(b"2014-11-01 18:33:00".to_vec()))
+            );
+            assert_eq!(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd(2014, 11, 1),
+                    NaiveTime::from_hms(0, 0, 0),
+                ),
+                from_value::<NaiveDateTime>(Bytes(b"2014-11-01".to_vec()))
+            );
+        }
+
+        #[test]
+        fn should_convert_Bytes_to_NaiveDate() {
+            assert_eq!(
+                NaiveDate::from_ymd(2014, 11, 1),
+                from_value::<NaiveDate>(Bytes(b"2014-11-01".to_vec()))
+            );
+        }
+
+        #[test]
+        fn should_convert_Bytes_to_NaiveTime() {
+            assert_eq!(
+                NaiveTime::from_hms(23, 58, 57),
+                from_value::<NaiveTime>(Bytes(b"23:58:57".to_vec()))
+            );
+            assert_eq!(
+                NaiveTime::from_hms_micro(23, 58, 57, 20),
+                from_value::<NaiveTime>(Bytes(b"23:58:57.00002".to_vec()))
+            );
+        }
+
+        #[test]
+        fn should_convert_Value_to_NaiveDateTime() {
+            assert_eq!(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd(2014, 11, 1),
+                    NaiveTime::from_hms_micro(18, 33, 0, 1),
+                ),
+                from_value::<NaiveDateTime>(Date(2014, 11, 1, 18, 33, 00, 1))
+            );
+        }
+
+        #[test]
+        fn should_convert_Value_to_NaiveDate() {
+            assert_eq!(
+                NaiveDate::from_ymd(2014, 11, 1),
+                from_value::<NaiveDate>(Date(2014, 11, 1, 0, 0, 0, 0))
+            );
+        }
+
+        #[test]
+        fn should_convert_Value_to_NaiveTime() {
+            assert_eq!(
+                NaiveTime::from_hms_micro(18, 33, 0, 20),
+                from_value::<NaiveTime>(Time(false, 0, 18, 33, 0, 20))
+            );
+        }
+
+        #[test]
         fn stored_and_retrieved_timestamp_should_match() {
             let mut conn = Conn::new(get_opts()).unwrap();
             conn.query("CREATE TEMPORARY TABLE x.t (ts TIMESTAMP)").unwrap();
@@ -1891,6 +2204,19 @@ mod test {
             conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
             let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
             assert_eq!(ts, from_value::<Timespec>(x.take(0).unwrap()));
+            conn.prep_exec("DELETE FROM x.t", ()).unwrap();
+            let ts = NaiveDateTime::new(
+                NaiveDate::from_ymd(2014, 11, 1),
+                NaiveTime::from_hms(18, 33, 0),
+            );
+            conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
+            let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
+            assert_eq!(ts, from_value::<NaiveDateTime>(x.take(0).unwrap()));
+            conn.prep_exec("DELETE FROM x.t", ()).unwrap();
+            let ts = NaiveDate::from_ymd(2014, 11, 1);
+            conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
+            let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
+            assert_eq!(ts, from_value::<NaiveDate>(x.take(0).unwrap()));
         }
 
         #[test]
@@ -1901,6 +2227,19 @@ mod test {
             conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
             let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
             assert_eq!(ts, from_value::<Timespec>(x.take(0).unwrap()));
+            conn.prep_exec("DELETE FROM x.t", ()).unwrap();
+            let ts = NaiveDateTime::new(
+                NaiveDate::from_ymd(2014, 11, 1),
+                NaiveTime::from_hms(18, 33, 0),
+            );
+            conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
+            let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
+            assert_eq!(ts, from_value::<NaiveDateTime>(x.take(0).unwrap()));
+            conn.prep_exec("DELETE FROM x.t", ()).unwrap();
+            let ts = NaiveDate::from_ymd(2014, 11, 1);
+            conn.prep_exec("INSERT INTO x.t (ts) VALUES (?)", (ts,)).unwrap();
+            let mut x = conn.prep_exec("SELECT * FROM x.t", ()).unwrap().next().unwrap().unwrap();
+            assert_eq!(ts, from_value::<NaiveDate>(x.take(0).unwrap()));
         }
 
         #[test]
@@ -2115,6 +2454,7 @@ mod test {
         use time::Timespec;
         use super::super::{from_row, from_value, Value};
         use super::super::super::conn::Row;
+        use chrono::NaiveDateTime;
 
         #[bench]
         fn pop_vs_from_row_pop(bencher: &mut test::Bencher) {
@@ -2132,15 +2472,15 @@ mod test {
                            Value::Date(2014, 11, 1, 18, 33, 00, 1)];
             bencher.iter(|| {
                 let mut row = row.clone();
-                let v12 = from_value::<Timespec>(row.pop().unwrap());
+                let v12 = from_value::<NaiveDateTime>(row.pop().unwrap());
                 let v11 = from_value::<Vec<u8>>(row.pop().unwrap());
                 let v10 = from_value::<String>(row.pop().unwrap());
                 let v9 = from_value::<i8>(row.pop().unwrap());
-                let v8 = from_value::<Timespec>(row.pop().unwrap());
+                let v8 = from_value::<NaiveDateTime>(row.pop().unwrap());
                 let v7 = from_value::<Vec<u8>>(row.pop().unwrap());
                 let v6 = from_value::<String>(row.pop().unwrap());
                 let v5 = from_value::<i8>(row.pop().unwrap());
-                let v4 = from_value::<Timespec>(row.pop().unwrap());
+                let v4 = from_value::<NaiveDateTime>(row.pop().unwrap());
                 let v3 = from_value::<Vec<u8>>(row.pop().unwrap());
                 let v2 = from_value::<String>(row.pop().unwrap());
                 let v1 = from_value::<i8>(row.pop().unwrap());
@@ -2163,9 +2503,9 @@ mod test {
                                     Value::Bytes(vec![255]),
                                     Value::Date(2014, 11, 1, 18, 33, 00, 1)]);
             bencher.iter(|| {
-                let vs: (i8, String, Vec<u8>, Timespec,
-                         i8, String, Vec<u8>, Timespec,
-                         i8, String, Vec<u8>, Timespec) = from_row(row.clone());
+                let vs: (i8, String, Vec<u8>, NaiveDateTime,
+                         i8, String, Vec<u8>, NaiveDateTime,
+                         i8, String, Vec<u8>, NaiveDateTime) = from_row(row.clone());
                 test::black_box(vs);
             });
         }
