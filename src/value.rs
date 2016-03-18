@@ -34,6 +34,18 @@ use fnv::FnvHasher;
 lazy_static! {
     static ref TM_UTCOFF: i32 = now().tm_utcoff;
     static ref TM_ISDST: i32 = now().tm_isdst;
+    static ref TIME_RE_HHH_MM_SS: Regex = {
+        Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)$").unwrap()
+    };
+    static ref TIME_RE_HHH_MM_SS_MS: Regex = {
+        Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)\.(\d{1,6})$").unwrap()
+    };
+    static ref TIME_RE_HH_MM_SS: Regex = {
+        Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)$").unwrap()
+    };
+    static ref TIME_RE_HH_MM_SS_MS: Regex = {
+        Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{1,6})$").unwrap()
+    };
 }
 
 /// `Value` enumerates possible values in mysql cells. Also `Value` used to fill
@@ -1604,19 +1616,13 @@ fn parse_mysql_time_string(mut bytes: &[u8]) -> Option<(bool, u32, u32, u32, u32
     }
     from_utf8(bytes).ok().and_then(|time_str| {
         let t_ref = time_str.as_ref();
-        Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)$").unwrap().captures(t_ref)
+        TIME_RE_HHH_MM_SS.captures(t_ref)
         .or_else(|| {
-            Regex::new(r"^([0-8]\d\d):([0-5]\d):([0-5]\d)\.(\d{1,6})$")
-                  .unwrap()
-                  .captures(t_ref)
+            TIME_RE_HHH_MM_SS_MS.captures(t_ref)
         }).or_else(|| {
-            Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)$")
-                  .unwrap()
-                  .captures(t_ref)
+            TIME_RE_HH_MM_SS.captures(t_ref)
         }).or_else(|| {
-            Regex::new(r"^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{1,6})$")
-                  .unwrap()
-                  .captures(t_ref)
+            TIME_RE_HH_MM_SS_MS.captures(t_ref)
         })
     }).map(|capts| {
         let hours = capts.at(1).unwrap().parse::<u32>().unwrap();

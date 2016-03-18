@@ -12,6 +12,12 @@ use super::error;
 use super::error::DriverError;
 use super::io::Read;
 
+lazy_static! {
+    static ref VERSION_RE: Regex = {
+        Regex::new(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)").unwrap()
+    };
+}
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct OkPacket {
     pub affected_rows: u64,
@@ -102,8 +108,7 @@ pub type ServerVersion = (u16, u16, u16);
 
 fn parse_version(bytes: &[u8]) -> error::Result<ServerVersion> {
     let ver_str = String::from_utf8_lossy(bytes).into_owned();
-    let version_re = Regex::new(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)").unwrap();
-    version_re.captures(&ver_str[..])
+    VERSION_RE.captures(&ver_str[..])
     .and_then(|capts| {
         Some((
             (capts.at(1).unwrap().parse::<u16>()).unwrap_or(0),
