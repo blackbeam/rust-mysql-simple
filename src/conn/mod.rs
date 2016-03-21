@@ -13,6 +13,7 @@ use std::ops::{
     Index,
 };
 use std::path;
+use std::sync::Arc;
 use std::str::from_utf8;
 
 use super::consts;
@@ -476,14 +477,16 @@ impl Column {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Row {
     values: Vec<Option<Value>>,
+    columns: Arc<Vec<Column>>
 }
 
 impl Row {
     /// Creates instance of `Row` from raw row representation
     #[doc(hidden)]
-    pub fn new(raw_row: Vec<Value>) -> Row {
+    pub fn new(raw_row: Vec<Value>, columns: Arc<Vec<Column>>) -> Row {
         Row {
             values: raw_row.into_iter().map(|value| Some(value)).collect(),
+            columns: columns
         }
     }
 
@@ -502,6 +505,13 @@ impl Row {
     pub fn take(&mut self, index: usize) -> Option<Value> {
         self.values.get_mut(index).and_then(|x| x.take())
     }
+
+    pub fn get<T: super::value::FromValue, R: RowIndex>(&mut self, idxr: R) -> Option<T> {
+        idxr.idx(&self.columns)
+            .and_then(|i| self.take(i) )
+            .and_then(|o| from_value_opt(o).ok() )
+    }
+
 
     /// Unwraps values of a row.
     ///
@@ -525,6 +535,31 @@ impl Index<usize> for Row {
 
     fn index<'a>(&'a self, index: usize) -> &'a Value {
         self.values[index].as_ref().unwrap()
+    }
+}
+
+pub trait RowIndex {
+    fn idx(&self, columns: &Vec<Column>) -> Option<usize>;
+}
+
+impl RowIndex for usize {
+    fn idx(&self, columns: &Vec<Column>) -> Option<usize> {
+        if *self >= columns.len() {
+            None
+        } else {
+            Some(*self)
+        }
+    }
+}
+
+impl<'a> RowIndex for &'a str {
+    fn idx(&self, columns: &Vec<Column>) -> Option<usize> {
+        for (i, c) in columns.iter().enumerate() {
+            if c.name == self.as_bytes() {
+                return Some(i);
+            }
+        }
+        None
     }
 }
 
@@ -1575,7 +1610,7 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 #[derive(Debug)]
 pub struct QueryResult<'a> {
     conn: ResultConnRef<'a>,
-    columns: Vec<Column>,
+    columns: Arc<Vec<Column>>,
     ok_packet: Option<OkPacket>,
     is_bin: bool,
 }
@@ -1588,7 +1623,7 @@ impl<'a> QueryResult<'a> {
     {
         QueryResult {
             conn: conn,
-            columns: columns,
+            columns: Arc::new(columns),
             ok_packet: ok_packet,
             is_bin: is_bin
         }
@@ -1598,7 +1633,7 @@ impl<'a> QueryResult<'a> {
         if self.conn.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
             match self.conn.handle_result_set() {
                 Ok((cols, ok_p)) => {
-                    self.columns = cols;
+                    self.columns = Arc::new(cols);
                     self.ok_packet = ok_p;
                     None
                 },
@@ -1703,7 +1738,7 @@ impl<'a> Iterator for QueryResult<'a> {
         match values {
             Ok(values) => {
                 match values {
-                    Some(values) => Some(Ok(Row::new(values))),
+                    Some(values) => Some(Ok(Row::new(values, self.columns.clone()))),
                     None => self.handle_if_more_results(),
                 }
             },
