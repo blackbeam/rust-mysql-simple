@@ -143,18 +143,18 @@ impl HandshakePacket {
         let mut auth_plugin_name: Vec<u8> = Vec::with_capacity(32);
         let mut character_set = 0u8;
         let mut status_flags = StatusFlags::empty();
-        let payload_len = pld.len();
-        let mut reader = io::Cursor::new(pld);
+        let mut reader = &pld[..];
         let protocol_version = try!(reader.read_u8());
         let version_bytes = try!(reader.read_to_null());
         let server_version = try!(parse_version(&version_bytes[..]));
         let connection_id = try!(reader.read_u32::<LE>());
-        try!(reader.by_ref().take(8).read_to_end(&mut auth_plugin_data));
+        auth_plugin_data.resize(8, 0);
+        try!(reader.read_exact(&mut *auth_plugin_data));
         // skip filler
-        { let pos = reader.position(); reader.set_position(pos + 1); }
+        reader = &reader[1..];
         let lower_cf = try!(reader.read_u16::<LE>());
         let mut capability_flags = CapabilityFlags::from_bits_truncate(lower_cf as u32);
-        if reader.position() != payload_len as u64 {
+        if reader.len() > 0 {
             character_set = try!(reader.read_u8());
             status_flags = StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>()));
             let upper_cf = try!(reader.read_u16::<LE>());
@@ -162,14 +162,15 @@ impl HandshakePacket {
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
                 length_of_auth_plugin_data = try!(reader.read_u8()) as i16;
             } else {
-                let pos = reader.position();
-                reader.set_position(pos + 1);
+                reader = &reader[1..];
             }
-            { let pos = reader.position(); reader.set_position(pos + 10); }
+            reader = &reader[10..];
             if capability_flags.contains(consts::CLIENT_SECURE_CONNECTION) {
                 let mut len = length_of_auth_plugin_data - 8i16;
                 len = if len > 13i16 { len } else { 13i16 };
-                try!(reader.by_ref().take(len as u64).read_to_end(&mut auth_plugin_data));
+                auth_plugin_data.reserve_exact(len as usize);
+                auth_plugin_data.resize(len as usize + 8, 0);
+                try!(reader.read_exact(&mut auth_plugin_data[8..]));
                 if auth_plugin_data[auth_plugin_data.len() - 1] == 0u8 {
                     auth_plugin_data.pop();
                 }

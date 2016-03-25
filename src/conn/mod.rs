@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fs;
 use std::fmt;
@@ -1024,12 +1023,15 @@ impl Conn {
     #[cfg(feature = "ssl")]
     fn do_ssl_request(&mut self) -> MyResult<()> {
         let client_flags = self.get_client_flags();
-        let mut writer = io::Cursor::new(Vec::with_capacity(4 + 4 + 1 + 23));
-        try!(writer.write_u32::<LE>(client_flags.bits()));
-        try!(writer.write_all(&[0u8; 4]));
-        try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write_all(&[0u8; 23]));
-        self.write_packet(writer.into_inner().borrow())
+        let mut buf = [0; 4 + 4 + 1 + 23];
+        {
+            let mut writer = &mut buf[..];
+            try!(writer.write_u32::<LE>(client_flags.bits()));
+            try!(writer.write_all(&[0u8; 4]));
+            try!(writer.write_u8(consts::UTF8_GENERAL_CI));
+            try!(writer.write_all(&[0u8; 23]));
+        }
+        self.write_packet(&buf[..])
     }
 
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
@@ -1046,25 +1048,28 @@ impl Conn {
         if db_name_len > 0 {
             payload_len += db_name_len + 1;
         }
-        let mut writer = io::Cursor::new(Vec::with_capacity(payload_len));
-        try!(writer.write_u32::<LE>(client_flags.bits()));
-        try!(writer.write_all(&[0u8; 4]));
-        try!(writer.write_u8(consts::UTF8_GENERAL_CI));
-        try!(writer.write_all(&[0u8; 23]));
-        if let Some(ref user) = self.opts.user {
-            try!(writer.write_all(user.as_bytes()));
-        }
-        try!(writer.write_u8(0u8));
-        try!(writer.write_u8(scramble_buf_len as u8));
-        if let Some(scr) = scramble_buf {
-            try!(writer.write_all(scr.as_ref()));
-        }
-        if db_name_len > 0 {
-            let db_name = self.opts.db_name.as_ref().unwrap();
-            try!(writer.write_all(db_name.as_bytes()));
+        let mut buf = vec![0u8; payload_len];
+        {
+            let mut writer = &mut *buf;
+            try!(writer.write_u32::<LE>(client_flags.bits()));
+            try!(writer.write_all(&[0u8; 4]));
+            try!(writer.write_u8(consts::UTF8_GENERAL_CI));
+            try!(writer.write_all(&[0u8; 23]));
+            if let Some(ref user) = self.opts.user {
+                try!(writer.write_all(user.as_bytes()));
+            }
             try!(writer.write_u8(0u8));
+            try!(writer.write_u8(scramble_buf_len as u8));
+            if let Some(scr) = scramble_buf {
+                try!(writer.write_all(scr.as_ref()));
+            }
+            if db_name_len > 0 {
+                let db_name = self.opts.db_name.as_ref().unwrap();
+                try!(writer.write_all(db_name.as_bytes()));
+                try!(writer.write_u8(0u8));
+            }
         }
-        self.write_packet(writer.into_inner().borrow())
+        self.write_packet(&*buf)
     }
 
     fn write_command(&mut self, cmd: consts::Command) -> MyResult<()> {
@@ -1073,13 +1078,16 @@ impl Conn {
         self.write_packet(&[cmd as u8])
     }
 
-    fn write_command_data(&mut self, cmd: consts::Command, buf: &[u8]) -> MyResult<()> {
+    fn write_command_data(&mut self, cmd: consts::Command, data: &[u8]) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd as u8;
-        let mut writer = io::Cursor::new(Vec::with_capacity(buf.len() + 1));
-        let _ = writer.write_u8(cmd as u8);
-        let _ = writer.write_all(buf);
-        self.write_packet(writer.into_inner().borrow())
+        let mut buf = vec![0u8; data.len() + 1];
+        {
+            let mut writer = &mut *buf;
+            let _ = writer.write_u8(cmd as u8);
+            let _ = writer.write_all(data);
+        }
+        self.write_packet(&*buf)
     }
 
     fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
@@ -1088,12 +1096,14 @@ impl Conn {
                 Bytes(ref x) => {
                     for chunk in x.chunks(self.max_allowed_packet - 7) {
                         let chunk_len = chunk.len() + 7;
-                        let mut writer = io::Cursor::new(Vec::with_capacity(chunk_len));
-                        try!(writer.write_u32::<LE>(stmt.statement_id));
-                        try!(writer.write_u16::<LE>(id));
-                        try!(writer.write_all(chunk));
-                        try!(self.write_command_data(Command::COM_STMT_SEND_LONG_DATA,
-                                                     writer.into_inner().borrow()));
+                        let mut buf = vec![0u8; chunk_len];
+                        {
+                            let mut writer = &mut *buf;
+                            try!(writer.write_u32::<LE>(stmt.statement_id));
+                            try!(writer.write_u16::<LE>(id));
+                            try!(writer.write_all(chunk));
+                        }
+                        try!(self.write_command_data(Command::COM_STMT_SEND_LONG_DATA, &*buf));
                     }
                 },
                 _ => unreachable!(),
@@ -1103,16 +1113,21 @@ impl Conn {
     }
 
     fn _execute(&mut self, stmt: &InnerStmt, params: Params) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
-        let mut writer: io::Cursor<_>;
+        let mut buf = [0u8; 4 + 1 + 4];
+        let mut data: Vec<u8>;
+        let out;
         match params {
             Params::Empty => {
                 if stmt.num_params != 0 {
                     return Err(DriverError(MismatchedStmtParams(stmt.num_params, 0)));
                 }
-                writer = io::Cursor::new(Vec::with_capacity(4 + 1 + 4));
-                try!(writer.write_u32::<LE>(stmt.statement_id));
-                try!(writer.write_u8(0u8));
-                try!(writer.write_u32::<LE>(1u32));
+                {
+                    let mut writer = &mut buf[..];
+                    try!(writer.write_u32::<LE>(stmt.statement_id));
+                    try!(writer.write_u8(0u8));
+                    try!(writer.write_u32::<LE>(1u32));
+                }
+                out = &buf[..];
             },
             Params::Positional(params) => {
                 if stmt.num_params != params.len() as u16 {
@@ -1127,40 +1142,42 @@ impl Conn {
                         Some(ids) => try!(self.send_long_data(stmt, &params, ids)),
                         _ => ()
                     }
-                    writer = io::Cursor::new(Vec::with_capacity(9 + bitmap.len() + 1 +
-                                                                params.len() * 2 +
-                                                                values.len()));
-                    try!(writer.write_u32::<LE>(stmt.statement_id));
-                    try!(writer.write_u8(0u8));
-                    try!(writer.write_u32::<LE>(1u32));
-                    try!(writer.write_all(bitmap.as_ref()));
-                    try!(writer.write_u8(1u8));
-                    for i in 0..params.len() {
-                        match params[i] {
-                            NULL => try!(writer.write_all(
-                                &[sparams[i].column_type as u8, 0u8])),
-                            Bytes(..) => try!(
-                                writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0u8])),
-                            Int(..) => try!(
-                                writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0u8])),
-                            UInt(..) => try!(
-                                writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128u8])),
-                            Float(..) => try!(
-                                writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0u8])),
-                            Date(..) => try!(
-                                writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0u8])),
-                            Time(..) => try!(
-                                writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0u8]))
+                    data = vec![0u8; 9 + bitmap.len() + 1 + params.len() * 2 + values.len()];
+                    {
+                        let mut writer = &mut *data;
+                        try!(writer.write_u32::<LE>(stmt.statement_id));
+                        try!(writer.write_u8(0u8));
+                        try!(writer.write_u32::<LE>(1u32));
+                        try!(writer.write_all(bitmap.as_ref()));
+                        try!(writer.write_u8(1u8));
+                        for i in 0..params.len() {
+                            match params[i] {
+                                NULL => try!(writer.write_all(
+                                    &[sparams[i].column_type as u8, 0u8])),
+                                Bytes(..) => try!(
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0u8])),
+                                Int(..) => try!(
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0u8])),
+                                UInt(..) => try!(
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128u8])),
+                                Float(..) => try!(
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0u8])),
+                                Date(..) => try!(
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0u8])),
+                                Time(..) => try!(
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0u8]))
+                            }
                         }
+                        try!(writer.write_all(values.as_ref()));
                     }
-                    try!(writer.write_all(values.as_ref()));
+                    out = &*data;
                 } else {
                     unreachable!();
                 }
             },
             Params::Named(_) => unimplemented!(),
         }
-        try!(self.write_command_data(Command::COM_STMT_EXECUTE, writer.into_inner().borrow()));
+        try!(self.write_command_data(Command::COM_STMT_EXECUTE, out));
         self.handle_result_set()
     }
 

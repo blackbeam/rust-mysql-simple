@@ -237,13 +237,12 @@ impl Value {
     #[doc(hidden)]
     pub fn from_payload(pld: &[u8], columns_count: usize) -> io::Result<Vec<Value>> {
         let mut output = Vec::with_capacity(columns_count);
-        let mut reader = io::Cursor::new(pld);
+        let mut reader = &pld[..];
         loop {
-            if reader.get_ref().len() as u64 == reader.position() {
+            if reader.len() == 0 {
                 break;
-            } else if pld[reader.position() as usize] == 0xfb {
-                let new_position = reader.position() + 1;
-                reader.set_position(new_position);
+            } else if reader[0] == 0xfb {
+                reader = &reader[1..];
                 output.push(Value::NULL);
             } else {
                 output.push(Value::Bytes(try!(reader.read_lenenc_bytes())));
