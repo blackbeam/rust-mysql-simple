@@ -49,6 +49,35 @@ pub enum Error {
     FromRowError(Row),
 }
 
+impl Error {
+    #[cfg(not(feature = "openssl"))]
+    #[doc(hidden)]
+    pub fn is_connectivity_error(&self) -> bool {
+        match self {
+            &Error::IoError(_) |
+            &Error::DriverError(_) => true,
+            &Error::MySqlError(_) |
+            &Error::UrlError(_) |
+            &Error::FromValueError(_) |
+            &Error::FromRowError(_) => false,
+        }
+    }
+
+    #[cfg(feature = "openssl")]
+    #[doc(hidden)]
+    pub fn is_connectivity_error(&self) -> bool {
+        match self {
+            &Error::IoError(_) |
+            &Error::DriverError(_) |
+            &Error::SslError(_) => true,
+            &Error::MySqlError(_) |
+            &Error::UrlError(_) |
+            &Error::FromValueError(_) |
+            &Error::FromRowError(_) => false,
+        }
+    }
+}
+
 impl error::Error for Error {
     #[cfg(feature = "ssl")]
     fn description(&self) -> &str {

@@ -213,30 +213,37 @@ impl Pool {
         self._get_conn(None::<String>, Some(timeout_ms), true)
     }
 
-    fn get_conn_by_stmt<T: AsRef<str>>(&self, query: T) -> MyResult<PooledConn> {
-        self._get_conn(Some(query), None, false)
+    fn get_conn_by_stmt<T: AsRef<str>>(&self, query: T, call_ping: bool) -> MyResult<PooledConn> {
+        self._get_conn(Some(query), None, call_ping)
     }
 
     /// Will prepare statement.
     ///
     /// It will try to find connection which has this statement cached.
-    ///
-    /// Will not check or fix connection health.
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a self, query: T) -> MyResult<Stmt<'a>> {
-        let conn = try!(self.get_conn_by_stmt(query.as_ref()));
+        let conn = try!(self.get_conn_by_stmt(query.as_ref(), true));
         conn.pooled_prepare(query)
     }
 
     /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`.
     ///
     /// It will try to find connection which has this statement cached.
-    ///
-    /// Will not check or fix connection health.
     pub fn prep_exec<'a, A, T>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>>
     where A: AsRef<str>,
           T: Into<Params> {
-        let conn = try!(self.get_conn_by_stmt(query.as_ref()));
-        conn.pooled_prep_exec(query, params)
+        let conn = try!(self.get_conn_by_stmt(query.as_ref(), false));
+        let params = params.into();
+        match conn.pooled_prep_exec(query.as_ref(), params.clone()) {
+            Ok(stmt) => Ok(stmt),
+            Err(e) => {
+                if e.is_connectivity_error() {
+                    let conn = try!(self._get_conn(None::<String>, None, true));
+                    conn.pooled_prep_exec(query, params)
+                } else {
+                    Err(e)
+                }
+            },
+        }
     }
 
     /// Shortcut for `try!(pool.get_conn()).start_transaction(..)`.
@@ -244,9 +251,20 @@ impl Pool {
                              consistent_snapshot: bool,
                              isolation_level: Option<IsolationLevel>,
                              readonly: Option<bool>) -> MyResult<Transaction> {
-        (try!(self.get_conn())).pooled_start_transaction(consistent_snapshot,
-                                                         isolation_level,
-                                                         readonly)
+        let conn = try!(self._get_conn(None::<String>, None, false));
+        let result = conn.pooled_start_transaction(consistent_snapshot,
+                                                   isolation_level,
+                                                   readonly);
+        match result {
+            Ok(trans) => Ok(trans),
+            Err(ref e) if e.is_connectivity_error() => {
+                let conn = try!(self._get_conn(None::<String>, None, true));
+                conn.pooled_start_transaction(consistent_snapshot,
+                                              isolation_level,
+                                              readonly)
+            },
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -336,7 +354,9 @@ impl PooledConn {
 
     /// Redirects to
     /// [`Conn#prep_exec`](../struct.Conn.html#method.prep_exec).
-    pub fn prep_exec<'a, A: AsRef<str> + 'a, T: Into<Params>>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>> {
+    pub fn prep_exec<'a, A, T>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
+    where A: AsRef<str> + 'a,
+          T: Into<Params> {
         self.conn.as_mut().unwrap().prep_exec(query, params)
     }
 
@@ -369,10 +389,7 @@ impl PooledConn {
     }
 
     fn pooled_prepare<'a, T: AsRef<str>>(mut self, query: T) -> MyResult<Stmt<'a>> {
-        match self.as_mut()._prepare(query.as_ref()) {
-            Ok(stmt) => Ok(Stmt::new_pooled(stmt, self)),
-            Err(err) => Err(err)
-        }
+        self.as_mut()._prepare(query.as_ref()).map(|stmt| Stmt::new_pooled(stmt, self))
     }
 
     fn pooled_prep_exec<'a, A, T>(mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
@@ -443,6 +460,78 @@ mod test {
         use super::super::Pool;
         use super::super::super::super::value::from_value;
         use super::super::super::super::error::{Error, DriverError};
+        #[test]
+        fn should_fix_connectivity_errors_on_prepare() {
+            let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
+            let mut conn = pool.get_conn().unwrap();
+
+            let mut id = 0u32;
+            for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
+                let info: Option<String> = from_value(row.take(7).unwrap());
+                match info {
+                    Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
+                        id = from_value(row.take(0).unwrap());
+                    },
+                    _ => (),
+                }
+            }
+
+            conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
+            for mut row in conn.query("SHOW PROCESSLIST").unwrap().flat_map(|x| x) {
+                let c_id: u32 = from_value(row.take(0).unwrap());
+                assert!(c_id != id);
+            }
+
+            pool.prepare("SHOW FULL PROCESSLIST").unwrap();
+        }
+        #[test]
+        fn should_fix_connectivity_errors_on_prep_exec() {
+            let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
+            let mut conn = pool.get_conn().unwrap();
+
+            let mut id = 0u32;
+            for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
+                let info: Option<String> = from_value(row.take(7).unwrap());
+                match info {
+                    Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
+                        id = from_value(row.take(0).unwrap());
+                    },
+                    _ => (),
+                }
+            }
+
+            conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
+            for mut row in conn.query("SHOW PROCESSLIST").unwrap().flat_map(|x| x) {
+                let c_id: u32 = from_value(row.take(0).unwrap());
+                assert!(c_id != id);
+            }
+
+            pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap();
+        }
+        #[test]
+        fn should_fix_connectivity_errors_on_start_transaction() {
+            let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
+            let mut conn = pool.get_conn().unwrap();
+
+            let mut id = 0u32;
+            for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
+                let info: Option<String> = from_value(row.take(7).unwrap());
+                match info {
+                    Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
+                        id = from_value(row.take(0).unwrap());
+                    },
+                    _ => (),
+                }
+            }
+
+            conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
+            for mut row in conn.query("SHOW PROCESSLIST").unwrap().flat_map(|x| x) {
+                let c_id: u32 = from_value(row.take(0).unwrap());
+                assert!(c_id != id);
+            }
+
+            pool.start_transaction(false, None, None).unwrap();
+        }
         #[test]
         fn should_execute_queryes_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
@@ -600,6 +689,29 @@ mod test {
             for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
+            }
+        }
+
+        #[cfg(feature = "nightly")]
+        mod bench {
+            use test;
+            use Pool;
+            use super::super::get_opts;
+
+            #[bench]
+            fn many_prepares(bencher: &mut test::Bencher) {
+                let pool = Pool::new(get_opts()).unwrap();
+                bencher.iter(|| {
+                    pool.prepare("SELECT 1").unwrap();
+                });
+            }
+
+            #[bench]
+            fn many_prepexecs(bencher: &mut test::Bencher) {
+                let pool = Pool::new(get_opts()).unwrap();
+                bencher.iter(|| {
+                    pool.prep_exec("SELECT 1", ()).unwrap();
+                });
             }
         }
     }

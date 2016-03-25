@@ -928,6 +928,7 @@ where Ir1: ConvIr<T1>, T1: FromValue<Intermediate=Ir1>,
     }
 }
 
+#[derive(PartialEq, Clone, Debug)]
 pub enum Params {
     Empty,
     Named(HashMap<String, Value, BldHshrDflt<FnvHasher>>),
@@ -2451,7 +2452,6 @@ mod test {
     #[cfg(feature = "nightly")]
     mod bench {
         use test;
-        use time::Timespec;
         use super::super::{from_row, from_value, Value};
         use super::super::super::conn::Row;
         use chrono::NaiveDateTime;
