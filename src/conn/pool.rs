@@ -477,10 +477,6 @@ mod test {
             }
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-            for mut row in conn.query("SHOW PROCESSLIST").unwrap().flat_map(|x| x) {
-                let c_id: u32 = from_value(row.take(0).unwrap());
-                assert!(c_id != id);
-            }
 
             pool.prepare("SHOW FULL PROCESSLIST").unwrap();
         }
@@ -501,10 +497,6 @@ mod test {
             }
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-            for mut row in conn.query("SHOW PROCESSLIST").unwrap().flat_map(|x| x) {
-                let c_id: u32 = from_value(row.take(0).unwrap());
-                assert!(c_id != id);
-            }
 
             pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap();
         }
@@ -525,10 +517,6 @@ mod test {
             }
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-            for mut row in conn.query("SHOW PROCESSLIST").unwrap().flat_map(|x| x) {
-                let c_id: u32 = from_value(row.take(0).unwrap());
-                assert!(c_id != id);
-            }
 
             pool.start_transaction(false, None, None).unwrap();
         }
