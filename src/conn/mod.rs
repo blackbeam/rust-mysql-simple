@@ -12,8 +12,8 @@ use std::ops::{
     Index,
 };
 use std::path;
-use std::sync::Arc;
 use std::str::from_utf8;
+use std::sync::Arc;
 
 use super::consts;
 use super::consts::Command;
@@ -44,10 +44,10 @@ use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersi
 use super::value::{
     Params,
     Value,
-    from_value_opt
+    from_value_opt,
+    from_value,
+    FromValue,
 };
-#[cfg(any(feature = "pipe", feature = "socket"))]
-use super::value::from_value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 use bufstream::BufStream;
@@ -429,10 +429,6 @@ impl Column {
 
 /// Mysql row representation.
 ///
-/// Only stores values of a cells. To get column names please refer to
-/// [`QueryResult::column_index`](struct.QueryResult.html#method.column_index) and
-/// [`QueryResult::column_indexes`](struct.QueryResult.html#method.column_indexes) methods.
-///
 /// It allows you to move column values out of a row with `Row::take` method but note that it
 /// makes row incomplete. Calls to `from_row_opt` on incomplete row will return
 /// `Error::FromRowError` and also numerical indexing on taken columns will panic.
@@ -463,13 +459,16 @@ impl Column {
 /// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
 /// #                (1, "John", 17, "foo@bar.baz"));
 /// pool.prep_exec("SELECT * FROM tmp.Users", ()).map(|mut result| {
-///     let idxs = result.column_indexes();
 ///     let mut row = result.next().unwrap().unwrap();
+///     let id: u32 = row.take("id").unwrap();
+///     let name: String = row.take("name").unwrap();
+///     let age: u32 = row.take("age").unwrap();
+///     let email: String = row.take("email").unwrap();
 ///
-///     assert_eq!(1, from_value::<u32>(row.take(idxs["id"]).unwrap()));
-///     assert_eq!("John", from_value::<String>(row.take(idxs["name"]).unwrap()));
-///     assert_eq!(17, from_value::<u32>(row.take(idxs["age"]).unwrap()));
-///     assert_eq!("foo@bar.baz", from_value::<String>(row.take(idxs["email"]).unwrap()));
+///     assert_eq!(1, id);
+///     assert_eq!("John", name);
+///     assert_eq!(17, age);
+///     assert_eq!("foo@bar.baz", email);
 /// });
 /// ```
 ///
@@ -496,21 +495,31 @@ impl Row {
 
     /// Returns reference to the value of a column with index `index` if it exists and wasn't taken
     /// by `Row::take` method.
+    ///
+    /// Non panicking version of `row[usize]`.
     pub fn as_ref(&self, index: usize) -> Option<&Value> {
         self.values.get(index).and_then(|x| x.as_ref())
     }
 
-    /// Takes value of a column with index `index` if it exists and wasn't taken earlier.
-    pub fn take(&mut self, index: usize) -> Option<Value> {
-        self.values.get_mut(index).and_then(|x| x.take())
+    /// Will copy value at index `index` if it was not taken by `Row::take` earlier,
+    /// then will convert it to `T`.
+    pub fn get<T, I>(&mut self, index: I) -> Option<T>
+    where T: FromValue,
+          I: ColumnIndex {
+        index.idx(&*self.columns).and_then(|idx| {
+            self.values.get(idx).and_then(|x| x.as_ref()).map(|x| from_value::<T>(x.clone()))
+        })
     }
 
-    pub fn get<T: super::value::FromValue, R: RowIndex>(&mut self, idxr: R) -> Option<T> {
-        idxr.idx(&self.columns)
-            .and_then(|i| self.take(i) )
-            .and_then(|o| from_value_opt(o).ok() )
+    /// Will take value of a column with index `index` if it exists and wasn't taken earlier then
+    /// will converts it to `T`.
+    pub fn take<T, I>(&mut self, index: I) -> Option<T>
+    where T: FromValue,
+          I: ColumnIndex {
+        index.idx(&*self.columns).and_then(|idx| {
+            self.values.get_mut(idx).and_then(|x| x.take()).map(from_value::<T>)
+        })
     }
-
 
     /// Unwraps values of a row.
     ///
@@ -537,11 +546,24 @@ impl Index<usize> for Row {
     }
 }
 
-pub trait RowIndex {
+impl<'a> Index<&'a str> for Row {
+    type Output = Value;
+
+    fn index<'r>(&'r self, index: &'a str) -> &'r Value {
+        for (i, column) in self.columns.iter().enumerate() {
+            if column.name == index.as_bytes() {
+                return self.values[i].as_ref().unwrap();
+            }
+        }
+        panic!("No such column: `{}`", index);
+    }
+}
+
+pub trait ColumnIndex {
     fn idx(&self, columns: &Vec<Column>) -> Option<usize>;
 }
 
-impl RowIndex for usize {
+impl ColumnIndex for usize {
     fn idx(&self, columns: &Vec<Column>) -> Option<usize> {
         if *self >= columns.len() {
             None
@@ -551,7 +573,7 @@ impl RowIndex for usize {
     }
 }
 
-impl<'a> RowIndex for &'a str {
+impl<'a> ColumnIndex for &'a str {
     fn idx(&self, columns: &Vec<Column>) -> Option<usize> {
         for (i, c) in columns.iter().enumerate() {
             if c.name == self.as_bytes() {
@@ -1837,7 +1859,7 @@ mod test {
         use std::fs;
         use std::io::Write;
         use time::{Tm, now};
-        use super::super::{Conn, Opts, Row};
+        use super::super::{Conn, Opts};
         use super::super::super::value::{ToValue, from_value};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
@@ -1923,8 +1945,8 @@ mod test {
         fn should_parse_large_text_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
             assert_eq!(
-                conn.query("SELECT REPEAT('A', 20000000)").unwrap().next().unwrap().unwrap(),
-                Row::new(vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())])
+                conn.query("SELECT REPEAT('A', 20000000)").unwrap().next().unwrap().unwrap().unwrap(),
+                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
             );
         }
         #[test]
@@ -1961,13 +1983,13 @@ mod test {
                         assert_eq!(row[1], Int(-123i64));
                         assert_eq!(row[2], Int(123i64));
                         assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                        assert_eq!(from_value::<f64>(row.take(4).unwrap()), 123.123);
+                        assert_eq!(row.take::<f64, _>(4).unwrap(), 123.123f64);
                     } else if i == 1 {
                         assert_eq!(row[0], Bytes(b"world".to_vec()));
                         assert_eq!(row[1], NULL);
                         assert_eq!(row[2], NULL);
                         assert_eq!(row[3], NULL);
-                        assert_eq!(from_value::<f64>(row.take(4).unwrap()), 321.321);
+                        assert_eq!(row.take::<f64, _>(4).unwrap(), 321.321f64);
                     } else {
                         unreachable!();
                     }
@@ -1977,17 +1999,17 @@ mod test {
             let mut result = conn.prep_exec("SELECT ?, ?, ?", ("hello", 1, 1.1)).unwrap();
             let row = result.next().unwrap();
             let mut row = row.unwrap();
-            assert_eq!(from_value::<String>(row.take(0).unwrap()), "hello".to_string());
-            assert_eq!(from_value::<i8>(row.take(1).unwrap()), 1);
-            assert_eq!(from_value::<f32>(row.take(2).unwrap()), 1.1);
+            assert_eq!(row.take::<String, _>(0).unwrap(), "hello".to_string());
+            assert_eq!(row.take::<i8, _>(1).unwrap(), 1i8);
+            assert_eq!(row.take::<f32, _>(2).unwrap(), 1.1f32);
         }
         #[test]
         fn should_parse_large_binary_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
             assert_eq!(
-                stmt.execute(()).unwrap().next().unwrap().unwrap(),
-                Row::new(vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())])
+                stmt.execute(()).unwrap().next().unwrap().unwrap().unwrap(),
+                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
             );
         }
         #[test]
@@ -2000,23 +2022,29 @@ mod test {
                 assert!(t.commit().is_ok());
                 Ok(())
             }).unwrap();
-            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
-                       Row::new(vec![Bytes(b"2".to_vec())]));
+            assert_eq!(
+                conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap().unwrap(),
+                vec![Bytes(b"2".to_vec())]
+            );
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
                 Ok(())
                 // implicit rollback
             }).unwrap();
-            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
-                       Row::new(vec![Bytes(b"2".to_vec())]));
+            assert_eq!(
+                conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap().unwrap(),
+                vec![Bytes(b"2".to_vec())]
+            );
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
                 assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
                 assert!(t.rollback().is_ok());
                 Ok(())
             }).unwrap();
-            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
-                       Row::new(vec![Bytes(b"2".to_vec())]));
+            assert_eq!(
+                conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap().unwrap(),
+                vec![Bytes(b"2".to_vec())]
+            );
             let _ = conn.start_transaction(false, None, None).and_then(|mut t| {
                 let _ = t.prepare("INSERT INTO x.tbl(a) VALUES(?)")
                 .and_then(|mut stmt| {
@@ -2027,8 +2055,10 @@ mod test {
                 assert!(t.commit().is_ok());
                 Ok(())
             }).unwrap();
-            assert_eq!(conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap(),
-                       Row::new(vec![Bytes(b"4".to_vec())]));
+            assert_eq!(
+                conn.query("SELECT COUNT(a) from x.tbl").unwrap().next().unwrap().unwrap().unwrap(),
+                vec![Bytes(b"4".to_vec())]
+            );
             let _ = conn.start_transaction(false, None, None). and_then(|mut t| {
                 t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", (5,)).unwrap();
                 t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", (6,)).unwrap();
@@ -2096,9 +2126,18 @@ mod test {
             while { i += 1; result.more_results_exists() } {
                 for row in result.by_ref() {
                     match i {
-                        1 => assert_eq!(row.unwrap(), Row::new(vec![Bytes(b"1".to_vec())])),
-                        2 => assert_eq!(row.unwrap(), Row::new(vec![Bytes(b"2".to_vec())])),
-                        3 => assert_eq!(row.unwrap(), Row::new(vec![Bytes(b"3".to_vec())])),
+                        1 => assert_eq!(
+                            row.unwrap().unwrap(),
+                            vec![Bytes(b"1".to_vec())]
+                        ),
+                        2 => assert_eq!(
+                            row.unwrap().unwrap(),
+                            vec![Bytes(b"2".to_vec())]
+                        ),
+                        3 => assert_eq!(
+                            row.unwrap().unwrap(),
+                            vec![Bytes(b"3".to_vec())]
+                        ),
                         _ => unreachable!(),
                     }
                 }

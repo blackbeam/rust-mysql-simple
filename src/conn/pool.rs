@@ -87,7 +87,7 @@ impl InnerPool {
 ///     let pool = pool.clone();
 ///     threads.push(thread::spawn(move || {
 ///         let mut result = pool.prep_exec("SELECT 1", ()).unwrap();
-///         assert_eq!(result.next().unwrap().unwrap(), Row::new(vec![1.into()]));
+///         assert_eq!(result.next().unwrap().unwrap().unwrap(), vec![1.into()]);
 ///     }));
 /// }
 /// for t in threads.into_iter() {
@@ -467,10 +467,10 @@ mod test {
 
             let mut id = 0u32;
             for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
-                let info: Option<String> = from_value(row.take(7).unwrap());
+                let info: Option<String> = row.take(7).unwrap();
                 match info {
                     Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
-                        id = from_value(row.take(0).unwrap());
+                        id = row.take(0).unwrap();
                     },
                     _ => (),
                 }
@@ -487,10 +487,10 @@ mod test {
 
             let mut id = 0u32;
             for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
-                let info: Option<String> = from_value(row.take(7).unwrap());
+                let info: Option<String> = row.take(7).unwrap();
                 match info {
                     Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
-                        id = from_value(row.take(0).unwrap());
+                        id = row.take(0).unwrap();
                     },
                     _ => (),
                 }
@@ -507,10 +507,10 @@ mod test {
 
             let mut id = 0u32;
             for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
-                let info: Option<String> = from_value(row.take(7).unwrap());
+                let info: Option<String> = row.take(7).unwrap();
                 match info {
                     Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
-                        id = from_value(row.take(0).unwrap());
+                        id = row.take(0).unwrap();
                     },
                     _ => (),
                 }

@@ -2287,6 +2287,11 @@ mod test {
     }
 
     mod from_row {
+        use Column;
+        use consts::ColumnFlags;
+        use consts::ColumnType;
+        use std::iter::repeat;
+        use std::sync::Arc;
         use time::{Timespec, now};
         use super::super::{from_row, from_row_opt, Value};
         use super::super::super::error::Error;
@@ -2294,6 +2299,19 @@ mod test {
 
         #[test]
         fn should_convert_to_tuples() {
+            let col = Column {
+                schema: vec![],
+                table: vec![],
+                org_table: vec![],
+                name: vec![],
+                org_name: vec![],
+                default_values: vec![],
+                column_length: 0u32,
+                character_set: 0u16,
+                flags: ColumnFlags::empty(),
+                column_type: ColumnType::MYSQL_TYPE_DECIMAL,
+                decimals: 0u8,
+            };
             let t1 = Value::Int(1);
             let t2 = Value::Bytes(b"a".to_vec());
             let t3 = Value::Bytes(vec![255]);
@@ -2348,22 +2366,22 @@ mod test {
                        o1, o2.clone(), o3.clone(), o4.clone(),
                        o1, o2.clone(), o3.clone(), o4.clone());
 
-            assert_eq!(o1, from_row::<u8>(Row::new(vec![t1])));
-            assert_eq!(o2, from_row::<String>(Row::new(vec![t2])));
-            assert_eq!(o3, from_row::<Vec<u8>>(Row::new(vec![t3])));
-            assert_eq!(o4, from_row::<Timespec>(Row::new(vec![t4])));
-            assert_eq!(r1, from_row(Row::new(v1)));
-            assert_eq!(r2, from_row(Row::new(v2)));
-            assert_eq!(r3, from_row(Row::new(v3)));
-            assert_eq!(r4, from_row(Row::new(v4)));
-            assert_eq!(r5, from_row(Row::new(v5)));
-            assert_eq!(r6, from_row(Row::new(v6)));
-            assert_eq!(r7, from_row(Row::new(v7)));
-            assert_eq!(r8, from_row(Row::new(v8)));
-            assert_eq!(r9, from_row(Row::new(v9)));
-            assert_eq!(r10, from_row(Row::new(v10)));
-            assert_eq!(r11, from_row(Row::new(v11)));
-            assert_eq!(r12, from_row(Row::new(v12)));
+            assert_eq!(o1, from_row::<u8>(Row::new(vec![t1], Arc::new(vec![col.clone()]))));
+            assert_eq!(o2, from_row::<String>(Row::new(vec![t2], Arc::new(vec![col.clone()]))));
+            assert_eq!(o3, from_row::<Vec<u8>>(Row::new(vec![t3], Arc::new(vec![col.clone()]))));
+            assert_eq!(o4, from_row::<Timespec>(Row::new(vec![t4], Arc::new(vec![col.clone()]))));
+            assert_eq!(r1, from_row(Row::new(v1, Arc::new(repeat(col.clone()).take(1).collect::<Vec<Column>>()))));
+            assert_eq!(r2, from_row(Row::new(v2, Arc::new(repeat(col.clone()).take(2).collect::<Vec<Column>>()))));
+            assert_eq!(r3, from_row(Row::new(v3, Arc::new(repeat(col.clone()).take(3).collect::<Vec<Column>>()))));
+            assert_eq!(r4, from_row(Row::new(v4, Arc::new(repeat(col.clone()).take(4).collect::<Vec<Column>>()))));
+            assert_eq!(r5, from_row(Row::new(v5, Arc::new(repeat(col.clone()).take(5).collect::<Vec<Column>>()))));
+            assert_eq!(r6, from_row(Row::new(v6, Arc::new(repeat(col.clone()).take(6).collect::<Vec<Column>>()))));
+            assert_eq!(r7, from_row(Row::new(v7, Arc::new(repeat(col.clone()).take(7).collect::<Vec<Column>>()))));
+            assert_eq!(r8, from_row(Row::new(v8, Arc::new(repeat(col.clone()).take(8).collect::<Vec<Column>>()))));
+            assert_eq!(r9, from_row(Row::new(v9, Arc::new(repeat(col.clone()).take(9).collect::<Vec<Column>>()))));
+            assert_eq!(r10, from_row(Row::new(v10, Arc::new(repeat(col.clone()).take(10).collect::<Vec<Column>>()))));
+            assert_eq!(r11, from_row(Row::new(v11, Arc::new(repeat(col.clone()).take(11).collect::<Vec<Column>>()))));
+            assert_eq!(r12, from_row(Row::new(v12, Arc::new(repeat(col.clone()).take(12).collect::<Vec<Column>>()))));
         }
 
         #[test]
@@ -2373,29 +2391,29 @@ mod test {
             let t3 = Value::Bytes(vec![255]);
             let t4 = Value::Date(2014, 11, 1, 18, 33, 00, 1);
 
-            let v1 = Row::new(vec![t1.clone()]);
-            let v2 = Row::new(vec![t1.clone(), t2.clone()]);
-            let v3 = Row::new(vec![t1.clone(), t2.clone(), t3.clone()]);
-            let v4 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone()]);
-            let v5 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone()]);
+            let v1 = Row::new(vec![t1.clone()], Arc::new(vec![]));
+            let v2 = Row::new(vec![t1.clone(), t2.clone()], Arc::new(vec![]));
+            let v3 = Row::new(vec![t1.clone(), t2.clone(), t3.clone()], Arc::new(vec![]));
+            let v4 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone()], Arc::new(vec![]));
+            let v5 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(), t1.clone()], Arc::new(vec![]));
             let v6 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                              t1.clone(), t2.clone()]);
+                              t1.clone(), t2.clone()], Arc::new(vec![]));
             let v7 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                              t1.clone(), t2.clone(), t3.clone()]);
+                              t1.clone(), t2.clone(), t3.clone()], Arc::new(vec![]));
             let v8 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                              t1.clone(), t2.clone(), t3.clone(), t4.clone()]);
+                              t1.clone(), t2.clone(), t3.clone(), t4.clone()], Arc::new(vec![]));
             let v9 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
                               t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                              t1.clone()]);
+                              t1.clone()], Arc::new(vec![]));
             let v10 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
                                t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                               t1.clone(), t2.clone()]);
+                               t1.clone(), t2.clone()], Arc::new(vec![]));
             let v11 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
                                t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                               t1.clone(), t2.clone(), t3.clone()]);
+                               t1.clone(), t2.clone(), t3.clone()], Arc::new(vec![]));
             let v12 = Row::new(vec![t1.clone(), t2.clone(), t3.clone(), t4.clone(),
                                t1.clone(), t2.clone(), t3.clone(), t4.clone(),
-                               t1.clone(), t2.clone(), t3.clone(), t4.clone()]);
+                               t1.clone(), t2.clone(), t3.clone(), t4.clone()], Arc::new(vec![]));
 
             match from_row_opt::<f32>(v1.clone()) {
                 Err(Error::FromRowError(e)) => assert_eq!(v1, e),
@@ -2450,6 +2468,11 @@ mod test {
 
     #[cfg(feature = "nightly")]
     mod bench {
+        use Column;
+        use consts::ColumnFlags;
+        use consts::ColumnType;
+        use std::iter::repeat;
+        use std::sync::Arc;
         use test;
         use super::super::{from_row, from_value, Value};
         use super::super::super::conn::Row;
@@ -2489,6 +2512,19 @@ mod test {
 
         #[bench]
         fn pop_vs_from_row_from_row(bencher: &mut test::Bencher) {
+            let col = Column {
+                schema: vec![],
+                table: vec![],
+                org_table: vec![],
+                name: vec![],
+                org_name: vec![],
+                default_values: vec![],
+                column_length: 0u32,
+                character_set: 0u16,
+                flags: ColumnFlags::empty(),
+                column_type: ColumnType::MYSQL_TYPE_DECIMAL,
+                decimals: 0u8,
+            };
             let row = Row::new(vec![Value::Int(1),
                                     Value::Bytes(vec![b'a']),
                                     Value::Bytes(vec![255]),
@@ -2500,7 +2536,8 @@ mod test {
                                     Value::Int(1),
                                     Value::Bytes(vec![b'a']),
                                     Value::Bytes(vec![255]),
-                                    Value::Date(2014, 11, 1, 18, 33, 00, 1)]);
+                                    Value::Date(2014, 11, 1, 18, 33, 00, 1)],
+                               Arc::new(repeat(col).take(12).collect::<Vec<Column>>()));
             bencher.iter(|| {
                 let vs: (i8, String, Vec<u8>, NaiveDateTime,
                          i8, String, Vec<u8>, NaiveDateTime,
