@@ -840,22 +840,30 @@ impl Conn {
 
     #[cfg(all(not(feature = "socket"), feature = "pipe"))]
     fn connect_stream(&mut self) -> MyResult<()> {
-        if self.opts.pipe_name.is_some() {
+        if let Some(ref pipe_name) = self.opts.pipe_name {
             let mut full_name: String = r"\\.\pipe\".into();
-            full_name.push_str(self.opts.pipe_name.as_ref().unwrap().as_ref());
-            let pipe_stream = try!(np::PipeClient::connect(full_name));
-            self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
-            Ok(())
-        } else if self.opts.ip_or_hostname.is_some() {
-            match net::TcpStream::connect(&(self.opts.ip_or_hostname.as_ref().unwrap().as_ref(),
-                                             self.opts.tcp_port))
-            {
+            full_name.push_str(&**pipe_name);
+            match np::PipeClient::connect(full_name) {
+                Ok(pipe_stream) => {
+                    self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
+                    Ok(())
+                },
+                Err(e) => {
+                    let addr = format!(r"\\.\pipe\{}", pipe_name);
+                    let desc = format!("{}", e);
+                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
+                }
+            }
+        } else if let Some(ref ip_or_hostname) = self.opts.ip_or_hostname {
+            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.tcp_port)) {
                 Ok(stream) => {
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
-                _ => {
-                    Err(DriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
+                Err(e) => {
+                    let addr = format!("{}:{}", ip_or_hostname, self.opts.tcp_port);
+                    let desc = format!("{}", e);
+                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
             }
         } else {
@@ -865,27 +873,28 @@ impl Conn {
 
     #[cfg(all(feature = "socket", not(feature = "pipe")))]
     fn connect_stream(&mut self) -> MyResult<()> {
-        if self.opts.unix_addr.is_some() {
-            match us::UnixStream::connect(self.opts.unix_addr.as_ref().unwrap()) {
+        if let Some(ref unix_addr) = self.opts.unix_addr {
+            match us::UnixStream::connect(unix_addr) {
                 Ok(stream) => {
                     self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
                     Ok(())
                 },
-                _ => {
-                    let path_str = format!("{}", self.opts.unix_addr.as_ref().unwrap().display());
-                    Err(DriverError(CouldNotConnect(Some(path_str))))
+                Err(e) => {
+                    let addr = format!("{}", unix_addr.display());
+                    let desc = format!("{}", e);
+                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
             }
-        } else if self.opts.ip_or_hostname.is_some() {
-            match net::TcpStream::connect(&(&**self.opts.ip_or_hostname.as_ref().unwrap(),
-                                            self.opts.tcp_port))
-            {
+        } else if let Some(ref ip_or_hostname) = self.opts.ip_or_hostname {
+            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.tcp_port)) {
                 Ok(stream) => {
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
-                _ => {
-                    Err(DriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
+                Err(e) => {
+                    let addr = format!("{}:{}", ip_or_hostname, self.opts.tcp_port);
+                    let desc = format!("{}", e);
+                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
             }
         } else {
@@ -895,16 +904,16 @@ impl Conn {
 
     #[cfg(all(not(feature = "socket"), not(feature = "pipe")))]
     fn connect_stream(&mut self) -> MyResult<()> {
-        if self.opts.ip_or_hostname.is_some() {
-            match net::TcpStream::connect(&(&**self.opts.ip_or_hostname.as_ref().unwrap(),
-                                            self.opts.tcp_port))
-            {
+        if let Some(ref ip_or_hostname) = self.opts.ip_or_hostname {
+            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.tcp_port)) {
                 Ok(stream) => {
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
-                _ => {
-                    Err(DriverError(CouldNotConnect(self.opts.ip_or_hostname.clone())))
+                Err(e) => {
+                    let addr = format!("{}:{}", ip_or_hostname, self.opts.tcp_port);
+                    let desc = format!("{}", e);
+                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
             }
         } else {

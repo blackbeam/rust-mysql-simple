@@ -203,7 +203,8 @@ impl fmt::Debug for Error {
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum DriverError {
-    CouldNotConnect(Option<String>),
+    // (address, description)
+    CouldNotConnect(Option<(String, String, io::ErrorKind)>),
     UnsupportedProtocol(u8),
     PacketOutOfSync,
     PacketTooLarge,
@@ -231,8 +232,8 @@ impl fmt::Display for DriverError {
             DriverError::CouldNotConnect(None) => {
                 write!(f, "Could not connect: address not specified")
             }
-            DriverError::CouldNotConnect(Some(ref addr)) => {
-                write!(f, "Could not connect to address: {}", addr)
+            DriverError::CouldNotConnect(Some((ref addr, ref desc, _))) => {
+                write!(f, "Could not connect to address `{}': {}", addr, desc)
             }
             DriverError::UnsupportedProtocol(proto_version) => {
                 write!(f, "Unsupported protocol version {}", proto_version)
