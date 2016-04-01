@@ -62,22 +62,24 @@ impl InnerPool {
 /// use mysql::conn::pool;
 /// use std::default::Default;
 /// use mysql::conn::Opts;
+/// # use mysql::conn::OptsBuilder;
 /// # use mysql::conn::Row;
 /// use std::thread;
 ///
 /// fn get_opts() -> Opts {
 ///       // ...
+/// #     let USER = "root";
+/// #     let ADDR = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
-/// #     Opts {
-/// #         user: Some("root".to_string()),
-/// #         pass: Some(pwd),
-/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
-/// #         tcp_port: port,
-/// #         ..Default::default()
-/// #     }
+/// #     let mut builder = OptsBuilder::default();
+/// #     builder.user(Some(USER))
+/// #            .pass(Some(pwd))
+/// #            .ip_or_hostname(Some(ADDR))
+/// #            .tcp_port(port);
+/// #     builder.into()
 /// }
 ///
 /// let opts = get_opts();
@@ -286,22 +288,24 @@ impl fmt::Debug for Pool {
 ///
 /// ```rust
 /// # use mysql::conn::pool;
-/// # use mysql::conn::Opts;
+/// # use mysql::conn::{Opts, OptsBuilder};
 /// # use mysql::value::{from_value, Value};
 /// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # fn get_opts() -> Opts {
+/// #     let USER = "root";
+/// #     let ADDR = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
-/// #     Opts {
-/// #         user: Some("root".to_string()),
-/// #         pass: Some(pwd),
-/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
-/// #         tcp_port: port,
-/// #         ..Default::default()
-/// #     }
+/// #     let mut builder = OptsBuilder::default();
+/// #     builder.user(Some(USER))
+/// #            .pass(Some(pwd))
+/// #            .ip_or_hostname(Some(ADDR))
+/// #            .tcp_port(port)
+/// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+/// #     builder.into()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = pool::Pool::new(opts).unwrap();
@@ -415,8 +419,8 @@ impl PooledConn {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    use conn::Opts;
-    use std::default::Default;
+    use Opts;
+    use OptsBuilder;
 
     pub static USER: &'static str = "root";
     pub static PASS: &'static str = "password";
@@ -429,14 +433,14 @@ mod test {
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
-        Opts {
-            user: Some(USER.to_string()),
-            pass: Some(pwd),
-            ip_or_hostname: Some(ADDR.to_string()),
-            tcp_port: port,
-            ssl_opts: Some((::std::convert::From::from("tests/ca-cert.pem"), None)),
-            ..Default::default()
-        }
+        let mut builder = OptsBuilder::default();
+        builder.user(Some(USER))
+               .pass(Some(pwd))
+               .ip_or_hostname(Some(ADDR))
+               .tcp_port(port)
+               .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
+               .ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
+        builder.into()
     }
 
     #[cfg(not(feature = "ssl"))]
@@ -445,13 +449,13 @@ mod test {
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
-        Opts {
-            user: Some(USER.to_string()),
-            pass: Some(pwd),
-            ip_or_hostname: Some(ADDR.to_string()),
-            tcp_port: port,
-            ..Default::default()
-        }
+        let mut builder = OptsBuilder::default();
+        builder.user(Some(USER))
+               .pass(Some(pwd))
+               .ip_or_hostname(Some(ADDR))
+               .tcp_port(port)
+               .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+        builder.into()
     }
 
     mod pool {

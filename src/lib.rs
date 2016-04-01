@@ -31,16 +31,9 @@
 //! features = ["pipe"]
 //! ```
 //!
-//! #### Use
-//! You should start by creating [`Opts`](conn/struct.Opts.html) struct.
-//!
-//! Then you can create [`Pool`](conn/pool/struct.Pool.html) which should be
-//! enough to work with mysql server.
-//!
-//! ##### Example
+//! #### Example
 //!
 //! ```rust
-//! use std::default::Default;
 //! use mysql as my;
 //!
 //! #[derive(Debug, PartialEq, Eq)]
@@ -51,6 +44,8 @@
 //! }
 //!
 //! fn main() {
+//! #   let USER = "root";
+//! #   let ADDR = "127.0.0.1";
 //! #   let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 //! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
 //! #                              .unwrap_or(3307);
@@ -59,14 +54,12 @@
 //!     let pool = my::Pool::new("mysql://root:password@localhost:3307").unwrap();
 //! #       pool
 //! #   } else {
-//! #       let opts = my::Opts {
-//! #             user: Some("root".to_string()),
-//! #             pass: Some(pwd),
-//! #             ip_or_hostname: Some("127.0.0.1".to_string()),
-//! #             tcp_port: port,
-//! #             ..Default::default()
-//! #       };
-//! #       my::Pool::new(opts).unwrap()
+//! #       let mut builder = my::OptsBuilder::default();
+//! #       builder.user(Some(USER))
+//! #              .pass(Some(pwd))
+//! #              .ip_or_hostname(Some(ADDR))
+//! #              .tcp_port(port);
+//! #       my::Pool::new(builder).unwrap()
 //! #   };
 //!
 //!     // Let's create payment table.
@@ -167,6 +160,8 @@ pub use conn::Conn;
 pub use conn::IsolationLevel;
 #[doc(inline)]
 pub use conn::Opts;
+#[doc(inline)]
+pub use conn::OptsBuilder;
 #[doc(inline)]
 pub use conn::QueryResult;
 #[doc(inline)]

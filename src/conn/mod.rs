@@ -62,6 +62,7 @@ use named_pipe as np;
 pub mod pool;
 mod opts;
 pub use self::opts::Opts;
+pub use self::opts::OptsBuilder;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum IsolationLevel {
@@ -273,23 +274,25 @@ impl<'a> Stmt<'a> {
     ///
     /// ```rust
     /// # use mysql::conn::pool;
-    /// # use mysql::conn::Opts;
+    /// # use mysql::conn::{Opts, OptsBuilder};
     /// # use mysql::value::{from_value, from_row, ToValue, Value};
     /// # use std::thread::Thread;
     /// # use std::default::Default;
     /// # use std::iter::repeat;
     /// # fn get_opts() -> Opts {
+    /// #     let USER = "root";
+    /// #     let ADDR = "127.0.0.1";
     /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
     /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
     /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
     /// #                                .unwrap_or(3307);
-    /// #     Opts {
-    /// #         user: Some("root".to_string()),
-    /// #         pass: Some(pwd),
-    /// #         ip_or_hostname: Some("127.0.0.1".to_string()),
-    /// #         tcp_port: port,
-    /// #         ..Default::default()
-    /// #     }
+    /// #     let mut builder = OptsBuilder::default();
+    /// #     builder.user(Some(USER.to_string()))
+    /// #            .pass(Some(pwd))
+    /// #            .ip_or_hostname(Some(ADDR.to_string()))
+    /// #            .tcp_port(port)
+    /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()]);
+    /// #     builder.into()
     /// # }
     /// # let opts = get_opts();
     /// # let pool = pool::Pool::new(opts).unwrap();
@@ -435,23 +438,25 @@ impl Column {
 ///
 /// ```rust
 /// # use mysql::conn::pool;
-/// # use mysql::conn::Opts;
+/// # use mysql::conn::{Opts, OptsBuilder};
 /// # use mysql::value::{from_value, from_row, ToValue, Value};
 /// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # use std::iter::repeat;
 /// # fn get_opts() -> Opts {
+/// #     let USER = "root";
+/// #     let ADDR = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
-/// #     Opts {
-/// #         user: Some("root".to_string()),
-/// #         pass: Some(pwd),
-/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
-/// #         tcp_port: port,
-/// #         ..Default::default()
-/// #     }
+/// #     let mut builder = OptsBuilder::default();
+/// #     builder.user(Some(USER))
+/// #            .pass(Some(pwd))
+/// #            .ip_or_hostname(Some(ADDR))
+/// #            .tcp_port(port)
+/// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+/// #     builder.into()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = pool::Pool::new_manual(1, 1, opts).unwrap();
@@ -645,22 +650,20 @@ impl Conn {
         let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
-        if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
+        if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
             if conn.opts.addr_is_loopback() {
                 match conn.get_system_var("socket") {
                     Some(path) => {
                         let path = from_value::<String>(path);
-                        let opts = Opts{
-                            unix_addr: Some(From::from(path)),
-                            ..conn.opts.clone()
-                        };
-                        return Conn::new(opts).or(Ok(conn));
+                        let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
+                        new_opts.unix_addr(Some(path));
+                        return Conn::new(new_opts).or(Ok(conn));
                     },
                     _ => return Ok(conn)
                 }
             }
         }
-        for cmd in conn.opts.init.clone() {
+        for cmd in conn.opts.get_init().clone() {
             try!(conn.query(cmd));
         }
         return Ok(conn);
@@ -672,22 +675,20 @@ impl Conn {
         let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
-        if conn.opts.pipe_name.is_none() && conn.opts.prefer_socket {
+        if conn.opts.get_pipe_name().is_none() && conn.opts.get_prefer_socket() {
             if conn.opts.addr_is_loopback() {
                 match conn.get_system_var("socket") {
                     Some(name) => {
                         let name = from_value::<String>(name);
-                        let opts = Opts{
-                            pipe_name: Some(name),
-                            ..conn.opts.clone()
-                        };
-                        return Conn::new(opts).or(Ok(conn));
+                        let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
+                        new_opts.pipe_name(Some(name));
+                        return Conn::new(new_opts).or(Ok(conn));
                     },
                     _ => return Ok(conn)
                 }
             }
         }
-        for cmd in conn.opts.init.clone() {
+        for cmd in conn.opts.get_init().clone() {
             try!(conn.query(cmd));
         }
         return Ok(conn);
@@ -699,24 +700,22 @@ impl Conn {
         let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
-        if let None = conn.opts.ssl_opts {
-            if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
+        if let &None = conn.opts.get_ssl_opts() {
+            if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
                 if conn.opts.addr_is_loopback() {
                     match conn.get_system_var("socket") {
                         Some(path) => {
                             let path = from_value::<String>(path);
-                            let opts = Opts{
-                                unix_addr: Some(From::from(path)),
-                                ..conn.opts.clone()
-                            };
-                            return Conn::new(opts).or(Ok(conn));
+                            let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
+                            new_opts.unix_addr(Some(path));
+                            return Conn::new(new_opts).or(Ok(conn));
                         },
                         _ => return Ok(conn)
                     }
                 }
             }
         }
-        for cmd in conn.opts.init.clone() {
+        for cmd in conn.opts.get_init().clone() {
             try!(conn.query(cmd));
         }
         return Ok(conn);
@@ -728,24 +727,22 @@ impl Conn {
         let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
-        if let None = conn.opts.ssl_opts {
-            if conn.opts.unix_addr.is_none() && conn.opts.prefer_socket {
+        if let &None = conn.opts.get_ssl_opts() {
+            if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
                 if conn.opts.addr_is_loopback() {
                     match conn.get_system_var("socket") {
                         Some(name) => {
                             let name = from_value::<String>(path);
-                            let opts = Opts{
-                                pipe_name: Some(name),
-                                ..conn.opts.clone()
-                            };
-                            return Conn::new(opts).or(Ok(conn));
+                            let mut new_opts = OptsBuilder::from_opts(opts);
+                            new_opts.pipe_name(Some(name));
+                            return Conn::new(new_opts).or(Ok(conn));
                         },
                         _ => return Ok(conn)
                     }
                 }
             }
         }
-        for cmd in conn.opts.init.clone() {
+        for cmd in conn.opts.get_init().clone() {
             try!(conn.query(cmd));
         }
         return Ok(conn);
@@ -757,7 +754,7 @@ impl Conn {
         let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
-        for cmd in conn.opts.init.clone() {
+        for cmd in conn.opts.get_init().clone() {
             try!(conn.query(cmd));
         }
         return Ok(conn);
@@ -769,7 +766,7 @@ impl Conn {
         let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
-        for cmd in conn.opts.init.clone() {
+        for cmd in conn.opts.get_init().clone() {
             try!(conn.query(cmd));
         }
         return Ok(conn);
@@ -832,7 +829,8 @@ impl Conn {
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         if self.stream.is_some() {
             let stream = self.stream.take().unwrap();
-            let stream = try!(stream.make_secure(self.opts.verify_peer, &self.opts.ssl_opts));
+            let stream = try!(stream.make_secure(self.opts.get_verify_peer(),
+                                                 self.opts.get_ssl_opts()));
             self.stream = Some(stream);
         }
         Ok(())
@@ -840,7 +838,7 @@ impl Conn {
 
     #[cfg(all(not(feature = "socket"), feature = "pipe"))]
     fn connect_stream(&mut self) -> MyResult<()> {
-        if let Some(ref pipe_name) = self.opts.pipe_name {
+        if let &Some(ref pipe_name) = self.opts.get_pipe_name() {
             let mut full_name: String = r"\\.\pipe\".into();
             full_name.push_str(&**pipe_name);
             match np::PipeClient::connect(full_name) {
@@ -854,14 +852,14 @@ impl Conn {
                     Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
             }
-        } else if let Some(ref ip_or_hostname) = self.opts.ip_or_hostname {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.tcp_port)) {
+        } else if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
+            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
                 Ok(stream) => {
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
                 Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.tcp_port);
+                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
                     let desc = format!("{}", e);
                     Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
@@ -873,7 +871,7 @@ impl Conn {
 
     #[cfg(all(feature = "socket", not(feature = "pipe")))]
     fn connect_stream(&mut self) -> MyResult<()> {
-        if let Some(ref unix_addr) = self.opts.unix_addr {
+        if let &Some(ref unix_addr) = self.opts.get_unix_addr() {
             match us::UnixStream::connect(unix_addr) {
                 Ok(stream) => {
                     self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
@@ -885,14 +883,14 @@ impl Conn {
                     Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
             }
-        } else if let Some(ref ip_or_hostname) = self.opts.ip_or_hostname {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.tcp_port)) {
+        } else if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
+            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
                 Ok(stream) => {
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
                 Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.tcp_port);
+                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
                     let desc = format!("{}", e);
                     Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
@@ -904,14 +902,14 @@ impl Conn {
 
     #[cfg(all(not(feature = "socket"), not(feature = "pipe")))]
     fn connect_stream(&mut self) -> MyResult<()> {
-        if let Some(ref ip_or_hostname) = self.opts.ip_or_hostname {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.tcp_port)) {
+        if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
+            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
                 Ok(stream) => {
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
                 Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.tcp_port);
+                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
                     let desc = format!("{}", e);
                     Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
                 }
@@ -1011,7 +1009,7 @@ impl Conn {
                         return Err(DriverError(Protocol41NotSet));
                     }
                     self.handle_handshake(&handshake);
-                    if self.opts.ssl_opts.is_some() && self.stream.is_some() {
+                    if self.opts.get_ssl_opts().is_some() && self.stream.is_some() {
                         if self.stream.as_ref().unwrap().is_insecure() {
                             if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
                                 return Err(DriverError(SslNotSupported));
@@ -1054,13 +1052,13 @@ impl Conn {
                                consts::CLIENT_MULTI_RESULTS |
                                consts::CLIENT_PS_MULTI_RESULTS |
                                (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        if let Some(ref db_name) = self.opts.db_name {
+        if let &Some(ref db_name) = self.opts.get_db_name() {
             if db_name.len() > 0 {
                 client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
             }
         }
         if self.stream.is_some() && self.stream.as_ref().unwrap().is_insecure() {
-            if self.opts.ssl_opts.is_some() {
+            if self.opts.get_ssl_opts().is_some() {
                 client_flags.insert(consts::CLIENT_SSL);
             }
         }
@@ -1078,7 +1076,7 @@ impl Conn {
                                consts::CLIENT_MULTI_RESULTS |
                                consts::CLIENT_PS_MULTI_RESULTS |
                                (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        if let Some(ref db_name) = self.opts.db_name {
+        if let &Some(ref db_name) = self.opts.get_db_name() {
             if db_name.len() > 0 {
                 client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
             }
@@ -1102,13 +1100,13 @@ impl Conn {
 
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let client_flags = self.get_client_flags();
-        let scramble_buf = if let Some(ref pass) = self.opts.pass {
+        let scramble_buf = if let &Some(ref pass) = self.opts.get_pass() {
             scramble(&*hp.auth_plugin_data, pass.as_bytes())
         } else {
             None
         };
-        let user_len = self.opts.user.as_ref().map(|x| x.as_bytes().len()).unwrap_or(0);
-        let db_name_len = self.opts.db_name.as_ref().map(|x| x.as_bytes().len()).unwrap_or(0);
+        let user_len = self.opts.get_user().as_ref().map(|x| x.as_bytes().len()).unwrap_or(0);
+        let db_name_len = self.opts.get_db_name().as_ref().map(|x| x.as_bytes().len()).unwrap_or(0);
         let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
         let mut payload_len = 4 + 4 + 1 + 23 + user_len + 1 + 1 + scramble_buf_len;
         if db_name_len > 0 {
@@ -1121,7 +1119,7 @@ impl Conn {
             try!(writer.write_all(&[0u8; 4]));
             try!(writer.write_u8(consts::UTF8_GENERAL_CI));
             try!(writer.write_all(&[0u8; 23]));
-            if let Some(ref user) = self.opts.user {
+            if let &Some(ref user) = self.opts.get_user() {
                 try!(writer.write_all(user.as_bytes()));
             }
             try!(writer.write_u8(0u8));
@@ -1130,7 +1128,7 @@ impl Conn {
                 try!(writer.write_all(scr.as_ref()));
             }
             if db_name_len > 0 {
-                let db_name = self.opts.db_name.as_ref().unwrap();
+                let db_name = self.opts.get_db_name().as_ref().unwrap();
                 try!(writer.write_all(db_name.as_bytes()));
                 try!(writer.write_u8(0u8));
             }
@@ -1626,22 +1624,24 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// ```rust
 /// use mysql::value::from_row;
 /// # use mysql::conn::pool;
-/// # use mysql::conn::Opts;
+/// # use mysql::conn::{Opts, OptsBuilder};
 /// # use mysql::value::Value;
 /// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # fn get_opts() -> Opts {
+/// #     let USER = "root";
+/// #     let ADDR = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
-/// #     Opts {
-/// #         user: Some("root".to_string()),
-/// #         pass: Some(pwd),
-/// #         ip_or_hostname: Some("127.0.0.1".to_string()),
-/// #         tcp_port: port,
-/// #         ..Default::default()
-/// #     }
+/// #     let mut builder = OptsBuilder::default();
+/// #     builder.user(Some(USER))
+/// #            .pass(Some(pwd))
+/// #            .ip_or_hostname(Some(ADDR))
+/// #            .tcp_port(port)
+/// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+/// #     builder.into()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = pool::Pool::new(opts).unwrap();
@@ -1820,9 +1820,8 @@ impl<'a> Drop for QueryResult<'a> {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    use std::borrow::ToOwned;
-    use std::default::Default;
-    use super::Opts;
+    use Opts;
+    use OptsBuilder;
 
     static USER: &'static str = "root";
     static PASS: &'static str = "password";
@@ -1835,15 +1834,14 @@ mod test {
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
-        Opts {
-            user: Some(USER.to_string()),
-            pass: Some(pwd),
-            ip_or_hostname: Some(ADDR.to_string()),
-            tcp_port: port,
-            init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
-            ssl_opts: Some((::std::convert::From::from("tests/ca-cert.pem"), None)),
-            ..Default::default()
-        }
+        let mut builder = OptsBuilder::default();
+        builder.user(Some(USER))
+               .pass(Some(pwd))
+               .ip_or_hostname(Some(ADDR))
+               .tcp_port(port)
+               .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
+               .ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
+        builder.into()
     }
 
     #[cfg(not(feature = "ssl"))]
@@ -1852,14 +1850,13 @@ mod test {
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
-        Opts {
-            user: Some(USER.to_string()),
-            pass: Some(pwd),
-            ip_or_hostname: Some(ADDR.to_string()),
-            tcp_port: port,
-            init: vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()],
-            ..Default::default()
-        }
+        let mut builder = OptsBuilder::default();
+        builder.user(Some(USER))
+               .pass(Some(pwd))
+               .ip_or_hostname(Some(ADDR))
+               .tcp_port(port)
+               .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+        builder.into()
     }
 
     mod my_conn {
@@ -1868,7 +1865,8 @@ mod test {
         use std::fs;
         use std::io::Write;
         use time::{Tm, now};
-        use super::super::{Conn, Opts};
+        use Conn;
+        use OptsBuilder;
         use super::super::super::value::{ToValue, from_value};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
@@ -1883,20 +1881,18 @@ mod test {
         }
         #[test]
         fn should_connect_with_database() {
-            let mut conn = Conn::new(Opts {
-                db_name: Some("mysql".to_string()),
-                ..get_opts()
-            }).unwrap();
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.db_name(Some("mysql"));
+            let mut conn = Conn::new(opts).unwrap();
             assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap().unwrap(),
                        vec![Bytes(b"mysql".to_vec())]);
         }
         #[test]
         fn should_connect_by_hostname() {
-            let mut conn = Conn::new(Opts {
-                db_name: Some("mysql".to_string()),
-                ip_or_hostname: Some("localhost".to_string()),
-                ..get_opts()
-            }).unwrap();
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.db_name(Some("mysql"));
+            opts.ip_or_hostname(Some("localhost"));
+            let mut conn = Conn::new(opts).unwrap();
             assert_eq!(conn.query("SELECT DATABASE()").unwrap().next().unwrap().unwrap().unwrap(),
                        vec![Bytes(b"mysql".to_vec())]);
         }
@@ -2113,11 +2109,10 @@ mod test {
         #[test]
         #[cfg(any(feature = "pipe", feature = "socket"))]
         fn should_handle_multi_resultset() {
-            let mut conn = Conn::new(Opts {
-                prefer_socket: false,
-                db_name: Some("mysql".to_string()),
-                ..get_opts()
-            }).unwrap();
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.prefer_socket(false);
+            opts.db_name(Some("mysql"));
+            let mut conn = Conn::new(opts).unwrap();
             assert!(conn.query("DROP PROCEDURE IF EXISTS multi").is_ok());
             assert!(conn.query(r#"CREATE PROCEDURE multi() BEGIN
                                       SELECT 1;

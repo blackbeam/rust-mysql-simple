@@ -14,51 +14,47 @@ use url::{
     SchemeType,
 };
 
+
+/// Ssl options: Option<(ca_cert, Option<(client_cert, client_key)>)>.`
+#[cfg(feature = "ssl")]
+pub type SslOpts = Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>;
+
 /// Mysql connection options.
 ///
-/// For example:
-///
-/// ```ignore
-/// let opts = Opts {
-///     user: Some("username".to_string()),
-///     pass: Some("password".to_string()),
-///     db_name: Some("mydatabase".to_string()),
-///     ..Default::default()
-/// };
-/// ```
+/// Build one with [`OptsBuilder`](struct.OptsBuilder.html).
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Opts {
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
-    pub ip_or_hostname: Option<String>,
+    ip_or_hostname: Option<String>,
     /// TCP port of mysql server (defaults to `3306`).
-    pub tcp_port: u16,
+    tcp_port: u16,
     /// Path to unix socket of mysql server (defaults to `None`).
     #[cfg(feature = "socket")]
-    pub unix_addr: Option<path::PathBuf>,
+    unix_addr: Option<path::PathBuf>,
     /// Pipe name of mysql server (defaults to `None`).
     #[cfg(feature = "pipe")]
-    pub pipe_name: Option<String>,
+    pipe_name: Option<String>,
     /// User (defaults to `None`).
-    pub user: Option<String>,
+    user: Option<String>,
     /// Password (defaults to `None`).
-    pub pass: Option<String>,
+    pass: Option<String>,
     /// Database name (defaults to `None`).
-    pub db_name: Option<String>,
+    db_name: Option<String>,
 
     #[cfg(any(feature = "socket", feature = "pipe"))]
     /// Prefer socket connection (defaults to `true`).
     ///
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
-    pub prefer_socket: bool,
+    prefer_socket: bool,
     // XXX: Wait for keepalive_timeout stabilization
     /// Commands to execute on each new database connection.
-    pub init: Vec<String>,
+    init: Vec<String>,
 
     #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
     /// Perform or not ssl peer verification (defaults to `false`).
     /// Only make sense if ssl_opts is not None.
-    pub verify_peer: bool,
+    verify_peer: bool,
 
     #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
@@ -66,7 +62,7 @@ pub struct Opts {
     /// If not None, then ssl connection implied.
     ///
     /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
-    pub ssl_opts: Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>
+    ssl_opts: SslOpts,
 }
 
 impl Opts {
@@ -94,6 +90,68 @@ impl Opts {
 
     pub fn from_url(url: &str) -> Result<Opts, UrlError> {
         from_url(url)
+    }
+
+    /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
+    pub fn get_ip_or_hostname(&self) -> &Option<String> {
+        &self.ip_or_hostname
+    }
+    /// TCP port of mysql server (defaults to `3306`).
+    pub fn get_tcp_port(&self) -> u16 {
+        self.tcp_port
+    }
+    /// Path to unix socket of mysql server (defaults to `None`).
+    #[cfg(feature = "socket")]
+    pub fn get_unix_addr(&self) -> &Option<path::PathBuf> {
+        &self.unix_addr
+    }
+    /// Pipe name of mysql server (defaults to `None`).
+    #[cfg(feature = "pipe")]
+    pub fn get_pipe_name(&self) -> &Option<String> {
+        &self.pipe_name
+    }
+    /// User (defaults to `None`).
+    pub fn get_user(&self) -> &Option<String> {
+        &self.user
+    }
+    /// Password (defaults to `None`).
+    pub fn get_pass(&self) -> &Option<String> {
+        &self.pass
+    }
+    /// Database name (defaults to `None`).
+    pub fn get_db_name(&self) -> &Option<String> {
+        &self.db_name
+    }
+
+    #[cfg(any(feature = "socket", feature = "pipe"))]
+    /// Prefer socket connection (defaults to `true`).
+    ///
+    /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
+    pub fn get_prefer_socket(&self) -> bool {
+        self.prefer_socket
+    }
+    // XXX: Wait for keepalive_timeout stabilization
+    /// Commands to execute on each new database connection.
+    pub fn get_init(&self) -> &Vec<String> {
+        &self.init
+    }
+
+    #[cfg(feature = "ssl")]
+    /// #### Only available if `ssl` feature enabled.
+    /// Perform or not ssl peer verification (defaults to `false`).
+    /// Only make sense if ssl_opts is not None.
+    pub fn get_verify_peer(&self) -> bool {
+        self.verify_peer
+    }
+
+    #[cfg(feature = "ssl")]
+    /// #### Only available if `ssl` feature enabled.
+    /// SSL certificates and keys in pem format.
+    /// If not None, then ssl connection implied.
+    ///
+    /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
+    pub fn get_ssl_opts(&self) -> &SslOpts {
+        &self.ssl_opts
     }
 
     #[cfg(any(feature = "socket", feature = "pipe"))]
@@ -213,6 +271,137 @@ impl Default for Opts {
             init: vec![],
             verify_peer: false,
             ssl_opts: None,
+        }
+    }
+}
+
+/// Provides a way to build [`Opts`](struct.Opts.html).
+///
+/// ```ignore
+/// // You can create new default builder
+/// let mut builder = OptsBuilder::new();
+/// builder.ip_or_hostname(Some("foo"))
+///        .db_name(Some("bar"))
+///        .ssl_opts(Some(("/foo/cert.pem", None::<(String, String)>)));
+///
+/// // Or use existing T: Into<Opts>
+/// let mut builder = OptsBuilder::from_opts(existing_opts);
+/// builder.ip_or_hostname(Some("foo"))
+///        .db_name(Some("bar"));
+/// ```
+pub struct OptsBuilder {
+    opts: Opts,
+}
+
+impl OptsBuilder {
+    pub fn new() -> Self {
+        OptsBuilder::default()
+    }
+
+    pub fn from_opts<T: Into<Opts>>(opts: T) -> Self {
+        OptsBuilder {
+            opts: opts.into(),
+        }
+    }
+
+    /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
+    pub fn ip_or_hostname<T: Into<String>>(&mut self, ip_or_hostname: Option<T>) -> &mut Self {
+        self.opts.ip_or_hostname = ip_or_hostname.map(Into::into);
+        self
+    }
+
+    /// TCP port of mysql server (defaults to `3306`).
+    pub fn tcp_port(&mut self, tcp_port: u16) -> &mut Self {
+        self.opts.tcp_port = tcp_port;
+        self
+    }
+
+    /// Path to unix socket of mysql server (defaults to `None`).
+    #[cfg(feature = "socket")]
+    pub fn unix_addr<T: Into<path::PathBuf>>(&mut self, unix_addr: Option<T>) -> &mut Self {
+        self.opts.unix_addr = unix_addr.map(Into::into);
+        self
+    }
+
+    /// Pipe name of mysql server (defaults to `None`).
+    #[cfg(feature = "pipe")]
+    pub fn pipe_name<T: Into<String>>(&mut self, pipe_name: Option<T>) -> &mut Self {
+        self.opts.pipe_name = pipe_name.map(Into::into);
+        self
+    }
+
+    /// User (defaults to `None`).
+    pub fn user<T: Into<String>>(&mut self, user: Option<T>) -> &mut Self {
+        self.opts.user = user.map(Into::into);
+        self
+    }
+
+    /// Password (defaults to `None`).
+    pub fn pass<T: Into<String>>(&mut self, pass: Option<T>) -> &mut Self {
+        self.opts.pass = pass.map(Into::into);
+        self
+    }
+
+    /// Database name (defaults to `None`).
+    pub fn db_name<T: Into<String>>(&mut self, db_name: Option<T>) -> &mut Self {
+        self.opts.db_name = db_name.map(Into::into);
+        self
+    }
+
+    #[cfg(any(feature = "socket", feature = "pipe"))]
+    /// Prefer socket connection (defaults to `true`).
+    ///
+    /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
+    pub fn prefer_socket(&mut self, prefer_socket: bool) -> &mut Self {
+        self.opts.prefer_socket = prefer_socket;
+        self
+    }
+
+    // XXX: Wait for keepalive_timeout stabilization
+    /// Commands to execute on each new database connection.
+    pub fn init<T: Into<String>>(&mut self, init: Vec<T>) -> &mut Self {
+        self.opts.init = init.into_iter().map(Into::into).collect();
+        self
+    }
+
+    #[cfg(feature = "ssl")]
+    /// #### Only available if `ssl` feature enabled.
+    /// Perform or not ssl peer verification (defaults to `false`).
+    /// Only make sense if ssl_opts is not None.
+    pub fn verify_peer(&mut self, verify_peer: bool) -> &mut Self {
+        self.opts.verify_peer = verify_peer;
+        self
+    }
+
+    #[cfg(feature = "ssl")]
+    /// #### Only available if `ssl` feature enabled.
+    /// SSL certificates and keys in pem format.
+    /// If not None, then ssl connection implied.
+    ///
+    /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
+    pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<(A, Option<(B, C)>)>) -> &mut Self
+    where A: Into<path::PathBuf>,
+          B: Into<path::PathBuf>,
+          C: Into<path::PathBuf> {
+        self.opts.ssl_opts = ssl_opts.map(|(ca_cert, rest)| {
+            (ca_cert.into(), rest.map(|(client_cert, client_key)| {
+                (client_cert.into(), client_key.into())
+            }))
+        });
+        self
+    }
+}
+
+impl From<OptsBuilder> for Opts {
+    fn from(builder: OptsBuilder) -> Opts {
+        builder.opts
+    }
+}
+
+impl Default for OptsBuilder {
+    fn default() -> OptsBuilder {
+        OptsBuilder {
+            opts: Opts::default(),
         }
     }
 }
