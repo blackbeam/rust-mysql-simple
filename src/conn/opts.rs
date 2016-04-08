@@ -7,6 +7,8 @@ use std::path;
 #[cfg(any(feature = "socket", feature = "pipe"))]
 use std::str::FromStr;
 
+use std::time::Duration;
+
 use super::super::error::UrlError;
 
 use url::{
@@ -40,6 +42,12 @@ pub struct Opts {
     pass: Option<String>,
     /// Database name (defaults to `None`).
     db_name: Option<String>,
+
+    /// The timeout for each attempt to read from the server.
+    read_timeout: Option<Duration>,
+
+    /// The timeout for each attempt to write to the server.
+    write_timeout: Option<Duration>,
 
     #[cfg(any(feature = "socket", feature = "pipe"))]
     /// Prefer socket connection (defaults to `true`).
@@ -123,6 +131,16 @@ impl Opts {
         &self.db_name
     }
 
+    /// The timeout for each attempt to write to the server.
+    pub fn get_read_timeout(&self) -> &Option<Duration> {
+        &self.read_timeout
+    }
+
+    /// The timeout for each attempt to write to the server.
+    pub fn get_write_timeout(&self) -> &Option<Duration> {
+        &self.write_timeout
+    }
+
     #[cfg(any(feature = "socket", feature = "pipe"))]
     /// Prefer socket connection (defaults to `true`).
     ///
@@ -187,6 +205,8 @@ impl Default for Opts {
             user: None,
             pass: None,
             db_name: None,
+            read_timeout: None,
+            write_timeout: None,
             prefer_socket: true,
             init: vec![],
         }
@@ -202,6 +222,8 @@ impl Default for Opts {
             user: None,
             pass: None,
             db_name: None,
+            read_timeout: None,
+            write_timeout: None,
             init: vec![],
         }
     }
@@ -217,6 +239,8 @@ impl Default for Opts {
             user: None,
             pass: None,
             db_name: None,
+            read_timeout: None,
+            write_timeout: None,
             prefer_socket: true,
             init: vec![],
         }
@@ -232,6 +256,8 @@ impl Default for Opts {
             user: None,
             pass: None,
             db_name: None,
+            read_timeout: None,
+            write_timeout: None,
             init: vec![],
             verify_peer: false,
             ssl_opts: None,
@@ -249,6 +275,8 @@ impl Default for Opts {
             user: None,
             pass: None,
             db_name: None,
+            read_timeout: None,
+            write_timeout: None,
             init: vec![],
             verify_peer: false,
             prefer_socket: true,
@@ -267,6 +295,8 @@ impl Default for Opts {
             user: None,
             pass: None,
             db_name: None,
+            read_timeout: None,
+            write_timeout: None,
             prefer_socket: true,
             init: vec![],
             verify_peer: false,
@@ -345,6 +375,24 @@ impl OptsBuilder {
     /// Database name (defaults to `None`).
     pub fn db_name<T: Into<String>>(&mut self, db_name: Option<T>) -> &mut Self {
         self.opts.db_name = db_name.map(Into::into);
+        self
+    }
+
+    /// The timeout for each attempt to read from the server (defaults to `None`).
+    ///
+    /// Note that named pipe connection will ignore duration's `nanos`, and also note that
+    /// it is an error to pass the zero `Duration` to this method.
+    pub fn read_timeout(&mut self, read_timeout: Option<Duration>) -> &mut Self {
+        self.opts.read_timeout = read_timeout;
+        self
+    }
+
+    /// The timeout for each attempt to write to the server (defaults to `None`).
+    ///
+    /// Note that named pipe connection will ignore duration's `nanos`, and also note that
+    /// it is likely error to pass the zero `Duration` to this method.
+    pub fn write_timeout(&mut self, write_timeout: Option<Duration>) -> &mut Self {
+        self.opts.write_timeout = write_timeout;
         self
     }
 
