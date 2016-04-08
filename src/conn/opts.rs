@@ -599,7 +599,7 @@ mod test {
 
     #[test]
     #[should_panic]
-    #[cfg(not(feature = "socket"))]
+    #[cfg(all(not(feature = "socket"), not(feature = "pipe")))]
     fn should_panic_if_prefer_socket_query_param_requires_feature() {
         let opts = "mysql://usr:pw@localhost:3308/dbname?prefer_socket=false";
         let _: Opts = opts.into();
