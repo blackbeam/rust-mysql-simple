@@ -842,7 +842,7 @@ impl Conn {
             let mut full_name: String = r"\\.\pipe\".into();
             full_name.push_str(&**pipe_name);
             match np::PipeClient::connect(full_name) {
-                Ok(pipe_stream) => {
+                Ok(mut pipe_stream) => {
                     pipe_stream.set_read_timeout(self.opts.get_read_timeout().clone());
                     pipe_stream.set_write_timeout(self.opts.get_write_timeout().clone());
                     self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
