@@ -857,8 +857,8 @@ impl Conn {
         } else if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
             match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
                 Ok(stream) => {
-                    stream.set_read_timeout(self.opts.get_read_timeout().clone());
-                    stream.set_write_timeout(self.opts.get_write_timeout().clone());
+                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
+                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
@@ -878,8 +878,8 @@ impl Conn {
         if let &Some(ref unix_addr) = self.opts.get_unix_addr() {
             match us::UnixStream::connect(unix_addr) {
                 Ok(stream) => {
-                    stream.set_read_timeout(self.opts.get_read_timeout().clone());
-                    stream.set_write_timeout(self.opts.get_write_timeout().clone());
+                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
+                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
                     self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
                     Ok(())
                 },
@@ -892,8 +892,8 @@ impl Conn {
         } else if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
             match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
                 Ok(stream) => {
-                    stream.set_read_timeout(self.opts.get_read_timeout().clone());
-                    stream.set_write_timeout(self.opts.get_write_timeout().clone());
+                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
+                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
@@ -913,8 +913,8 @@ impl Conn {
         if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
             match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
                 Ok(stream) => {
-                    stream.set_read_timeout(self.opts.get_read_timeout().clone());
-                    stream.set_write_timeout(self.opts.get_write_timeout().clone());
+                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
+                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
                     self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
                     Ok(())
                 },
