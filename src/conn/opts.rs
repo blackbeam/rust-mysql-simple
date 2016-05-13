@@ -11,10 +11,8 @@ use std::time::Duration;
 
 use super::super::error::UrlError;
 
-use url::{
-    UrlParser,
-    SchemeType,
-};
+use url::Url;
+use url::percent_encoding::percent_decode;
 
 
 /// Ssl options: Option<(ca_cert, Option<(client_cert, client_key)>)>.`
@@ -454,38 +452,48 @@ impl Default for OptsBuilder {
     }
 }
 
-fn from_url_basic(url: &str) -> Result<(Opts, Vec<(String, String)>), UrlError> {
-    fn scheme_type_mapper(scheme: &str) -> SchemeType {
-        match scheme {
-            "mysql" => SchemeType::Relative(3306),
-            _ => SchemeType::NonRelative,
-        }
+fn get_opts_user_from_url(url: &Url) -> Option<String> {
+    let user = url.username();
+    if user != "" {
+        Some(percent_decode(user.as_ref()).decode_utf8_lossy().into_owned())
+    } else {
+        None
     }
+}
 
-    let mut parser = UrlParser::new();
-    parser.scheme_type_mapper(scheme_type_mapper);
-    let url = try!(parser.parse(url));
-    if url.scheme != "mysql" {
-        return Err(UrlError::UnsupportedScheme(url.scheme))
+fn get_opts_pass_from_url(url: &Url) -> Option<String> {
+    if let Some(pass) = url.password() {
+        Some(percent_decode(pass.as_ref()).decode_utf8_lossy().into_owned())
+    } else {
+        None
     }
-    let user = url.lossy_percent_decode_username();
-    let pass = url.lossy_percent_decode_password();
-    let ip_or_hostname = match url.domain() {
-        Some(domain) => Some(domain.to_string()),
-        None => Some("127.0.0.1".to_string()),
-    };
+}
+
+fn get_opts_db_name_from_url(url: &Url) -> Option<String> {
+    if let Some(mut segments) = url.path_segments() {
+        segments.next().map(|db_name| {
+            percent_decode(db_name.as_ref()).decode_utf8_lossy().into_owned()
+        })
+    } else {
+        None
+    }
+}
+
+fn from_url_basic(url_str: &str) -> Result<(Opts, Vec<(String, String)>), UrlError> {
+    let url = try!(Url::parse(url_str));
+    if url.scheme() != "mysql" {
+        return Err(UrlError::UnsupportedScheme(url.scheme().to_string()));
+    }
+    if url.cannot_be_a_base() || !url.has_host() {
+        return Err(UrlError::BadUrl);
+    }
+    let user = get_opts_user_from_url(&url);
+    let pass = get_opts_pass_from_url(&url);
+    let ip_or_hostname = url.host_str().map(String::from);
     let tcp_port = url.port().unwrap_or(3306);
-    let db_name = match url.path() {
-        Some(path) => {
-            if path.len() > 0 {
-                Some(path[0].clone())
-            } else {
-                None
-            }
-        },
-        None => None,
-    };
-    let query_pairs = url.query_pairs().unwrap_or(Vec::new());
+    let db_name = get_opts_db_name_from_url(&url);
+
+    let query_pairs = url.query_pairs().into_owned().collect();
     let opts = Opts {
         user: user,
         pass: pass,
@@ -494,6 +502,7 @@ fn from_url_basic(url: &str) -> Result<(Opts, Vec<(String, String)>), UrlError> 
         db_name: db_name,
         ..Opts::default()
     };
+
     Ok((opts, query_pairs))
 }
 
@@ -549,13 +558,13 @@ mod test {
     #[test]
     #[cfg(all(feature = "ssl", feature = "socket"))]
     fn should_convert_url_into_opts() {
-        let opts = "mysql://usr:pw@localhost:3308/dbname?prefer_socket=false&verify_peer=true";
+        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true";
         assert_eq!(Opts {
-            user: Some("usr".to_string()),
-            pass: Some("pw".to_string()),
+            user: Some("us r".to_string()),
+            pass: Some("p w".to_string()),
             ip_or_hostname: Some("localhost".to_string()),
             tcp_port: 3308,
-            db_name: Some("dbname".to_string()),
+            db_name: Some("db-name".to_string()),
             prefer_socket: false,
             verify_peer: true,
             ..Opts::default()
@@ -565,12 +574,12 @@ mod test {
     #[test]
     #[cfg(all(not(feature = "ssl"), not(feature = "socket")))]
     fn should_convert_url_into_opts() {
-        let opts = "mysql://usr:pw@localhost:3308/dbname";
+        let opts = "mysql://usr:pw@192.168.1.1:3309/dbname";
         assert_eq!(Opts {
             user: Some("usr".to_string()),
             pass: Some("pw".to_string()),
-            ip_or_hostname: Some("localhost".to_string()),
-            tcp_port: 3308,
+            ip_or_hostname: Some("192.168.1.1".to_string()),
+            tcp_port: 3309,
             db_name: Some("dbname".to_string()),
             ..Opts::default()
         }, opts.into());

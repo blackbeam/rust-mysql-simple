@@ -294,6 +294,7 @@ pub enum UrlError {
     /// (feature_name, value)
     InvalidValue(String, String),
     UnknownParameter(String),
+    BadUrl,
 }
 
 impl error::Error for UrlError {
@@ -316,6 +317,9 @@ impl fmt::Display for UrlError {
             UrlError::UnknownParameter(ref parameter) => {
                 write!(f, "Unknown URL parameter `{}'", parameter)
             },
+            UrlError::BadUrl => {
+                write!(f, "Invalid or incomplete connection URL")
+            }
         }
     }
 }
