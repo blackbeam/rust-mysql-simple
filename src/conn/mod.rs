@@ -2117,6 +2117,25 @@ mod test {
         }
 
         #[test]
+        #[cfg(all(not(feature = "ssl"), any(feature = "pipe", feature = "socket")))]
+        fn should_connect_via_socket_for_127_0_0_1() {
+            let opts = OptsBuilder::from_opts(get_opts());
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:?}", conn);
+            assert!(debug_format.contains("UnixStream"));
+        }
+
+        #[test]
+        #[cfg(all(not(feature = "ssl"), any(feature = "pipe", feature = "socket")))]
+        fn should_connect_via_socket_localhost() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.ip_or_hostname(Some("localhost"));
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:?}", conn);
+            assert!(debug_format.contains("UnixStream"));
+        }
+
+        #[test]
         #[cfg(any(feature = "pipe", feature = "socket"))]
         fn should_handle_multi_resultset() {
             let mut opts = OptsBuilder::from_opts(get_opts());
