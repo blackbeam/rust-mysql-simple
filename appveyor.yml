@@ -1,0 +1,30 @@
+version: 1.0.{build}
+branches:
+  only:
+  - master
+clone_folder: c:\clone
+environment:
+  MYSQL_SERVER_PORT: 3306
+  MYSQL_SERVER_PASS: Password12!
+  MYSQL_PWD: Password12!
+  matrix:
+  - RUST_URL: https://static.rust-lang.org/dist/rust-nightly-x86_64-pc-windows-gnu.msi
+    RUST_INSTALLER: rust-nightly-x86_64-pc-windows-gnu.msi
+  - RUST_URL: https://static.rust-lang.org/dist/rust-beta-x86_64-pc-windows-gnu.msi
+    RUST_INSTALLER: rust-beta-x86_64-pc-windows-gnu.msi
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.8.0-x86_64-pc-windows-gnu.msi
+    RUST_INSTALLER: rust-1.8.0-x86_64-pc-windows-gnu.msi
+services: mysql
+install:
+- cmd: >-
+    appveyor DownloadFile %RUST_URL%
+
+    msiexec /i %RUST_INSTALLER% INSTALLDIR="c:\rust" /qn
+
+    SET PATH=c:\rust\bin;%PATH%
+build: off
+test_script:
+- cmd: >-
+    "C:\Program Files\MySql\MySQL Server 5.6\bin\mysql" -e "set global max_allowed_packet = 36700160;" --user=root
+
+    cargo test --no-default-features --features named_pipe
