@@ -2,6 +2,7 @@ use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry::Occupied;
 use std::hash::BuildHasherDefault as BldHshrDflt;
 use std::io;
 use std::io::Write as stdWrite;
@@ -21,6 +22,8 @@ use super::error::{
     Error,
     Result as MyResult,
 };
+use super::error::Error::DriverError;
+use super::error::DriverError::MissingNamedParameter;
 use super::io::{Write, Read};
 use super::conn::Row;
 
@@ -935,6 +938,49 @@ pub enum Params {
     Positional(Vec<Value>),
 }
 
+impl Params {
+    pub fn into_positional(self, named_params: &Vec<String>) -> MyResult<Params> {
+        match self {
+            Params::Named(mut map) => {
+                let mut params: Vec<Value> = Vec::with_capacity(named_params.len());
+                'params: for (i, name) in named_params.clone().into_iter().enumerate() {
+                    if ! map.contains_key(&name) {
+                        return Err(DriverError(MissingNamedParameter(name.clone())));
+                    }
+                    match map.entry(name.clone()) {
+                        Occupied(entry) => {
+                            let mut x = named_params.len() - 1;
+                            while x > i {
+                                if name == named_params[x] {
+                                    params.push(entry.get().clone());
+                                    continue 'params;
+                                }
+                                x -= 1;
+                            }
+                            params.push(entry.remove());
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+                Ok(Params::Positional(params))
+            },
+            params => Ok(params),
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! params {
+    ($($name:expr => $value:expr),*) => (
+        vec![
+            $((::std::string::String::from($name), $value)),*
+        ]
+    );
+    ($($name:expr => $value:expr),*,) => (
+        params!($($name => $value),*)
+    );
+}
+
 impl<'a, T: Into<Params> + Clone> From<&'a T> for Params {
     fn from(x: &'a T) -> Params {
         x.clone().into()
@@ -952,6 +998,21 @@ impl<T: Into<Value>> From<Vec<T>> for Params {
         } else {
             Params::Positional(raw_params)
         }
+    }
+}
+
+impl<N: Into<String>, V: Into<Value>> From<Vec<(N, V)>> for Params {
+    fn from(x: Vec<(N, V)>) -> Params {
+        let mut map = HashMap::default();
+        for (name, value) in x.into_iter() {
+            let name = name.into();
+            if map.contains_key(&name) {
+                panic!("Redefinition of named parameter `{}'", name);
+            } else {
+                map.insert(name, value.into());
+            }
+        }
+        Params::Named(map)
     }
 }
 

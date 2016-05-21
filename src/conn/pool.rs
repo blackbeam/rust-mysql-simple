@@ -1,9 +1,11 @@
+use std::borrow::Borrow;
 use std::fmt;
 use std::sync::{Arc, Mutex, Condvar};
 use std::time::Duration as StdDuration;
 
 use time::{Duration, SteadyTime};
 
+use named_params::parse_named_params;
 use super::IsolationLevel;
 use super::Transaction;
 use super::super::error::{Error, DriverError};
@@ -393,14 +395,19 @@ impl PooledConn {
     }
 
     fn pooled_prepare<'a, T: AsRef<str>>(mut self, query: T) -> MyResult<Stmt<'a>> {
-        self.as_mut()._prepare(query.as_ref()).map(|stmt| Stmt::new_pooled(stmt, self))
+        let query = query.as_ref();
+        let (named_params, real_query) = parse_named_params(query);
+        self.as_mut()._prepare(real_query.borrow(), named_params)
+                     .map(|stmt| Stmt::new_pooled(stmt, self))
     }
 
     fn pooled_prep_exec<'a, A, T>(mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
     where A: AsRef<str>,
           T: Into<Params>
     {
-        let stmt = try!(self.as_mut()._prepare(query.as_ref()));
+        let query = query.as_ref();
+        let (named_params, real_query) = parse_named_params(query);
+        let stmt = try!(self.as_mut()._prepare(real_query.borrow(), named_params));
         let stmt = Stmt::new_pooled(stmt, self);
         stmt.prep_exec(params)
     }
@@ -459,8 +466,10 @@ mod test {
     }
 
     mod pool {
-        use super::get_opts;
         use std::thread;
+
+        use from_row;
+        use super::get_opts;
         use super::super::Pool;
         use super::super::super::super::value::from_value;
         use super::super::super::super::error::{Error, DriverError};
@@ -682,6 +691,25 @@ mod test {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
+        }
+        #[test]
+        fn should_work_with_named_params() {
+            let pool = Pool::new(get_opts()).unwrap();
+            pool.prepare("SELECT :a, :b, :a + :b, :abc").map(|mut stmt| {
+                let mut result = stmt.execute(params!{
+                    "a" => 1,
+                    "b" => 2,
+                    "abc" => 4,
+                }).unwrap();
+                let row = result.next().unwrap().unwrap();
+                assert_eq!((1, 2, 3, 4), from_row(row));
+            }).unwrap();
+
+            let params = params!{"a" => 1, "b" => 2, "abc" => 4};
+            pool.prep_exec("SELECT :a, :b, :a+:b, :abc", params).map(|mut result| {
+                let row = result.next().unwrap().unwrap();
+                assert_eq!((1, 2, 3, 4), from_row(row));
+            }).unwrap();
         }
 
         #[cfg(feature = "nightly")]

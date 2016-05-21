@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fs;
 use std::fmt;
@@ -33,12 +34,14 @@ use super::error::DriverError::{
     Protocol41NotSet,
     UnexpectedPacket,
     MismatchedStmtParams,
+    NamedParamsForPositionalQuery,
     SetupError,
     ReadOnlyTransNotSupported,
 };
 use super::error::Result as MyResult;
 #[cfg(feature = "ssl")]
 use super::error::DriverError::SslNotSupported;
+use named_params::parse_named_params;
 use super::scramble::scramble;
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
 use super::value::{
@@ -162,6 +165,8 @@ impl<'a> Drop for Transaction<'a> {
  */
 #[derive(Eq, PartialEq, Clone, Debug)]
 struct InnerStmt {
+    /// Positions and names of named parameters
+    named_params: Option<Vec<String>>,
     params: Option<Vec<Column>>,
     columns: Option<Vec<Column>>,
     statement_id: u32,
@@ -171,18 +176,21 @@ struct InnerStmt {
 }
 
 impl InnerStmt {
-    fn from_payload(pld: &[u8]) -> io::Result<InnerStmt> {
+    fn from_payload(pld: &[u8], named_params: Option<Vec<String>>) -> io::Result<InnerStmt> {
         let mut reader = &pld[1..];
         let statement_id = try!(reader.read_u32::<LE>());
         let num_columns = try!(reader.read_u16::<LE>());
         let num_params = try!(reader.read_u16::<LE>());
         let warning_count = try!(reader.read_u16::<LE>());
-        Ok(InnerStmt{statement_id: statement_id,
-                     num_columns: num_columns,
-                     num_params: num_params,
-                     warning_count: warning_count,
-                     params: None,
-                     columns: None})
+        Ok(InnerStmt {
+            named_params: named_params,
+            statement_id: statement_id,
+            num_columns: num_columns,
+            num_params: num_params,
+            warning_count: warning_count,
+            params: None,
+            columns: None,
+        })
     }
 }
 
@@ -1249,7 +1257,13 @@ impl Conn {
                     unreachable!();
                 }
             },
-            Params::Named(_) => unimplemented!(),
+            Params::Named(_) => {
+                if let None = stmt.named_params {
+                    return Err(DriverError(NamedParamsForPositionalQuery));
+                }
+                let named_params = stmt.named_params.as_ref().unwrap();
+                return self._execute(stmt, try!(params.into_positional(named_params)))
+            }
         }
         try!(self.write_command_data(Command::COM_STMT_EXECUTE, out));
         self.handle_result_set()
@@ -1397,7 +1411,9 @@ impl Conn {
         }
     }
 
-    fn _true_prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
+    fn _true_prepare(&mut self,
+                     query: &str,
+                     named_params: Option<Vec<String>>) -> MyResult<InnerStmt> {
         try!(self.write_command_data(Command::COM_STMT_PREPARE, query.as_bytes()));
         let pld = try!(self.read_packet());
         match pld[0] {
@@ -1406,7 +1422,7 @@ impl Conn {
                 Err(MySqlError(err.into()))
             },
             _ => {
-                let mut stmt = try!(InnerStmt::from_payload(pld.as_ref()));
+                let mut stmt = try!(InnerStmt::from_payload(pld.as_ref(), named_params));
                 if stmt.num_params > 0 {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as usize);
                     for _ in 0..stmt.num_params {
@@ -1430,12 +1446,13 @@ impl Conn {
         }
     }
 
-    fn _prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
-        if let Some(inner_st) = self.stmts.get(query) {
+    fn _prepare(&mut self, query: &str, named_params: Option<Vec<String>>) -> MyResult<InnerStmt> {
+        if let Some(inner_st) = self.stmts.get_mut(query) {
+            inner_st.named_params = named_params;
             return Ok(inner_st.clone());
         }
 
-        let inner_st = try!(self._true_prepare(query));
+        let inner_st = try!(self._true_prepare(query, named_params));
         self.stmts.insert(query.to_owned(), inner_st.clone());
         Ok(inner_st)
     }
@@ -1447,7 +1464,9 @@ impl Conn {
     ///
     /// This call will take statement from cache if has been prepared on this connection.
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
-        match self._prepare(query.as_ref()) {
+        let query = query.as_ref();
+        let (named_params, real_query) = parse_named_params(query);
+        match self._prepare(real_query.borrow(), named_params) {
             Ok(stmt) => Ok(Stmt::new(stmt, self)),
             Err(err) => Err(err),
         }
@@ -1876,8 +1895,14 @@ mod test {
         use std::io::Write;
         use time::{Tm, now};
         use Conn;
+        use DriverError::{
+            MissingNamedParameter,
+            NamedParamsForPositionalQuery,
+        };
+        use Error::DriverError;
         use OptsBuilder;
-        use super::super::super::value::{ToValue, from_value};
+        use Params;
+        use super::super::super::value::{ToValue, from_value, from_row};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
 
@@ -2177,6 +2202,53 @@ mod test {
             }
             assert_eq!(i, 4);
         }
+
+        #[test]
+        fn should_work_with_named_params() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            {
+                let mut stmt = conn.prepare("SELECT :a, :b, :a, :c").unwrap();
+                let mut result = stmt.execute(params!{"a" => 1, "b" => 2, "c" => 3}).unwrap();
+                let row = result.next().unwrap().unwrap();
+                assert_eq!((1, 2, 1, 3), from_row(row));
+            }
+
+            let mut result = conn.prep_exec("SELECT :a, :b, :a + :b, :c", params!{
+                "a" => 1,
+                "b" => 2,
+                "c" => 3,
+            }).unwrap();
+            let row = result.next().unwrap().unwrap();
+            assert_eq!((1, 2, 3, 3), from_row(row));
+        }
+
+        #[test]
+        fn should_return_error_on_missing_named_parameter() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT :a, :b, :a, :c, :d").unwrap();
+            let result = stmt.execute(params!{"a" => 1, "b" => 2, "c" => 3,});
+            match result {
+                Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
+                _ => assert!(false),
+            }
+        }
+
+        #[test]
+        fn should_return_error_on_named_params_for_positional_statement() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
+            let result = stmt.execute(params!{"a" => 1, "b" => 2, "c" => 3,});
+            match result {
+                Err(DriverError(NamedParamsForPositionalQuery)) => (),
+                _ => assert!(false),
+            }
+        }
+
+        #[test]
+        #[should_panic]
+        fn should_panic_on_named_param_redefinition() {
+            let _: Params = params!{"a" => 1, "b" => 2, "a" => 3}.into();
+        }
     }
 
     #[cfg(feature = "nightly")]
@@ -2185,6 +2257,7 @@ mod test {
         use super::get_opts;
         use super::super::{Conn};
         use super::super::super::value::Value::NULL;
+        use Value;
 
         #[bench]
         fn simple_exec(bencher: &mut test::Bencher) {
@@ -2229,11 +2302,33 @@ mod test {
         }
 
         #[bench]
+        fn simple_prepared_query_row_with_named_param(bencher: &mut test::Bencher) {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT :a").unwrap();
+            bencher.iter(|| { let _ = stmt.execute(params!{"a" => 0}); })
+        }
+
+        #[bench]
         fn simple_prepared_query_row_with_5_params(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
             let params = (42i8, b"123456".to_vec(), 1.618f64, NULL, 1i8);
             bencher.iter(|| { let _ = stmt.execute(&params); })
+        }
+
+        #[bench]
+        fn simple_prepared_query_row_with_5_named_params(bencher: &mut test::Bencher) {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            let mut stmt = conn.prepare("SELECT :one, :two, :three, :four, :five").unwrap();
+            bencher.iter(|| {
+                let _ = stmt.execute(params!{
+                    "one" => Value::from(42i8),
+                    "two" => Value::from(b"123456".to_vec()),
+                    "three" => Value::from(1.618f64),
+                    "four" => NULL,
+                    "five" => Value::from(1i8),
+                });
+            })
         }
 
         #[bench]

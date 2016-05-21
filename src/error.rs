@@ -218,6 +218,8 @@ pub enum DriverError {
     ReadOnlyTransNotSupported,
     PoisonedPoolMutex,
     Timeout,
+    MissingNamedParameter(String),
+    NamedParamsForPositionalQuery,
 }
 
 impl error::Error for DriverError {
@@ -274,7 +276,13 @@ impl fmt::Display for DriverError {
             },
             DriverError::Timeout => {
                 write!(f, "Operation timed out")
-            }
+            },
+            DriverError::MissingNamedParameter(ref name) => {
+                write!(f, "Missing named parameter `{}' for statement", name)
+            },
+            DriverError::NamedParamsForPositionalQuery => {
+                write!(f, "Can not pass named parameters to positional query")
+            },
         }
     }
 }

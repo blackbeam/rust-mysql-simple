@@ -122,7 +122,7 @@
 #![crate_type="rlib"]
 #![crate_type="dylib"]
 
-#![cfg_attr(feature = "nightly", feature(test, const_fn))]
+#![cfg_attr(feature = "nightly", feature(test, const_fn, drop_types_in_const))]
 #[cfg(feature = "nightly")]
 extern crate test;
 
@@ -149,8 +149,10 @@ pub mod consts;
 pub mod error;
 mod packet;
 mod io;
+#[macro_use]
 pub mod value;
 pub mod conn;
+mod named_params;
 
 #[doc(inline)]
 pub use conn::Column;
