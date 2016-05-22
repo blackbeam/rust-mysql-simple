@@ -110,17 +110,17 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    /// See [`Conn#query`](struct.Conn.html#method.query).
+    /// See [`Conn::query`](struct.Conn.html#method.query).
     pub fn query<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<QueryResult<'c>> {
         self.conn.query(query)
     }
 
-    /// See [`Conn#prepare`](struct.Conn.html#method.prepare).
+    /// See [`Conn::prepare`](struct.Conn.html#method.prepare).
     pub fn prepare<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<Stmt<'c>> {
         self.conn.prepare(query)
     }
 
-    /// See [`Conn#prep_exec`](struct.Conn.html#method.prep_exec).
+    /// See [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
     pub fn prep_exec<'c, A: AsRef<str> + 'c, T: Into<Params>>(&'c mut self, query: A, params: T) -> MyResult<QueryResult<'c>> {
         self.conn.prep_exec(query, params)
     }
@@ -1463,6 +1463,86 @@ impl Conn {
     /// borrow `Conn` until the end of its scope.
     ///
     /// This call will take statement from cache if has been prepared on this connection.
+    ///
+    /// ### Named parameters support
+    ///
+    /// `prepare` supports named parameters in form of `:named_param_name`. Allowed characters for
+    /// parameter name is `[a-z_]`. Named parameters will be converted to positional before actual
+    /// call to prepare so `SELECT :a-:b, :a*:b` is actually `SELECT ?-?, ?*?`.
+    ///
+    /// ```
+    /// # #[macro_use] extern crate mysql; fn main() {
+    /// # use mysql::conn::pool;
+    /// # use mysql::conn::{Opts, OptsBuilder};
+    /// # use mysql::value::{from_value, from_row, ToValue, Value};
+    /// # use std::thread::Thread;
+    /// # use std::default::Default;
+    /// # use std::iter::repeat;
+    /// # use mysql::Error::DriverError;
+    /// # use mysql::DriverError::MixedParams;
+    /// # use mysql::DriverError::MissingNamedParameter;
+    /// # use mysql::DriverError::NamedParamsForPositionalQuery;
+    /// # fn get_opts() -> Opts {
+    /// #     let USER = "root";
+    /// #     let ADDR = "127.0.0.1";
+    /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
+    /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+    /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
+    /// #                                .unwrap_or(3307);
+    /// #     let mut builder = OptsBuilder::default();
+    /// #     builder.user(Some(USER.to_string()))
+    /// #            .pass(Some(pwd))
+    /// #            .ip_or_hostname(Some(ADDR.to_string()))
+    /// #            .tcp_port(port)
+    /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()]);
+    /// #     builder.into()
+    /// # }
+    /// # let opts = get_opts();
+    /// # let pool = pool::Pool::new(opts).unwrap();
+    /// // Names could be repeated
+    /// pool.prep_exec("SELECT :a+:b, :a * :b, ':c'", params!{"a" => 2, "b" => 3}).map(|mut result| {
+    ///     let row = result.next().unwrap().unwrap();
+    ///     assert_eq!((5, 6, String::from(":c")), from_row(row));
+    /// }).unwrap();
+    ///
+    /// // In case of different types of parameter values
+    /// // you should convert them into Value explicitly.
+    /// pool.prep_exec("SELECT :num, :string", params!{
+    ///     "num" => Value::from(42),
+    ///     "string" => Value::from("yay"),
+    /// }).map(|mut result| {
+    ///     let row = result.next().unwrap().unwrap();
+    ///     assert_eq!((42, String::from("yay")), from_row(row));
+    /// }).unwrap();
+    ///
+    /// // You can call named statement with positional parameters
+    /// pool.prep_exec("SELECT :a+:b, :a*:b", (2, 3, 2, 3)).map(|mut result| {
+    ///     let row = result.next().unwrap().unwrap();
+    ///     assert_eq!((5, 6), from_row(row));
+    /// }).unwrap();
+    ///
+    /// // You must pass all named parameters for statement
+    /// let err = pool.prep_exec("SELECT :name", params!{"another_name" => 42}).unwrap_err();
+    /// match err {
+    ///     DriverError(e) => assert_eq!(MissingNamedParameter(String::from("name")), e),
+    ///     _ => unreachable!(),
+    /// }
+    ///
+    /// // You can't call positional statement with named parameters
+    /// let err = pool.prep_exec("SELECT ?", params!{"first" => 42}).unwrap_err();
+    /// match err {
+    ///     DriverError(e) => assert_eq!(NamedParamsForPositionalQuery, e),
+    ///     _ => unreachable!(),
+    /// }
+    ///
+    /// // You can't mix named and positional parameters
+    /// let err = pool.prepare("SELECT :a, ?").unwrap_err();
+    /// match err {
+    ///     DriverError(e) => assert_eq!(MixedParams, e),
+    ///     _ => unreachable!(),
+    /// }
+    /// # }
+    /// ```
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
         let query = query.as_ref();
         let (named_params, real_query) = try!(parse_named_params(query));
@@ -1472,7 +1552,8 @@ impl Conn {
         }
     }
 
-    /// Prepares and executes statement in one call.
+    /// Prepares and executes statement in one call. See
+    /// ['Conn::prepare'](struct.Conn.html#method.prepare)
     ///
     /// This call will take statement from cache if has been prepared on this connection.
     pub fn prep_exec<'a, A, T>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>>

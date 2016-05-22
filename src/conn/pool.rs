@@ -221,7 +221,7 @@ impl Pool {
         self._get_conn(Some(query), None, call_ping)
     }
 
-    /// Will prepare statement.
+    /// Will prepare statement. See [`Conn::prepare`](../struct.Conn.html#method.prepare).
     ///
     /// It will try to find connection which has this statement cached.
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a self, query: T) -> MyResult<Stmt<'a>> {
@@ -229,7 +229,8 @@ impl Pool {
         conn.pooled_prepare(query)
     }
 
-    /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`.
+    /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`. See
+    /// [`Conn::prep_exec`](../struct.Conn.html#method.prep_exec).
     ///
     /// It will try to find connection which has this statement cached.
     pub fn prep_exec<'a, A, T>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>>
@@ -352,14 +353,12 @@ impl PooledConn {
         self.conn.as_mut().unwrap().query(query)
     }
 
-    /// Redirects to
-    /// [`Conn#prepare`](../struct.Conn.html#method.prepare).
+    /// See [`Conn::prepare`](../struct.Conn.html#method.prepare).
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
         self.conn.as_mut().unwrap().prepare(query)
     }
 
-    /// Redirects to
-    /// [`Conn#prep_exec`](../struct.Conn.html#method.prep_exec).
+    /// See [`Conn::prep_exec`](../struct.Conn.html#method.prep_exec).
     pub fn prep_exec<'a, A, T>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
     where A: AsRef<str> + 'a,
           T: Into<Params> {
