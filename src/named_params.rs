@@ -133,7 +133,7 @@ mod test {
             bencher.iter(|| {
                 let result = parse_named_params(r#"
                 SELECT :one, :two, :three, :four, :five, :six, :seven, :eight, :nine, :ten
-                "#);
+                "#).unwrap();
                 test::black_box(result);
             });
         }
@@ -143,7 +143,7 @@ mod test {
             bencher.iter(|| {
                 let result = parse_named_params(r"
                 SELECT one, two, three, four, five, six, seven, eight, nine, ten
-                ");
+                ").unwrap();
                 test::black_box(result);
             });
         }
