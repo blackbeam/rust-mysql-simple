@@ -93,7 +93,7 @@
 //!                                        (:customer_id, :amount, :account_name)").into_iter() {
 //!         for p in payments.iter() {
 //!             // `execute` takes ownership of `params` so we pass account name by reference.
-//!             // Unwrap each result just to make sure no errors happended.
+//!             // Unwrap each result just to make sure no errors happened.
 //!             stmt.execute(params!{
 //!                 "customer_id" => my::Value::from(p.customer_id),
 //!                 "amount" => my::Value::from(p.amount),
