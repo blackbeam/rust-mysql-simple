@@ -34,6 +34,11 @@
 //! #### Example
 //!
 //! ```rust
+//! #[macro_use]
+//! extern crate mysql;
+//! // ...
+//!
+//! # fn main() {
 //! use mysql as my;
 //!
 //! #[derive(Debug, PartialEq, Eq)]
@@ -85,11 +90,15 @@
 //!     for mut stmt in pool.prepare(r"INSERT INTO tmp.payment
 //!                                        (customer_id, amount, account_name)
 //!                                    VALUES
-//!                                        (?, ?, ?)").into_iter() {
+//!                                        (:customer_id, :amount, :account_name)").into_iter() {
 //!         for p in payments.iter() {
 //!             // `execute` takes ownership of `params` so we pass account name by reference.
 //!             // Unwrap each result just to make sure no errors happended.
-//!             stmt.execute((p.customer_id, p.amount, &p.account_name)).unwrap();
+//!             stmt.execute(params!{
+//!                 "customer_id" => my::Value::from(p.customer_id),
+//!                 "amount" => my::Value::from(p.amount),
+//!                 "account_name" => my::Value::from(&p.account_name),
+//!             }).unwrap();
 //!         }
 //!     }
 //!
@@ -116,6 +125,7 @@
 //!     assert_eq!(payments, selected_payments);
 //!     println!("Yay!");
 //! }
+//! # }
 //! ```
 
 #![crate_name="mysql"]
