@@ -17,7 +17,6 @@ use super::error::Result as MyResult;
 #[cfg(feature = "openssl")]
 use openssl::{ssl, x509};
 use bufstream::BufStream;
-use byteorder::ByteOrder;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;

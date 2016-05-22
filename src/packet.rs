@@ -3,7 +3,7 @@ use std::io::Read as StdRead;
 
 use regex::Regex;
 use byteorder::LittleEndian as LE;
-use byteorder::{ByteOrder, ReadBytesExt};
+use byteorder::{ReadBytesExt};
 
 use super::consts;
 use super::consts::StatusFlags;

@@ -1,10 +1,8 @@
 use std::error;
 use std::fmt;
-use std::fmt::Display;
 use std::io;
 use std::result;
 
-use byteorder::Error as BoError;
 #[cfg(feature = "openssl")]
 use openssl::ssl::error::{SslError};
 
@@ -131,13 +129,6 @@ impl error::Error for Error {
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
         Error::IoError(err)
-    }
-}
-
-impl From<BoError> for Error {
-    fn from(err: BoError) -> Error {
-        let io_err: io::Error = From::from(err);
-        From::from(io_err)
     }
 }
 

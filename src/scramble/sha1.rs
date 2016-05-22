@@ -1,6 +1,5 @@
 use std::num::Wrapping;
 
-use byteorder::ByteOrder;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use byteorder::BigEndian as BE;

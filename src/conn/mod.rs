@@ -55,7 +55,7 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 use bufstream::BufStream;
 use byteorder::LittleEndian as LE;
-use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
+use byteorder::{ReadBytesExt, WriteBytesExt};
 use fnv::FnvHasher;
 #[cfg(feature = "socket")]
 use unix_socket as us;

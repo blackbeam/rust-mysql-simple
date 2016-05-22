@@ -38,7 +38,7 @@ use chrono::{
 };
 
 use byteorder::LittleEndian as LE;
-use byteorder::{ByteOrder, WriteBytesExt};
+use byteorder::{WriteBytesExt};
 
 use fnv::FnvHasher;
 
