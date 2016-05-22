@@ -211,6 +211,7 @@ pub enum DriverError {
     Timeout,
     MissingNamedParameter(String),
     NamedParamsForPositionalQuery,
+    MixedParams,
 }
 
 impl error::Error for DriverError {
@@ -273,6 +274,9 @@ impl fmt::Display for DriverError {
             },
             DriverError::NamedParamsForPositionalQuery => {
                 write!(f, "Can not pass named parameters to positional query")
+            },
+            DriverError::MixedParams => {
+                write!(f, "Can not mix named and positional parameters in one statement")
             },
         }
     }

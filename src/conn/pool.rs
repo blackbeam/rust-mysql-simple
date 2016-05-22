@@ -396,7 +396,7 @@ impl PooledConn {
 
     fn pooled_prepare<'a, T: AsRef<str>>(mut self, query: T) -> MyResult<Stmt<'a>> {
         let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query);
+        let (named_params, real_query) = try!(parse_named_params(query));
         self.as_mut()._prepare(real_query.borrow(), named_params)
                      .map(|stmt| Stmt::new_pooled(stmt, self))
     }
@@ -406,7 +406,7 @@ impl PooledConn {
           T: Into<Params>
     {
         let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query);
+        let (named_params, real_query) = try!(parse_named_params(query));
         let stmt = try!(self.as_mut()._prepare(real_query.borrow(), named_params));
         let stmt = Stmt::new_pooled(stmt, self);
         stmt.prep_exec(params)

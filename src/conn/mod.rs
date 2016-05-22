@@ -1465,7 +1465,7 @@ impl Conn {
     /// This call will take statement from cache if has been prepared on this connection.
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
         let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query);
+        let (named_params, real_query) = try!(parse_named_params(query));
         match self._prepare(real_query.borrow(), named_params) {
             Ok(stmt) => Ok(Stmt::new(stmt, self)),
             Err(err) => Err(err),
