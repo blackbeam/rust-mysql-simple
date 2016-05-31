@@ -15,7 +15,7 @@
 //!
 //! ```toml
 //! [dependencies.mysql]
-//! mysql = "*"
+//! version = "*"
 //! default-features = false
 //! features = ["socket"]
 //! ```
@@ -26,7 +26,7 @@
 //!
 //! ```toml
 //! [dependencies.mysql]
-//! mysql = "*"
+//! version = "*"
 //! default-features = false
 //! features = ["pipe"]
 //! ```
