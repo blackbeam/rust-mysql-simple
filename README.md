@@ -22,7 +22,7 @@ rust-mysql-simple offer support of SSL via `ssl` cargo feature which is enabled 
 
 ```toml
 [dependencies.mysql]
-mysql = "*"
+version = "*"
 default-features = false
 features = ["socket"]
 ```
@@ -32,7 +32,7 @@ Currently rust-mysql-simple have no support of SSL on windows. To use crate on W
 
 ```toml
 [dependencies.mysql]
-mysql = "*"
+version = "*"
 default-features = false
 features = ["pipe"]
 ```
