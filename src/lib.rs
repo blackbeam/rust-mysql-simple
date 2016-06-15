@@ -31,6 +31,19 @@
 //! features = ["pipe"]
 //! ```
 //!
+//! #### Optional features
+//!
+//! You can compile rust-mysql-simple with the `uuid` feature, which makes it possible to use UUIDs with MySQL conveniently.
+//!
+//! The `uuid` feature depends on the `uuid` crate and UUIDs are assumed to be binary encoded in MySQL. So make sure that your MySQL fields are binary(16).
+//!
+//! To activate the `uuid` feature, add it to the `features` list:
+//!
+//! ```toml
+//! [dependencies]
+//! mysql = { version = "*", features = ["uuid"] }
+//! ```
+//!
 //! #### Example
 //!
 //! ```rust
@@ -163,6 +176,8 @@ mod io;
 pub mod value;
 pub mod conn;
 mod named_params;
+#[cfg(feature = "uuid")]
+mod uuid;
 
 #[doc(inline)]
 pub use conn::Column;
