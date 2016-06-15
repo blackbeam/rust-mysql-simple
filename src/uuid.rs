@@ -21,13 +21,14 @@ impl Into<Value> for Uuid {
 #[derive(Debug)]
 pub struct UuidIr {
     val: Uuid,
+    bytes: Vec<u8>,
 }
 
 impl ConvIr<Uuid> for UuidIr {
     fn new(v: Value) -> MyResult<UuidIr> {
         match v {
             Value::Bytes(bytes) => match Uuid::from_bytes(bytes.as_slice()) {
-                Ok(val) => Ok(UuidIr { val: val }),
+                Ok(val) => Ok(UuidIr { val: val, bytes: bytes }),
                 Err(_) => Err(Error::FromValueError(Value::Bytes(bytes))),
             },
             v => Err(Error::FromValueError(v)),
@@ -37,7 +38,7 @@ impl ConvIr<Uuid> for UuidIr {
         self.val
     }
     fn rollback(self) -> Value {
-        Value::Bytes(self.val.as_bytes().to_vec())
+        Value::Bytes(self.bytes)
     }
 }
 
