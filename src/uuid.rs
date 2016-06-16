@@ -53,7 +53,7 @@ mod test {
     use super::uuid::Uuid;
 
     #[test]
-    fn should_convert_Bytes_to_Uuid() {
+    fn should_convert_bytes_to_uuid() {
         let bytes = vec![0x0e, 0x87, 0x6d, 0x72, 0xc7, 0xb2, 0x4c, 0x00, 0x8c, 0x56, 0x44, 0xee, 0xac, 0x10, 0x15, 0xd1];
         assert_eq!(
             Uuid::parse_str("0e876d72-c7b2-4c00-8c56-44eeac1015d1").unwrap(),
@@ -62,7 +62,7 @@ mod test {
     }
 
     #[test]
-    fn should_convert_Uuid_to_Bytes() {
+    fn should_convert_uuid_to_bytes() {
         let bytes = vec![0x0e, 0x87, 0x6d, 0x72, 0xc7, 0xb2, 0x4c, 0x00, 0x8c, 0x56, 0x44, 0xee, 0xac, 0x10, 0x15, 0xd1];
         assert_eq!(
             Bytes(bytes),
