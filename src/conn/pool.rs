@@ -225,7 +225,7 @@ impl Pool {
     /// Will prepare statement. See [`Conn::prepare`](../struct.Conn.html#method.prepare).
     ///
     /// It will try to find connection which has this statement cached.
-    pub fn prepare<'a, T: AsRef<str> + 'a>(&'a self, query: T) -> MyResult<Stmt<'a>> {
+    pub fn prepare<T: AsRef<str>>(&self, query: T) -> MyResult<Stmt<'static>> {
         let conn = try!(self.get_conn_by_stmt(query.as_ref(), true));
         conn.pooled_prepare(query)
     }
@@ -234,7 +234,7 @@ impl Pool {
     /// [`Conn::prep_exec`](../struct.Conn.html#method.prep_exec).
     ///
     /// It will try to find connection which has this statement cached.
-    pub fn prep_exec<'a, A, T>(&'a self, query: A, params: T) -> MyResult<QueryResult<'a>>
+    pub fn prep_exec<A, T>(&self, query: A, params: T) -> MyResult<QueryResult<'static>>
     where A: AsRef<str>,
           T: Into<Params> {
         let conn = try!(self.get_conn_by_stmt(query.as_ref(), false));
@@ -655,6 +655,14 @@ mod test {
             for t in threads.into_iter() {
                 assert!(t.join().is_ok());
             }
+            pool.prep_exec("SELECT 1", ()).and_then(|mut res1| {
+                pool.prep_exec("SELECT 2", ()).map(|mut res2| {
+                    let (x1,) = from_row(res1.next().unwrap().unwrap());
+                    let (x2,) = from_row(res2.next().unwrap().unwrap());
+                    assert_eq!(1, x1);
+                    assert_eq!(2, x2);
+                })
+            }).unwrap()
         }
         #[test]
         fn should_start_transaction_on_Pool() {
