@@ -5,6 +5,7 @@ use std::time::Duration as StdDuration;
 
 use time::{Duration, SteadyTime};
 
+use Row;
 use named_params::parse_named_params;
 use super::IsolationLevel;
 use super::Transaction;
@@ -251,6 +252,19 @@ impl Pool {
         }
     }
 
+    /// See [`Conn::first_exec`](../struct.Conn.html#method.first_exec).
+    pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    where Q: AsRef<str>,
+          P: Into<Params>,
+    {
+        self.prep_exec(query, params).and_then(|result| {
+            for row in result {
+                return row.map(Some);
+            }
+            return Ok(None)
+        })
+    }
+
     /// Shortcut for `try!(pool.get_conn()).start_transaction(..)`.
     pub fn start_transaction(&self,
                              consistent_snapshot: bool,
@@ -353,6 +367,17 @@ impl PooledConn {
         self.conn.as_mut().unwrap().query(query)
     }
 
+    /// See [`Conn::first`](../struct.Conn.html#method.first).
+    pub fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+        self.query(query).and_then(|result| {
+            for row in result {
+                return row.map(Some);
+            }
+            return Ok(None)
+        })
+    }
+
+
     /// See [`Conn::prepare`](../struct.Conn.html#method.prepare).
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
         self.conn.as_mut().unwrap().prepare(query)
@@ -363,6 +388,19 @@ impl PooledConn {
     where A: AsRef<str> + 'a,
           T: Into<Params> {
         self.conn.as_mut().unwrap().prep_exec(query, params)
+    }
+
+    /// See [`Conn::first_exec`](../struct.Conn.html#method.first_exec).
+    pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    where Q: AsRef<str>,
+          P: Into<Params>,
+    {
+        self.prep_exec(query, params).and_then(|result| {
+            for row in result {
+                return row.map(Some);
+            }
+            return Ok(None)
+        })
     }
 
     /// Redirects to

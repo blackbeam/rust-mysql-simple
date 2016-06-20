@@ -115,6 +115,16 @@ impl<'a> Transaction<'a> {
         self.conn.query(query)
     }
 
+    /// See [`Conn::first`](struct.Conn.html#method.first).
+    pub fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+        self.query(query).and_then(|result| {
+            for row in result {
+                return row.map(Some);
+            }
+            return Ok(None)
+        })
+    }
+
     /// See [`Conn::prepare`](struct.Conn.html#method.prepare).
     pub fn prepare<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<Stmt<'c>> {
         self.conn.prepare(query)
@@ -123,6 +133,19 @@ impl<'a> Transaction<'a> {
     /// See [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
     pub fn prep_exec<'c, A: AsRef<str> + 'c, T: Into<Params>>(&'c mut self, query: A, params: T) -> MyResult<QueryResult<'c>> {
         self.conn.prep_exec(query, params)
+    }
+
+    /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
+    pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    where Q: AsRef<str>,
+          P: Into<Params>,
+    {
+        self.prep_exec(query, params).and_then(|result| {
+            for row in result {
+                return row.map(Some);
+            }
+            return Ok(None)
+        })
     }
 
     /// Will consume and commit transaction.
@@ -350,6 +373,18 @@ impl<'a> Stmt<'a> {
     /// ```
     pub fn execute<'s, T: Into<Params>>(&'s mut self, params: T) -> MyResult<QueryResult<'s>> {
         self.conn.execute(&self.stmt, params)
+    }
+
+    /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
+    pub fn first_exec<P>(&mut self, params: P) -> MyResult<Option<Row>>
+    where P: Into<Params>,
+    {
+        self.execute(params).and_then(|result| {
+            for row in result {
+                return row.map(Some);
+            }
+            return Ok(None)
+        })
     }
 
     fn prep_exec<T: Into<Params>>(mut self, params: T) -> MyResult<QueryResult<'a>> {
@@ -1411,6 +1446,16 @@ impl Conn {
         }
     }
 
+    /// Performs query and returns first row.
+    pub fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+        self.query(query).and_then(|result| {
+            for row in result {
+                return row.map(Some);
+            }
+            return Ok(None)
+        })
+    }
+
     fn _true_prepare(&mut self,
                      query: &str,
                      named_params: Option<Vec<String>>) -> MyResult<InnerStmt> {
@@ -1560,6 +1605,19 @@ impl Conn {
     where A: AsRef<str> + 'a,
           T: Into<Params> {
         try!(self.prepare(query)).prep_exec(params.into())
+    }
+
+    /// Executs statement and returns first row.
+    pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    where Q: AsRef<str>,
+          P: Into<Params>,
+    {
+        self.prep_exec(query, params).and_then(|result| {
+            for row in result {
+                return row.map(Some);
+            }
+            return Ok(None)
+        })
     }
 
     fn more_results_exists(&self) -> bool {
