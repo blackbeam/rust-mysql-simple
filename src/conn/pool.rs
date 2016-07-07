@@ -269,7 +269,7 @@ impl Pool {
     pub fn start_transaction(&self,
                              consistent_snapshot: bool,
                              isolation_level: Option<IsolationLevel>,
-                             readonly: Option<bool>) -> MyResult<Transaction> {
+                             readonly: Option<bool>) -> MyResult<Transaction<'static>> {
         let conn = try!(self._get_conn(None::<String>, None, false));
         let result = conn.pooled_start_transaction(consistent_snapshot,
                                                    isolation_level,
@@ -510,6 +510,18 @@ mod test {
         use super::super::Pool;
         use super::super::super::super::value::from_value;
         use super::super::super::super::error::{Error, DriverError};
+
+        struct A {
+            pool: Pool,
+            x: u32,
+        }
+
+        impl A {
+            fn add(&mut self) {
+                self.x += 1;
+            }
+        }
+
         #[test]
         fn should_fix_connectivity_errors_on_prepare() {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
@@ -665,6 +677,7 @@ mod test {
             }).unwrap()
         }
         #[test]
+        #[allow(unused_variables)]
         fn should_start_transaction_on_Pool() {
             let pool = Pool::new(get_opts()).unwrap();
             pool.prepare("CREATE TEMPORARY TABLE x.tbl(a INT)").ok().map(|mut stmt| {
@@ -703,6 +716,9 @@ mod test {
                     assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                 }
             });
+            let mut a = A {pool: pool, x: 0};
+            let transaction = a.pool.start_transaction(false, None, None).unwrap();
+            a.add();
         }
         #[test]
         fn should_start_transaction_on_PooledConn() {
