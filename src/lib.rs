@@ -108,9 +108,9 @@
 //!             // `execute` takes ownership of `params` so we pass account name by reference.
 //!             // Unwrap each result just to make sure no errors happened.
 //!             stmt.execute(params!{
-//!                 "customer_id" => my::Value::from(p.customer_id),
-//!                 "amount" => my::Value::from(p.amount),
-//!                 "account_name" => my::Value::from(&p.account_name),
+//!                 "customer_id" => p.customer_id,
+//!                 "amount" => p.amount,
+//!                 "account_name" => &p.account_name,
 //!             }).unwrap();
 //!         }
 //!     }

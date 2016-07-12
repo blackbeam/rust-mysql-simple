@@ -1550,16 +1550,6 @@ impl Conn {
     ///     assert_eq!((5, 6, String::from(":c")), from_row(row));
     /// }).unwrap();
     ///
-    /// // In case of different types of parameter values
-    /// // you should convert them into Value explicitly.
-    /// pool.prep_exec("SELECT :num, :string", params!{
-    ///     "num" => Value::from(42),
-    ///     "string" => Value::from("yay"),
-    /// }).map(|mut result| {
-    ///     let row = result.next().unwrap().unwrap();
-    ///     assert_eq!((42, String::from("yay")), from_row(row));
-    /// }).unwrap();
-    ///
     /// // You can call named statement with positional parameters
     /// pool.prep_exec("SELECT :a+:b, :a*:b", (2, 3, 2, 3)).map(|mut result| {
     ///     let row = result.next().unwrap().unwrap();
