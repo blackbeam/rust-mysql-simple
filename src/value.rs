@@ -973,7 +973,7 @@ impl Params {
 macro_rules! params {
     ($($name:expr => $value:expr),*) => (
         vec![
-            $((::std::string::String::from($name), $value)),*
+            $((::std::string::String::from($name), $crate::Value::from($value))),*
         ]
     );
     ($($name:expr => $value:expr),*,) => (

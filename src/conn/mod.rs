@@ -2461,11 +2461,11 @@ mod test {
             let mut stmt = conn.prepare("SELECT :one, :two, :three, :four, :five").unwrap();
             bencher.iter(|| {
                 let _ = stmt.execute(params!{
-                    "one" => Value::from(42i8),
-                    "two" => Value::from(b"123456".to_vec()),
-                    "three" => Value::from(1.618f64),
+                    "one" => 42i8,
+                    "two" => b"123456",
+                    "three" => 1.618f64,
                     "four" => NULL,
-                    "five" => Value::from(1i8),
+                    "five" => 1i8,
                 });
             })
         }
