@@ -158,8 +158,6 @@ extern crate lazy_static;
 #[macro_use]
 extern crate bitflags;
 extern crate byteorder;
-#[cfg(feature = "socket")]
-extern crate unix_socket;
 #[cfg(feature = "pipe")]
 extern crate named_pipe;
 extern crate url;

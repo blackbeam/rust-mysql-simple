@@ -43,7 +43,7 @@ debug = true
 [features]
 default = ["ssl", "socket"]
 ssl = ["openssl"]
-socket = ["unix_socket"]
+socket = []
 pipe = ["named_pipe"]
 nightly = []
 
@@ -63,10 +63,6 @@ default-features = false
 
 [dependencies.openssl]
 version = "~0.7"
-optional = true
-
-[dependencies.unix_socket]
-version = "~0.5"
 optional = true
 
 [dependencies.named_pipe]

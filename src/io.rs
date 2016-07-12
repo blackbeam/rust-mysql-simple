@@ -21,7 +21,7 @@ use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;
 #[cfg(feature = "socket")]
-use unix_socket as us;
+use std::os::unix as unix;
 #[cfg(feature = "pipe")]
 use named_pipe as np;
 
@@ -265,7 +265,7 @@ impl<T: WriteBytesExt> Write for T {}
 #[derive(Debug)]
 pub enum Stream {
     #[cfg(feature = "socket")]
-    UnixStream(BufStream<us::UnixStream>),
+    UnixStream(BufStream<unix::net::UnixStream>),
     #[cfg(feature = "pipe")]
     PipeStream(BufStream<np::PipeClient>),
     TcpStream(Option<TcpStream>),

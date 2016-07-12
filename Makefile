@@ -8,7 +8,7 @@ MYSQL_PORT = 3307
 BASEDIR := $(shell mysqld --verbose --help 2>/dev/null | grep -e '^basedir' | awk '{ print $$2 }')
 OS := $(shell uname)
 
-FEATURES := "socket" "ssl" "uuid" "ssl socket uuid"
+FEATURES := "" "socket" "ssl" "uuid" "ssl socket uuid"
 BENCH_FEATURES := "nightly" "nightly socket" "nightly ssl" "nightly socket ssl"
 
 define run-mysql

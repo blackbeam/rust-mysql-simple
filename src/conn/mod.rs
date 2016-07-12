@@ -58,7 +58,7 @@ use byteorder::LittleEndian as LE;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use fnv::FnvHasher;
 #[cfg(feature = "socket")]
-use unix_socket as us;
+use std::os::unix;
 #[cfg(feature = "pipe")]
 use named_pipe as np;
 
@@ -919,7 +919,7 @@ impl Conn {
     #[cfg(all(feature = "socket", not(feature = "pipe")))]
     fn connect_stream(&mut self) -> MyResult<()> {
         if let &Some(ref unix_addr) = self.opts.get_unix_addr() {
-            match us::UnixStream::connect(unix_addr) {
+            match unix::net::UnixStream::connect(unix_addr) {
                 Ok(stream) => {
                     try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
                     try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
