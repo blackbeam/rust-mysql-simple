@@ -2387,7 +2387,6 @@ mod test {
         use super::get_opts;
         use super::super::{Conn};
         use super::super::super::value::Value::NULL;
-        use Value;
 
         #[bench]
         fn simple_exec(bencher: &mut test::Bencher) {

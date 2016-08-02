@@ -780,6 +780,7 @@ mod test {
         #[cfg(feature = "nightly")]
         mod bench {
             use test;
+            use std::thread;
             use Pool;
             use super::super::get_opts;
 
@@ -796,6 +797,25 @@ mod test {
                 let pool = Pool::new(get_opts()).unwrap();
                 bencher.iter(|| {
                     pool.prep_exec("SELECT 1", ()).unwrap();
+                });
+            }
+
+            #[bench]
+            fn many_prepares_threaded(bencher: &mut test::Bencher) {
+                let pool = Pool::new(get_opts()).unwrap();
+                bencher.iter(|| {
+                    let mut threads = Vec::new();
+                    for _ in 0..4 {
+                        let pool = pool.clone();
+                        threads.push(thread::spawn(move || {
+                            for _ in 0..1000 {
+                                test::black_box(pool.prep_exec("SELECT 1, 'hello world', 123.321", ()).unwrap());
+                            }
+                        }));
+                    }
+                    for t in threads {
+                        t.join().unwrap();
+                    }
                 });
             }
         }
