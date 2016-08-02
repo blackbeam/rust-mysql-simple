@@ -189,17 +189,25 @@ impl Pool {
 
     /// Creates new pool with `min = 10` and `max = 100`.
     pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Pool> {
-        Pool::new_manual(10, 100, true, true, opts)
+        Pool::new_manual(10, 100, opts)
     }
 
     /// Same as `new` but you can set `min` and `max`.
-    pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, use_cache: bool, check_health: bool, opts: T) -> MyResult<Pool> {
+    pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> MyResult<Pool> {
         let pool = try!(InnerPool::new(min, max, opts.into()));
         Ok(Pool{
             inner: Arc::new((Mutex::new(pool), Condvar::new())),
-            use_cache: use_cache,
-            check_health: check_health,
+            use_cache: true,
+            check_health: true,
         })
+    }
+
+    pub fn use_cache(&mut self, use_cache: bool) {
+        self.use_cache = use_cache;
+    }
+
+    pub fn check_health(&mut self, check_health: bool) {
+        self.check_health = check_health;
     }
 
     /// Gives you a [`PooledConn`](struct.PooledConn.html).
