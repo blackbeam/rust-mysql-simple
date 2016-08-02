@@ -691,37 +691,37 @@ mod test {
         #[test]
         #[allow(unused_variables)]
         fn should_start_transaction_on_Pool() {
-            let pool = Pool::new(get_opts()).unwrap();
+            let pool = Pool::new_manual(1, 10, get_opts()).unwrap();
             pool.prepare("CREATE TEMPORARY TABLE x.tbl(a INT)").ok().map(|mut stmt| {
                 assert!(stmt.execute(()).is_ok());
             });
-            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+            pool.start_transaction(false, None, None).and_then(|mut t| {
+                t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
+                t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
                 t.commit()
-            }).is_ok());
+            }).unwrap();
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
                     assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                 }
             });
-            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+            pool.start_transaction(false, None, None).and_then(|mut t| {
+                t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
+                t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
                 t.rollback()
-            }).is_ok());
+            }).unwrap();
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
                     assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                 }
             });
-            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+            pool.start_transaction(false, None, None).and_then(|mut t| {
+                t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
+                t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
                 Ok(())
-            }).is_ok());
+            }).unwrap();
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
