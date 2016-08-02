@@ -136,7 +136,7 @@ impl Pool {
             if let Some(query) = stmt {
                 let mut id = None;
                 let mut pool = try!(inner_pool.lock());
-                for (i, conn) in pool.pool.iter().enumerate() {
+                for (i, conn) in pool.pool.iter().rev().enumerate() {
                     if conn.has_stmt(query.as_ref()) {
                         id = Some(i);
                         break;
