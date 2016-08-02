@@ -57,6 +57,7 @@ use bufstream::BufStream;
 use byteorder::LittleEndian as LE;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use fnv::FnvHasher;
+use twox_hash::XxHash;
 #[cfg(feature = "socket")]
 use unix_socket as us;
 #[cfg(feature = "pipe")]
@@ -651,7 +652,7 @@ impl<'a> ColumnIndex for &'a str {
 pub struct Conn {
     opts: Opts,
     stream: Option<Stream>,
-    stmts: HashMap<String, InnerStmt, BldHshrDflt<FnvHasher>>,
+    stmts: HashMap<String, InnerStmt, BldHshrDflt<XxHash>>,
     server_version: ServerVersion,
     affected_rows: u64,
     last_insert_id: u64,

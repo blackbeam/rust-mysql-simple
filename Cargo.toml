@@ -55,6 +55,7 @@ byteorder = "~0.5"
 url = "~1.1"
 bufstream = "~0.1"
 fnv = "~1.0"
+twox-hash = "~1.0"
 chrono = "~0.2"
 
 [dependencies.regex]

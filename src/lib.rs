@@ -166,6 +166,7 @@ extern crate url;
 extern crate bufstream;
 extern crate fnv;
 extern crate chrono;
+extern crate twox_hash;
 
 mod scramble;
 pub mod consts;
