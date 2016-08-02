@@ -358,6 +358,7 @@ impl Drop for PooledConn {
             pool.count -= 1;
         } else {
             pool.pool.push_back(self.conn.take().unwrap());
+            drop(pool);
             (self.pool.inner).1.notify_one();
         }
     }
