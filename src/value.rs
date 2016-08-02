@@ -1264,6 +1264,50 @@ impl From<time::Duration> for Value {
     }
 }
 
+macro_rules! from_array_impl {
+    ($n:expr) => {
+        impl From<[u8; $n]> for Value {
+            fn from(x: [u8; $n]) -> Value {
+                Value::from(&x[..])
+            }
+        }
+    };
+}
+
+from_array_impl!(0);
+from_array_impl!(1);
+from_array_impl!(2);
+from_array_impl!(3);
+from_array_impl!(4);
+from_array_impl!(5);
+from_array_impl!(6);
+from_array_impl!(7);
+from_array_impl!(8);
+from_array_impl!(9);
+from_array_impl!(10);
+from_array_impl!(11);
+from_array_impl!(12);
+from_array_impl!(13);
+from_array_impl!(14);
+from_array_impl!(15);
+from_array_impl!(16);
+from_array_impl!(17);
+from_array_impl!(18);
+from_array_impl!(19);
+from_array_impl!(20);
+from_array_impl!(21);
+from_array_impl!(22);
+from_array_impl!(23);
+from_array_impl!(24);
+from_array_impl!(25);
+from_array_impl!(26);
+from_array_impl!(27);
+from_array_impl!(28);
+from_array_impl!(29);
+from_array_impl!(30);
+from_array_impl!(31);
+from_array_impl!(32);
+
 /// Basic operations on `FromValue` conversion intermediate result.
 ///
 /// See [`FromValue`](trait.FromValue.html)
