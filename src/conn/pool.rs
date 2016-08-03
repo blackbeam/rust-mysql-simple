@@ -351,7 +351,7 @@ pub struct PooledConn {
 impl Drop for PooledConn {
     fn drop(&mut self) {
         let mut pool = (self.pool.0).0.lock().unwrap();
-        if pool.count > pool.min || self.conn.is_none() {
+        if pool.count > pool.max || self.conn.is_none() {
             pool.count -= 1;
         } else {
             pool.pool.push(self.conn.take().unwrap());
