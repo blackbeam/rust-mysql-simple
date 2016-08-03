@@ -2394,8 +2394,6 @@ mod test {
 
     mod from_row {
         use Column;
-        use consts::ColumnFlags;
-        use consts::ColumnType;
         use std::iter::repeat;
         use std::sync::Arc;
         use time::{Timespec, now};
@@ -2405,19 +2403,9 @@ mod test {
 
         #[test]
         fn should_convert_to_tuples() {
-            let col = Column {
-                schema: vec![],
-                table: vec![],
-                org_table: vec![],
-                name: vec![],
-                org_name: vec![],
-                default_values: vec![],
-                column_length: 0u32,
-                character_set: 0u16,
-                flags: ColumnFlags::empty(),
-                column_type: ColumnType::MYSQL_TYPE_DECIMAL,
-                decimals: 0u8,
-            };
+            let col = Column::from_payload(b"\x03def\x06schema\x05table\x09org_table\x04name\x08\
+                                           org_name\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+                                           \x00\x00".to_vec()).unwrap();
             let t1 = Value::Int(1);
             let t2 = Value::Bytes(b"a".to_vec());
             let t3 = Value::Bytes(vec![255]);
@@ -2618,19 +2606,9 @@ mod test {
 
         #[bench]
         fn pop_vs_from_row_from_row(bencher: &mut test::Bencher) {
-            let col = Column {
-                schema: vec![],
-                table: vec![],
-                org_table: vec![],
-                name: vec![],
-                org_name: vec![],
-                default_values: vec![],
-                column_length: 0u32,
-                character_set: 0u16,
-                flags: ColumnFlags::empty(),
-                column_type: ColumnType::MYSQL_TYPE_DECIMAL,
-                decimals: 0u8,
-            };
+            let col = Column::from_payload(b"\x03def\x06schema\x05table\x09org_table\x04name\x08\
+                                           org_name\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+                                           \x00\x00".to_vec()).unwrap();
             let row = Row::new(vec![Value::Int(1),
                                     Value::Bytes(vec![b'a']),
                                     Value::Bytes(vec![255]),

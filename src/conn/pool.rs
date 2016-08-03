@@ -816,8 +816,34 @@ mod test {
                     for _ in 0..4 {
                         let pool = pool.clone();
                         threads.push(thread::spawn(move || {
-                            for _ in 0..1000 {
-                                test::black_box(pool.prep_exec("SELECT 1, 'hello world', 123.321", ()).unwrap());
+                            for _ in 0..250 {
+                                test::black_box(
+                                    pool.prep_exec("SELECT 1, 'hello world', 123.321, ?, ?, ?",
+                                                   ("hello", "world", 65536)).unwrap()
+                                );
+                            }
+                        }));
+                    }
+                    for t in threads {
+                        t.join().unwrap();
+                    }
+                });
+            }
+
+            #[bench]
+            fn many_prepares_threaded_no_cache(bencher: &mut test::Bencher) {
+                let mut pool = Pool::new(get_opts()).unwrap();
+                pool.use_cache(false);
+                bencher.iter(|| {
+                    let mut threads = Vec::new();
+                    for _ in 0..4 {
+                        let pool = pool.clone();
+                        threads.push(thread::spawn(move || {
+                            for _ in 0..250 {
+                                test::black_box(
+                                    pool.prep_exec("SELECT 1, 'hello world', 123.321, ?, ?, ?",
+                                                   ("hello", "world", 65536)).unwrap()
+                                );
                             }
                         }));
                     }

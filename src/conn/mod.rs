@@ -44,6 +44,7 @@ use super::error::DriverError::SslNotSupported;
 use named_params::parse_named_params;
 use super::scramble::scramble;
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
+use super::parser::column_def;
 use super::value::{
     Params,
     Value,
@@ -293,7 +294,7 @@ impl<'a> Stmt<'a> {
             Some(ref columns) => {
                 let name = name.as_ref().as_bytes();
                 for (i, c) in columns.iter().enumerate() {
-                    if c.name == name {
+                    if c.name() == name {
                         return Some(i)
                     }
                 }
@@ -412,67 +413,171 @@ impl<'a> Stmt<'a> {
 /// [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition).
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Column {
-    /// Schema name.
-    pub schema: Vec<u8>,
-    /// Virtual table name.
-    pub table: Vec<u8>,
-    /// Phisical table name.
-    pub org_table: Vec<u8>,
-    /// Virtual column name.
-    pub name: Vec<u8>,
-    /// Phisical column name.
-    pub org_name: Vec<u8>,
-    /// Default values.
-    pub default_values: Vec<u8>,
-    /// Maximum length of the field.
+    payload: Vec<u8>,
+    schema: (usize, usize),
+    table: (usize, usize),
+    org_table: (usize, usize),
+    name: (usize, usize),
+    org_name: (usize, usize),
+    default_values: Option<(usize, usize)>,
     pub column_length: u32,
-    /// Column character set.
     pub character_set: u16,
-    /// Flags.
     pub flags: consts::ColumnFlags,
-    /// Column type.
     pub column_type: consts::ColumnType,
-    /// Max shown decimal digits
-    pub decimals: u8
+    pub decimals: u8,
 }
 
 impl Column {
-    #[inline]
-    fn from_payload(command: u8, pld: &[u8]) -> io::Result<Column> {
-        let mut reader = pld.as_ref();
-        // Skip catalog
-        let _ = try!(reader.read_lenenc_bytes());
-        let schema = try!(reader.read_lenenc_bytes());
-        let table = try!(reader.read_lenenc_bytes());
-        let org_table = try!(reader.read_lenenc_bytes());
-        let name = try!(reader.read_lenenc_bytes());
-        let org_name = try!(reader.read_lenenc_bytes());
-        let _ = try!(reader.read_lenenc_int());
-        let character_set = try!(reader.read_u16::<LE>());
-        let column_length = try!(reader.read_u32::<LE>());
-        let column_type = try!(reader.read_u8());
-        let flags = consts::ColumnFlags::from_bits_truncate(try!(reader.read_u16::<LE>()));
-        let decimals = try!(reader.read_u8());
-        // skip filler
-        try!(reader.read_u16::<LE>());
-        let mut default_values = Vec::with_capacity(reader.len());
-        if command == Command::COM_FIELD_LIST as u8 {
-            let len = try!(reader.read_lenenc_int());
-            try!(reader.take(len).read_to_end(&mut default_values));
-        }
-        Ok(Column{schema: schema,
-                  table: table,
-                  org_table: org_table,
-                  name: name,
-                  org_name: org_name,
-                  character_set: character_set,
-                  column_length: column_length,
-                  column_type: From::from(column_type),
-                  flags: flags,
-                  decimals: decimals,
-                  default_values: default_values})
+    pub fn from_payload(pld: Vec<u8>) -> io::Result<Column> {
+        let (
+            schema,
+            table,
+            org_table,
+            name,
+            org_name,
+            character_set,
+            column_length,
+            column_type,
+            flags,
+            decimals,
+            default_values
+        ) = {
+            let (
+                schema,
+                table,
+                org_table,
+                name,
+                org_name,
+                character_set,
+                column_length,
+                column_type,
+                flags,
+                decimals,
+                default_values
+            ) = match column_def(&*pld) {
+                ::nom::IResult::Done(_, def) => def,
+                _ => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Can't parse column"))
+            };
+            let schema = (schema.as_ptr() as usize - pld.as_ptr() as usize, schema.len());
+            let table = (table.as_ptr() as usize - pld.as_ptr() as usize, table.len());
+            let org_table = (org_table.as_ptr() as usize - pld.as_ptr() as usize, org_table.len());
+            let name = (name.as_ptr() as usize - pld.as_ptr() as usize, name.len());
+            let org_name = (org_name.as_ptr() as usize - pld.as_ptr() as usize, org_name.len());
+            let default_values = default_values.map(|v| {
+                (v.as_ptr() as usize - pld.as_ptr() as usize, v.len())
+            });
+            (schema, table, org_table, name, org_name, character_set, column_length, column_type,
+             flags, decimals, default_values)
+        };
+
+        Ok(Column {
+            payload: pld,
+            schema: schema,
+            table: table,
+            org_table: org_table,
+            name: name,
+            org_name: org_name,
+            default_values: default_values,
+            column_length: column_length,
+            character_set: character_set,
+            flags: consts::ColumnFlags::from_bits_truncate(flags),
+            column_type: consts::ColumnType::from(column_type),
+            decimals: decimals,
+        })
+    }
+
+    pub fn schema<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.schema.0..self.schema.0+self.schema.1]
+    }
+
+    pub fn table<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.table.0..self.table.0+self.table.1]
+    }
+
+    pub fn org_table<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.org_table.0..self.org_table.0+self.org_table.1]
+    }
+
+    pub fn name<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.name.0..self.name.0+self.name.1]
+    }
+
+    pub fn org_name<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.org_name.0..self.org_name.0+self.org_name.1]
+    }
+
+    pub fn default_values<'a>(&'a self) -> Option<&'a [u8]> {
+        self.default_values.map(|(offset, len)| {
+            &self.payload[offset..offset + len]
+        })
     }
 }
+
+///// Mysql
+///// [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition).
+//#[derive(Clone, Eq, PartialEq, Debug)]
+//pub struct Column {
+//    /// Schema name.
+//    pub schema: Vec<u8>,
+//    /// Virtual table name.
+//    pub table: Vec<u8>,
+//    /// Phisical table name.
+//    pub org_table: Vec<u8>,
+//    /// Virtual column name.
+//    pub name: Vec<u8>,
+//    /// Phisical column name.
+//    pub org_name: Vec<u8>,
+//    /// Default values.
+//    pub default_values: Vec<u8>,
+//    /// Maximum length of the field.
+//    pub column_length: u32,
+//    /// Column character set.
+//    pub character_set: u16,
+//    /// Flags.
+//    pub flags: consts::ColumnFlags,
+//    /// Column type.
+//    pub column_type: consts::ColumnType,
+//    /// Max shown decimal digits
+//    pub decimals: u8
+//}
+//
+//impl Column {
+//    #[inline]
+//    pub fn from_payload(command: u8, pld: &[u8]) -> io::Result<Column> {
+//        let mut reader = pld.as_ref();
+//        // Skip catalog
+//        let _ = try!(reader.read_lenenc_bytes());
+//        let schema = try!(reader.read_lenenc_bytes());
+//        let table = try!(reader.read_lenenc_bytes());
+//        let org_table = try!(reader.read_lenenc_bytes());
+//        let name = try!(reader.read_lenenc_bytes());
+//        let org_name = try!(reader.read_lenenc_bytes());
+//        let _ = try!(reader.read_lenenc_int());
+//        let character_set = try!(reader.read_u16::<LE>());
+//        let column_length = try!(reader.read_u32::<LE>());
+//        let column_type = try!(reader.read_u8());
+//        let flags = consts::ColumnFlags::from_bits_truncate(try!(reader.read_u16::<LE>()));
+//        let decimals = try!(reader.read_u8());
+//        // skip filler
+//        try!(reader.read_u16::<LE>());
+//        let mut default_values = Vec::with_capacity(reader.len());
+//        if command == Command::COM_FIELD_LIST as u8 {
+//            let len = try!(reader.read_lenenc_int());
+//            try!(reader.take(len).read_to_end(&mut default_values));
+//        }
+//        Ok(Column{schema: schema,
+//                  table: table,
+//                  org_table: org_table,
+//                  name: name,
+//                  org_name: org_name,
+//                  character_set: character_set,
+//                  column_length: column_length,
+//                  column_type: From::from(column_type),
+//                  flags: flags,
+//                  decimals: decimals,
+//                  default_values: default_values})
+//    }
+//}
 
 /// Mysql row representation.
 ///
@@ -600,7 +705,7 @@ impl<'a> Index<&'a str> for Row {
 
     fn index<'r>(&'r self, index: &'a str) -> &'r Value {
         for (i, column) in self.columns.iter().enumerate() {
-            if column.name == index.as_bytes() {
+            if column.name() == index.as_bytes() {
                 return self.values[i].as_ref().unwrap();
             }
         }
@@ -625,7 +730,7 @@ impl ColumnIndex for usize {
 impl<'a> ColumnIndex for &'a str {
     fn idx(&self, columns: &Vec<Column>) -> Option<usize> {
         for (i, c) in columns.iter().enumerate() {
-            if c.name == self.as_bytes() {
+            if c.name() == self.as_bytes() {
                 return Some(i);
             }
         }
@@ -1398,7 +1503,7 @@ impl Conn {
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
                 for _ in 0..column_count {
                     let pld = try!(self.read_packet());
-                    columns.push(try!(Column::from_payload(self.last_command, pld.as_ref())));
+                    columns.push(try!(Column::from_payload(pld)));
                 }
                 // skip eof packet
                 try!(self.read_packet());
@@ -1473,7 +1578,7 @@ impl Conn {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as usize);
                     for _ in 0..stmt.num_params {
                         let pld = try!(self.read_packet());
-                        params.push(try!(Column::from_payload(self.last_command, pld.as_ref())));
+                        params.push(try!(Column::from_payload(pld)));
                     }
                     stmt.params = Some(params);
                     try!(self.read_packet());
@@ -1482,7 +1587,7 @@ impl Conn {
                     let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as usize);
                     for _ in 0..stmt.num_columns {
                         let pld = try!(self.read_packet());
-                        columns.push(try!(Column::from_payload(self.last_command, pld.as_ref())));
+                        columns.push(try!(Column::from_payload(pld)));
                     }
                     stmt.columns = Some(columns);
                     try!(self.read_packet());
@@ -1887,7 +1992,7 @@ impl<'a> QueryResult<'a> {
     pub fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize> {
         let name = name.as_ref().as_bytes();
         for (i, c) in self.columns.iter().enumerate() {
-            if c.name == name {
+            if c.name() == name {
                 return Some(i)
             }
         }
@@ -1898,7 +2003,7 @@ impl<'a> QueryResult<'a> {
     pub fn column_indexes<'b, 'c>(&'b self) -> HashMap<String, usize, BldHshrDflt<FnvHasher>> {
         let mut indexes = HashMap::default();
         for (i, column) in self.columns.iter().enumerate() {
-            indexes.insert(from_utf8(&*column.name).unwrap().to_string(), i);
+            indexes.insert(from_utf8(column.name()).unwrap().to_string(), i);
         }
         indexes
     }
@@ -2035,6 +2140,7 @@ mod test {
         use super::super::super::value::{ToValue, from_value, from_row};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
+        use super::super::Column;
 
         #[test]
         fn should_connect() {
@@ -2378,6 +2484,28 @@ mod test {
         #[should_panic]
         fn should_panic_on_named_param_redefinition() {
             let _: Params = params!{"a" => 1, "b" => 2, "a" => 3}.into();
+        }
+
+        #[test]
+        fn should_parse_column_from_payload() {
+            let payload1 = b"\x03def\x06schema\x05table\x09org_table\x04name\x08org_name\
+                         \x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec();
+            let payload2 = b"\x03def\x06schema\x05table\x09org_table\x04name\x08org_name\
+                         \x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x07default".to_vec();
+            let out1 = Column::from_payload(payload1).unwrap();
+            let out2 = Column::from_payload(payload2).unwrap();
+            assert_eq!(out1.schema(), b"schema");
+            assert_eq!(out1.table(), b"table");
+            assert_eq!(out1.org_table(), b"org_table");
+            assert_eq!(out1.name(), b"name");
+            assert_eq!(out1.org_name(), b"org_name");
+            assert_eq!(out1.default_values(), None);
+            assert_eq!(out2.schema(), b"schema");
+            assert_eq!(out2.table(), b"table");
+            assert_eq!(out2.org_table(), b"org_table");
+            assert_eq!(out2.name(), b"name");
+            assert_eq!(out2.org_name(), b"org_name");
+            assert_eq!(out2.default_values(), Some(&b"default"[..]));
         }
     }
 

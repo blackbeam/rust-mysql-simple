@@ -156,6 +156,8 @@ extern crate regex;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
+extern crate nom;
+#[macro_use]
 extern crate bitflags;
 extern crate byteorder;
 #[cfg(feature = "socket")]
@@ -172,6 +174,7 @@ mod scramble;
 pub mod consts;
 pub mod error;
 mod packet;
+mod parser;
 mod io;
 #[macro_use]
 pub mod value;
