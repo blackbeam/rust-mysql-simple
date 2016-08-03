@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::{Arc, Mutex, Condvar};
 use std::time::Duration as StdDuration;
@@ -17,7 +18,7 @@ use super::super::error::Result as MyResult;
 #[derive(Debug)]
 struct InnerPool {
     opts: Opts,
-    pool: Vec<Conn>,
+    pool: VecDeque<Conn>,
     min: usize,
     max: usize,
     count: usize
@@ -30,7 +31,7 @@ impl InnerPool {
         }
         let mut pool = InnerPool {
             opts: opts,
-            pool: Vec::with_capacity(max),
+            pool: VecDeque::with_capacity(max),
             max: max,
             min: min,
             count: 0
@@ -43,7 +44,7 @@ impl InnerPool {
     fn new_conn(&mut self) -> MyResult<()> {
         match Conn::new(self.opts.clone()) {
             Ok(conn) => {
-                self.pool.push(conn);
+                self.pool.push_back(conn);
                 self.count += 1;
                 Ok(())
             },
@@ -103,7 +104,11 @@ impl InnerPool {
 /// For more info on how to work with mysql connection please look at
 /// [`PooledConn`](struct.PooledConn.html) documentation.
 #[derive(Clone)]
-pub struct Pool(Arc<(Mutex<InnerPool>, Condvar)>);
+pub struct Pool {
+    inner: Arc<(Mutex<InnerPool>, Condvar)>,
+    check_health: bool,
+    use_cache: bool,
+}
 
 impl Pool {
     /// Will return connection taken from a pool.
@@ -125,61 +130,55 @@ impl Pool {
             None
         };
 
-        let &(ref inner_pool, ref condvar) = &*self.0;
-        let mut pool = match inner_pool.lock() {
-            Ok(mutex) => mutex,
-            _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
-        };
+        let &(ref inner_pool, ref condvar) = &*self.inner;
 
-        let mut id = None;
-        if let Some(query) = stmt {
-            for (i, conn) in pool.pool.iter().enumerate() {
-                if conn.has_stmt(query.as_ref()) {
-                    id = Some(i);
-                    break;
-                }
-            }
-        }
-
-        loop {
-            if pool.pool.is_empty() {
-                if pool.count < pool.max {
-                    match pool.new_conn() {
-                        Ok(()) => break,
-                        Err(err) => return Err(err),
-                    }
-                } else {
-                    pool = if let Some((start, timeout, std_timeout)) = times {
-                        if SteadyTime::now() - start > timeout {
-                            return Err(DriverError::Timeout.into());
-                        }
-                        match condvar.wait_timeout(pool, std_timeout) {
-                            Ok((mutex, _)) => mutex,
-                            _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
-                        }
-                    } else {
-                        match condvar.wait(pool) {
-                            Ok(mutex) => mutex,
-                            _ => return Err(Error::DriverError(DriverError::PoisonedPoolMutex)),
-                        }
+        let conn = if self.use_cache {
+            if let Some(query) = stmt {
+                let mut id = None;
+                let mut pool = try!(inner_pool.lock());
+                for (i, conn) in pool.pool.iter().rev().enumerate() {
+                    if conn.has_stmt(query.as_ref()) {
+                        id = Some(i);
+                        break;
                     }
                 }
+                id.and_then(|id| pool.pool.swap_remove_back(id))
             } else {
-                break;
-            }
-        }
-
-        let mut conn = if let Some(id) = id {
-            if id < pool.pool.len() {
-                pool.pool.remove(id)
-            } else {
-                pool.pool.pop().unwrap()
+                None
             }
         } else {
-            pool.pool.pop().unwrap()
+            None
         };
 
-        if call_ping {
+        let mut conn = if let Some(conn) = conn {
+            conn
+        } else {
+            let out_conn;
+            let mut pool = try!(inner_pool.lock());
+            loop {
+                if let Some(conn) = pool.pool.pop_front() {
+                    drop(pool);
+                    out_conn = Some(conn);
+                    break;
+                } else {
+                    if pool.count < pool.max {
+                        try!(pool.new_conn());
+                    } else {
+                        pool = if let Some((start, timeout, std_timeout)) = times {
+                            if SteadyTime::now() - start > timeout {
+                                return Err(DriverError::Timeout.into());
+                            }
+                            try!(condvar.wait_timeout(pool, std_timeout)).0
+                        } else {
+                            try!(condvar.wait(pool))
+                        }
+                    }
+                }
+            }
+            out_conn.unwrap()
+        };
+
+        if call_ping && self.check_health {
             if !conn.ping() {
                 try!(conn.reset());
             }
@@ -196,7 +195,19 @@ impl Pool {
     /// Same as `new` but you can set `min` and `max`.
     pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> MyResult<Pool> {
         let pool = try!(InnerPool::new(min, max, opts.into()));
-        Ok(Pool(Arc::new((Mutex::new(pool), Condvar::new()))))
+        Ok(Pool{
+            inner: Arc::new((Mutex::new(pool), Condvar::new())),
+            use_cache: true,
+            check_health: true,
+        })
+    }
+
+    pub fn use_cache(&mut self, use_cache: bool) {
+        self.use_cache = use_cache;
+    }
+
+    pub fn check_health(&mut self, check_health: bool) {
+        self.check_health = check_health;
     }
 
     /// Gives you a [`PooledConn`](struct.PooledConn.html).
@@ -289,7 +300,7 @@ impl Pool {
 
 impl fmt::Debug for Pool {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let pool = (self.0).0.lock().unwrap();
+        let pool = (self.inner).0.lock().unwrap();
         write!(f, "Pool {{ min: {}, max: {} }}", pool.min, pool.max)
     }
 }
@@ -350,12 +361,13 @@ pub struct PooledConn {
 
 impl Drop for PooledConn {
     fn drop(&mut self) {
-        let mut pool = (self.pool.0).0.lock().unwrap();
+        let mut pool = (self.pool.inner).0.lock().unwrap();
         if pool.count > pool.max || self.conn.is_none() {
             pool.count -= 1;
         } else {
-            pool.pool.push(self.conn.take().unwrap());
-            (self.pool.0).1.notify_one();
+            pool.pool.push_back(self.conn.take().unwrap());
+            drop(pool);
+            (self.pool.inner).1.notify_one();
         }
     }
 }
@@ -679,37 +691,37 @@ mod test {
         #[test]
         #[allow(unused_variables)]
         fn should_start_transaction_on_Pool() {
-            let pool = Pool::new(get_opts()).unwrap();
+            let pool = Pool::new_manual(1, 10, get_opts()).unwrap();
             pool.prepare("CREATE TEMPORARY TABLE x.tbl(a INT)").ok().map(|mut stmt| {
                 assert!(stmt.execute(()).is_ok());
             });
-            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+            pool.start_transaction(false, None, None).and_then(|mut t| {
+                t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
+                t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
                 t.commit()
-            }).is_ok());
+            }).unwrap();
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
                     assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                 }
             });
-            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+            pool.start_transaction(false, None, None).and_then(|mut t| {
+                t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
+                t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
                 t.rollback()
-            }).is_ok());
+            }).unwrap();
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
                     assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                 }
             });
-            assert!(pool.start_transaction(false, None, None).and_then(|mut t| {
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+            pool.start_transaction(false, None, None).and_then(|mut t| {
+                t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
+                t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
                 Ok(())
-            }).is_ok());
+            }).unwrap();
             pool.prepare("SELECT COUNT(a) FROM x.tbl").ok().map(|mut stmt| {
                 for x in stmt.execute(()).unwrap() {
                     let mut x = x.unwrap();
@@ -776,6 +788,7 @@ mod test {
         #[cfg(feature = "nightly")]
         mod bench {
             use test;
+            use std::thread;
             use Pool;
             use super::super::get_opts;
 
@@ -792,6 +805,51 @@ mod test {
                 let pool = Pool::new(get_opts()).unwrap();
                 bencher.iter(|| {
                     pool.prep_exec("SELECT 1", ()).unwrap();
+                });
+            }
+
+            #[bench]
+            fn many_prepares_threaded(bencher: &mut test::Bencher) {
+                let pool = Pool::new(get_opts()).unwrap();
+                bencher.iter(|| {
+                    let mut threads = Vec::new();
+                    for _ in 0..4 {
+                        let pool = pool.clone();
+                        threads.push(thread::spawn(move || {
+                            for _ in 0..250 {
+                                test::black_box(
+                                    pool.prep_exec("SELECT 1, 'hello world', 123.321, ?, ?, ?",
+                                                   ("hello", "world", 65536)).unwrap()
+                                );
+                            }
+                        }));
+                    }
+                    for t in threads {
+                        t.join().unwrap();
+                    }
+                });
+            }
+
+            #[bench]
+            fn many_prepares_threaded_no_cache(bencher: &mut test::Bencher) {
+                let mut pool = Pool::new(get_opts()).unwrap();
+                pool.use_cache(false);
+                bencher.iter(|| {
+                    let mut threads = Vec::new();
+                    for _ in 0..4 {
+                        let pool = pool.clone();
+                        threads.push(thread::spawn(move || {
+                            for _ in 0..250 {
+                                test::black_box(
+                                    pool.prep_exec("SELECT 1, 'hello world', 123.321, ?, ?, ?",
+                                                   ("hello", "world", 65536)).unwrap()
+                                );
+                            }
+                        }));
+                    }
+                    for t in threads {
+                        t.join().unwrap();
+                    }
                 });
             }
         }

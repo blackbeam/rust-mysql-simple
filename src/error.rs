@@ -2,6 +2,7 @@ use std::error;
 use std::fmt;
 use std::io;
 use std::result;
+use std::sync;
 
 #[cfg(feature = "openssl")]
 use openssl::ssl::error::{SslError};
@@ -154,6 +155,12 @@ impl From<SslError> for Error {
 impl From<UrlError> for Error {
     fn from(err: UrlError) -> Error {
         Error::UrlError(err)
+    }
+}
+
+impl<T> From<sync::PoisonError<T>> for Error {
+    fn from(_: sync::PoisonError<T>) -> Error {
+        Error::DriverError(DriverError::PoisonedPoolMutex)
     }
 }
 
