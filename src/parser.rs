@@ -115,17 +115,16 @@ mod test {
     mod bench {
         use test;
         use super::super::*;
-        use packet::OkPacket;
         use Column;
 
-        static column_payload: &'static [u8] = b"\x03def\x06schema\x05table\x09org_table\x04name\
+        static COLUMN_PAYLOAD: &'static [u8] = b"\x03def\x06schema\x05table\x09org_table\x04name\
                                                  \x08org_name\x0c\x00\x00\x00\x00\x00\x0F\x00\x00\
                                                  \x00\x00\x00\x00\x07default";
 
         #[bench]
         fn nom_column(bencher: &mut test::Bencher) {
             bencher.iter(|| {
-                let out = column_def(&column_payload[..]);
+                let out = column_def(&COLUMN_PAYLOAD[..]);
                 test::black_box(out);
             });
         }
@@ -133,7 +132,11 @@ mod test {
         #[bench]
         fn new_column(bencher: &mut test::Bencher) {
             bencher.iter(|| {
-                let pld = unsafe { ::std::vec::Vec::from_raw_parts(column_payload.as_ptr() as *mut u8, column_payload.len(), column_payload.len()) };
+                let pld = unsafe {
+                    ::std::vec::Vec::from_raw_parts(COLUMN_PAYLOAD.as_ptr() as *mut u8,
+                                                    COLUMN_PAYLOAD.len(),
+                                                    COLUMN_PAYLOAD.len())
+                };
                 let out = Column::from_payload(pld);
                 test::black_box(::std::mem::forget(out));
             });

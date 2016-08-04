@@ -2563,8 +2563,6 @@ mod test {
     #[cfg(feature = "nightly")]
     mod bench {
         use Column;
-        use consts::ColumnFlags;
-        use consts::ColumnType;
         use std::iter::repeat;
         use std::sync::Arc;
         use test;
