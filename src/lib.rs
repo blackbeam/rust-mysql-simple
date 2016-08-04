@@ -1,5 +1,5 @@
 //! ### rust-mysql-simple
-//! Mysql client library implemented in rust nightly.
+//! Mysql client library implemented in rust.
 //!
 //! #### Install
 //! Please use *mysql* crate:

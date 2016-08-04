@@ -57,7 +57,7 @@ impl InnerPool {
 /// invoking [`Pool::get_conn`](struct.Pool.html#method.get_conn).
 ///
 /// `Pool` will hold at least `min` connections and will create as many as `max`
-/// connections.
+/// connections with possible overhead of one connection per alive thread.
 ///
 /// Example of multithreaded `Pool` usage:
 ///
@@ -223,14 +223,18 @@ impl Pool {
         })
     }
 
+    /// A way to turn off pool level statments cache (on by default).
     pub fn use_cache(&mut self, use_cache: bool) {
         self.use_cache = use_cache;
     }
 
+    /// A way to turn off connection health check on each call to `get_conn` and `prepare`
+    /// (`prep_exec` is not affected) (on by default).
     pub fn check_health(&mut self, check_health: bool) {
         self.check_health = check_health;
     }
 
+    /// A way to turn off TLS slot usage (on by default).
     pub fn use_tls(&mut self, use_tls: bool) {
         self.use_tls = use_tls;
     }
