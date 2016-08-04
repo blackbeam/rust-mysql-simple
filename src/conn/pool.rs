@@ -1,7 +1,9 @@
 use std::borrow::Borrow;
+use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::{Arc, Mutex, Condvar};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration as StdDuration;
 
 use time::{Duration, SteadyTime};
@@ -15,13 +17,14 @@ use super::super::value::Params;
 use super::{Conn, Opts, Stmt, QueryResult};
 use super::super::error::Result as MyResult;
 
+thread_local! {
+    static TLS_CONN: UnsafeCell<Option<Conn>> = UnsafeCell::new(None)
+}
+
 #[derive(Debug)]
 struct InnerPool {
     opts: Opts,
     pool: VecDeque<Conn>,
-    min: usize,
-    max: usize,
-    count: usize
 }
 
 impl InnerPool {
@@ -32,9 +35,6 @@ impl InnerPool {
         let mut pool = InnerPool {
             opts: opts,
             pool: VecDeque::with_capacity(max),
-            max: max,
-            min: min,
-            count: 0
         };
         for _ in 0..min {
             try!(pool.new_conn());
@@ -45,7 +45,6 @@ impl InnerPool {
         match Conn::new(self.opts.clone()) {
             Ok(conn) => {
                 self.pool.push_back(conn);
-                self.count += 1;
                 Ok(())
             },
             Err(err) => Err(err)
@@ -106,8 +105,12 @@ impl InnerPool {
 #[derive(Clone)]
 pub struct Pool {
     inner: Arc<(Mutex<InnerPool>, Condvar)>,
+    min: Arc<AtomicUsize>,
+    max: Arc<AtomicUsize>,
+    count: Arc<AtomicUsize>,
     check_health: bool,
     use_cache: bool,
+    use_tls: bool,
 }
 
 impl Pool {
@@ -132,22 +135,35 @@ impl Pool {
 
         let &(ref inner_pool, ref condvar) = &*self.inner;
 
-        let conn = if self.use_cache {
-            if let Some(query) = stmt {
-                let mut id = None;
-                let mut pool = try!(inner_pool.lock());
-                for (i, conn) in pool.pool.iter().rev().enumerate() {
-                    if conn.has_stmt(query.as_ref()) {
-                        id = Some(i);
-                        break;
+        let conn = if self.use_tls {
+            TLS_CONN.with(|tls_conn| {
+                unsafe { &mut *tls_conn.get() }.take()
+            })
+        } else {
+            None
+        };
+
+        let conn = if let Some(conn) = conn {
+            self.count.fetch_add(1, Ordering::SeqCst);
+            Some(conn)
+        } else {
+            if self.use_cache {
+                if let Some(query) = stmt {
+                    let mut id = None;
+                    let mut pool = try!(inner_pool.lock());
+                    for (i, conn) in pool.pool.iter().rev().enumerate() {
+                        if conn.has_stmt(query.as_ref()) {
+                            id = Some(i);
+                            break;
+                        }
                     }
+                    id.and_then(|id| pool.pool.swap_remove_back(id))
+                } else {
+                    None
                 }
-                id.and_then(|id| pool.pool.swap_remove_back(id))
             } else {
                 None
             }
-        } else {
-            None
         };
 
         let mut conn = if let Some(conn) = conn {
@@ -161,8 +177,9 @@ impl Pool {
                     out_conn = Some(conn);
                     break;
                 } else {
-                    if pool.count < pool.max {
+                    if self.count.load(Ordering::Relaxed) < self.max.load(Ordering::Relaxed) {
                         try!(pool.new_conn());
+                        self.count.fetch_add(1, Ordering::SeqCst);
                     } else {
                         pool = if let Some((start, timeout, std_timeout)) = times {
                             if SteadyTime::now() - start > timeout {
@@ -197,8 +214,12 @@ impl Pool {
         let pool = try!(InnerPool::new(min, max, opts.into()));
         Ok(Pool{
             inner: Arc::new((Mutex::new(pool), Condvar::new())),
+            min: Arc::new(AtomicUsize::new(min)),
+            max: Arc::new(AtomicUsize::new(max)),
+            count: Arc::new(AtomicUsize::new(min)),
             use_cache: true,
             check_health: true,
+            use_tls: true,
         })
     }
 
@@ -208,6 +229,10 @@ impl Pool {
 
     pub fn check_health(&mut self, check_health: bool) {
         self.check_health = check_health;
+    }
+
+    pub fn use_tls(&mut self, use_tls: bool) {
+        self.use_tls = use_tls;
     }
 
     /// Gives you a [`PooledConn`](struct.PooledConn.html).
@@ -300,8 +325,11 @@ impl Pool {
 
 impl fmt::Debug for Pool {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let pool = (self.inner).0.lock().unwrap();
-        write!(f, "Pool {{ min: {}, max: {} }}", pool.min, pool.max)
+        write!(f,
+               "Pool {{ min: {}, max: {}, count: {} }}",
+               self.min.load(Ordering::Relaxed),
+               self.max.load(Ordering::Relaxed),
+               self.count.load(Ordering::Relaxed))
     }
 }
 
@@ -361,10 +389,27 @@ pub struct PooledConn {
 
 impl Drop for PooledConn {
     fn drop(&mut self) {
-        let mut pool = (self.pool.inner).0.lock().unwrap();
-        if pool.count > pool.max || self.conn.is_none() {
-            pool.count -= 1;
+        let out = if self.pool.use_tls {
+            TLS_CONN.with(|tls_conn| {
+                let mut val = unsafe { &mut *tls_conn.get() };
+                if val.is_none() {
+                    *val = self.conn.take();
+                    val.is_some()
+                } else {
+                    false
+                }
+            })
         } else {
+            false
+        };
+        if out {
+            self.pool.count.fetch_sub(1, Ordering::SeqCst);
+            return;
+        }
+        if self.pool.count.load(Ordering::Relaxed) > self.pool.max.load(Ordering::Relaxed) || self.conn.is_none() {
+            self.pool.count.fetch_sub(1, Ordering::SeqCst);
+        } else {
+            let mut pool = (self.pool.inner).0.lock().unwrap();
             pool.pool.push_back(self.conn.take().unwrap());
             drop(pool);
             (self.pool.inner).1.notify_one();
@@ -532,6 +577,16 @@ mod test {
             fn add(&mut self) {
                 self.x += 1;
             }
+        }
+
+        #[test]
+        fn should_not_block_when_pool_capacity_goes_to_tls() {
+            let pool = Pool::new_manual(1, 1, get_opts()).unwrap();
+            let pool1 = pool.clone();
+            thread::spawn(move || {
+                pool1.get_conn().unwrap()
+            }).join().unwrap();
+            pool.get_conn().unwrap();
         }
 
         #[test]
