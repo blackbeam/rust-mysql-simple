@@ -1085,6 +1085,13 @@ impl Conn {
         Ok(data)
     }
 
+    fn drop_packet(&mut self) -> MyResult<()> {
+        let old_seq_id = self.seq_id;
+        let seq_id = try!(self.get_mut_stream().drop_packet(old_seq_id));
+        self.seq_id = seq_id;
+        Ok(())
+    }
+
     fn write_packet(&mut self, data: &[u8]) -> MyResult<()> {
         let seq_id = self.seq_id;
         let max_allowed_packet = self.max_allowed_packet;
@@ -1523,7 +1530,7 @@ impl Conn {
     pub fn ping(&mut self) -> bool {
         match self.write_command(Command::COM_PING) {
             Ok(_) => {
-                self.read_packet().is_ok()
+                self.drop_packet().is_ok()
             },
             _ => false
         }

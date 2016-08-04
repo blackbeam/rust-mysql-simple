@@ -25,7 +25,7 @@ use std::os::unix as unix;
 #[cfg(feature = "pipe")]
 use named_pipe as np;
 
-pub trait Read: ReadBytesExt {
+pub trait Read: ReadBytesExt + io::BufRead {
     fn read_lenenc_int(&mut self) -> io::Result<u64> {
         let head_byte = try!(self.read_u8());
         let length = match head_byte {
@@ -170,6 +170,31 @@ pub trait Read: ReadBytesExt {
         }
     }
 
+    /// Drops mysql packet paylaod. Returns new seq_id.
+    fn drop_packet(&mut self, mut seq_id: u8) -> MyResult<u8> {
+        use std::io::ErrorKind::Other;
+        loop {
+            let payload_len = try!(self.read_uint::<LE>(3)) as usize;
+            let srv_seq_id = try!(self.read_u8());
+            if srv_seq_id != seq_id {
+                return Err(DriverError(PacketOutOfSync));
+            }
+            seq_id = seq_id.wrapping_add(1);
+            if payload_len == 0 {
+                break;
+            } else {
+                if try!(self.fill_buf()).len() < payload_len {
+                    return Err(io::Error::new(Other, "Unexpected EOF while reading packet").into())
+                }
+                self.consume(payload_len);
+                if payload_len != consts::MAX_PAYLOAD_LEN {
+                    break;
+                }
+            }
+        }
+        Ok(seq_id)
+    }
+
     /// Reads mysql packet payload returns it with new seq_id value.
     fn read_packet(&mut self, mut seq_id: u8) -> MyResult<(Vec<u8>, u8)> {
         use std::io::ErrorKind::Other;
@@ -199,7 +224,7 @@ pub trait Read: ReadBytesExt {
     }
 }
 
-impl<T: ReadBytesExt> Read for T {}
+impl<T: ReadBytesExt + io::BufRead> Read for T {}
 
 pub trait Write: WriteBytesExt {
     fn write_le_uint_n(&mut self, x: u64, len: usize) -> io::Result<()> {
@@ -279,6 +304,7 @@ impl Stream {
             _ => false,
         }
     }
+
     pub fn make_secure(mut self,
                        verify_peer: bool,
                        ssl_opts: &Option<(::std::path::PathBuf,
@@ -355,6 +381,60 @@ impl io::Read for Stream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
             Stream::TcpStream(Some(ref mut s)) => s.read(buf),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+}
+
+impl io::BufRead for Stream {
+    #[cfg(feature = "socket")]
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        match *self {
+            Stream::UnixStream(ref mut s) => s.fill_buf(),
+            Stream::TcpStream(Some(ref mut s)) => s.fill_buf(),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(feature = "pipe")]
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        match *self {
+            Stream::PipeStream(ref mut s) => s.fill_buf(),
+            Stream::TcpStream(Some(ref mut s)) => s.fill_buf(),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        match *self {
+            Stream::TcpStream(Some(ref mut s)) => s.fill_buf(),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(feature = "socket")]
+    fn consume(&mut self, amt: usize) {
+        match *self {
+            Stream::UnixStream(ref mut s) => s.consume(amt),
+            Stream::TcpStream(Some(ref mut s)) => s.consume(amt),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(feature = "pipe")]
+    fn consume(&mut self, amt: usize) {
+        match *self {
+            Stream::PipeStream(ref mut s) => s.consume(amt),
+            Stream::TcpStream(Some(ref mut s)) => s.consume(amt),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+
+    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
+    fn consume(&mut self, amt: usize) {
+        match *self {
+            Stream::TcpStream(Some(ref mut s)) => s.consume(amt),
             _ => panic!("Incomplete stream"),
         }
     }
@@ -454,6 +534,38 @@ impl io::Read for TcpStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
             TcpStream::Insecure(ref mut s) => s.read(buf),
+        }
+    }
+}
+
+impl io::BufRead for TcpStream {
+    #[cfg(feature = "ssl")]
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        match *self {
+            TcpStream::Secure(ref mut s) => s.fill_buf(),
+            TcpStream::Insecure(ref mut s) => s.fill_buf(),
+        }
+    }
+
+    #[cfg(not(feature = "ssl"))]
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        match *self {
+            TcpStream::Insecure(ref mut s) => s.fill_buf(),
+        }
+    }
+
+    #[cfg(feature = "ssl")]
+    fn consume(&mut self, amt: usize) {
+        match *self {
+            TcpStream::Secure(ref mut s) => s.consume(amt),
+            TcpStream::Insecure(ref mut s) => s.consume(amt),
+        }
+    }
+
+    #[cfg(not(feature = "ssl"))]
+    fn consume(&mut self, amt: usize) {
+        match *self {
+            TcpStream::Insecure(ref mut s) => s.consume(amt),
         }
     }
 }
