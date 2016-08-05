@@ -293,7 +293,7 @@ impl Pool {
     }
 
     /// See [`Conn::first_exec`](../struct.Conn.html#method.first_exec).
-    pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    pub fn first_exec<Q, P>(&self, query: Q, params: P) -> MyResult<Option<Row>>
     where Q: AsRef<str>,
           P: Into<Params>,
     {
