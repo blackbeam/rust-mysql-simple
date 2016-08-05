@@ -598,39 +598,22 @@ mod test {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
 
-            let mut id = 0u32;
-            for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
-                let info: Option<String> = row.take(7).unwrap();
-                match info {
-                    Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
-                        id = row.take(0).unwrap();
-                    },
-                    _ => (),
-                }
-            }
+            let row = pool.first_exec("SELECT CONNECTION_ID();", ()).unwrap().unwrap();
+            let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-
             pool.prepare("SHOW FULL PROCESSLIST").unwrap();
         }
+
         #[test]
         fn should_fix_connectivity_errors_on_prep_exec() {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
 
-            let mut id = 0u32;
-            for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
-                let info: Option<String> = row.take(7).unwrap();
-                match info {
-                    Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
-                        id = row.take(0).unwrap();
-                    },
-                    _ => (),
-                }
-            }
+            let row = pool.first_exec("SELECT CONNECTION_ID();", ()).unwrap().unwrap();
+            let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-
             pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap();
         }
         #[test]
@@ -638,16 +621,8 @@ mod test {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
 
-            let mut id = 0u32;
-            for mut row in pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap().flat_map(|x| x) {
-                let info: Option<String> = row.take(7).unwrap();
-                match info {
-                    Some(ref info) => if info == "SHOW FULL PROCESSLIST" {
-                        id = row.take(0).unwrap();
-                    },
-                    _ => (),
-                }
-            }
+            let row = pool.first_exec("SELECT CONNECTION_ID();", ()).unwrap().unwrap();
+            let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
 
