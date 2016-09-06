@@ -51,7 +51,7 @@ pub fn parse_named_params<'a>(query: &'a str) -> MyResult<(Option<Vec<String>>, 
             },
             InNamedParam => {
                 match c {
-                    'a' ... 'z' | '_' => params[cur_param].2.push(c),
+                    'a' ... 'z' | '0' ... '9' | '_' => params[cur_param].2.push(c),
                     _ => {
                         params[cur_param].1 = i;
                         cur_param += 1;
@@ -121,6 +121,15 @@ mod test {
             DriverError(MixedParams) => (),
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn should_allow_numbers_in_param_name() {
+        let result = parse_named_params(":a1 :a2").unwrap();
+        assert_eq!((Some(vec!["a1".to_string(), "a2".to_string()]), "? ?".into()), result);
+
+        let result = parse_named_params(":1a :2a").unwrap();
+        assert_eq!((None, ":1a :2a".into()), result);
     }
 
     #[cfg(feature = "nightly")]
