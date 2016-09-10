@@ -187,6 +187,16 @@ impl HandshakePacket {
                          capability_flags: capability_flags, character_set: character_set,
                          status_flags: status_flags, auth_plugin_name: auth_plugin_name})
     }
+    pub fn get_default_collation(&self) -> u8 {
+        // MySQL version 5.5.3 introduced "utf8mb4"
+        if self.server_version >= (5, 5, 3) {
+            // This is a true UTF-8 collation, which supports the full range of code-points
+            consts::UTF8MB4_GENERAL_CI
+        } else {
+            // Fall-back to the "utf8" collation which only supports up to 3-byte code-points
+            consts::UTF8_GENERAL_CI
+        }
+    }
 }
 
 #[cfg(test)]
