@@ -54,7 +54,10 @@ mysqld --no-defaults \
        --ssl-cipher=DHE-RSA-AES256-SHA \
        --socket=$(MYSQL_DATA_DIR)/mysqld.sock &
 
-sleep 10
+while ! nc -z 127.0.0.1 $(MYSQL_PORT); \
+do \
+    sleep 0.5; \
+done
 
 if [ -e ~/.mysql_secret ]; \
 then \
