@@ -15,6 +15,8 @@ use std::ops::{
 use std::path;
 use std::str::from_utf8;
 use std::sync::Arc;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use super::consts;
 use super::consts::Command;
@@ -163,6 +165,15 @@ impl<'a> Transaction<'a> {
         try!(self.conn.query("ROLLBACK"));
         self.rolled_back = true;
         Ok(())
+    }
+
+    pub fn set_local_infile_handler<
+        F: for<'b> FnMut(&'b [u8], &'b mut LocalInfile) -> io::Result<()> + 'static
+    >(&mut self, f: F) {
+        self.conn.set_local_infile_handler(f);
+    }
+    pub fn clear_local_infile_handler(&mut self) {
+        self.conn.clear_local_infile_handler();
     }
 }
 
@@ -711,6 +722,49 @@ pub struct Conn {
     last_command: u8,
     connected: bool,
     has_results: bool,
+    local_infile_handler: Option<LocalInfileHandler>
+}
+
+#[derive(Clone)]
+struct LocalInfileHandler(
+    Rc<RefCell<
+        for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()>
+    >>
+);
+
+impl fmt::Debug for LocalInfileHandler {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "LocalInfileHandler(...)")
+    }
+}
+
+#[derive(Debug)]
+pub struct LocalInfile<'a> {
+    buffer: io::Cursor<Box<[u8]>>,
+    conn: &'a mut Conn
+}
+
+impl<'a> NewWrite for LocalInfile<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let result = self.buffer.write(buf);
+        if let Ok(n) = result {
+            if n < buf.len() {
+                try!(self.flush());
+            }
+        }
+        result
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        let n = self.buffer.position() as usize;
+        if n > 0 {
+            let range = &self.buffer.get_ref()[..n];
+            try!(self.conn.write_packet(range).map_err(|e| {
+                io::Error::new(io::ErrorKind::Other, Box::new(e))
+            }));
+        }
+        self.buffer.set_position(0);
+        Ok(())
+    }
 }
 
 impl Conn {
@@ -731,6 +785,7 @@ impl Conn {
             connected: false,
             has_results: false,
             server_version: (0, 0, 0),
+            local_infile_handler: None
         }
     }
 
@@ -1393,26 +1448,24 @@ impl Conn {
     }
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
-        let path = String::from_utf8_lossy(file_name);
-        let path = path.into_owned();
-        let path: path::PathBuf = path.into();
-        let mut file = try!(fs::File::open(&path));
-        let mut chunk = vec![0u8; self.max_allowed_packet];
-        let mut r = file.read(&mut chunk[..]);
-        loop {
-            match r {
-                Ok(n) => {
-                    if n > 0 {
-                        try!(self.write_packet(&chunk[..n]));
-                    } else {
-                        break;
-                    }
-                },
-                Err(e) => {
-                    return Err(IoError(e));
-                }
-            }
-            r = file.read(&mut chunk[..]);
+        {
+            let chunk = vec![0u8; self.max_allowed_packet].into_boxed_slice();
+            let maybe_handler = self.local_infile_handler.clone();
+            let mut local_infile = LocalInfile {
+                buffer: io::Cursor::new(chunk),
+                conn: self
+            };
+            if let Some(handler) = maybe_handler {
+                let mut handler_fn = &mut *handler.0.borrow_mut();
+                try!(handler_fn(file_name, &mut local_infile));
+            } else {
+                let path = String::from_utf8_lossy(file_name);
+                let path = path.into_owned();
+                let path: path::PathBuf = path.into();
+                let mut file = try!(fs::File::open(&path));
+                try!(io::copy(&mut file, &mut local_infile));
+            };
+            try!(local_infile.flush());
         }
         try!(self.write_packet(&[]));
         let pld = try!(self.read_packet());
@@ -1765,6 +1818,15 @@ impl Conn {
 
     fn has_stmt(&self, query: &str) -> bool {
         self.stmts.contains_key(query)
+    }
+
+    pub fn set_local_infile_handler<
+        F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + 'static
+    >(&mut self, f: F) {
+        self.local_infile_handler = Some(LocalInfileHandler(Rc::new(RefCell::new(f))));
+    }
+    pub fn clear_local_infile_handler(&mut self) {
+        self.local_infile_handler = None;
     }
 }
 
