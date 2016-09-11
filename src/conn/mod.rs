@@ -14,9 +14,7 @@ use std::ops::{
 };
 use std::path;
 use std::str::from_utf8;
-use std::sync::Arc;
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 use super::consts;
 use super::consts::Command;
@@ -168,7 +166,7 @@ impl<'a> Transaction<'a> {
     }
 
     pub fn set_local_infile_handler<
-        F: for<'b> FnMut(&'b [u8], &'b mut LocalInfile) -> io::Result<()> + 'static
+        F: for<'b> FnMut(&'b [u8], &'b mut LocalInfile) -> io::Result<()> + Send + 'static
     >(&mut self, f: F) {
         self.conn.set_local_infile_handler(f);
     }
@@ -727,8 +725,8 @@ pub struct Conn {
 
 #[derive(Clone)]
 struct LocalInfileHandler(
-    Rc<RefCell<
-        for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()>
+    Arc<Mutex<
+        for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send
     >>
 );
 
@@ -1456,7 +1454,10 @@ impl Conn {
                 conn: self
             };
             if let Some(handler) = maybe_handler {
-                let mut handler_fn = &mut *handler.0.borrow_mut();
+                // Unwrap won't panic because we have exclusive access to `self` and this
+                // method is not re-entrant, because `LocalInfile` does not expose the
+                // connection.
+                let mut handler_fn = &mut *handler.0.lock().unwrap();
                 try!(handler_fn(file_name, &mut local_infile));
             } else {
                 let path = String::from_utf8_lossy(file_name);
@@ -1821,9 +1822,9 @@ impl Conn {
     }
 
     pub fn set_local_infile_handler<
-        F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + 'static
+        F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send + 'static
     >(&mut self, f: F) {
-        self.local_infile_handler = Some(LocalInfileHandler(Rc::new(RefCell::new(f))));
+        self.local_infile_handler = Some(LocalInfileHandler(Arc::new(Mutex::new(f))));
     }
     pub fn clear_local_infile_handler(&mut self) {
         self.local_infile_handler = None;
