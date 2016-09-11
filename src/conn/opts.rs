@@ -10,6 +10,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use super::super::error::UrlError;
+use super::LocalInfileHandler;
 
 use url::Url;
 use url::percent_encoding::percent_decode;
@@ -69,6 +70,14 @@ pub struct Opts {
     ///
     /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
     ssl_opts: SslOpts,
+
+    /// Callback to handle requests for local files. These are
+    /// caused by using `LOAD DATA LOCAL INFILE` queries. The
+    /// callback is passed the filename, and a `Write`able object
+    /// to receive the contents of that file.
+    /// If unset, the default callback will read files relative to
+    /// the current directory.
+    local_infile_handler: Option<LocalInfileHandler>
 }
 
 impl Opts {
@@ -191,6 +200,11 @@ impl Opts {
     fn set_verify_peer(&mut self, val: bool) {
         ()
     }
+
+    /// Callback to handle requests for local files.
+    pub fn get_local_infile_handler(&self) -> &Option<LocalInfileHandler> {
+        &self.local_infile_handler
+    }
 }
 
 #[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
@@ -207,6 +221,7 @@ impl Default for Opts {
             write_timeout: None,
             prefer_socket: true,
             init: vec![],
+            local_infile_handler: None
         }
     }
 }
@@ -223,6 +238,7 @@ impl Default for Opts {
             read_timeout: None,
             write_timeout: None,
             init: vec![],
+            local_infile_handler: None
         }
     }
 }
@@ -241,6 +257,7 @@ impl Default for Opts {
             write_timeout: None,
             prefer_socket: true,
             init: vec![],
+            local_infile_handler: None
         }
     }
 }
@@ -259,6 +276,7 @@ impl Default for Opts {
             init: vec![],
             verify_peer: false,
             ssl_opts: None,
+            local_infile_handler: None
         }
     }
 }
@@ -279,6 +297,7 @@ impl Default for Opts {
             verify_peer: false,
             prefer_socket: true,
             ssl_opts: None,
+            local_infile_handler: None
         }
     }
 }
@@ -299,6 +318,7 @@ impl Default for Opts {
             init: vec![],
             verify_peer: false,
             ssl_opts: None,
+            local_infile_handler: None
         }
     }
 }
@@ -434,6 +454,17 @@ impl OptsBuilder {
                 (client_cert.into(), client_key.into())
             }))
         });
+        self
+    }
+
+    /// Callback to handle requests for local files. These are
+    /// caused by using `LOAD DATA LOCAL INFILE` queries. The
+    /// callback is passed the filename, and a `Write`able object
+    /// to receive the contents of that file.
+    /// If unset, the default callback will read files relative to
+    /// the current directory.
+    pub fn local_infile_handler(&mut self, handler: LocalInfileHandler) -> &mut Self {
+        self.opts.local_infile_handler = Some(handler);
         self
     }
 }

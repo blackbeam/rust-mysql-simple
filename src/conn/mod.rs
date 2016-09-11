@@ -93,22 +93,27 @@ pub struct Transaction<'a> {
     conn: ConnRef<'a>,
     committed: bool,
     rolled_back: bool,
+    restore_local_infile_handler: Option<LocalInfileHandler>
 }
 
 impl<'a> Transaction<'a> {
     fn new(conn: &'a mut Conn) -> Transaction<'a> {
+        let handler = conn.local_infile_handler.clone();
         Transaction {
             conn: ConnRef::ViaConnRef(conn),
             committed: false,
             rolled_back: false,
+            restore_local_infile_handler: handler
         }
     }
 
     fn new_pooled(conn: pool::PooledConn) -> Transaction<'a> {
+        let handler = conn.as_ref().local_infile_handler.clone();
         Transaction {
             conn: ConnRef::ViaPooledConn(conn),
             committed: false,
             rolled_back: false,
+            restore_local_infile_handler: handler
         }
     }
 
@@ -165,13 +170,8 @@ impl<'a> Transaction<'a> {
         Ok(())
     }
 
-    pub fn set_local_infile_handler<
-        F: for<'b> FnMut(&'b [u8], &'b mut LocalInfile) -> io::Result<()> + Send + 'static
-    >(&mut self, f: F) {
-        self.conn.set_local_infile_handler(f);
-    }
-    pub fn clear_local_infile_handler(&mut self) {
-        self.conn.clear_local_infile_handler();
+    pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
+        self.conn.set_local_infile_handler(handler);
     }
 }
 
@@ -181,6 +181,7 @@ impl<'a> Drop for Transaction<'a> {
         if ! self.committed && ! self.rolled_back {
             let _ = self.conn.query("ROLLBACK");
         }
+        self.conn.local_infile_handler = self.restore_local_infile_handler.take();
     }
 }
 
@@ -688,6 +689,68 @@ impl<'a> ColumnIndex for &'a str {
     }
 }
 
+/// Callback to handle requests for local files.
+#[derive(Clone)]
+pub struct LocalInfileHandler(
+    Arc<Mutex<
+        for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send
+    >>
+);
+
+impl LocalInfileHandler {
+    pub fn new<
+        F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send + 'static
+    >(f: F) -> Self {
+        LocalInfileHandler(Arc::new(Mutex::new(f)))
+    }
+}
+
+impl PartialEq for LocalInfileHandler {
+    fn eq(&self, other: &LocalInfileHandler) -> bool {
+        (&*self.0 as *const _) == (&*other.0 as *const _)
+    }
+}
+
+impl Eq for LocalInfileHandler {}
+
+impl fmt::Debug for LocalInfileHandler {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "LocalInfileHandler(...)")
+    }
+}
+
+/// Local in-file stream.
+/// The callback will be passed a reference to this stream, which it
+/// should use to write the contents of the requested file.
+#[derive(Debug)]
+pub struct LocalInfile<'a> {
+    buffer: io::Cursor<Box<[u8]>>,
+    conn: &'a mut Conn
+}
+
+impl<'a> NewWrite for LocalInfile<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let result = self.buffer.write(buf);
+        if let Ok(n) = result {
+            if n < buf.len() {
+                try!(self.flush());
+            }
+        }
+        result
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        let n = self.buffer.position() as usize;
+        if n > 0 {
+            let range = &self.buffer.get_ref()[..n];
+            try!(self.conn.write_packet(range).map_err(|e| {
+                io::Error::new(io::ErrorKind::Other, Box::new(e))
+            }));
+        }
+        self.buffer.set_position(0);
+        Ok(())
+    }
+}
+
 /***
  *    888b     d888           .d8888b.
  *    8888b   d8888          d88P  Y88b
@@ -721,48 +784,6 @@ pub struct Conn {
     connected: bool,
     has_results: bool,
     local_infile_handler: Option<LocalInfileHandler>
-}
-
-#[derive(Clone)]
-struct LocalInfileHandler(
-    Arc<Mutex<
-        for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send
-    >>
-);
-
-impl fmt::Debug for LocalInfileHandler {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "LocalInfileHandler(...)")
-    }
-}
-
-#[derive(Debug)]
-pub struct LocalInfile<'a> {
-    buffer: io::Cursor<Box<[u8]>>,
-    conn: &'a mut Conn
-}
-
-impl<'a> NewWrite for LocalInfile<'a> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let result = self.buffer.write(buf);
-        if let Ok(n) = result {
-            if n < buf.len() {
-                try!(self.flush());
-            }
-        }
-        result
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        let n = self.buffer.position() as usize;
-        if n > 0 {
-            let range = &self.buffer.get_ref()[..n];
-            try!(self.conn.write_packet(range).map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, Box::new(e))
-            }));
-        }
-        self.buffer.set_position(0);
-        Ok(())
-    }
 }
 
 impl Conn {
@@ -1448,7 +1469,9 @@ impl Conn {
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
         {
             let chunk = vec![0u8; self.max_allowed_packet].into_boxed_slice();
-            let maybe_handler = self.local_infile_handler.clone();
+            let maybe_handler = self.local_infile_handler.clone().or_else(|| {
+                self.opts.get_local_infile_handler().clone()
+            });
             let mut local_infile = LocalInfile {
                 buffer: io::Cursor::new(chunk),
                 conn: self
@@ -1821,13 +1844,14 @@ impl Conn {
         self.stmts.contains_key(query)
     }
 
-    pub fn set_local_infile_handler<
-        F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send + 'static
-    >(&mut self, f: F) {
-        self.local_infile_handler = Some(LocalInfileHandler(Arc::new(Mutex::new(f))));
-    }
-    pub fn clear_local_infile_handler(&mut self) {
-        self.local_infile_handler = None;
+    /// Sets a callback to handle requests for local files. These are
+    /// caused by using `LOAD DATA LOCAL INFILE` queries. The
+    /// callback is passed the filename, and a `Write`able object
+    /// to receive the contents of that file.
+    /// Specifying `None` will reset the handler to the one specified
+    /// in the `Opts` for this connection.
+    pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
+        self.local_infile_handler = handler;
     }
 }
 

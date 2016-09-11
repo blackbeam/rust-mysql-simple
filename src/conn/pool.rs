@@ -16,6 +16,7 @@ use super::super::error::{Error, DriverError};
 use super::super::value::Params;
 use super::{Conn, Opts, Stmt, QueryResult};
 use super::super::error::Result as MyResult;
+use super::LocalInfileHandler;
 
 thread_local! {
     static TLS_CONN: UnsafeCell<Option<Conn>> = UnsafeCell::new(None)
@@ -423,12 +424,12 @@ impl Drop for PooledConn {
 
 impl PooledConn {
     /// Redirects to
-    /// [`Conn#query`](../struct.Conn.html#method.query).
+    /// [`Conn#query`](struct.Conn.html#method.query).
     pub fn query<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<QueryResult<'a>> {
         self.conn.as_mut().unwrap().query(query)
     }
 
-    /// See [`Conn::first`](../struct.Conn.html#method.first).
+    /// See [`Conn::first`](struct.Conn.html#method.first).
     pub fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
         self.query(query).and_then(|result| {
             for row in result {
@@ -439,19 +440,19 @@ impl PooledConn {
     }
 
 
-    /// See [`Conn::prepare`](../struct.Conn.html#method.prepare).
+    /// See [`Conn::prepare`](struct.Conn.html#method.prepare).
     pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
         self.conn.as_mut().unwrap().prepare(query)
     }
 
-    /// See [`Conn::prep_exec`](../struct.Conn.html#method.prep_exec).
+    /// See [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
     pub fn prep_exec<'a, A, T>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
     where A: AsRef<str> + 'a,
           T: Into<Params> {
         self.conn.as_mut().unwrap().prep_exec(query, params)
     }
 
-    /// See [`Conn::first_exec`](../struct.Conn.html#method.first_exec).
+    /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
     pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
     where Q: AsRef<str>,
           P: Into<Params>,
@@ -465,7 +466,7 @@ impl PooledConn {
     }
 
     /// Redirects to
-    /// [`Conn#start_transaction`](../struct.Conn.html#method.start_transaction)
+    /// [`Conn#start_transaction`](struct.Conn.html#method.start_transaction)
     pub fn start_transaction<'a>(&'a mut self,
                                  consistent_snapshot: bool,
                                  isolation_level: Option<IsolationLevel>,
@@ -476,18 +477,18 @@ impl PooledConn {
     }
 
     /// Gives mutable reference to the wrapped
-    /// [`Conn`](../struct.Conn.html).
+    /// [`Conn`](struct.Conn.html).
     pub fn as_mut<'a>(&'a mut self) -> &'a mut Conn {
         self.conn.as_mut().unwrap()
     }
 
     /// Gives reference to the wrapped
-    /// [`Conn`](../struct.Conn.html).
+    /// [`Conn`](struct.Conn.html).
     pub fn as_ref<'a>(&'a self) -> &'a Conn {
         self.conn.as_ref().unwrap()
     }
 
-    /// Unwraps wrapped [`Conn`](../struct.Conn.html).
+    /// Unwraps wrapped [`Conn`](struct.Conn.html).
     pub fn unwrap(mut self) -> Conn {
         self.conn.take().unwrap()
     }
@@ -518,6 +519,11 @@ impl PooledConn {
                                                       isolation_level,
                                                       readonly));
         Ok(Transaction::new_pooled(self))
+    }
+
+    /// See [`Conn::set_local_infile_handler`](struct.Conn.html#method.set_local_infile_handler).
+    pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
+        self.conn.as_mut().unwrap().set_local_infile_handler(handler);
     }
 }
 
