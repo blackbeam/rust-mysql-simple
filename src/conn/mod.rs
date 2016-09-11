@@ -1121,7 +1121,7 @@ impl Conn {
                             if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
                                 return Err(DriverError(SslNotSupported));
                             } else {
-                                try!(self.do_ssl_request());
+                                try!(self.do_ssl_request(&handshake));
                                 try!(self.switch_to_ssl());
                             }
                         }
@@ -1192,14 +1192,14 @@ impl Conn {
     }
 
     #[cfg(feature = "ssl")]
-    fn do_ssl_request(&mut self) -> MyResult<()> {
+    fn do_ssl_request(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let client_flags = self.get_client_flags();
         let mut buf = [0; 4 + 4 + 1 + 23];
         {
             let mut writer = &mut buf[..];
             try!(writer.write_u32::<LE>(client_flags.bits()));
             try!(writer.write_all(&[0u8; 4]));
-            try!(writer.write_u8(consts::UTF8_GENERAL_CI));
+            try!(writer.write_u8(hp.get_default_collation()));
             try!(writer.write_all(&[0u8; 23]));
         }
         self.write_packet(&buf[..])
@@ -1224,7 +1224,7 @@ impl Conn {
             let mut writer = &mut *buf;
             try!(writer.write_u32::<LE>(client_flags.bits()));
             try!(writer.write_all(&[0u8; 4]));
-            try!(writer.write_u8(consts::UTF8_GENERAL_CI));
+            try!(writer.write_u8(hp.get_default_collation()));
             try!(writer.write_all(&[0u8; 23]));
             if let &Some(ref user) = self.opts.get_user() {
                 try!(writer.write_all(user.as_bytes()));

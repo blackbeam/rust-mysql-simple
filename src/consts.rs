@@ -3,6 +3,7 @@ pub static MAX_PACKET_LEN: usize = 16777219;
 pub static MAX_PAYLOAD_LEN: usize = 16777215;
 
 pub static UTF8_GENERAL_CI: u8 = 33u8;
+pub static UTF8MB4_GENERAL_CI: u8 = 45u8;
 
 /// Server status flags
 bitflags! {
