@@ -731,8 +731,8 @@ pub struct LocalInfile<'a> {
 impl<'a> NewWrite for LocalInfile<'a> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let result = self.buffer.write(buf);
-        if let Ok(n) = result {
-            if n < buf.len() {
+        if let Ok(_) = result {
+            if self.buffer.position() as usize >= self.buffer.get_ref().len() {
                 try!(self.flush());
             }
         }
