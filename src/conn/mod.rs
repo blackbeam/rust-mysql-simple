@@ -690,6 +690,66 @@ impl<'a> ColumnIndex for &'a str {
 }
 
 /// Callback to handle requests for local files.
+/// Consult [Mysql documentation](https://dev.mysql.com/doc/refman/5.7/en/load-data.html) for the
+/// format of local infile data.
+///
+/// ```rust
+/// # use std::io::Write;
+/// # use mysql::LocalInfileHandler;
+/// # use mysql::conn::pool;
+/// # use mysql::conn::{Opts, OptsBuilder};
+/// # use mysql::value::{from_value, from_row, ToValue, Value};
+/// # use std::thread::Thread;
+/// # use std::default::Default;
+/// # use std::iter::repeat;
+/// # fn get_opts() -> Opts {
+/// #     let USER = "root";
+/// #     let ADDR = "127.0.0.1";
+/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
+/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
+/// #                                .unwrap_or(3307);
+/// #     let mut builder = OptsBuilder::default();
+/// #     builder.user(Some(USER))
+/// #            .pass(Some(pwd))
+/// #            .ip_or_hostname(Some(ADDR))
+/// #            .tcp_port(port)
+/// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+/// #     builder.into()
+/// # }
+/// # let opts = get_opts();
+/// # let pool = pool::Pool::new_manual(1, 1, opts).unwrap();
+/// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ());
+/// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
+/// #                (1, "John", 17, "foo@bar.baz"));
+/// # let mut conn = pool.get_conn().unwrap();
+/// conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").unwrap();
+///
+/// conn.set_local_infile_handler(Some(
+///     LocalInfileHandler::new(|file_name, writer| {
+///         try!(writer.write_all(b"row1: file name is "));
+///         try!(writer.write_all(file_name));
+///         try!(writer.write_all(b"\n"));
+///
+///         writer.write_all(b"row2: foobar\n")
+///     })
+/// ));
+///
+/// conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE x.tbl").unwrap();
+///
+/// let mut row_num = 0;
+/// for (row_idx, row) in conn.query("SELECT * FROM x.tbl").unwrap().enumerate() {
+///     row_num = row_idx + 1;
+///     let row: (String,) = from_row(row.unwrap());
+///     match row_num {
+///         1 => assert_eq!(row.0, "row1: file name is file_name"),
+///         2 => assert_eq!(row.0, "row2: foobar"),
+///         _ => unreachable!(),
+///     }
+/// }
+///
+/// assert_eq!(row_num, 2);
+/// ```
 #[derive(Clone)]
 pub struct LocalInfileHandler(
     Arc<Mutex<
@@ -722,6 +782,7 @@ impl fmt::Debug for LocalInfileHandler {
 /// Local in-file stream.
 /// The callback will be passed a reference to this stream, which it
 /// should use to write the contents of the requested file.
+/// See [LocalInfileHandler](struct.LocalInfileHandler.html) documentation for example.
 #[derive(Debug)]
 pub struct LocalInfile<'a> {
     buffer: io::Cursor<Box<[u8]>>,
