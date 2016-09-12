@@ -93,7 +93,7 @@ pub struct Transaction<'a> {
     conn: ConnRef<'a>,
     committed: bool,
     rolled_back: bool,
-    restore_local_infile_handler: Option<LocalInfileHandler>
+    restore_local_infile_handler: Option<LocalInfileHandler>,
 }
 
 impl<'a> Transaction<'a> {
@@ -103,7 +103,7 @@ impl<'a> Transaction<'a> {
             conn: ConnRef::ViaConnRef(conn),
             committed: false,
             rolled_back: false,
-            restore_local_infile_handler: handler
+            restore_local_infile_handler: handler,
         }
     }
 
@@ -113,7 +113,7 @@ impl<'a> Transaction<'a> {
             conn: ConnRef::ViaPooledConn(conn),
             committed: false,
             rolled_back: false,
-            restore_local_infile_handler: handler
+            restore_local_infile_handler: handler,
         }
     }
 
@@ -698,9 +698,9 @@ pub struct LocalInfileHandler(
 );
 
 impl LocalInfileHandler {
-    pub fn new<
-        F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send + 'static
-    >(f: F) -> Self {
+    pub fn new<F>(f: F) -> Self
+    where F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send + 'static
+    {
         LocalInfileHandler(Arc::new(Mutex::new(f)))
     }
 }
@@ -725,7 +725,7 @@ impl fmt::Debug for LocalInfileHandler {
 #[derive(Debug)]
 pub struct LocalInfile<'a> {
     buffer: io::Cursor<Box<[u8]>>,
-    conn: &'a mut Conn
+    conn: &'a mut Conn,
 }
 
 impl<'a> NewWrite for LocalInfile<'a> {
@@ -783,7 +783,7 @@ pub struct Conn {
     last_command: u8,
     connected: bool,
     has_results: bool,
-    local_infile_handler: Option<LocalInfileHandler>
+    local_infile_handler: Option<LocalInfileHandler>,
 }
 
 impl Conn {

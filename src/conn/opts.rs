@@ -77,7 +77,7 @@ pub struct Opts {
     /// to receive the contents of that file.
     /// If unset, the default callback will read files relative to
     /// the current directory.
-    local_infile_handler: Option<LocalInfileHandler>
+    local_infile_handler: Option<LocalInfileHandler>,
 }
 
 impl Opts {
@@ -221,7 +221,7 @@ impl Default for Opts {
             write_timeout: None,
             prefer_socket: true,
             init: vec![],
-            local_infile_handler: None
+            local_infile_handler: None,
         }
     }
 }
@@ -238,7 +238,7 @@ impl Default for Opts {
             read_timeout: None,
             write_timeout: None,
             init: vec![],
-            local_infile_handler: None
+            local_infile_handler: None,
         }
     }
 }
@@ -257,7 +257,7 @@ impl Default for Opts {
             write_timeout: None,
             prefer_socket: true,
             init: vec![],
-            local_infile_handler: None
+            local_infile_handler: None,
         }
     }
 }
@@ -276,7 +276,7 @@ impl Default for Opts {
             init: vec![],
             verify_peer: false,
             ssl_opts: None,
-            local_infile_handler: None
+            local_infile_handler: None,
         }
     }
 }
@@ -297,7 +297,7 @@ impl Default for Opts {
             verify_peer: false,
             prefer_socket: true,
             ssl_opts: None,
-            local_infile_handler: None
+            local_infile_handler: None,
         }
     }
 }
@@ -318,7 +318,7 @@ impl Default for Opts {
             init: vec![],
             verify_peer: false,
             ssl_opts: None,
-            local_infile_handler: None
+            local_infile_handler: None,
         }
     }
 }
