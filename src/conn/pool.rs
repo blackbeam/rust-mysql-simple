@@ -414,6 +414,7 @@ impl Drop for PooledConn {
         if self.pool.count.load(Ordering::Relaxed) > self.pool.max.load(Ordering::Relaxed) || self.conn.is_none() {
             self.pool.count.fetch_sub(1, Ordering::SeqCst);
         } else {
+            self.conn.as_mut().unwrap().set_local_infile_handler(None);
             let mut pool = (self.pool.inner).0.lock().unwrap();
             pool.pool.push_back(self.conn.take().unwrap());
             drop(pool);
@@ -521,6 +522,8 @@ impl PooledConn {
         Ok(Transaction::new_pooled(self))
     }
 
+    /// A way to override default local infile handler for this pooled connection. Destructor will
+    /// restore original handler before returning connection to a pool.
     /// See [`Conn::set_local_infile_handler`](struct.Conn.html#method.set_local_infile_handler).
     pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
         self.conn.as_mut().unwrap().set_local_infile_handler(handler);
