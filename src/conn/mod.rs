@@ -728,7 +728,7 @@ pub struct LocalInfile<'a> {
     conn: &'a mut Conn,
 }
 
-impl<'a> NewWrite for LocalInfile<'a> {
+impl<'a> io::Write for LocalInfile<'a> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let result = self.buffer.write(buf);
         if let Ok(_) = result {
