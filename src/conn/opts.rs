@@ -463,8 +463,8 @@ impl OptsBuilder {
     /// to receive the contents of that file.
     /// If unset, the default callback will read files relative to
     /// the current directory.
-    pub fn local_infile_handler(&mut self, handler: LocalInfileHandler) -> &mut Self {
-        self.opts.local_infile_handler = Some(handler);
+    pub fn local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) -> &mut Self {
+        self.opts.local_infile_handler = handler;
         self
     }
 }
