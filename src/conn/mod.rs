@@ -170,6 +170,8 @@ impl<'a> Transaction<'a> {
         Ok(())
     }
 
+    /// A way to override local infile handler for this transaction.
+    /// Destructor of transaction will restore original handler.
     pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
         self.conn.set_local_infile_handler(handler);
     }
