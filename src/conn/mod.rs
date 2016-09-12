@@ -2233,6 +2233,7 @@ mod test {
         use Error::DriverError;
         use OptsBuilder;
         use Params;
+        use LocalInfileHandler;
         use super::super::super::value::{ToValue, from_value, from_row};
         use super::super::super::value::Value::{NULL, Int, Bytes, Date};
         use super::get_opts;
@@ -2462,6 +2463,27 @@ mod test {
                 }
             }
             let _ = fs::remove_file(&path);
+        }
+        #[test]
+        fn should_handle_LOCAL_INFILE_with_custom_handler() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
+            conn.set_local_infile_handler(Some(
+                LocalInfileHandler::new(|file_name, stream| {
+                    try!(stream.write_all(file_name));
+                    stream.write_all(b"\nBBBBBB\n")
+                })
+            ));
+            conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE x.tbl").unwrap();
+            for (i, row) in conn.query("SELECT * FROM x.tbl")
+                .unwrap().enumerate() {
+                let row = row.unwrap();
+                match i {
+                    0 => assert_eq!(row.unwrap(), vec!(Bytes(b"file_name".to_vec()))),
+                    1 => assert_eq!(row.unwrap(), vec!(Bytes(b"BBBBBB".to_vec()))),
+                    _ => unreachable!()
+                }
+            }
         }
         #[test]
         fn should_reset_connection() {
