@@ -186,6 +186,10 @@ pub use conn::Column;
 #[doc(inline)]
 pub use conn::Conn;
 #[doc(inline)]
+pub use conn::LocalInfile;
+#[doc(inline)]
+pub use conn::LocalInfileHandler;
+#[doc(inline)]
 pub use conn::IsolationLevel;
 #[doc(inline)]
 pub use conn::Opts;
