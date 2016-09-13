@@ -264,7 +264,7 @@ pub trait Write: WriteBytesExt {
         }
         if data.len() == 0 {
             try!(self.write_all(&[0, 0, 0, seq_id]));
-            seq_id += 1;
+            seq_id = seq_id.wrapping_add(1);
         } else {
             let mut last_was_max = false;
             for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
@@ -273,11 +273,11 @@ pub trait Write: WriteBytesExt {
                 try!(self.write_u8(seq_id));
                 try!(self.write_all(chunk));
                 last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
-                seq_id += 1;
+                seq_id = seq_id.wrapping_add(1);
             }
             if last_was_max {
                 try!(self.write_all(&[0u8, 0u8, 0u8, seq_id]));
-                seq_id += 1;
+                seq_id = seq_id.wrapping_add(1);
             }
         }
         try!(self.flush());

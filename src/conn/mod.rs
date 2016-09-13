@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::cmp;
 use std::collections::HashMap;
 use std::fs;
 use std::fmt;
@@ -1531,7 +1532,8 @@ impl Conn {
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
         {
-            let chunk = vec![0u8; self.max_allowed_packet].into_boxed_slice();
+            let buffer_size = cmp::min(consts::MAX_PAYLOAD_LEN - 1, self.max_allowed_packet - 1);
+            let chunk = vec![0u8; buffer_size].into_boxed_slice();
             let maybe_handler = self.local_infile_handler.clone().or_else(|| {
                 self.opts.get_local_infile_handler().clone()
             });
@@ -2469,24 +2471,25 @@ mod test {
         #[test]
         fn should_handle_LOCAL_INFILE_with_custom_handler() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
+            conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").unwrap();
             conn.set_local_infile_handler(Some(
-                LocalInfileHandler::new(|file_name, stream| {
-                    try!(stream.write_all(file_name));
-                    stream.write_all(b"\nBBBBBB\n")
+                LocalInfileHandler::new(|_, stream| {
+                    let mut cell_data = vec![b'Z'; 65535];
+                    cell_data.push(b'\n');
+                    for _ in 0..1536 {
+                        try!(stream.write_all(&*cell_data));
+                    }
+                    Ok(())
                 })
             ));
             conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE x.tbl").unwrap();
-            for (i, row) in conn.query("SELECT * FROM x.tbl")
-                .unwrap().enumerate() {
-                let row = row.unwrap();
-                match i {
-                    0 => assert_eq!(row.unwrap(), vec!(Bytes(b"file_name".to_vec()))),
-                    1 => assert_eq!(row.unwrap(), vec!(Bytes(b"BBBBBB".to_vec()))),
-                    _ => unreachable!()
-                }
-            }
+            let count = conn.query("SELECT * FROM x.tbl").unwrap().map(|row| {
+                assert_eq!(from_row::<(Vec<u8>,)>(row.unwrap()).0.len(), 65535);
+                1
+            }).sum::<usize>();
+            assert_eq!(count, 1536);
         }
+
         #[test]
         fn should_reset_connection() {
             let mut conn = Conn::new(get_opts()).unwrap();
