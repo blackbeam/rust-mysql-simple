@@ -1159,14 +1159,14 @@ impl Conn {
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let old_seq_id = self.seq_id;
-        let (data, seq_id) = try!(self.get_mut_stream().read_packet(old_seq_id));
+        let (data, seq_id) = try!(self.get_mut_stream().as_mut().read_packet(old_seq_id));
         self.seq_id = seq_id;
         Ok(data)
     }
 
     fn drop_packet(&mut self) -> MyResult<()> {
         let old_seq_id = self.seq_id;
-        let seq_id = try!(self.get_mut_stream().drop_packet(old_seq_id));
+        let seq_id = try!(self.get_mut_stream().as_mut().drop_packet(old_seq_id));
         self.seq_id = seq_id;
         Ok(())
     }
@@ -1174,7 +1174,7 @@ impl Conn {
     fn write_packet(&mut self, data: &[u8]) -> MyResult<()> {
         let seq_id = self.seq_id;
         let max_allowed_packet = self.max_allowed_packet;
-        self.seq_id = try!(self.get_mut_stream().write_packet(data, seq_id, max_allowed_packet));
+        self.seq_id = try!(self.get_mut_stream().as_mut().write_packet(data, seq_id, max_allowed_packet));
         Ok(())
     }
 

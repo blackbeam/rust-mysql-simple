@@ -296,6 +296,23 @@ pub enum Stream {
     TcpStream(Option<TcpStream>),
 }
 
+trait IoPack: io::Read + io::Write + io::BufRead + 'static { }
+
+impl<T: io::Read + io::Write + 'static> IoPack for BufStream<T> { }
+
+impl AsMut<IoPack> for Stream {
+    fn as_mut(&mut self) -> &mut IoPack {
+        match *self {
+            #[cfg(feature = "socket")]
+            Stream::UnixStream(ref mut stream) => stream,
+            #[cfg(feature = "pipe")]
+            Stream::PipeStream(ref mut stream) => stream,
+            Stream::TcpStream(Some(ref mut stream)) => stream.as_mut(),
+            _ => panic!("Incomplete stream"),
+        }
+    }
+}
+
 #[cfg(feature = "openssl")]
 impl Stream {
     pub fn is_insecure(&self) -> bool {
@@ -353,144 +370,8 @@ impl Drop for Stream {
         if let &mut Stream::TcpStream(None) = self {
             return;
         }
-        let _ = self.write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
-        let _ = self.flush();
-    }
-}
-
-impl io::Read for Stream {
-    #[cfg(feature = "socket")]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match *self {
-            Stream::UnixStream(ref mut s) => s.read(buf),
-            Stream::TcpStream(Some(ref mut s)) => s.read(buf),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(feature = "pipe")]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match *self {
-            Stream::PipeStream(ref mut s) => s.read(buf),
-            Stream::TcpStream(Some(ref mut s)) => s.read(buf),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match *self {
-            Stream::TcpStream(Some(ref mut s)) => s.read(buf),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-}
-
-impl io::BufRead for Stream {
-    #[cfg(feature = "socket")]
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        match *self {
-            Stream::UnixStream(ref mut s) => s.fill_buf(),
-            Stream::TcpStream(Some(ref mut s)) => s.fill_buf(),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(feature = "pipe")]
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        match *self {
-            Stream::PipeStream(ref mut s) => s.fill_buf(),
-            Stream::TcpStream(Some(ref mut s)) => s.fill_buf(),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        match *self {
-            Stream::TcpStream(Some(ref mut s)) => s.fill_buf(),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(feature = "socket")]
-    fn consume(&mut self, amt: usize) {
-        match *self {
-            Stream::UnixStream(ref mut s) => s.consume(amt),
-            Stream::TcpStream(Some(ref mut s)) => s.consume(amt),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(feature = "pipe")]
-    fn consume(&mut self, amt: usize) {
-        match *self {
-            Stream::PipeStream(ref mut s) => s.consume(amt),
-            Stream::TcpStream(Some(ref mut s)) => s.consume(amt),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
-    fn consume(&mut self, amt: usize) {
-        match *self {
-            Stream::TcpStream(Some(ref mut s)) => s.consume(amt),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-}
-
-impl io::Write for Stream {
-    #[cfg(feature = "socket")]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match *self {
-            Stream::UnixStream(ref mut s) => s.write(buf),
-            Stream::TcpStream(Some(ref mut s)) => s.write(buf),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(feature = "socket")]
-    fn flush(&mut self) -> io::Result<()> {
-        match *self {
-            Stream::UnixStream(ref mut s) => s.flush(),
-            Stream::TcpStream(Some(ref mut s)) => s.flush(),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(feature = "pipe")]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match *self {
-            Stream::PipeStream(ref mut s) => s.write(buf),
-            Stream::TcpStream(Some(ref mut s)) => s.write(buf),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(feature = "pipe")]
-    fn flush(&mut self) -> io::Result<()> {
-        match *self {
-            Stream::PipeStream(ref mut s) => s.flush(),
-            Stream::TcpStream(Some(ref mut s)) => s.flush(),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match *self {
-            Stream::TcpStream(Some(ref mut s)) => s.write(buf),
-            _ => panic!("Incomplete stream"),
-        }
-    }
-
-    #[cfg(all(not(feature = "pipe"), not(feature = "socket")))]
-    fn flush(&mut self) -> io::Result<()> {
-        match *self {
-            Stream::TcpStream(Some(ref mut s)) => s.flush(),
-            _ => panic!("Incomplete stream"),
-        }
+        let _ = self.as_mut().write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+        let _ = self.as_mut().flush();
     }
 }
 
@@ -500,102 +381,22 @@ pub enum TcpStream {
     Insecure(BufStream<net::TcpStream>),
 }
 
-#[cfg(feature = "ssl")]
+impl AsMut<IoPack> for TcpStream {
+    fn as_mut(&mut self) -> &mut IoPack {
+        match *self {
+            #[cfg(feature = "openssl")]
+            TcpStream::Secure(ref mut stream) => stream,
+            TcpStream::Insecure(ref mut stream) => stream,
+        }
+    }
+}
+
 impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            #[cfg(feature = "ssl")]
             TcpStream::Secure(_) => write!(f, "Secure stream"),
             TcpStream::Insecure(_) => write!(f, "Insecure stream"),
-        }
-    }
-}
-
-#[cfg(not(feature = "ssl"))]
-impl fmt::Debug for TcpStream {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            TcpStream::Insecure(_) => write!(f, "Insecure stream"),
-        }
-    }
-}
-
-#[cfg(feature = "ssl")]
-impl io::Read for TcpStream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match *self {
-            TcpStream::Secure(ref mut s) => s.read(buf),
-            TcpStream::Insecure(ref mut s) => s.read(buf),
-        }
-    }
-}
-
-#[cfg(not(feature = "ssl"))]
-impl io::Read for TcpStream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match *self {
-            TcpStream::Insecure(ref mut s) => s.read(buf),
-        }
-    }
-}
-
-impl io::BufRead for TcpStream {
-    #[cfg(feature = "ssl")]
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        match *self {
-            TcpStream::Secure(ref mut s) => s.fill_buf(),
-            TcpStream::Insecure(ref mut s) => s.fill_buf(),
-        }
-    }
-
-    #[cfg(not(feature = "ssl"))]
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        match *self {
-            TcpStream::Insecure(ref mut s) => s.fill_buf(),
-        }
-    }
-
-    #[cfg(feature = "ssl")]
-    fn consume(&mut self, amt: usize) {
-        match *self {
-            TcpStream::Secure(ref mut s) => s.consume(amt),
-            TcpStream::Insecure(ref mut s) => s.consume(amt),
-        }
-    }
-
-    #[cfg(not(feature = "ssl"))]
-    fn consume(&mut self, amt: usize) {
-        match *self {
-            TcpStream::Insecure(ref mut s) => s.consume(amt),
-        }
-    }
-}
-
-#[cfg(feature = "ssl")]
-impl io::Write for TcpStream {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match *self {
-            TcpStream::Secure(ref mut s) => s.write(buf),
-            TcpStream::Insecure(ref mut s) => s.write(buf),
-        }
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        match *self {
-            TcpStream::Secure(ref mut s) => s.flush(),
-            TcpStream::Insecure(ref mut s) => s.flush(),
-        }
-    }
-}
-
-#[cfg(not(feature = "ssl"))]
-impl io::Write for TcpStream {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match *self {
-            TcpStream::Insecure(ref mut s) => s.write(buf),
-        }
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        match *self {
-            TcpStream::Insecure(ref mut s) => s.flush(),
         }
     }
 }
