@@ -872,128 +872,46 @@ impl Conn {
         }
     }
 
-    #[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
-        if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
-            if conn.opts.addr_is_loopback() {
-                match conn.get_system_var("socket") {
-                    Some(path) => {
-                        let path = from_value::<String>(path);
-                        let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
-                        new_opts.unix_addr(Some(path));
-                        return Conn::new(new_opts).or(Ok(conn));
-                    },
-                    _ => return Ok(conn)
-                }
-            }
-        }
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
-    }
-
-    #[cfg(all(not(feature = "ssl"), not(feature = "socket"), feature = "pipe"))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
-        if conn.opts.get_pipe_name().is_none() && conn.opts.get_prefer_socket() {
-            if conn.opts.addr_is_loopback() {
-                match conn.get_system_var("socket") {
-                    Some(name) => {
-                        let name = from_value::<String>(name);
-                        let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
-                        new_opts.pipe_name(Some(name));
-                        return Conn::new(new_opts).or(Ok(conn));
-                    },
-                    _ => return Ok(conn)
-                }
-            }
-        }
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
-    }
-
-    #[cfg(all(feature = "ssl", feature = "socket"))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
-        if let &None = conn.opts.get_ssl_opts() {
-            if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
-                if conn.opts.addr_is_loopback() {
-                    match conn.get_system_var("socket") {
-                        Some(path) => {
-                            let path = from_value::<String>(path);
-                            let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
-                            new_opts.unix_addr(Some(path));
-                            return Conn::new(new_opts).or(Ok(conn));
-                        },
-                        _ => return Ok(conn)
+    /// Check the connection can be improved.
+    fn can_improved(&mut self) -> Option<Opts> {
+        if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
+            if let Some(socket) = self.get_system_var("socket") {
+                if cfg!(feature = "socket") {
+                    if self.opts.get_unix_addr().is_none() {
+                        let mut unix_opts = OptsBuilder::from_opts(self.opts.clone());
+                        let path = from_value::<String>(socket);
+                        unix_opts.unix_addr(Some(path));
+                        return Some(unix_opts.into());
+                    }
+                } else if cfg!(feature = "pipe") {
+                    if self.opts.get_pipe_name().is_none() {
+                        let mut pipe_opts = OptsBuilder::from_opts(self.opts.clone());
+                        let name = from_value::<String>(socket);
+                        pipe_opts.pipe_name(Some(name));
+                        return Some(pipe_opts.into());
                     }
                 }
             }
         }
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
+        None
     }
 
-    #[cfg(all(feature = "ssl", not(feature = "socket"), feature = "pipe"))]
     /// Creates new `Conn`.
     pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
         let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
-        if let &None = conn.opts.get_ssl_opts() {
-            if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
-                if conn.opts.addr_is_loopback() {
-                    match conn.get_system_var("socket") {
-                        Some(name) => {
-                            let name = from_value::<String>(path);
-                            let mut new_opts = OptsBuilder::from_opts(opts);
-                            new_opts.pipe_name(Some(name));
-                            return Conn::new(new_opts).or(Ok(conn));
-                        },
-                        _ => return Ok(conn)
-                    }
-                }
+        let mut conn = {
+            if let Some(new_opts) = conn.can_improved() {
+                drop(conn);
+                let mut improved_conn = Conn::empty(new_opts);
+                try!(improved_conn.connect_stream());
+                try!(improved_conn.connect());
+                improved_conn
+            } else {
+                conn
             }
-        }
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
-    }
-
-    #[cfg(all(not(feature = "ssl"), not(feature = "socket"), not(feature = "pipe")))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
-    }
-
-    #[cfg(all(feature = "ssl", not(feature = "socket"), not(feature = "pipe")))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
+        };
         for cmd in conn.opts.get_init().clone() {
             try!(conn.query(cmd));
         }
