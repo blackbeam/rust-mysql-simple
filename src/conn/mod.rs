@@ -40,7 +40,6 @@ use super::error::DriverError::{
     ReadOnlyTransNotSupported,
 };
 use super::error::Result as MyResult;
-#[cfg(feature = "ssl")]
 use super::error::DriverError::SslNotSupported;
 use named_params::parse_named_params;
 use super::scramble::scramble;
@@ -982,6 +981,11 @@ impl Conn {
         Ok(())
     }
 
+    #[cfg(not(feature = "openssl"))]
+    fn switch_to_ssl(&mut self) -> MyResult<()> {
+        unimplemented!();
+    }
+
     #[cfg(feature = "socket")]
     fn connect_socket(&mut self, unix_addr: &path::PathBuf) -> MyResult<()> {
         match unix::net::UnixStream::connect(unix_addr) {
@@ -1093,47 +1097,6 @@ impl Conn {
         self.status_flags = eof.status_flags;
     }
 
-    #[cfg(not(feature = "ssl"))]
-    fn do_handshake(&mut self) -> MyResult<()> {
-        self.read_packet().and_then(|pld| {
-            match pld[0] {
-                0xFF => {
-                    let error_packet = try!(ErrPacket::from_payload(pld.as_ref(),
-                                                                    self.capability_flags));
-                    Err(MySqlError(error_packet.into()))
-                },
-                _ => {
-                    let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
-                    if handshake.protocol_version != 10u8 {
-                        return Err(DriverError(UnsupportedProtocol(handshake.protocol_version)));
-                    }
-                    if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
-                        return Err(DriverError(Protocol41NotSet));
-                    }
-                    self.handle_handshake(&handshake);
-                    self.do_handshake_response(&handshake)
-                },
-            }
-        }).and_then(|_| {
-            self.read_packet()
-        }).and_then(|pld| {
-            match pld[0] {
-                0u8 => {
-                    let ok = try!(OkPacket::from_payload(pld.as_ref()));
-                    self.handle_ok(&ok);
-                    Ok(())
-                },
-                0xffu8 => {
-                    let err = try!(ErrPacket::from_payload(pld.as_ref(),
-                                                           self.capability_flags));
-                    Err(MySqlError(err.into()))
-                },
-                _ => Err(DriverError(UnexpectedPacket))
-            }
-        })
-    }
-
-    #[cfg(feature = "ssl")]
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
             match pld[0] {
@@ -1183,7 +1146,6 @@ impl Conn {
         })
     }
 
-    #[cfg(feature = "ssl")]
     fn get_client_flags(&self) -> consts::CapabilityFlags {
         let mut client_flags = consts::CLIENT_PROTOCOL_41 |
                                consts::CLIENT_SECURE_CONNECTION |
@@ -1207,26 +1169,6 @@ impl Conn {
         client_flags
     }
 
-    #[cfg(not(feature = "ssl"))]
-    fn get_client_flags(&self) -> consts::CapabilityFlags {
-        let mut client_flags = consts::CLIENT_PROTOCOL_41 |
-                               consts::CLIENT_SECURE_CONNECTION |
-                               consts::CLIENT_LONG_PASSWORD |
-                               consts::CLIENT_TRANSACTIONS |
-                               consts::CLIENT_LOCAL_FILES |
-                               consts::CLIENT_MULTI_STATEMENTS |
-                               consts::CLIENT_MULTI_RESULTS |
-                               consts::CLIENT_PS_MULTI_RESULTS |
-                               (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        if let &Some(ref db_name) = self.opts.get_db_name() {
-            if db_name.len() > 0 {
-                client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
-            }
-        }
-        client_flags
-    }
-
-    #[cfg(feature = "ssl")]
     fn do_ssl_request(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let client_flags = self.get_client_flags();
         let mut buf = [0; 4 + 4 + 1 + 23];

@@ -313,7 +313,6 @@ impl AsMut<IoPack> for Stream {
     }
 }
 
-#[cfg(feature = "openssl")]
 impl Stream {
     pub fn is_insecure(&self) -> bool {
         match self {
@@ -321,7 +320,10 @@ impl Stream {
             _ => false,
         }
     }
+}
 
+#[cfg(feature = "openssl")]
+impl Stream {
     pub fn make_secure(mut self,
                        verify_peer: bool,
                        ssl_opts: &Option<(::std::path::PathBuf,
