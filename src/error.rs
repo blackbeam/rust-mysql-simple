@@ -49,25 +49,12 @@ pub enum Error {
 }
 
 impl Error {
-    #[cfg(not(feature = "openssl"))]
     #[doc(hidden)]
     pub fn is_connectivity_error(&self) -> bool {
         match self {
             &Error::IoError(_) |
             &Error::DriverError(_) => true,
-            &Error::MySqlError(_) |
-            &Error::UrlError(_) |
-            &Error::FromValueError(_) |
-            &Error::FromRowError(_) => false,
-        }
-    }
-
-    #[cfg(feature = "openssl")]
-    #[doc(hidden)]
-    pub fn is_connectivity_error(&self) -> bool {
-        match self {
-            &Error::IoError(_) |
-            &Error::DriverError(_) |
+            #[cfg(feature = "openssl")]
             &Error::SslError(_) => true,
             &Error::MySqlError(_) |
             &Error::UrlError(_) |
@@ -78,50 +65,27 @@ impl Error {
 }
 
 impl error::Error for Error {
-    #[cfg(feature = "ssl")]
     fn description(&self) -> &str {
         match *self {
             Error::IoError(_) => "I/O Error",
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
             Error::UrlError(_) => "url error",
+            #[cfg(feature = "ssl")]
             Error::SslError(_) => "ssl error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
         }
     }
 
-    #[cfg(not(feature = "ssl"))]
-    fn description(&self) -> &str {
-        match *self {
-            Error::IoError(_) => "I/O Error",
-            Error::MySqlError(_) => "MySql server error",
-            Error::DriverError(_) => "driver error",
-            Error::UrlError(_) => "url error",
-            Error::FromRowError(_) => "from row conversion error",
-            Error::FromValueError(_) => "from value conversion error",
-        }
-    }
-
-    #[cfg(feature = "ssl")]
     fn cause(&self) -> Option<&error::Error> {
         match *self {
             Error::IoError(ref err) => Some(err),
             Error::DriverError(ref err) => Some(err),
             Error::MySqlError(ref err) => Some(err),
             Error::UrlError(ref err) => Some(err),
+            #[cfg(feature = "ssl")]
             Error::SslError(ref err) => Some(err),
-            _ => None
-        }
-    }
-
-    #[cfg(not(feature = "ssl"))]
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            Error::IoError(ref err) => Some(err),
-            Error::DriverError(ref err) => Some(err),
-            Error::MySqlError(ref err) => Some(err),
-            Error::UrlError(ref err) => Some(err),
             _ => None
         }
     }
@@ -164,7 +128,6 @@ impl<T> From<sync::PoisonError<T>> for Error {
     }
 }
 
-#[cfg(feature = "ssl")]
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -172,21 +135,8 @@ impl fmt::Display for Error {
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
             Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
+            #[cfg(feature = "ssl")]
             Error::SslError(ref err) => write!(f, "SslError {{ {} }}", err),
-            Error::FromRowError(_) => "from row conversion error".fmt(f),
-            Error::FromValueError(_) => "from value conversion error".fmt(f),
-        }
-    }
-}
-
-#[cfg(not(feature = "ssl"))]
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::IoError(ref err) => write!(f, "IoError {{ {} }}", err),
-            Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
-            Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
-            Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
