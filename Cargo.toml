@@ -41,7 +41,7 @@ opt-level = 0
 debug = true
 
 [features]
-default = ["ssl", "socket"]
+default = ["ssl", "socket", "pipe"]
 ssl = ["openssl"]
 socket = []
 pipe = ["named_pipe"]

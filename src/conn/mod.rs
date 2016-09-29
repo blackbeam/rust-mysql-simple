@@ -59,7 +59,7 @@ use byteorder::LittleEndian as LE;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use fnv::FnvHasher;
 use twox_hash::XxHash;
-#[cfg(feature = "socket")]
+#[cfg(all(feature = "socket", not(windows)))]
 use std::os::unix;
 #[cfg(feature = "pipe")]
 use named_pipe as np;
@@ -986,7 +986,7 @@ impl Conn {
         unimplemented!();
     }
 
-    #[cfg(feature = "socket")]
+    #[cfg(all(feature = "socket", not(windows)))]
     fn connect_socket(&mut self, unix_addr: &path::PathBuf) -> MyResult<()> {
         match unix::net::UnixStream::connect(unix_addr) {
             Ok(stream) => {
@@ -1003,7 +1003,7 @@ impl Conn {
         }
     }
 
-    #[cfg(not(feature = "socket"))]
+    #[cfg(any(not(feature = "socket"), windows))]
     fn connect_socket(&mut self, _: &path::PathBuf) -> MyResult<()> {
         unimplemented!();
     }

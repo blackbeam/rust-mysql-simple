@@ -20,7 +20,7 @@ use bufstream::BufStream;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;
-#[cfg(feature = "socket")]
+#[cfg(all(feature = "socket", not(windows)))]
 use std::os::unix as unix;
 #[cfg(feature = "pipe")]
 use named_pipe as np;
@@ -289,7 +289,7 @@ impl<T: WriteBytesExt> Write for T {}
 
 #[derive(Debug)]
 pub enum Stream {
-    #[cfg(feature = "socket")]
+    #[cfg(all(feature = "socket", not(windows)))]
     UnixStream(BufStream<unix::net::UnixStream>),
     #[cfg(feature = "pipe")]
     PipeStream(BufStream<np::PipeClient>),
@@ -303,7 +303,7 @@ impl<T: io::Read + io::Write + 'static> IoPack for BufStream<T> { }
 impl AsMut<IoPack> for Stream {
     fn as_mut(&mut self) -> &mut IoPack {
         match *self {
-            #[cfg(feature = "socket")]
+            #[cfg(all(feature = "socket", not(windows)))]
             Stream::UnixStream(ref mut stream) => stream,
             #[cfg(feature = "pipe")]
             Stream::PipeStream(ref mut stream) => stream,
