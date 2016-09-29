@@ -982,94 +982,73 @@ impl Conn {
         Ok(())
     }
 
-    #[cfg(all(not(feature = "socket"), feature = "pipe"))]
-    fn connect_stream(&mut self) -> MyResult<()> {
-        if let &Some(ref pipe_name) = self.opts.get_pipe_name() {
-            let mut full_name: String = r"\\.\pipe\".into();
-            full_name.push_str(&**pipe_name);
-            match np::PipeClient::connect(full_name) {
-                Ok(mut pipe_stream) => {
-                    pipe_stream.set_read_timeout(self.opts.get_read_timeout().clone());
-                    pipe_stream.set_write_timeout(self.opts.get_write_timeout().clone());
-                    self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!(r"\\.\pipe\{}", pipe_name);
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
+    #[cfg(feature = "socket")]
+    fn connect_socket(&mut self, unix_addr: &path::PathBuf) -> MyResult<()> {
+        match unix::net::UnixStream::connect(unix_addr) {
+            Ok(stream) => {
+                try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
+                try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
+                self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
+                Ok(())
+            },
+            Err(e) => {
+                let addr = format!("{}", unix_addr.display());
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
             }
-        } else if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
-                Ok(stream) => {
-                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
-            }
-        } else {
-            Err(DriverError(CouldNotConnect(None)))
         }
     }
 
-    #[cfg(all(feature = "socket", not(feature = "pipe")))]
-    fn connect_stream(&mut self) -> MyResult<()> {
-        if let &Some(ref unix_addr) = self.opts.get_unix_addr() {
-            match unix::net::UnixStream::connect(unix_addr) {
-                Ok(stream) => {
-                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                    self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!("{}", unix_addr.display());
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
+    #[cfg(not(feature = "socket"))]
+    fn connect_socket(&mut self, _: &path::PathBuf) -> MyResult<()> {
+        unimplemented!();
+    }
+
+    #[cfg(feature = "pipe")]
+    fn connect_pipe(&mut self, pipe_name: &str) -> MyResult<()> {
+        let full_name = format!(r"\\.\pipe\{}", pipe_name);
+        match np::PipeClient::connect(full_name.clone()) {
+            Ok(mut pipe_stream) => {
+                pipe_stream.set_read_timeout(self.opts.get_read_timeout().clone());
+                pipe_stream.set_write_timeout(self.opts.get_write_timeout().clone());
+                self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
+                Ok(())
+            },
+            Err(e) => {
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((full_name, desc, e.kind())))))
             }
-        } else if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
-                Ok(stream) => {
-                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
-            }
-        } else {
-            Err(DriverError(CouldNotConnect(None)))
         }
     }
 
-    #[cfg(all(not(feature = "socket"), not(feature = "pipe")))]
-    fn connect_stream(&mut self) -> MyResult<()> {
-        if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
-                Ok(stream) => {
-                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
+    #[cfg(not(feature = "pipe"))]
+    fn connect_pipe(&mut self, _: &str) -> MyResult<()> {
+        unimplemented!();
+    }
+
+    fn connect_tcp(&mut self, ip_or_hostname: &str) -> MyResult<()> {
+        match net::TcpStream::connect((ip_or_hostname, self.opts.get_tcp_port())) {
+            Ok(stream) => {
+                try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
+                try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
+                self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
+                Ok(())
+            },
+            Err(e) => {
+                let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
             }
+        }
+    }
+
+    fn connect_stream(&mut self) -> MyResult<()> {
+        if let Some(unix_addr) = self.opts.get_unix_addr().clone() {
+            self.connect_socket(&unix_addr)
+        } else if let Some(pipe_name) = self.opts.get_pipe_name().clone() {
+            self.connect_pipe(&pipe_name)
+        } else if let Some(ip_or_hostname) = self.opts.get_ip_or_hostname().clone() {
+            self.connect_tcp(&ip_or_hostname)
         } else {
             Err(DriverError(CouldNotConnect(None)))
         }
