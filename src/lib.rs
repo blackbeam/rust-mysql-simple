@@ -118,7 +118,7 @@
 //!     // Let's select payments from database
 //!     let selected_payments: Vec<Payment> =
 //!     pool.prep_exec("SELECT customer_id, amount, account_name from tmp.payment", ())
-//!     .map(|result| { // In this closure we sill map `QueryResult` to `Vec<Payment>`
+//!     .map(|result| { // In this closure we will map `QueryResult` to `Vec<Payment>`
 //!         // `QueryResult` is iterator over `MyResult<row, err>` so first call to `map`
 //!         // will map each `MyResult` to contained `row` (no proper error handling)
 //!         // and second call to `map` will map each `row` to `Payment`
