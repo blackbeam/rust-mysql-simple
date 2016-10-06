@@ -149,7 +149,7 @@
 #[cfg(feature = "nightly")]
 extern crate test;
 
-extern crate time;
+pub extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;
 extern crate regex;
@@ -165,7 +165,7 @@ extern crate named_pipe;
 extern crate url;
 extern crate bufstream;
 extern crate fnv;
-extern crate chrono;
+pub extern crate chrono;
 extern crate twox_hash;
 
 mod scramble;
