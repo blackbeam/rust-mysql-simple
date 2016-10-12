@@ -118,7 +118,7 @@
 //!     // Let's select payments from database
 //!     let selected_payments: Vec<Payment> =
 //!     pool.prep_exec("SELECT customer_id, amount, account_name from tmp.payment", ())
-//!     .map(|result| { // In this closure we sill map `QueryResult` to `Vec<Payment>`
+//!     .map(|result| { // In this closure we will map `QueryResult` to `Vec<Payment>`
 //!         // `QueryResult` is iterator over `MyResult<row, err>` so first call to `map`
 //!         // will map each `MyResult` to contained `row` (no proper error handling)
 //!         // and second call to `map` will map each `row` to `Payment`
@@ -149,7 +149,7 @@
 #[cfg(feature = "nightly")]
 extern crate test;
 
-extern crate time;
+pub extern crate time;
 #[cfg(feature = "openssl")]
 extern crate openssl;
 extern crate regex;
@@ -165,7 +165,7 @@ extern crate named_pipe;
 extern crate url;
 extern crate bufstream;
 extern crate fnv;
-extern crate chrono;
+pub extern crate chrono;
 extern crate twox_hash;
 
 mod scramble;
