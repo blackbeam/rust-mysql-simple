@@ -63,11 +63,11 @@ nom = "~1.2"
 version = "~0.1"
 default-features = false
 
-[dependencies.openssl]
+[target.'cfg(any(unix, macos))'.dependencies.openssl]
 version = "~0.7"
 optional = true
 
-[dependencies.named_pipe]
+[target.'cfg(windows)'.dependencies.named_pipe]
 version = "~0.2"
 optional = true
 

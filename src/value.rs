@@ -2182,7 +2182,7 @@ mod test {
         static ADDR: &'static str = "127.0.0.1";
         static PORT: u16          = 3307;
 
-        #[cfg(feature = "openssl")]
+        #[cfg(all(feature = "ssl", any(unix, macos)))]
         pub fn get_opts() -> Opts {
             let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
             let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -2198,7 +2198,7 @@ mod test {
             builder.into()
         }
 
-        #[cfg(not(feature = "ssl"))]
+        #[cfg(any(not(feature = "ssl"), windows))]
         pub fn get_opts() -> Opts {
             let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
             let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()

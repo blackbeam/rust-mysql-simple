@@ -4,7 +4,7 @@ use std::io;
 use std::result;
 use std::sync;
 
-#[cfg(feature = "openssl")]
+#[cfg(all(feature = "ssl", any(unix, macos)))]
 use openssl::ssl::error::{SslError};
 
 use super::conn::Row;
@@ -42,7 +42,7 @@ pub enum Error {
     MySqlError(MySqlError),
     DriverError(DriverError),
     UrlError(UrlError),
-    #[cfg(feature = "openssl")]
+    #[cfg(all(feature = "ssl", any(unix, macos)))]
     SslError(SslError),
     FromValueError(Value),
     FromRowError(Row),
@@ -54,7 +54,7 @@ impl Error {
         match self {
             &Error::IoError(_) |
             &Error::DriverError(_) => true,
-            #[cfg(feature = "openssl")]
+            #[cfg(all(feature = "ssl", any(unix, macos)))]
             &Error::SslError(_) => true,
             &Error::MySqlError(_) |
             &Error::UrlError(_) |
@@ -71,7 +71,7 @@ impl error::Error for Error {
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
             Error::UrlError(_) => "url error",
-            #[cfg(feature = "ssl")]
+            #[cfg(all(feature = "ssl", any(unix, macos)))]
             Error::SslError(_) => "ssl error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
@@ -84,7 +84,7 @@ impl error::Error for Error {
             Error::DriverError(ref err) => Some(err),
             Error::MySqlError(ref err) => Some(err),
             Error::UrlError(ref err) => Some(err),
-            #[cfg(feature = "ssl")]
+            #[cfg(all(feature = "ssl", any(unix, macos)))]
             Error::SslError(ref err) => Some(err),
             _ => None
         }
@@ -109,7 +109,7 @@ impl From<MySqlError> for Error {
     }
 }
 
-#[cfg(feature = "openssl")]
+#[cfg(all(feature = "ssl", any(unix, macos)))]
 impl From<SslError> for Error {
     fn from(err: SslError) -> Error {
         Error::SslError(err)
@@ -135,7 +135,7 @@ impl fmt::Display for Error {
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
             Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
-            #[cfg(feature = "ssl")]
+            #[cfg(all(feature = "ssl", any(unix, macos)))]
             Error::SslError(ref err) => write!(f, "SslError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),

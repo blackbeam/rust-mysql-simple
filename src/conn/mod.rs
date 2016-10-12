@@ -61,7 +61,7 @@ use fnv::FnvHasher;
 use twox_hash::XxHash;
 #[cfg(all(feature = "socket", not(windows)))]
 use std::os::unix;
-#[cfg(feature = "pipe")]
+#[cfg(all(feature = "pipe", windows))]
 use named_pipe as np;
 
 pub mod pool;
@@ -970,7 +970,7 @@ impl Conn {
         self.stream.as_mut().unwrap()
     }
 
-    #[cfg(feature = "openssl")]
+    #[cfg(all(feature = "ssl", any(unix, macos)))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         if self.stream.is_some() {
             let stream = self.stream.take().unwrap();
@@ -981,7 +981,7 @@ impl Conn {
         Ok(())
     }
 
-    #[cfg(not(feature = "openssl"))]
+    #[cfg(any(not(feature = "ssl"), windows))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         unimplemented!();
     }
@@ -1008,7 +1008,7 @@ impl Conn {
         unimplemented!();
     }
 
-    #[cfg(feature = "pipe")]
+    #[cfg(all(feature = "pipe", windows))]
     fn connect_pipe(&mut self, pipe_name: &str) -> MyResult<()> {
         let full_name = format!(r"\\.\pipe\{}", pipe_name);
         match np::PipeClient::connect(full_name.clone()) {
@@ -1025,7 +1025,7 @@ impl Conn {
         }
     }
 
-    #[cfg(not(feature = "pipe"))]
+    #[cfg(not(all(feature = "pipe", windows)))]
     fn connect_pipe(&mut self, _: &str) -> MyResult<()> {
         unimplemented!();
     }
@@ -1048,10 +1048,16 @@ impl Conn {
 
     fn connect_stream(&mut self) -> MyResult<()> {
         if let Some(unix_addr) = self.opts.get_unix_addr().clone() {
-            self.connect_socket(&unix_addr)
-        } else if let Some(pipe_name) = self.opts.get_pipe_name().clone() {
-            self.connect_pipe(&pipe_name)
-        } else if let Some(ip_or_hostname) = self.opts.get_ip_or_hostname().clone() {
+            if cfg!(all(feature = "socket", not(windows))) {
+                return self.connect_socket(&unix_addr);
+            }
+        }
+        if let Some(pipe_name) = self.opts.get_pipe_name().clone() {
+            if cfg!(all(feature = "pipe", windows)) {
+                return self.connect_pipe(&pipe_name);
+            }
+        }
+        if let Some(ip_or_hostname) = self.opts.get_ip_or_hostname().clone() {
             self.connect_tcp(&ip_or_hostname)
         } else {
             Err(DriverError(CouldNotConnect(None)))
@@ -2031,7 +2037,7 @@ mod test {
     static ADDR: &'static str = "127.0.0.1";
     static PORT: u16          = 3307;
 
-    #[cfg(feature = "openssl")]
+    #[cfg(all(feature = "ssl", any(unix, macos)))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -2047,7 +2053,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(not(feature = "ssl"))]
+    #[cfg(any(not(feature = "ssl"), windows))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()

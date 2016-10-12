@@ -14,7 +14,7 @@ use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
 use super::error::Result as MyResult;
 
-#[cfg(feature = "openssl")]
+#[cfg(all(feature = "ssl", any(unix, macos)))]
 use openssl::{ssl, x509};
 use bufstream::BufStream;
 use byteorder::ReadBytesExt;
@@ -22,7 +22,7 @@ use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;
 #[cfg(all(feature = "socket", not(windows)))]
 use std::os::unix as unix;
-#[cfg(feature = "pipe")]
+#[cfg(all(feature = "pipe", windows))]
 use named_pipe as np;
 
 pub trait Read: ReadBytesExt + io::BufRead {
@@ -291,7 +291,7 @@ impl<T: WriteBytesExt> Write for T {}
 pub enum Stream {
     #[cfg(all(feature = "socket", not(windows)))]
     UnixStream(BufStream<unix::net::UnixStream>),
-    #[cfg(feature = "pipe")]
+    #[cfg(all(feature = "pipe", windows))]
     PipeStream(BufStream<np::PipeClient>),
     TcpStream(Option<TcpStream>),
 }
@@ -305,7 +305,7 @@ impl AsMut<IoPack> for Stream {
         match *self {
             #[cfg(all(feature = "socket", not(windows)))]
             Stream::UnixStream(ref mut stream) => stream,
-            #[cfg(feature = "pipe")]
+            #[cfg(all(feature = "pipe", windows))]
             Stream::PipeStream(ref mut stream) => stream,
             Stream::TcpStream(Some(ref mut stream)) => stream.as_mut(),
             _ => panic!("Incomplete stream"),
@@ -322,7 +322,7 @@ impl Stream {
     }
 }
 
-#[cfg(feature = "openssl")]
+#[cfg(all(feature = "ssl", any(unix, macos)))]
 impl Stream {
     pub fn make_secure(mut self,
                        verify_peer: bool,
@@ -378,7 +378,7 @@ impl Drop for Stream {
 }
 
 pub enum TcpStream {
-    #[cfg(feature = "openssl")]
+    #[cfg(all(feature = "ssl", any(unix, macos)))]
     Secure(BufStream<ssl::SslStream<net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
 }
@@ -386,7 +386,7 @@ pub enum TcpStream {
 impl AsMut<IoPack> for TcpStream {
     fn as_mut(&mut self) -> &mut IoPack {
         match *self {
-            #[cfg(feature = "openssl")]
+            #[cfg(all(feature = "ssl", any(unix, macos)))]
             TcpStream::Secure(ref mut stream) => stream,
             TcpStream::Insecure(ref mut stream) => stream,
         }
@@ -396,7 +396,7 @@ impl AsMut<IoPack> for TcpStream {
 impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            #[cfg(feature = "ssl")]
+            #[cfg(all(feature = "ssl", any(unix, macos)))]
             TcpStream::Secure(_) => write!(f, "Secure stream"),
             TcpStream::Insecure(_) => write!(f, "Insecure stream"),
         }
