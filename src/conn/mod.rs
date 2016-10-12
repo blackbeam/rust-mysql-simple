@@ -2346,22 +2346,45 @@ mod test {
         }
 
         #[test]
-        #[cfg(all(not(feature = "ssl"), any(feature = "pipe", feature = "socket")))]
+        #[cfg(all(feature = "socket", unix))]
         fn should_connect_via_socket_for_127_0_0_1() {
-            let opts = OptsBuilder::from_opts(get_opts());
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.ssl_opts::<String, String, String>(None);
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:#?}", conn);
+            assert!(debug_format.contains("UnixStream"));
+        }
+
+        #[test]
+        #[cfg(all(feature = "pipe", windows))]
+        fn should_connect_via_socket_for_127_0_0_1() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.ssl_opts::<String, String, String>(None);
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:#?}", conn);
+            assert!(debug_format.contains("PipeStream"));
+        }
+
+        #[test]
+        #[cfg(all(feature = "socket", unix))]
+        fn should_connect_via_socket_localhost() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.ip_or_hostname(Some("localhost"));
+            opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
             assert!(debug_format.contains("UnixStream"));
         }
 
         #[test]
-        #[cfg(all(not(feature = "ssl"), any(feature = "pipe", feature = "socket")))]
+        #[cfg(all(feature = "pipe", windows))]
         fn should_connect_via_socket_localhost() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ip_or_hostname(Some("localhost"));
+            opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
-            assert!(debug_format.contains("UnixStream"));
+            assert!(debug_format.contains("PipeStream"));
         }
 
         #[test]
