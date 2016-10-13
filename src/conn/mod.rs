@@ -875,14 +875,14 @@ impl Conn {
     fn can_improved(&mut self) -> Option<Opts> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
             if let Some(socket) = self.get_system_var("socket") {
-                if cfg!(feature = "socket") {
+                if cfg!(all(feature = "socket", unix)) {
                     if self.opts.get_unix_addr().is_none() {
                         let mut unix_opts = OptsBuilder::from_opts(self.opts.clone());
                         let path = from_value::<String>(socket);
                         unix_opts.unix_addr(Some(path));
                         return Some(unix_opts.into());
                     }
-                } else if cfg!(feature = "pipe") {
+                } else if cfg!(all(feature = "pipe", windows)) {
                     if self.opts.get_pipe_name().is_none() {
                         let mut pipe_opts = OptsBuilder::from_opts(self.opts.clone());
                         let name = from_value::<String>(socket);
@@ -986,7 +986,7 @@ impl Conn {
         unimplemented!();
     }
 
-    #[cfg(all(feature = "socket", not(windows)))]
+    #[cfg(all(feature = "socket", unix))]
     fn connect_socket(&mut self, unix_addr: &path::PathBuf) -> MyResult<()> {
         match unix::net::UnixStream::connect(unix_addr) {
             Ok(stream) => {
@@ -1003,7 +1003,7 @@ impl Conn {
         }
     }
 
-    #[cfg(any(not(feature = "socket"), windows))]
+    #[cfg(any(not(feature = "socket"), not(unix)))]
     fn connect_socket(&mut self, _: &path::PathBuf) -> MyResult<()> {
         unimplemented!();
     }
@@ -1025,7 +1025,7 @@ impl Conn {
         }
     }
 
-    #[cfg(not(all(feature = "pipe", windows)))]
+    #[cfg(any(not(feature = "pipe"), not(windows)))]
     fn connect_pipe(&mut self, _: &str) -> MyResult<()> {
         unimplemented!();
     }
@@ -1048,7 +1048,7 @@ impl Conn {
 
     fn connect_stream(&mut self) -> MyResult<()> {
         if let Some(unix_addr) = self.opts.get_unix_addr().clone() {
-            if cfg!(all(feature = "socket", not(windows))) {
+            if cfg!(all(feature = "socket", unix)) {
                 return self.connect_socket(&unix_addr);
             }
         }
