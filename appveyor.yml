@@ -12,8 +12,8 @@ environment:
     RUST_INSTALLER: rust-nightly-x86_64-pc-windows-gnu.msi
   - RUST_URL: https://static.rust-lang.org/dist/rust-beta-x86_64-pc-windows-gnu.msi
     RUST_INSTALLER: rust-beta-x86_64-pc-windows-gnu.msi
-  - RUST_URL: https://static.rust-lang.org/dist/rust-1.11.0-x86_64-pc-windows-gnu.msi
-    RUST_INSTALLER: rust-1.11.0-x86_64-pc-windows-gnu.msi
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.12.0-x86_64-pc-windows-gnu.msi
+    RUST_INSTALLER: rust-1.12.0-x86_64-pc-windows-gnu.msi
 services: mysql
 install:
 - cmd: >-
@@ -23,6 +23,16 @@ install:
 
     SET PATH=c:\rust\bin;%PATH%
 build: off
+before_test:
+- ps: >-
+    $iniPath="C:\ProgramData\MySQL\MySQL Server 5.7\my.ini"
+
+    $newText = ([System.IO.File]::ReadAllText($iniPath)).Replace("# enable-named-pipe", "enable-named-pipe")
+
+    [System.IO.File]::WriteAllText($iniPath, $newText)
+
+    Restart-Service MySQL57
+
 test_script:
 - cmd: >-
     "C:\Program Files\MySql\MySQL Server 5.7\bin\mysql" -e "set global max_allowed_packet = 36700160;" --user=root
