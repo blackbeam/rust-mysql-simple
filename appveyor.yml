@@ -36,5 +36,7 @@ before_test:
 test_script:
 - cmd: >-
     "C:\Program Files\MySql\MySQL Server 5.7\bin\mysql" -e "set global max_allowed_packet = 36700160;" --user=root
+
     SET RUST_BACKTRACE=1
+
     cargo test && cargo test --no-default-features && cargo test --no-default-features --features pipe
