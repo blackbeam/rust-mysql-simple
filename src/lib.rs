@@ -150,7 +150,7 @@
 extern crate test;
 
 pub extern crate time;
-#[cfg(feature = "openssl")]
+#[cfg(all(feature = "ssl", any(unix, macos)))]
 extern crate openssl;
 extern crate regex;
 #[macro_use]
@@ -160,7 +160,7 @@ extern crate nom;
 #[macro_use]
 extern crate bitflags;
 extern crate byteorder;
-#[cfg(feature = "pipe")]
+#[cfg(all(feature = "pipe", windows))]
 extern crate named_pipe;
 extern crate url;
 extern crate bufstream;

@@ -40,7 +40,6 @@ use super::error::DriverError::{
     ReadOnlyTransNotSupported,
 };
 use super::error::Result as MyResult;
-#[cfg(feature = "ssl")]
 use super::error::DriverError::SslNotSupported;
 use named_params::parse_named_params;
 use super::scramble::scramble;
@@ -60,9 +59,9 @@ use byteorder::LittleEndian as LE;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use fnv::FnvHasher;
 use twox_hash::XxHash;
-#[cfg(feature = "socket")]
+#[cfg(all(feature = "socket", not(windows)))]
 use std::os::unix;
-#[cfg(feature = "pipe")]
+#[cfg(all(feature = "pipe", windows))]
 use named_pipe as np;
 
 pub mod pool;
@@ -872,128 +871,46 @@ impl Conn {
         }
     }
 
-    #[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
-        if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
-            if conn.opts.addr_is_loopback() {
-                match conn.get_system_var("socket") {
-                    Some(path) => {
-                        let path = from_value::<String>(path);
-                        let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
-                        new_opts.unix_addr(Some(path));
-                        return Conn::new(new_opts).or(Ok(conn));
-                    },
-                    _ => return Ok(conn)
-                }
-            }
-        }
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
-    }
-
-    #[cfg(all(not(feature = "ssl"), not(feature = "socket"), feature = "pipe"))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
-        if conn.opts.get_pipe_name().is_none() && conn.opts.get_prefer_socket() {
-            if conn.opts.addr_is_loopback() {
-                match conn.get_system_var("socket") {
-                    Some(name) => {
-                        let name = from_value::<String>(name);
-                        let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
-                        new_opts.pipe_name(Some(name));
-                        return Conn::new(new_opts).or(Ok(conn));
-                    },
-                    _ => return Ok(conn)
-                }
-            }
-        }
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
-    }
-
-    #[cfg(all(feature = "ssl", feature = "socket"))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
-        if let &None = conn.opts.get_ssl_opts() {
-            if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
-                if conn.opts.addr_is_loopback() {
-                    match conn.get_system_var("socket") {
-                        Some(path) => {
-                            let path = from_value::<String>(path);
-                            let mut new_opts = OptsBuilder::from_opts(conn.opts.clone());
-                            new_opts.unix_addr(Some(path));
-                            return Conn::new(new_opts).or(Ok(conn));
-                        },
-                        _ => return Ok(conn)
+    /// Check the connection can be improved.
+    fn can_improved(&mut self) -> Option<Opts> {
+        if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
+            if let Some(socket) = self.get_system_var("socket") {
+                if cfg!(all(feature = "socket", unix)) {
+                    if self.opts.get_unix_addr().is_none() {
+                        let mut unix_opts = OptsBuilder::from_opts(self.opts.clone());
+                        let path = from_value::<String>(socket);
+                        unix_opts.unix_addr(Some(path));
+                        return Some(unix_opts.into());
+                    }
+                } else if cfg!(all(feature = "pipe", windows)) {
+                    if self.opts.get_pipe_name().is_none() {
+                        let mut pipe_opts = OptsBuilder::from_opts(self.opts.clone());
+                        let name = from_value::<String>(socket);
+                        pipe_opts.pipe_name(Some(name));
+                        return Some(pipe_opts.into());
                     }
                 }
             }
         }
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
+        None
     }
 
-    #[cfg(all(feature = "ssl", not(feature = "socket"), feature = "pipe"))]
     /// Creates new `Conn`.
     pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
         let mut conn = Conn::empty(opts);
         try!(conn.connect_stream());
         try!(conn.connect());
-        if let &None = conn.opts.get_ssl_opts() {
-            if conn.opts.get_unix_addr().is_none() && conn.opts.get_prefer_socket() {
-                if conn.opts.addr_is_loopback() {
-                    match conn.get_system_var("socket") {
-                        Some(name) => {
-                            let name = from_value::<String>(path);
-                            let mut new_opts = OptsBuilder::from_opts(opts);
-                            new_opts.pipe_name(Some(name));
-                            return Conn::new(new_opts).or(Ok(conn));
-                        },
-                        _ => return Ok(conn)
-                    }
-                }
+        let mut conn = {
+            if let Some(new_opts) = conn.can_improved() {
+                drop(conn);
+                let mut improved_conn = Conn::empty(new_opts);
+                try!(improved_conn.connect_stream());
+                try!(improved_conn.connect());
+                improved_conn
+            } else {
+                conn
             }
-        }
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
-    }
-
-    #[cfg(all(not(feature = "ssl"), not(feature = "socket"), not(feature = "pipe")))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
-        for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
-        }
-        return Ok(conn);
-    }
-
-    #[cfg(all(feature = "ssl", not(feature = "socket"), not(feature = "pipe")))]
-    /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
-        let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
+        };
         for cmd in conn.opts.get_init().clone() {
             try!(conn.query(cmd));
         }
@@ -1053,7 +970,7 @@ impl Conn {
         self.stream.as_mut().unwrap()
     }
 
-    #[cfg(feature = "openssl")]
+    #[cfg(all(feature = "ssl", any(unix, macos)))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         if self.stream.is_some() {
             let stream = self.stream.take().unwrap();
@@ -1064,94 +981,84 @@ impl Conn {
         Ok(())
     }
 
-    #[cfg(all(not(feature = "socket"), feature = "pipe"))]
-    fn connect_stream(&mut self) -> MyResult<()> {
-        if let &Some(ref pipe_name) = self.opts.get_pipe_name() {
-            let mut full_name: String = r"\\.\pipe\".into();
-            full_name.push_str(&**pipe_name);
-            match np::PipeClient::connect(full_name) {
-                Ok(mut pipe_stream) => {
-                    pipe_stream.set_read_timeout(self.opts.get_read_timeout().clone());
-                    pipe_stream.set_write_timeout(self.opts.get_write_timeout().clone());
-                    self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!(r"\\.\pipe\{}", pipe_name);
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
+    #[cfg(any(not(feature = "ssl"), windows))]
+    fn switch_to_ssl(&mut self) -> MyResult<()> {
+        unimplemented!();
+    }
+
+    #[cfg(all(feature = "socket", unix))]
+    fn connect_socket(&mut self, unix_addr: &path::PathBuf) -> MyResult<()> {
+        match unix::net::UnixStream::connect(unix_addr) {
+            Ok(stream) => {
+                try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
+                try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
+                self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
+                Ok(())
+            },
+            Err(e) => {
+                let addr = format!("{}", unix_addr.display());
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
             }
-        } else if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
-                Ok(stream) => {
-                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
-            }
-        } else {
-            Err(DriverError(CouldNotConnect(None)))
         }
     }
 
-    #[cfg(all(feature = "socket", not(feature = "pipe")))]
-    fn connect_stream(&mut self) -> MyResult<()> {
-        if let &Some(ref unix_addr) = self.opts.get_unix_addr() {
-            match unix::net::UnixStream::connect(unix_addr) {
-                Ok(stream) => {
-                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                    self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!("{}", unix_addr.display());
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
+    #[cfg(any(not(feature = "socket"), not(unix)))]
+    fn connect_socket(&mut self, _: &path::PathBuf) -> MyResult<()> {
+        unimplemented!();
+    }
+
+    #[cfg(all(feature = "pipe", windows))]
+    fn connect_pipe(&mut self, pipe_name: &str) -> MyResult<()> {
+        let full_name = format!(r"\\.\pipe\{}", pipe_name);
+        match np::PipeClient::connect(full_name.clone()) {
+            Ok(mut pipe_stream) => {
+                pipe_stream.set_read_timeout(self.opts.get_read_timeout().clone());
+                pipe_stream.set_write_timeout(self.opts.get_write_timeout().clone());
+                self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
+                Ok(())
+            },
+            Err(e) => {
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((full_name, desc, e.kind())))))
             }
-        } else if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
-                Ok(stream) => {
-                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
-            }
-        } else {
-            Err(DriverError(CouldNotConnect(None)))
         }
     }
 
-    #[cfg(all(not(feature = "socket"), not(feature = "pipe")))]
-    fn connect_stream(&mut self) -> MyResult<()> {
-        if let &Some(ref ip_or_hostname) = self.opts.get_ip_or_hostname() {
-            match net::TcpStream::connect(&(&**ip_or_hostname, self.opts.get_tcp_port())) {
-                Ok(stream) => {
-                    try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                    try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                    self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
-                    Ok(())
-                },
-                Err(e) => {
-                    let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
-                    let desc = format!("{}", e);
-                    Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-                }
+    #[cfg(any(not(feature = "pipe"), not(windows)))]
+    fn connect_pipe(&mut self, _: &str) -> MyResult<()> {
+        unimplemented!();
+    }
+
+    fn connect_tcp(&mut self, ip_or_hostname: &str) -> MyResult<()> {
+        match net::TcpStream::connect((ip_or_hostname, self.opts.get_tcp_port())) {
+            Ok(stream) => {
+                try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
+                try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
+                self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
+                Ok(())
+            },
+            Err(e) => {
+                let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
             }
+        }
+    }
+
+    fn connect_stream(&mut self) -> MyResult<()> {
+        if let Some(unix_addr) = self.opts.get_unix_addr().clone() {
+            if cfg!(all(feature = "socket", unix)) {
+                return self.connect_socket(&unix_addr);
+            }
+        }
+        if let Some(pipe_name) = self.opts.get_pipe_name().clone() {
+            if cfg!(all(feature = "pipe", windows)) {
+                return self.connect_pipe(&pipe_name);
+            }
+        }
+        if let Some(ip_or_hostname) = self.opts.get_ip_or_hostname().clone() {
+            self.connect_tcp(&ip_or_hostname)
         } else {
             Err(DriverError(CouldNotConnect(None)))
         }
@@ -1159,14 +1066,14 @@ impl Conn {
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let old_seq_id = self.seq_id;
-        let (data, seq_id) = try!(self.get_mut_stream().read_packet(old_seq_id));
+        let (data, seq_id) = try!(self.get_mut_stream().as_mut().read_packet(old_seq_id));
         self.seq_id = seq_id;
         Ok(data)
     }
 
     fn drop_packet(&mut self) -> MyResult<()> {
         let old_seq_id = self.seq_id;
-        let seq_id = try!(self.get_mut_stream().drop_packet(old_seq_id));
+        let seq_id = try!(self.get_mut_stream().as_mut().drop_packet(old_seq_id));
         self.seq_id = seq_id;
         Ok(())
     }
@@ -1174,7 +1081,7 @@ impl Conn {
     fn write_packet(&mut self, data: &[u8]) -> MyResult<()> {
         let seq_id = self.seq_id;
         let max_allowed_packet = self.max_allowed_packet;
-        self.seq_id = try!(self.get_mut_stream().write_packet(data, seq_id, max_allowed_packet));
+        self.seq_id = try!(self.get_mut_stream().as_mut().write_packet(data, seq_id, max_allowed_packet));
         Ok(())
     }
 
@@ -1196,47 +1103,6 @@ impl Conn {
         self.status_flags = eof.status_flags;
     }
 
-    #[cfg(not(feature = "ssl"))]
-    fn do_handshake(&mut self) -> MyResult<()> {
-        self.read_packet().and_then(|pld| {
-            match pld[0] {
-                0xFF => {
-                    let error_packet = try!(ErrPacket::from_payload(pld.as_ref(),
-                                                                    self.capability_flags));
-                    Err(MySqlError(error_packet.into()))
-                },
-                _ => {
-                    let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
-                    if handshake.protocol_version != 10u8 {
-                        return Err(DriverError(UnsupportedProtocol(handshake.protocol_version)));
-                    }
-                    if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
-                        return Err(DriverError(Protocol41NotSet));
-                    }
-                    self.handle_handshake(&handshake);
-                    self.do_handshake_response(&handshake)
-                },
-            }
-        }).and_then(|_| {
-            self.read_packet()
-        }).and_then(|pld| {
-            match pld[0] {
-                0u8 => {
-                    let ok = try!(OkPacket::from_payload(pld.as_ref()));
-                    self.handle_ok(&ok);
-                    Ok(())
-                },
-                0xffu8 => {
-                    let err = try!(ErrPacket::from_payload(pld.as_ref(),
-                                                           self.capability_flags));
-                    Err(MySqlError(err.into()))
-                },
-                _ => Err(DriverError(UnexpectedPacket))
-            }
-        })
-    }
-
-    #[cfg(feature = "ssl")]
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
             match pld[0] {
@@ -1286,7 +1152,6 @@ impl Conn {
         })
     }
 
-    #[cfg(feature = "ssl")]
     fn get_client_flags(&self) -> consts::CapabilityFlags {
         let mut client_flags = consts::CLIENT_PROTOCOL_41 |
                                consts::CLIENT_SECURE_CONNECTION |
@@ -1310,26 +1175,6 @@ impl Conn {
         client_flags
     }
 
-    #[cfg(not(feature = "ssl"))]
-    fn get_client_flags(&self) -> consts::CapabilityFlags {
-        let mut client_flags = consts::CLIENT_PROTOCOL_41 |
-                               consts::CLIENT_SECURE_CONNECTION |
-                               consts::CLIENT_LONG_PASSWORD |
-                               consts::CLIENT_TRANSACTIONS |
-                               consts::CLIENT_LOCAL_FILES |
-                               consts::CLIENT_MULTI_STATEMENTS |
-                               consts::CLIENT_MULTI_RESULTS |
-                               consts::CLIENT_PS_MULTI_RESULTS |
-                               (self.capability_flags & consts::CLIENT_LONG_FLAG);
-        if let &Some(ref db_name) = self.opts.get_db_name() {
-            if db_name.len() > 0 {
-                client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
-            }
-        }
-        client_flags
-    }
-
-    #[cfg(feature = "ssl")]
     fn do_ssl_request(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let client_flags = self.get_client_flags();
         let mut buf = [0; 4 + 4 + 1 + 23];
@@ -2192,7 +2037,7 @@ mod test {
     static ADDR: &'static str = "127.0.0.1";
     static PORT: u16          = 3307;
 
-    #[cfg(feature = "openssl")]
+    #[cfg(all(feature = "ssl", any(unix, macos)))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -2208,7 +2053,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(not(feature = "ssl"))]
+    #[cfg(any(not(feature = "ssl"), windows))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -2501,22 +2346,45 @@ mod test {
         }
 
         #[test]
-        #[cfg(all(not(feature = "ssl"), any(feature = "pipe", feature = "socket")))]
+        #[cfg(all(feature = "socket", unix))]
         fn should_connect_via_socket_for_127_0_0_1() {
-            let opts = OptsBuilder::from_opts(get_opts());
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.ssl_opts::<String, String, String>(None);
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:#?}", conn);
+            assert!(debug_format.contains("UnixStream"));
+        }
+
+        #[test]
+        #[cfg(all(feature = "pipe", windows))]
+        fn should_connect_via_socket_for_127_0_0_1() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.ssl_opts::<String, String, String>(None);
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:#?}", conn);
+            assert!(debug_format.contains("PipeStream"));
+        }
+
+        #[test]
+        #[cfg(all(feature = "socket", unix))]
+        fn should_connect_via_socket_localhost() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.ip_or_hostname(Some("localhost"));
+            opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
             assert!(debug_format.contains("UnixStream"));
         }
 
         #[test]
-        #[cfg(all(not(feature = "ssl"), any(feature = "pipe", feature = "socket")))]
+        #[cfg(all(feature = "pipe", windows))]
         fn should_connect_via_socket_localhost() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ip_or_hostname(Some("localhost"));
+            opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
-            assert!(debug_format.contains("UnixStream"));
+            assert!(debug_format.contains("PipeStream"));
         }
 
         #[test]

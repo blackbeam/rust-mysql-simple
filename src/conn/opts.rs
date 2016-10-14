@@ -1,10 +1,5 @@
-#[cfg(any(feature = "socket", feature = "pipe"))]
 use std::net::{Ipv4Addr, Ipv6Addr};
-
-#[cfg(any(feature = "socket", feature = "ssl"))]
 use std::path;
-
-#[cfg(any(feature = "socket", feature = "pipe"))]
 use std::str::FromStr;
 
 use std::time::Duration;
@@ -17,7 +12,6 @@ use url::percent_encoding::percent_decode;
 
 
 /// Ssl options: Option<(ca_cert, Option<(client_cert, client_key)>)>.`
-#[cfg(feature = "ssl")]
 pub type SslOpts = Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>;
 
 /// Mysql connection options.
@@ -30,10 +24,8 @@ pub struct Opts {
     /// TCP port of mysql server (defaults to `3306`).
     tcp_port: u16,
     /// Path to unix socket of mysql server (defaults to `None`).
-    #[cfg(feature = "socket")]
     unix_addr: Option<path::PathBuf>,
     /// Pipe name of mysql server (defaults to `None`).
-    #[cfg(feature = "pipe")]
     pipe_name: Option<String>,
     /// User (defaults to `None`).
     user: Option<String>,
@@ -48,7 +40,6 @@ pub struct Opts {
     /// The timeout for each attempt to write to the server.
     write_timeout: Option<Duration>,
 
-    #[cfg(any(feature = "socket", feature = "pipe"))]
     /// Prefer socket connection (defaults to `true`).
     ///
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
@@ -57,13 +48,11 @@ pub struct Opts {
     /// Commands to execute on each new database connection.
     init: Vec<String>,
 
-    #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
     /// Perform or not ssl peer verification (defaults to `false`).
     /// Only make sense if ssl_opts is not None.
     verify_peer: bool,
 
-    #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
     /// SSL certificates and keys in pem format.
     /// If not None, then ssl connection implied.
@@ -82,7 +71,6 @@ pub struct Opts {
 
 impl Opts {
     #[doc(hidden)]
-    #[cfg(any(feature = "socket", feature = "pipe"))]
     pub fn addr_is_loopback(&self) -> bool {
         if self.ip_or_hostname.is_some() {
             let v4addr: Option<Ipv4Addr> = FromStr::from_str(
@@ -116,12 +104,10 @@ impl Opts {
         self.tcp_port
     }
     /// Path to unix socket of mysql server (defaults to `None`).
-    #[cfg(feature = "socket")]
     pub fn get_unix_addr(&self) -> &Option<path::PathBuf> {
         &self.unix_addr
     }
     /// Pipe name of mysql server (defaults to `None`).
-    #[cfg(feature = "pipe")]
     pub fn get_pipe_name(&self) -> &Option<String> {
         &self.pipe_name
     }
@@ -148,7 +134,6 @@ impl Opts {
         &self.write_timeout
     }
 
-    #[cfg(any(feature = "socket", feature = "pipe"))]
     /// Prefer socket connection (defaults to `true`).
     ///
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
@@ -161,7 +146,6 @@ impl Opts {
         &self.init
     }
 
-    #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
     /// Perform or not ssl peer verification (defaults to `false`).
     /// Only make sense if ssl_opts is not None.
@@ -169,7 +153,6 @@ impl Opts {
         self.verify_peer
     }
 
-    #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
     /// SSL certificates and keys in pem format.
     /// If not None, then ssl connection implied.
@@ -179,26 +162,12 @@ impl Opts {
         &self.ssl_opts
     }
 
-    #[cfg(any(feature = "socket", feature = "pipe"))]
     fn set_prefer_socket(&mut self, val: bool) {
         self.prefer_socket = val;
     }
 
-    #[allow(unused_variables)]
-    #[cfg(all(not(feature = "socket"), not(feature = "pipe")))]
-    fn set_prefer_socket(&mut self, val: bool) {
-        ()
-    }
-
-    #[cfg(feature = "ssl")]
     fn set_verify_peer(&mut self, val: bool) {
         self.verify_peer = val;
-    }
-
-    #[allow(unused_variables)]
-    #[cfg(not(feature = "ssl"))]
-    fn set_verify_peer(&mut self, val: bool) {
-        ()
     }
 
     /// Callback to handle requests for local files.
@@ -207,108 +176,13 @@ impl Opts {
     }
 }
 
-#[cfg(all(not(feature = "ssl"), feature = "socket", not(feature = "pipe")))]
 impl Default for Opts {
     fn default() -> Opts {
         Opts {
             ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
             unix_addr: None,
-            user: None,
-            pass: None,
-            db_name: None,
-            read_timeout: None,
-            write_timeout: None,
-            prefer_socket: true,
-            init: vec![],
-            local_infile_handler: None,
-        }
-    }
-}
-
-#[cfg(all(not(feature = "ssl"), not(feature = "socket"), not(feature = "pipe")))]
-impl Default for Opts {
-    fn default() -> Opts {
-        Opts {
-            ip_or_hostname: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            user: None,
-            pass: None,
-            db_name: None,
-            read_timeout: None,
-            write_timeout: None,
-            init: vec![],
-            local_infile_handler: None,
-        }
-    }
-}
-
-#[cfg(all(not(feature = "ssl"), not(feature = "socket"), feature = "pipe"))]
-impl Default for Opts {
-    fn default() -> Opts {
-        Opts {
-            ip_or_hostname: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
             pipe_name: None,
-            user: None,
-            pass: None,
-            db_name: None,
-            read_timeout: None,
-            write_timeout: None,
-            prefer_socket: true,
-            init: vec![],
-            local_infile_handler: None,
-        }
-    }
-}
-
-#[cfg(all(feature = "ssl", not(feature = "socket"), not(feature = "pipe")))]
-impl Default for Opts {
-    fn default() -> Opts {
-        Opts {
-            ip_or_hostname: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            user: None,
-            pass: None,
-            db_name: None,
-            read_timeout: None,
-            write_timeout: None,
-            init: vec![],
-            verify_peer: false,
-            ssl_opts: None,
-            local_infile_handler: None,
-        }
-    }
-}
-
-#[cfg(all(feature = "ssl", not(feature = "socket"), feature = "pipe"))]
-impl Default for Opts {
-    fn default() -> Opts {
-        Opts {
-            ip_or_hostname: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            pipe_name: None,
-            user: None,
-            pass: None,
-            db_name: None,
-            read_timeout: None,
-            write_timeout: None,
-            init: vec![],
-            verify_peer: false,
-            prefer_socket: true,
-            ssl_opts: None,
-            local_infile_handler: None,
-        }
-    }
-}
-
-#[cfg(all(feature = "ssl", feature = "socket", not(feature = "pipe")))]
-impl Default for Opts {
-    fn default() -> Opts {
-        Opts {
-            ip_or_hostname: Some("127.0.0.1".to_string()),
-            tcp_port: 3306,
-            unix_addr: None,
             user: None,
             pass: None,
             db_name: None,
@@ -365,14 +239,12 @@ impl OptsBuilder {
     }
 
     /// Path to unix socket of mysql server (defaults to `None`).
-    #[cfg(feature = "socket")]
     pub fn unix_addr<T: Into<path::PathBuf>>(&mut self, unix_addr: Option<T>) -> &mut Self {
         self.opts.unix_addr = unix_addr.map(Into::into);
         self
     }
 
     /// Pipe name of mysql server (defaults to `None`).
-    #[cfg(feature = "pipe")]
     pub fn pipe_name<T: Into<String>>(&mut self, pipe_name: Option<T>) -> &mut Self {
         self.opts.pipe_name = pipe_name.map(Into::into);
         self
@@ -414,7 +286,6 @@ impl OptsBuilder {
         self
     }
 
-    #[cfg(any(feature = "socket", feature = "pipe"))]
     /// Prefer socket connection (defaults to `true`).
     ///
     /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
@@ -430,7 +301,6 @@ impl OptsBuilder {
         self
     }
 
-    #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
     /// Perform or not ssl peer verification (defaults to `false`).
     /// Only make sense if ssl_opts is not None.
@@ -439,7 +309,6 @@ impl OptsBuilder {
         self
     }
 
-    #[cfg(feature = "ssl")]
     /// #### Only available if `ssl` feature enabled.
     /// SSL certificates and keys in pem format.
     /// If not None, then ssl connection implied.
@@ -655,17 +524,9 @@ mod test {
 
     #[test]
     #[should_panic]
-    #[cfg(feature = "socket")]
+    #[cfg(any(feature = "socket", feature = "ssl"))]
     fn should_panic_on_invalid_prefer_socket_param_value() {
         let opts = "mysql://usr:pw@localhost:3308/dbname?prefer_socket=invalid";
-        let _: Opts = opts.into();
-    }
-
-    #[test]
-    #[should_panic]
-    #[cfg(feature = "ssl")]
-    fn should_panic_on_invalid_verify_peer_param_value() {
-        let opts = "mysql://usr:pw@localhost:3308/dbname?verify_peer=invalid";
         let _: Opts = opts.into();
     }
 
