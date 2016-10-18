@@ -343,8 +343,8 @@ impl Stream {
         let full_name = format!(r"\\.\pipe\{}", socket);
         match np::PipeClient::connect(full_name.clone()) {
             Ok(mut stream) => {
-                try!(stream.set_read_timeout(read_timeout));
-                try!(stream.set_write_timeout(write_timeout));
+                stream.set_read_timeout(read_timeout);
+                stream.set_write_timeout(write_timeout);
                 Ok(Stream::SocketStream(BufStream::new(stream)))
             },
             Err(e) => {
