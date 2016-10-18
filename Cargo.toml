@@ -43,8 +43,6 @@ debug = true
 [features]
 default = ["ssl"]
 ssl = ["openssl"]
-socket = []
-pipe = ["named_pipe"]
 nightly = []
 
 [dependencies]
@@ -69,7 +67,6 @@ optional = true
 
 [target.'cfg(windows)'.dependencies.named_pipe]
 version = "~0.2"
-optional = true
 
 [dependencies.uuid]
 version = "~0.3"
