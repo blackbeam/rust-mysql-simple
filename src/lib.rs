@@ -160,7 +160,7 @@ extern crate nom;
 #[macro_use]
 extern crate bitflags;
 extern crate byteorder;
-#[cfg(all(feature = "pipe", windows))]
+#[cfg(windows)]
 extern crate named_pipe;
 extern crate url;
 extern crate bufstream;

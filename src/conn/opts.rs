@@ -23,10 +23,8 @@ pub struct Opts {
     ip_or_hostname: Option<String>,
     /// TCP port of mysql server (defaults to `3306`).
     tcp_port: u16,
-    /// Path to unix socket of mysql server (defaults to `None`).
-    unix_addr: Option<path::PathBuf>,
-    /// Pipe name of mysql server (defaults to `None`).
-    pipe_name: Option<String>,
+    /// Path to unix socket on unix or pipe name on windows (defaults to `None`).
+    socket: Option<String>,
     /// User (defaults to `None`).
     user: Option<String>,
     /// Password (defaults to `None`).
@@ -42,9 +40,12 @@ pub struct Opts {
 
     /// Prefer socket connection (defaults to `true`).
     ///
-    /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
+    /// Will reconnect via socket (or named pipe on windows) after TCP
+    /// connection to `127.0.0.1` if `true`.
     prefer_socket: bool,
+
     // XXX: Wait for keepalive_timeout stabilization
+
     /// Commands to execute on each new database connection.
     init: Vec<String>,
 
@@ -103,13 +104,9 @@ impl Opts {
     pub fn get_tcp_port(&self) -> u16 {
         self.tcp_port
     }
-    /// Path to unix socket of mysql server (defaults to `None`).
-    pub fn get_unix_addr(&self) -> &Option<path::PathBuf> {
-        &self.unix_addr
-    }
-    /// Pipe name of mysql server (defaults to `None`).
-    pub fn get_pipe_name(&self) -> &Option<String> {
-        &self.pipe_name
+    /// Socket path on unix or pipe name on windows (defaults to `None`).
+    pub fn get_socket(&self) -> &Option<String> {
+        &self.socket
     }
     /// User (defaults to `None`).
     pub fn get_user(&self) -> &Option<String> {
@@ -136,7 +133,8 @@ impl Opts {
 
     /// Prefer socket connection (defaults to `true`).
     ///
-    /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
+    /// Will reconnect via socket (or named pipe on windows) after TCP connection
+    /// to `127.0.0.1` if `true`.
     pub fn get_prefer_socket(&self) -> bool {
         self.prefer_socket
     }
@@ -181,8 +179,7 @@ impl Default for Opts {
         Opts {
             ip_or_hostname: Some("127.0.0.1".to_string()),
             tcp_port: 3306,
-            unix_addr: None,
-            pipe_name: None,
+            socket: None,
             user: None,
             pass: None,
             db_name: None,
@@ -238,15 +235,9 @@ impl OptsBuilder {
         self
     }
 
-    /// Path to unix socket of mysql server (defaults to `None`).
-    pub fn unix_addr<T: Into<path::PathBuf>>(&mut self, unix_addr: Option<T>) -> &mut Self {
-        self.opts.unix_addr = unix_addr.map(Into::into);
-        self
-    }
-
-    /// Pipe name of mysql server (defaults to `None`).
-    pub fn pipe_name<T: Into<String>>(&mut self, pipe_name: Option<T>) -> &mut Self {
-        self.opts.pipe_name = pipe_name.map(Into::into);
+    /// Socket path on unix or pipe name on windows (defaults to `None`).
+    pub fn socket<T: Into<String>>(&mut self, socket: Option<T>) -> &mut Self {
+        self.opts.socket = socket.map(Into::into);
         self
     }
 
@@ -288,7 +279,8 @@ impl OptsBuilder {
 
     /// Prefer socket connection (defaults to `true`).
     ///
-    /// Will reconnect via socket after TCP connection to `127.0.0.1` if `true`.
+    /// Will reconnect via socket (on named pipe on windows) after TCP connection
+    /// to `127.0.0.1` if `true`.
     pub fn prefer_socket(&mut self, prefer_socket: bool) -> &mut Self {
         self.opts.prefer_socket = prefer_socket;
         self
@@ -410,18 +402,12 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
     let (mut opts, query_pairs) = try!(from_url_basic(url));
     for (key, value) in query_pairs {
         if key == "prefer_socket" {
-            if cfg!(all(not(feature = "socket"), not(feature = "pipe"))) {
-                return Err(
-                    UrlError::FeatureRequired("`socket' or `pipe'".into(), "prefer_socket".into())
-                );
+            if value == "true" {
+                opts.set_prefer_socket(true);
+            } else if value == "false" {
+                opts.set_prefer_socket(false);
             } else {
-                if value == "true" {
-                    opts.set_prefer_socket(true);
-                } else if value == "false" {
-                    opts.set_prefer_socket(false);
-                } else {
-                    return Err(UrlError::InvalidValue("prefer_socket".into(), value));
-                }
+                return Err(UrlError::InvalidValue("prefer_socket".into(), value));
             }
         } else if key == "verify_peer" {
             if cfg!(not(feature = "ssl")) {
@@ -456,7 +442,7 @@ mod test {
     use super::Opts;
 
     #[test]
-    #[cfg(all(feature = "ssl", feature = "socket"))]
+    #[cfg(feature = "ssl")]
     fn should_convert_url_into_opts() {
         let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true";
         assert_eq!(Opts {
@@ -472,7 +458,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(all(not(feature = "ssl"), not(feature = "socket")))]
+    #[cfg(not(feature = "ssl"))]
     fn should_convert_url_into_opts() {
         let opts = "mysql://usr:pw@192.168.1.1:3309/dbname";
         assert_eq!(Opts {
@@ -508,14 +494,6 @@ mod test {
 
     #[test]
     #[should_panic]
-    #[cfg(all(not(feature = "socket"), not(feature = "pipe")))]
-    fn should_panic_if_prefer_socket_query_param_requires_feature() {
-        let opts = "mysql://usr:pw@localhost:3308/dbname?prefer_socket=false";
-        let _: Opts = opts.into();
-    }
-
-    #[test]
-    #[should_panic]
     #[cfg(not(feature = "ssl"))]
     fn should_panic_if_verify_peer_query_param_requires_feature() {
         let opts = "mysql://usr:pw@localhost:3308/dbname?verify_peer=false";
@@ -524,24 +502,9 @@ mod test {
 
     #[test]
     #[should_panic]
-    #[cfg(any(feature = "socket", feature = "ssl"))]
-    fn should_panic_on_invalid_prefer_socket_param_value() {
-        let opts = "mysql://usr:pw@localhost:3308/dbname?prefer_socket=invalid";
+    #[cfg(feature = "ssl")]
+    fn should_panic_on_invalid_verify_peer_param_value() {
+        let opts = "mysql://usr:pw@localhost:3308/dbname?verify_peer=invalid";
         let _: Opts = opts.into();
-    }
-
-    #[test]
-    #[should_panic]
-    #[cfg(all(not(feature = "ssl"), not(feature = "socket")))]
-    fn should_panic_on_unk() {
-        let opts = "mysql://localhost/dbname?prefer_socket=false";
-        assert_eq!(Opts {
-            user: Some("usr".to_string()),
-            pass: Some("pw".to_string()),
-            ip_or_hostname: Some("localhost".to_string()),
-            tcp_port: 3308,
-            db_name: Some("dbname".to_string()),
-            ..Opts::default()
-        }, opts.into());
     }
 }

@@ -7,7 +7,6 @@ use std::hash::BuildHasherDefault as BldHshrDflt;
 use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
-use std::net;
 use std::ops::{
     Deref,
     DerefMut,
@@ -23,7 +22,6 @@ use super::consts::ColumnType;
 use super::io::Read as MyRead;
 use super::io::Write;
 use super::io::Stream;
-use super::io::TcpStream::Insecure;
 use super::error::Error::{
     IoError,
     MySqlError,
@@ -54,15 +52,10 @@ use super::value::{
 };
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
-use bufstream::BufStream;
 use byteorder::LittleEndian as LE;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use fnv::FnvHasher;
 use twox_hash::XxHash;
-#[cfg(all(feature = "socket", not(windows)))]
-use std::os::unix;
-#[cfg(all(feature = "pipe", windows))]
-use named_pipe as np;
 
 pub mod pool;
 mod opts;
@@ -875,20 +868,11 @@ impl Conn {
     fn can_improved(&mut self) -> Option<Opts> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
             if let Some(socket) = self.get_system_var("socket") {
-                if cfg!(all(feature = "socket", unix)) {
-                    if self.opts.get_unix_addr().is_none() {
-                        let mut unix_opts = OptsBuilder::from_opts(self.opts.clone());
-                        let path = from_value::<String>(socket);
-                        unix_opts.unix_addr(Some(path));
-                        return Some(unix_opts.into());
-                    }
-                } else if cfg!(all(feature = "pipe", windows)) {
-                    if self.opts.get_pipe_name().is_none() {
-                        let mut pipe_opts = OptsBuilder::from_opts(self.opts.clone());
-                        let name = from_value::<String>(socket);
-                        pipe_opts.pipe_name(Some(name));
-                        return Some(pipe_opts.into());
-                    }
+                if self.opts.get_socket().is_none() {
+                    let mut socket_opts = OptsBuilder::from_opts(self.opts.clone());
+                    let socket = from_value::<String>(socket);
+                    socket_opts.socket(Some(socket));
+                    return Some(socket_opts.into())
                 }
             }
         }
@@ -986,82 +970,19 @@ impl Conn {
         unimplemented!();
     }
 
-    #[cfg(all(feature = "socket", unix))]
-    fn connect_socket(&mut self, unix_addr: &path::PathBuf) -> MyResult<()> {
-        match unix::net::UnixStream::connect(unix_addr) {
-            Ok(stream) => {
-                try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                self.stream = Some(Stream::UnixStream(BufStream::new(stream)));
-                Ok(())
-            },
-            Err(e) => {
-                let addr = format!("{}", unix_addr.display());
-                let desc = format!("{}", e);
-                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-            }
-        }
-    }
-
-    #[cfg(any(not(feature = "socket"), not(unix)))]
-    fn connect_socket(&mut self, _: &path::PathBuf) -> MyResult<()> {
-        unimplemented!();
-    }
-
-    #[cfg(all(feature = "pipe", windows))]
-    fn connect_pipe(&mut self, pipe_name: &str) -> MyResult<()> {
-        let full_name = format!(r"\\.\pipe\{}", pipe_name);
-        match np::PipeClient::connect(full_name.clone()) {
-            Ok(mut pipe_stream) => {
-                pipe_stream.set_read_timeout(self.opts.get_read_timeout().clone());
-                pipe_stream.set_write_timeout(self.opts.get_write_timeout().clone());
-                self.stream = Some(Stream::PipeStream(BufStream::new(pipe_stream)));
-                Ok(())
-            },
-            Err(e) => {
-                let desc = format!("{}", e);
-                Err(DriverError(CouldNotConnect(Some((full_name, desc, e.kind())))))
-            }
-        }
-    }
-
-    #[cfg(any(not(feature = "pipe"), not(windows)))]
-    fn connect_pipe(&mut self, _: &str) -> MyResult<()> {
-        unimplemented!();
-    }
-
-    fn connect_tcp(&mut self, ip_or_hostname: &str) -> MyResult<()> {
-        match net::TcpStream::connect((ip_or_hostname, self.opts.get_tcp_port())) {
-            Ok(stream) => {
-                try!(stream.set_read_timeout(self.opts.get_read_timeout().clone()));
-                try!(stream.set_write_timeout(self.opts.get_write_timeout().clone()));
-                self.stream = Some(Stream::TcpStream(Some(Insecure(BufStream::new(stream)))));
-                Ok(())
-            },
-            Err(e) => {
-                let addr = format!("{}:{}", ip_or_hostname, self.opts.get_tcp_port());
-                let desc = format!("{}", e);
-                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
-            }
-        }
-    }
-
     fn connect_stream(&mut self) -> MyResult<()> {
-        if let Some(unix_addr) = self.opts.get_unix_addr().clone() {
-            if cfg!(all(feature = "socket", unix)) {
-                return self.connect_socket(&unix_addr);
-            }
-        }
-        if let Some(pipe_name) = self.opts.get_pipe_name().clone() {
-            if cfg!(all(feature = "pipe", windows)) {
-                return self.connect_pipe(&pipe_name);
-            }
-        }
-        if let Some(ip_or_hostname) = self.opts.get_ip_or_hostname().clone() {
-            self.connect_tcp(&ip_or_hostname)
+        let read_timeout = self.opts.get_read_timeout().clone();
+        let write_timeout = self.opts.get_write_timeout().clone();
+        let stream = if let Some(ref socket) = *self.opts.get_socket() {
+            try!(Stream::connect_socket(&*socket, read_timeout, write_timeout))
+        } else if let Some(ref ip_or_hostname) = *self.opts.get_ip_or_hostname() {
+            let port = self.opts.get_tcp_port();
+            try!(Stream::connect_tcp(&*ip_or_hostname, port, read_timeout, write_timeout))
         } else {
-            Err(DriverError(CouldNotConnect(None)))
-        }
+            return Err(DriverError(CouldNotConnect(None)));
+        };
+        self.stream = Some(stream);
+        return Ok(())
     }
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
