@@ -535,6 +535,7 @@ impl PooledConn {
 mod test {
     use Opts;
     use OptsBuilder;
+    use std::thread;
 
     pub static USER: &'static str = "root";
     pub static PASS: &'static str = "password";
@@ -611,6 +612,7 @@ mod test {
             let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
+            thread::sleep_ms(250);
             pool.prepare("SHOW FULL PROCESSLIST").unwrap();
         }
 
@@ -623,6 +625,7 @@ mod test {
             let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
+            thread::sleep_ms(250);
             pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap();
         }
         #[test]
@@ -634,7 +637,7 @@ mod test {
             let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-
+            thread::sleep_ms(250);
             pool.start_transaction(false, None, None).unwrap();
         }
         #[test]

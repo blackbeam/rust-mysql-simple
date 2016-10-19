@@ -3,6 +3,7 @@ use std::io::Read as StdRead;
 use std::io::Write as StdWrite;
 use std::net;
 use std::fmt;
+use std::time::Duration;
 
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
@@ -10,6 +11,7 @@ use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
 use super::error::Error::DriverError;
+use super::error::DriverError::CouldNotConnect;
 use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
 use super::error::Result as MyResult;
@@ -20,9 +22,9 @@ use bufstream::BufStream;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian as LE;
-#[cfg(all(feature = "socket", not(windows)))]
+#[cfg(unix)]
 use std::os::unix as unix;
-#[cfg(all(feature = "pipe", windows))]
+#[cfg(windows)]
 use named_pipe as np;
 
 pub trait Read: ReadBytesExt + io::BufRead {
@@ -289,10 +291,10 @@ impl<T: WriteBytesExt> Write for T {}
 
 #[derive(Debug)]
 pub enum Stream {
-    #[cfg(all(feature = "socket", not(windows)))]
-    UnixStream(BufStream<unix::net::UnixStream>),
-    #[cfg(all(feature = "pipe", windows))]
-    PipeStream(BufStream<np::PipeClient>),
+    #[cfg(unix)]
+    SocketStream(BufStream<unix::net::UnixStream>),
+    #[cfg(windows)]
+    SocketStream(BufStream<np::PipeClient>),
     TcpStream(Option<TcpStream>),
 }
 
@@ -303,10 +305,10 @@ impl<T: io::Read + io::Write + 'static> IoPack for BufStream<T> { }
 impl AsMut<IoPack> for Stream {
     fn as_mut(&mut self) -> &mut IoPack {
         match *self {
-            #[cfg(all(feature = "socket", not(windows)))]
-            Stream::UnixStream(ref mut stream) => stream,
-            #[cfg(all(feature = "pipe", windows))]
-            Stream::PipeStream(ref mut stream) => stream,
+            #[cfg(unix)]
+            Stream::SocketStream(ref mut stream) => stream,
+            #[cfg(windows)]
+            Stream::SocketStream(ref mut stream) => stream,
             Stream::TcpStream(Some(ref mut stream)) => stream.as_mut(),
             _ => panic!("Incomplete stream"),
         }
@@ -314,6 +316,68 @@ impl AsMut<IoPack> for Stream {
 }
 
 impl Stream {
+    #[cfg(unix)]
+    pub fn connect_socket(socket: &str,
+                          read_timeout: Option<Duration>,
+                          write_timeout: Option<Duration>) -> MyResult<Stream>
+    {
+        match unix::net::UnixStream::connect(socket) {
+            Ok(stream) => {
+                try!(stream.set_read_timeout(read_timeout));
+                try!(stream.set_write_timeout(write_timeout));
+                Ok(Stream::SocketStream(BufStream::new(stream)))
+            },
+            Err(e) => {
+                let addr = format!("{}", socket);
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    pub fn connect_socket(socket: &str,
+                          read_timeout: Option<Duration>,
+                          write_timeout: Option<Duration>) -> MyResult<Stream>
+    {
+        let full_name = format!(r"\\.\pipe\{}", socket);
+        match np::PipeClient::connect(full_name.clone()) {
+            Ok(mut stream) => {
+                stream.set_read_timeout(read_timeout);
+                stream.set_write_timeout(write_timeout);
+                Ok(Stream::SocketStream(BufStream::new(stream)))
+            },
+            Err(e) => {
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((full_name, desc, e.kind())))))
+            }
+        }
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
+    fn connect_socket(&mut self) -> MyResult<()> {
+        unimplemented!("Sockets is not implemented on current platform");
+    }
+
+    pub fn connect_tcp(ip_or_hostname: &str,
+                       port: u16,
+                       read_timeout: Option<Duration>,
+                       write_timeout: Option<Duration>) -> MyResult<Stream>
+    {
+        match net::TcpStream::connect((ip_or_hostname, port)) {
+            Ok(stream) => {
+                try!(stream.set_read_timeout(read_timeout));
+                try!(stream.set_write_timeout(write_timeout));
+                Ok(Stream::TcpStream(Some(TcpStream::Insecure(BufStream::new(stream)))))
+            },
+            Err(e) => {
+                let addr = format!("{}:{}", ip_or_hostname, port);
+                let desc = format!("{}", e);
+                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
+            }
+        }
+    }
+
     pub fn is_insecure(&self) -> bool {
         match self {
             &Stream::TcpStream(Some(TcpStream::Insecure(_))) => true,
