@@ -1,6 +1,4 @@
-extern crate uuid;
-
-use self::uuid::Uuid;
+use uuid::Uuid;
 
 use super::value::{
     Value,
@@ -50,7 +48,7 @@ impl FromValue for Uuid {
 mod test {
     use super::super::value::Value::Bytes;
     use super::super::from_value;
-    use super::uuid::Uuid;
+    use uuid::Uuid;
 
     #[test]
     fn should_convert_bytes_to_uuid() {

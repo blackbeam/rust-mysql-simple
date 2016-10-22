@@ -8,8 +8,8 @@ MYSQL_PORT = 3307
 BASEDIR := $(shell mysqld --verbose --help 2>/dev/null | grep -e '^basedir' | awk '{ print $$2 }')
 OS := $(shell uname)
 
-FEATURES := "" "ssl" "uuid" "ssl uuid"
-BENCH_FEATURES := "nightly" "nightly ssl" "nightly uuid" "nighlty ssl uuid"
+FEATURES := "" "ssl"
+BENCH_FEATURES := "nightly" "nightly ssl"
 
 define run-mysql
 if [ -e $(MYSQL_DATA_DIR)/mysqld.pid ];\
