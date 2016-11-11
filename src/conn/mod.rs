@@ -1978,7 +1978,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
+    #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -1990,6 +1990,7 @@ mod test {
                .ip_or_hostname(Some(ADDR))
                .tcp_port(port)
                .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
+               .verify_peer(true)
                .ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
         builder.into()
     }
@@ -2329,7 +2330,7 @@ mod test {
         }
 
         #[test]
-        #[cfg(all(feature = "ssl", any(target_os = "macos", target_os = "linux")))]
+        #[cfg(all(feature = "ssl", any(target_os = "macos", unix)))]
         fn should_connect_via_ssl() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);

@@ -3,9 +3,6 @@ use std::io::Read as StdRead;
 use std::io::Write as StdWrite;
 use std::net;
 use std::fmt;
-use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
 use std::time::Duration;
 
 #[cfg(feature = "ssl")]
@@ -413,11 +410,14 @@ impl Stream {
     pub fn make_secure(mut self, verify_peer: bool, ip_or_hostname: &Option<String>, ssl_opts: &SslOpts)
     -> MyResult<Stream>
     {
+        use std::path::Path;
+        use std::path::PathBuf;
+
         fn load_client_cert(path: &Path, pass: &str) -> MyResult<Option<SecIdentity>> {
             use security_framework::import_export::Pkcs12ImportOptions;
             let mut import = Pkcs12ImportOptions::new();
             import.passphrase(pass);
-            let mut client_file = try!(fs::File::open(path));
+            let mut client_file = try!(::std::fs::File::open(path));
             let mut client_data = Vec::new();
             try!(client_file.read_to_end(&mut client_data));
             let mut identityes = try!(import.import(&*client_data));
@@ -427,7 +427,7 @@ impl Stream {
         fn load_extra_certs(files: &[PathBuf]) -> MyResult<Vec<SecCertificate>> {
             let mut extra_certs = Vec::new();
             for path in files {
-                let mut cert_file = try!(fs::File::open(path));
+                let mut cert_file = try!(::std::fs::File::open(path));
                 let mut cert_data = Vec::new();
                 try!(cert_file.read_to_end(&mut cert_data));
                 extra_certs.push(try!(SecCertificate::from_der(&*cert_data)));
@@ -500,12 +500,12 @@ impl Stream {
     }
 }
 
-#[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
+#[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
 impl Stream {
-    pub fn make_secure(mut self, verify_peer: bool, ip_or_hostname: &Option<String>, ssl_opts: &SslOpts) -> MyResult<Stream>
+    pub fn make_secure(mut self, verify_peer: bool, _: &Option<String>, ssl_opts: &SslOpts) -> MyResult<Stream>
     {
         if self.is_insecure() {
-            let mut ctx = try!(ssl::SslContext::new(ssl::SslMethod::Tlsv1));
+            let mut ctx = try!(SslContext::new(ssl::SslMethod::Tlsv1));
             let mode = if verify_peer {
                 ssl::SSL_VERIFY_PEER
             } else {

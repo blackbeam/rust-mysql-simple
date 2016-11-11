@@ -1,4 +1,5 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
+#[cfg(feature = "ssl")]
 use std::path;
 use std::str::FromStr;
 
@@ -21,7 +22,7 @@ use url::percent_encoding::percent_decode;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 pub type SslOpts = Option<Option<(path::PathBuf, String, Vec<path::PathBuf>)>>;
 
-#[cfg(all(featyre = "ssl", not(target_os = "macos"), target_os = "unix"))]
+#[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
 /// Ssl options: Option<(pem_ca_cert, Option<(pem_client_cert, pem_client_key)>)>.`
 pub type SslOpts = Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>;
 
@@ -312,7 +313,7 @@ impl OptsBuilder {
         self
     }
 
-    #[cfg(all(feature = "ssl", not(target_os = "macos"), target_os = "unix"))]
+    #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
     /// SSL certificates and keys in pem format.
     ///
     /// If not None, then ssl connection implied.
