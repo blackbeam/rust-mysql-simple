@@ -138,8 +138,10 @@ extern crate test;
 
 pub extern crate time;
 pub extern crate uuid;
-#[cfg(all(feature = "ssl", any(unix, macos)))]
+#[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
 extern crate openssl;
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+extern crate security_framework;
 extern crate regex;
 #[macro_use]
 extern crate lazy_static;

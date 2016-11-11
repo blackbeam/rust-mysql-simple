@@ -51,7 +51,7 @@ mysqld --no-defaults \
        --ssl-ca=$(MYSQL_SSL_CA) \
        --ssl-cert=$(MYSQL_SSL_CERT) \
        --ssl-key=$(MYSQL_SSL_KEY) \
-       --ssl-cipher=DHE-RSA-AES256-SHA \
+       --ssl-cipher=DEFAULT:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:DHE-RSA-AES256-SHA \
        --socket=$(MYSQL_DATA_DIR)/mysqld.sock &
 
 while ! nc -z 127.0.0.1 $(MYSQL_PORT); \

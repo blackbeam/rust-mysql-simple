@@ -4,8 +4,10 @@ use std::io;
 use std::result;
 use std::sync;
 
-#[cfg(all(feature = "ssl", any(unix, macos)))]
-use openssl::ssl::error::{SslError};
+#[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
+use openssl::ssl::error::SslError;
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+use security_framework::base::Error as SslError;
 
 use super::conn::Row;
 use super::value::Value;

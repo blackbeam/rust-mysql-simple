@@ -61,6 +61,8 @@ pub mod pool;
 mod opts;
 pub use self::opts::Opts;
 pub use self::opts::OptsBuilder;
+#[cfg(feature = "ssl")]
+pub use self::opts::SslOpts;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum IsolationLevel {
@@ -959,6 +961,7 @@ impl Conn {
         if self.stream.is_some() {
             let stream = self.stream.take().unwrap();
             let stream = try!(stream.make_secure(self.opts.get_verify_peer(),
+                                                 self.opts.get_ip_or_hostname(),
                                                  self.opts.get_ssl_opts()));
             self.stream = Some(stream);
         }
@@ -1955,10 +1958,27 @@ mod test {
 
     static USER: &'static str = "root";
     static PASS: &'static str = "password";
-    static ADDR: &'static str = "127.0.0.1";
+    static ADDR: &'static str = "localhost";
     static PORT: u16          = 3307;
 
-    #[cfg(all(feature = "ssl", any(unix, macos)))]
+    #[cfg(all(feature = "ssl", target_os = "macos"))]
+    pub fn get_opts() -> Opts {
+        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
+            .unwrap_or(PORT);
+        let mut builder = OptsBuilder::default();
+        builder.user(Some(USER))
+            .pass(Some(pwd))
+            .ip_or_hostname(Some(ADDR))
+            .tcp_port(port)
+            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
+            .verify_peer(true)
+            .ssl_opts(Some(Some(("tests/client.p12", "pass", vec!["tests/ca-cert.cer"]))));
+        builder.into()
+    }
+
+    #[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -1974,7 +1994,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(any(not(feature = "ssl"), windows))]
+    #[cfg(not(feature = "ssl"))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -2306,6 +2326,16 @@ mod test {
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
             assert!(debug_format.contains("PipeStream"));
+        }
+
+        #[test]
+        #[cfg(all(feature = "ssl", any(target_os = "macos", target_os = "linux")))]
+        fn should_connect_via_ssl() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.prefer_socket(false);
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:#?}", conn);
+            assert!(debug_format.contains("Secure stream"));
         }
 
         #[test]

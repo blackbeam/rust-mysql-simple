@@ -41,8 +41,8 @@ opt-level = 0
 debug = true
 
 [features]
-default = ["ssl"]
-ssl = ["openssl"]
+default = []
+ssl = ["openssl", "security-framework"]
 nightly = []
 
 [dependencies]
@@ -62,9 +62,14 @@ uuid = "~0.3"
 version = "~0.1"
 default-features = false
 
-[target.'cfg(any(unix, macos))'.dependencies.openssl]
+[target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies.openssl]
 version = "~0.7"
 optional = true
 
-[target.'cfg(windows)'.dependencies.named_pipe]
+[target.'cfg(target_os = "macos")'.dependencies.security-framework]
+version = "~0.1"
+optional = true
+features = ["OSX_10_8"]
+
+[target.'cfg(target_os = "windows")'.dependencies.named_pipe]
 version = "~0.2"

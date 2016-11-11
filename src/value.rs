@@ -2182,7 +2182,23 @@ mod test {
         static ADDR: &'static str = "127.0.0.1";
         static PORT: u16          = 3307;
 
-        #[cfg(all(feature = "ssl", any(unix, macos)))]
+        #[cfg(all(feature = "ssl", target_os = "macos"))]
+        pub fn get_opts() -> Opts {
+            let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+            let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+                .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
+                .unwrap_or(PORT);
+            let mut builder = OptsBuilder::default();
+            builder.user(Some(USER))
+                .pass(Some(pwd))
+                .ip_or_hostname(Some(ADDR))
+                .tcp_port(port)
+                .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
+                .ssl_opts(Some(Some(("tests/client.p12", "pass", vec!["tests/ca-cert.cer"]))));
+            builder.into()
+        }
+
+        #[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
         pub fn get_opts() -> Opts {
             let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
             let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -2198,7 +2214,7 @@ mod test {
             builder.into()
         }
 
-        #[cfg(any(not(feature = "ssl"), windows))]
+        #[cfg(not(feature = "ssl"))]
         pub fn get_opts() -> Opts {
             let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
             let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()

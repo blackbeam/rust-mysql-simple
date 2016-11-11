@@ -10,9 +10,28 @@ use super::LocalInfileHandler;
 use url::Url;
 use url::percent_encoding::percent_decode;
 
+/// Ssl options.
+///
+/// Option<Option<(CERT, PASS, EXTRA)>> where
+/// CERT - client certificate path (pkcs12)
+/// PASS - pkcs12 password
+/// EXTRA - vector of extra certificates in the chain
+///
+/// This parameters could be omitted using `Some(None)` value.
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+pub type SslOpts = Option<Option<(path::PathBuf, String, Vec<path::PathBuf>)>>;
 
-/// Ssl options: Option<(ca_cert, Option<(client_cert, client_key)>)>.`
+#[cfg(all(featyre = "ssl", not(target_os = "macos"), target_os = "unix"))]
+/// Ssl options: Option<(pem_ca_cert, Option<(pem_client_cert, pem_client_key)>)>.`
 pub type SslOpts = Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>;
+
+#[cfg(all(feature = "ssl", target_os = "windows"))]
+/// Not implemented on Windows
+pub type SslOpts = Option<()>;
+
+#[cfg(not(feature = "ssl"))]
+/// Requires `ssl` feature
+pub type SslOpts = Option<()>;
 
 /// Mysql connection options.
 ///
@@ -54,11 +73,7 @@ pub struct Opts {
     /// Only make sense if ssl_opts is not None.
     verify_peer: bool,
 
-    /// #### Only available if `ssl` feature enabled.
-    /// SSL certificates and keys in pem format.
-    /// If not None, then ssl connection implied.
-    ///
-    /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
+    /// Only available if `ssl` feature enabled.
     ssl_opts: SslOpts,
 
     /// Callback to handle requests for local files. These are
@@ -152,10 +167,6 @@ impl Opts {
     }
 
     /// #### Only available if `ssl` feature enabled.
-    /// SSL certificates and keys in pem format.
-    /// If not None, then ssl connection implied.
-    ///
-    /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
     pub fn get_ssl_opts(&self) -> &SslOpts {
         &self.ssl_opts
     }
@@ -301,10 +312,10 @@ impl OptsBuilder {
         self
     }
 
-    /// #### Only available if `ssl` feature enabled.
+    #[cfg(all(feature = "ssl", not(target_os = "macos"), target_os = "unix"))]
     /// SSL certificates and keys in pem format.
-    /// If not None, then ssl connection implied.
     ///
+    /// If not None, then ssl connection implied.
     /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
     pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<(A, Option<(B, C)>)>) -> &mut Self
     where A: Into<path::PathBuf>,
@@ -316,6 +327,35 @@ impl OptsBuilder {
             }))
         });
         self
+    }
+
+    /// SSL certificates and keys. If not None, then ssl connection implied.
+    ///
+    /// See `SslOpts`.
+    #[cfg(all(feature = "ssl", target_os = "macos"))]
+    pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<Option<(A, C, Vec<B>)>>) -> &mut Self
+        where A: Into<path::PathBuf>,
+              B: Into<path::PathBuf>,
+              C: Into<String>,
+    {
+        self.opts.ssl_opts = ssl_opts.map(|opts| {
+            opts.map(|(pkcs12_path, pass, certs)| {
+                (pkcs12_path.into(), pass.into(), certs.into_iter().map(Into::into).collect())
+            })
+        });
+        self
+    }
+
+    /// Not implemented on windows
+    #[cfg(all(feature = "ssl", target_os = "windows"))]
+    pub fn ssl_opts(&mut self) -> &mut Self {
+        panic!("OptsBuilder::ssl_opts is not implemented on Windows");
+    }
+
+    /// Requires `ssl` feature
+    #[cfg(not(feature = "ssl"))]
+    pub fn ssl_opts(&mut self) -> &mut Self {
+        panic!("OptsBuilder::ssl_opts requires `ssl` feature");
     }
 
     /// Callback to handle requests for local files. These are

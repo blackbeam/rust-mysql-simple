@@ -535,14 +535,29 @@ impl PooledConn {
 mod test {
     use Opts;
     use OptsBuilder;
-    use std::thread;
 
     pub static USER: &'static str = "root";
     pub static PASS: &'static str = "password";
     pub static ADDR: &'static str = "127.0.0.1";
     pub static PORT: u16          = 3307;
 
-    #[cfg(all(feature = "ssl", any(unix, macos)))]
+    #[cfg(all(feature = "ssl", target_os = "macos"))]
+    pub fn get_opts() -> Opts {
+        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
+            .unwrap_or(PORT);
+        let mut builder = OptsBuilder::default();
+        builder.user(Some(USER))
+            .pass(Some(pwd))
+            .ip_or_hostname(Some(ADDR))
+            .tcp_port(port)
+            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
+            .ssl_opts(Some(Some(("tests/client.p12", "pass", vec!["tests/ca-cert.cer"]))));
+        builder.into()
+    }
+
+    #[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -558,7 +573,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(any(not(feature = "ssl"), windows))]
+    #[cfg(not(feature = "ssl"))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -575,6 +590,7 @@ mod test {
 
     mod pool {
         use std::thread;
+        use std::time::Duration;
 
         use from_row;
         use super::get_opts;
@@ -612,7 +628,7 @@ mod test {
             let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-            thread::sleep_ms(250);
+            thread::sleep(Duration::from_millis(250));
             pool.prepare("SHOW FULL PROCESSLIST").unwrap();
         }
 
@@ -625,7 +641,7 @@ mod test {
             let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-            thread::sleep_ms(250);
+            thread::sleep(Duration::from_millis(250));
             pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap();
         }
         #[test]
@@ -637,7 +653,7 @@ mod test {
             let (id,): (u32,) = from_row(row);
 
             conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
-            thread::sleep_ms(250);
+            thread::sleep(Duration::from_millis(250));
             pool.start_transaction(false, None, None).unwrap();
         }
         #[test]

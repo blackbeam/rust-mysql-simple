@@ -3,7 +3,13 @@ use std::io::Read as StdRead;
 use std::io::Write as StdWrite;
 use std::net;
 use std::fmt;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
+
+#[cfg(feature = "ssl")]
+use conn::SslOpts;
 
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
@@ -16,8 +22,24 @@ use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
 use super::error::Result as MyResult;
 
-#[cfg(all(feature = "ssl", any(unix, macos)))]
-use openssl::{ssl, x509};
+#[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
+use openssl::x509;
+#[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
+use openssl::ssl::{self, SslStream, SslContext};
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+use security_framework::secure_transport::{
+    ConnectionType,
+    HandshakeError,
+    ProtocolSide,
+    SslContext,
+    SslStream,
+};
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+use security_framework::certificate::SecCertificate;
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+use security_framework::cipher_suite::CipherSuite;
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+use security_framework::identity::SecIdentity;
 use bufstream::BufStream;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
@@ -386,13 +408,101 @@ impl Stream {
     }
 }
 
-#[cfg(all(feature = "ssl", any(unix, macos)))]
+#[cfg(all(feature = "ssl", target_os = "macos"))]
 impl Stream {
-    pub fn make_secure(mut self,
-                       verify_peer: bool,
-                       ssl_opts: &Option<(::std::path::PathBuf,
-                                          Option<(::std::path::PathBuf, ::std::path::PathBuf)>)>)
+    pub fn make_secure(mut self, verify_peer: bool, ip_or_hostname: &Option<String>, ssl_opts: &SslOpts)
     -> MyResult<Stream>
+    {
+        fn load_client_cert(path: &Path, pass: &str) -> MyResult<Option<SecIdentity>> {
+            use security_framework::import_export::Pkcs12ImportOptions;
+            let mut import = Pkcs12ImportOptions::new();
+            import.passphrase(pass);
+            let mut client_file = try!(fs::File::open(path));
+            let mut client_data = Vec::new();
+            try!(client_file.read_to_end(&mut client_data));
+            let mut identityes = try!(import.import(&*client_data));
+            Ok(identityes.pop().map(|x| x.identity))
+        }
+
+        fn load_extra_certs(files: &[PathBuf]) -> MyResult<Vec<SecCertificate>> {
+            let mut extra_certs = Vec::new();
+            for path in files {
+                let mut cert_file = try!(fs::File::open(path));
+                let mut cert_data = Vec::new();
+                try!(cert_file.read_to_end(&mut cert_data));
+                extra_certs.push(try!(SecCertificate::from_der(&*cert_data)));
+            }
+            Ok(extra_certs)
+        }
+
+        if self.is_insecure() {
+            let mut ctx: SslContext = try!(SslContext::new(ProtocolSide::Client, ConnectionType::Stream));
+            match *ssl_opts {
+                Some(ref ssl_opts) => {
+                    if verify_peer {
+                        try!(ctx.set_peer_domain_name(ip_or_hostname.as_ref().unwrap_or(&("localhost".into()))));
+                    }
+                    // Taken from gmail.com
+                    try!(ctx.set_enabled_ciphers(&[
+                        CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                        CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+                        CipherSuite::TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+                        CipherSuite::TLS_RSA_WITH_AES_128_GCM_SHA256,
+                        CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA256,
+                        CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA,
+                        CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
+                        CipherSuite::TLS_RSA_WITH_RC4_128_MD5,
+                        CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+                        CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,
+                        CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+                        CipherSuite::TLS_RSA_WITH_AES_256_GCM_SHA384,
+                        CipherSuite::TLS_RSA_WITH_AES_256_CBC_SHA256,
+                        CipherSuite::TLS_RSA_WITH_AES_256_CBC_SHA,
+                        CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+                        CipherSuite::TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+                        CipherSuite::TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+                    ]));
+
+                    if let Some((ref path, ref pass, ref certs)) = *ssl_opts {
+                        if let Some(identity) = try!(load_client_cert(path, pass)) {
+                            let extra_certs = try!(load_extra_certs(certs));
+                            try!(ctx.set_certificate(&identity, &*extra_certs));
+                        }
+                    }
+
+                    match self {
+                        Stream::TcpStream(ref mut opt_stream) if opt_stream.is_some() => {
+                            let stream = opt_stream.take().unwrap();
+                            match stream {
+                                TcpStream::Insecure(mut stream) => {
+                                    try!(stream.flush());
+                                    let sstream = match ctx.handshake(stream.into_inner().unwrap()) {
+                                        Ok(sstream) => sstream,
+                                        Err(HandshakeError::Failure(err)) => {
+                                            return Err(err.into())
+                                        },
+                                        Err(HandshakeError::Interrupted(_)) => unreachable!(),
+                                    };
+                                    Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(sstream)))))
+                                },
+                                _ => unreachable!(),
+                            }
+
+                        },
+                        _ => unreachable!(),
+                    }
+                },
+                _ => unreachable!(),
+            }
+        } else {
+            Ok(self)
+        }
+    }
+}
+
+#[cfg(all(feature = "ssl", not(any(target_os = "windows", target_os = "macos"))))]
+impl Stream {
+    pub fn make_secure(mut self, verify_peer: bool, ip_or_hostname: &Option<String>, ssl_opts: &SslOpts) -> MyResult<Stream>
     {
         if self.is_insecure() {
             let mut ctx = try!(ssl::SslContext::new(ssl::SslMethod::Tlsv1));
@@ -442,15 +552,15 @@ impl Drop for Stream {
 }
 
 pub enum TcpStream {
-    #[cfg(all(feature = "ssl", any(unix, macos)))]
-    Secure(BufStream<ssl::SslStream<net::TcpStream>>),
+    #[cfg(all(feature = "ssl"))]
+    Secure(BufStream<SslStream<net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
 }
 
 impl AsMut<IoPack> for TcpStream {
     fn as_mut(&mut self) -> &mut IoPack {
         match *self {
-            #[cfg(all(feature = "ssl", any(unix, macos)))]
+            #[cfg(all(feature = "ssl"))]
             TcpStream::Secure(ref mut stream) => stream,
             TcpStream::Insecure(ref mut stream) => stream,
         }
@@ -460,7 +570,7 @@ impl AsMut<IoPack> for TcpStream {
 impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            #[cfg(all(feature = "ssl", any(unix, macos)))]
+            #[cfg(all(feature = "ssl"))]
             TcpStream::Secure(_) => write!(f, "Secure stream"),
             TcpStream::Insecure(_) => write!(f, "Insecure stream"),
         }
