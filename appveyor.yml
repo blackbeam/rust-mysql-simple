@@ -39,4 +39,4 @@ test_script:
 
     SET RUST_BACKTRACE=1
 
-    cargo test && cargo test --no-default-features && cargo test --no-default-features --features uuid
+    cargo test && cargo test --no-default-features --features ssl
