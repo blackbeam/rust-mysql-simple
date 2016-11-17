@@ -5,7 +5,7 @@ use std::net;
 use std::fmt;
 use std::time::Duration;
 
-#[cfg(feature = "ssl")]
+#[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use conn::SslOpts;
 
 use super::value::Value;
@@ -552,7 +552,7 @@ impl Drop for Stream {
 }
 
 pub enum TcpStream {
-    #[cfg(all(feature = "ssl"))]
+    #[cfg(all(feature = "ssl", not(target_os = "windows")))]
     Secure(BufStream<SslStream<net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
 }
@@ -560,7 +560,7 @@ pub enum TcpStream {
 impl AsMut<IoPack> for TcpStream {
     fn as_mut(&mut self) -> &mut IoPack {
         match *self {
-            #[cfg(all(feature = "ssl"))]
+            #[cfg(all(feature = "ssl", not(target_os = "windows")))]
             TcpStream::Secure(ref mut stream) => stream,
             TcpStream::Insecure(ref mut stream) => stream,
         }
@@ -570,7 +570,7 @@ impl AsMut<IoPack> for TcpStream {
 impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            #[cfg(all(feature = "ssl"))]
+            #[cfg(all(feature = "ssl", not(target_os = "windows")))]
             TcpStream::Secure(_) => write!(f, "Secure stream"),
             TcpStream::Insecure(_) => write!(f, "Insecure stream"),
         }

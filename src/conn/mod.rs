@@ -1995,7 +1995,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(not(feature = "ssl"))]
+    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()

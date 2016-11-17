@@ -1,5 +1,5 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
-#[cfg(feature = "ssl")]
+#[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use std::path;
 use std::str::FromStr;
 
