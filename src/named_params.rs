@@ -21,7 +21,7 @@ pub fn parse_named_params<'a>(query: &'a str) -> MyResult<(Option<Vec<String>>, 
     let mut cur_param = 0;
     // Vec<(start_offset, end_offset, name)>
     let mut params = Vec::new();
-    for (i, c) in query.chars().enumerate() {
+    for (i, c) in query.char_indices() {
         let mut rematch = false;
         match state {
             TopLevel => {
@@ -130,6 +130,12 @@ mod test {
 
         let result = parse_named_params(":1a :2a").unwrap();
         assert_eq!((None, ":1a :2a".into()), result);
+    }
+
+    #[test]
+    fn special_characters_in_query() {
+        let result = parse_named_params(r"SELECT 1 FROM été WHERE thing = :param;").unwrap();
+        assert_eq!((Some(vec!["param".to_string()]), "SELECT 1 FROM été WHERE thing = ?;".into()), result);
     }
 
     #[cfg(feature = "nightly")]
