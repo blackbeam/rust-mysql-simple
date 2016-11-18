@@ -243,8 +243,8 @@ impl Pool {
     /// Gives you a [`PooledConn`](struct.PooledConn.html).
     ///
     /// `Pool` will check that connection is alive via
-    /// [`Conn::ping`](../struct.Conn.html#method.ping) and will
-    /// call [`Conn::reset`](../struct.Conn.html#method.reset) if
+    /// [`Conn::ping`](struct.Conn.html#method.ping) and will
+    /// call [`Conn::reset`](struct.Conn.html#method.reset) if
     /// necessary.
     pub fn get_conn(&self) -> MyResult<PooledConn> {
         self._get_conn(None::<String>, None, true)
@@ -263,7 +263,7 @@ impl Pool {
         self._get_conn(Some(query), None, call_ping)
     }
 
-    /// Will prepare statement. See [`Conn::prepare`](../struct.Conn.html#method.prepare).
+    /// Will prepare statement. See [`Conn::prepare`](struct.Conn.html#method.prepare).
     ///
     /// It will try to find connection which has this statement cached.
     pub fn prepare<T: AsRef<str>>(&self, query: T) -> MyResult<Stmt<'static>> {
@@ -272,7 +272,7 @@ impl Pool {
     }
 
     /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`. See
-    /// [`Conn::prep_exec`](../struct.Conn.html#method.prep_exec).
+    /// [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
     ///
     /// It will try to find connection which has this statement cached.
     pub fn prep_exec<A, T>(&self, query: A, params: T) -> MyResult<QueryResult<'static>>
@@ -293,7 +293,7 @@ impl Pool {
         }
     }
 
-    /// See [`Conn::first_exec`](../struct.Conn.html#method.first_exec).
+    /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
     pub fn first_exec<Q, P>(&self, query: Q, params: P) -> MyResult<Option<Row>>
     where Q: AsRef<str>,
           P: Into<Params>,
