@@ -426,7 +426,7 @@ impl Drop for PooledConn {
 impl PooledConn {
     /// Redirects to
     /// [`Conn#query`](struct.Conn.html#method.query).
-    pub fn query<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<QueryResult<'a>> {
+    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
         self.conn.as_mut().unwrap().query(query)
     }
 
@@ -442,13 +442,13 @@ impl PooledConn {
 
 
     /// See [`Conn::prepare`](struct.Conn.html#method.prepare).
-    pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
+    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
         self.conn.as_mut().unwrap().prepare(query)
     }
 
     /// See [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
-    pub fn prep_exec<'a, A, T>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
-    where A: AsRef<str> + 'a,
+    pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    where A: AsRef<str>,
           T: Into<Params> {
         self.conn.as_mut().unwrap().prep_exec(query, params)
     }
