@@ -64,6 +64,32 @@ pub use self::opts::OptsBuilder;
 #[cfg(feature = "ssl")]
 pub use self::opts::SslOpts;
 
+/// A trait allowing abstraction over connections and transactions
+pub trait GenericConnection {
+    /// See
+    /// [`Conn#query`](struct.Conn.html#method.query).
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult>;
+
+    /// See
+    /// [`Conn#first`](struct.Conn.html#method.first).
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>>;
+
+    /// See
+    /// [`Conn#prepare`](struct.Conn.html#method.prepare).
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt>;
+
+    /// See
+    /// [`Conn#prep_exec`](struct.Conn.html#method.prep_exec).
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+        where A: AsRef<str>, T: Into<Params>;
+
+    /// See
+    /// [`Conn#first_exec`](struct.Conn.html#method.first_exec).
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+        where Q: AsRef<str>, P: Into<Params>;
+}
+
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum IsolationLevel {
     ReadUncommitted,
