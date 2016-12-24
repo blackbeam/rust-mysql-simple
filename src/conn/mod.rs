@@ -198,6 +198,30 @@ impl<'a> Transaction<'a> {
     }
 }
 
+impl<'a> GenericConnection for Transaction<'a> {
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+        self.query(query)
+    }
+
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+        self.first(query)
+    }
+
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+        self.prepare(query)
+    }
+
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+        where A: AsRef<str>, T: Into<Params> {
+        self.prep_exec(query, params)
+    }
+
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+        where Q: AsRef<str>, P: Into<Params> {
+        self.first_exec(query, params)
+    }
+}
+
 impl<'a> Drop for Transaction<'a> {
     /// Will rollback transaction.
     fn drop(&mut self) {
@@ -1712,6 +1736,30 @@ impl Conn {
     /// in the `Opts` for this connection.
     pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
         self.local_infile_handler = handler;
+    }
+}
+
+impl GenericConnection for Conn {
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+        self.query(query)
+    }
+
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+        self.first(query)
+    }
+
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+        self.prepare(query)
+    }
+
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+        where A: AsRef<str>, T: Into<Params> {
+        self.prep_exec(query, params)
+    }
+
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+        where Q: AsRef<str>, P: Into<Params> {
+        self.first_exec(query, params)
     }
 }
 
