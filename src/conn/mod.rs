@@ -64,6 +64,32 @@ pub use self::opts::OptsBuilder;
 #[cfg(feature = "ssl")]
 pub use self::opts::SslOpts;
 
+/// A trait allowing abstraction over connections and transactions
+pub trait GenericConnection {
+    /// See
+    /// [`Conn#query`](struct.Conn.html#method.query).
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult>;
+
+    /// See
+    /// [`Conn#first`](struct.Conn.html#method.first).
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>>;
+
+    /// See
+    /// [`Conn#prepare`](struct.Conn.html#method.prepare).
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt>;
+
+    /// See
+    /// [`Conn#prep_exec`](struct.Conn.html#method.prep_exec).
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+        where A: AsRef<str>, T: Into<Params>;
+
+    /// See
+    /// [`Conn#first_exec`](struct.Conn.html#method.first_exec).
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+        where Q: AsRef<str>, P: Into<Params>;
+}
+
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum IsolationLevel {
     ReadUncommitted,
@@ -113,7 +139,7 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`Conn::query`](struct.Conn.html#method.query).
-    pub fn query<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<QueryResult<'c>> {
+    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
         self.conn.query(query)
     }
 
@@ -128,12 +154,12 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`Conn::prepare`](struct.Conn.html#method.prepare).
-    pub fn prepare<'c, T: AsRef<str> + 'c>(&'c mut self, query: T) -> MyResult<Stmt<'c>> {
+    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
         self.conn.prepare(query)
     }
 
     /// See [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
-    pub fn prep_exec<'c, A: AsRef<str> + 'c, T: Into<Params>>(&'c mut self, query: A, params: T) -> MyResult<QueryResult<'c>> {
+    pub fn prep_exec<A: AsRef<str>, T: Into<Params>>(&mut self, query: A, params: T) -> MyResult<QueryResult> {
         self.conn.prep_exec(query, params)
     }
 
@@ -169,6 +195,30 @@ impl<'a> Transaction<'a> {
     /// Destructor of transaction will restore original handler.
     pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
         self.conn.set_local_infile_handler(handler);
+    }
+}
+
+impl<'a> GenericConnection for Transaction<'a> {
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+        self.query(query)
+    }
+
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+        self.first(query)
+    }
+
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+        self.prepare(query)
+    }
+
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+        where A: AsRef<str>, T: Into<Params> {
+        self.prep_exec(query, params)
+    }
+
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+        where Q: AsRef<str>, P: Into<Params> {
+        self.first_exec(query, params)
     }
 }
 
@@ -1402,7 +1452,7 @@ impl Conn {
     ///
     /// Executes mysql query on `Conn`. [`QueryResult`](struct.QueryResult.html)
     /// will borrow `Conn` until the end of its scope.
-    pub fn query<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<QueryResult<'a>> {
+    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
         match self._query(query.as_ref()) {
             Ok((columns, ok_packet)) => {
                 Ok(QueryResult::new(ResultConnRef::ViaConnRef(self), columns, ok_packet, false))
@@ -1543,7 +1593,7 @@ impl Conn {
     /// }
     /// # }
     /// ```
-    pub fn prepare<'a, T: AsRef<str> + 'a>(&'a mut self, query: T) -> MyResult<Stmt<'a>> {
+    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
         let query = query.as_ref();
         let (named_params, real_query) = try!(parse_named_params(query));
         match self._prepare(real_query.borrow(), named_params) {
@@ -1556,8 +1606,8 @@ impl Conn {
     /// ['Conn::prepare'](struct.Conn.html#method.prepare)
     ///
     /// This call will take statement from cache if has been prepared on this connection.
-    pub fn prep_exec<'a, A, T>(&'a mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
-    where A: AsRef<str> + 'a,
+    pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    where A: AsRef<str>,
           T: Into<Params> {
         try!(self.prepare(query)).prep_exec(params.into())
     }
@@ -1686,6 +1736,30 @@ impl Conn {
     /// in the `Opts` for this connection.
     pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
         self.local_infile_handler = handler;
+    }
+}
+
+impl GenericConnection for Conn {
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+        self.query(query)
+    }
+
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+        self.first(query)
+    }
+
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+        self.prepare(query)
+    }
+
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+        where A: AsRef<str>, T: Into<Params> {
+        self.prep_exec(query, params)
+    }
+
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+        where Q: AsRef<str>, P: Into<Params> {
+        self.first_exec(query, params)
     }
 }
 
