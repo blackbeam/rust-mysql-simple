@@ -1006,7 +1006,7 @@ impl Conn {
         self.stream.as_mut().unwrap()
     }
 
-    #[cfg(all(feature = "ssl", any(unix, macos)))]
+    #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         if self.stream.is_some() {
             let stream = self.stream.take().unwrap();
@@ -1018,7 +1018,7 @@ impl Conn {
         Ok(())
     }
 
-    #[cfg(any(not(feature = "ssl"), windows))]
+    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         unimplemented!();
     }
@@ -2362,45 +2362,43 @@ mod test {
         }
 
         #[test]
-        #[cfg(all(feature = "socket", unix))]
+        #[cfg(not(feature = "ssl"))]
+        fn should_connect_via_socket_for_127_0_0_1() {
+            let opts = OptsBuilder::from_opts(get_opts());
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:#?}", conn);
+            assert!(debug_format.contains("SocketStream"));
+        }
+
+        #[test]
+        #[cfg(not(feature = "ssl"))]
+        fn should_connect_via_socket_for_localhost() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.ip_or_hostname(Some("localhost"));
+            let conn = Conn::new(opts).unwrap();
+            let debug_format = format!("{:#?}", conn);
+            assert!(debug_format.contains("SocketStream"));
+        }
+
+        #[test]
+        #[cfg(feature = "ssl")]
         fn should_connect_via_socket_for_127_0_0_1() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:#?}", conn);
-            assert!(debug_format.contains("UnixStream"));
+            assert!(debug_format.contains("SocketStream"));
         }
 
         #[test]
-        #[cfg(all(feature = "pipe", windows))]
-        fn should_connect_via_socket_for_127_0_0_1() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.ssl_opts::<String, String, String>(None);
-            let conn = Conn::new(opts).unwrap();
-            let debug_format = format!("{:#?}", conn);
-            assert!(debug_format.contains("PipeStream"));
-        }
-
-        #[test]
-        #[cfg(all(feature = "socket", unix))]
+        #[cfg(feature = "ssl")]
         fn should_connect_via_socket_localhost() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ip_or_hostname(Some("localhost"));
             opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
-            assert!(debug_format.contains("UnixStream"));
-        }
-
-        #[test]
-        #[cfg(all(feature = "pipe", windows))]
-        fn should_connect_via_socket_localhost() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.ip_or_hostname(Some("localhost"));
-            opts.ssl_opts::<String, String, String>(None);
-            let conn = Conn::new(opts).unwrap();
-            let debug_format = format!("{:?}", conn);
-            assert!(debug_format.contains("PipeStream"));
+            assert!(debug_format.contains("SocketStream"));
         }
 
         #[test]
@@ -2414,7 +2412,6 @@ mod test {
         }
 
         #[test]
-        #[cfg(any(feature = "pipe", feature = "socket"))]
         fn should_handle_multi_resultset() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
