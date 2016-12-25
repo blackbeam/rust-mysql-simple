@@ -2362,28 +2362,9 @@ mod test {
         }
 
         #[test]
-        #[cfg(not(feature = "ssl"))]
-        fn should_connect_via_socket_for_127_0_0_1() {
-            let opts = OptsBuilder::from_opts(get_opts());
-            let conn = Conn::new(opts).unwrap();
-            let debug_format = format!("{:#?}", conn);
-            assert!(debug_format.contains("SocketStream"));
-        }
-
-        #[test]
-        #[cfg(not(feature = "ssl"))]
-        fn should_connect_via_socket_for_localhost() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.ip_or_hostname(Some("localhost"));
-            let conn = Conn::new(opts).unwrap();
-            let debug_format = format!("{:#?}", conn);
-            assert!(debug_format.contains("SocketStream"));
-        }
-
-        #[test]
-        #[cfg(feature = "ssl")]
         fn should_connect_via_socket_for_127_0_0_1() {
             let mut opts = OptsBuilder::from_opts(get_opts());
+            #[cfg(feature = "ssl")]
             opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:#?}", conn);
@@ -2391,10 +2372,10 @@ mod test {
         }
 
         #[test]
-        #[cfg(feature = "ssl")]
         fn should_connect_via_socket_localhost() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ip_or_hostname(Some("localhost"));
+            #[cfg(feature = "ssl")]
             opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
