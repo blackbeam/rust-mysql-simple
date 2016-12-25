@@ -349,13 +349,13 @@ impl OptsBuilder {
 
     /// Not implemented on windows
     #[cfg(all(feature = "ssl", target_os = "windows"))]
-    pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<SslOpts>) -> &mut Self {
+    pub fn ssl_opts<A, B, C>(&mut self, _: Option<SslOpts>) -> &mut Self {
         panic!("OptsBuilder::ssl_opts is not implemented on Windows");
     }
 
     /// Requires `ssl` feature
     #[cfg(not(feature = "ssl"))]
-    pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<SslOpts>) -> &mut Self {
+    pub fn ssl_opts<A, B, C>(&mut self, _: Option<SslOpts>) -> &mut Self {
         panic!("OptsBuilder::ssl_opts requires `ssl` feature");
     }
 
