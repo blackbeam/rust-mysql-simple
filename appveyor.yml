@@ -12,7 +12,7 @@ environment:
     RUST_INSTALLER: rust-nightly-x86_64-pc-windows-gnu.msi
   - RUST_URL: https://static.rust-lang.org/dist/rust-beta-x86_64-pc-windows-gnu.msi
     RUST_INSTALLER: rust-beta-x86_64-pc-windows-gnu.msi
-  - RUST_URL: https://static.rust-lang.org/dist/rust-1.12.0-x86_64-pc-windows-gnu.msi
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.14.0-x86_64-pc-windows-gnu.msi
     RUST_INSTALLER: rust-1.12.0-x86_64-pc-windows-gnu.msi
 services: mysql
 install:
