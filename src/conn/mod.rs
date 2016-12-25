@@ -2364,7 +2364,7 @@ mod test {
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
             let mut opts = OptsBuilder::from_opts(get_opts());
-            #[cfg(feature = "ssl")]
+            #[cfg(all(feature = "ssl", not(target_os = "windows")))]
             opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:#?}", conn);
@@ -2375,7 +2375,7 @@ mod test {
         fn should_connect_via_socket_localhost() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ip_or_hostname(Some("localhost"));
-            #[cfg(feature = "ssl")]
+            #[cfg(all(feature = "ssl", not(target_os = "windows")))]
             opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
