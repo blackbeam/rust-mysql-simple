@@ -209,15 +209,7 @@ pub use error::ServerError;
 #[doc(inline)]
 pub use error::UrlError;
 #[doc(inline)]
-pub use value::ConvIr;
-#[doc(inline)]
-pub use value::FromRow;
-#[doc(inline)]
-pub use value::FromValue;
-#[doc(inline)]
 pub use value::Params;
-#[doc(inline)]
-pub use value::ToValue;
 #[doc(inline)]
 pub use value::Value;
 #[doc(inline)]
@@ -228,3 +220,16 @@ pub use value::from_row_opt;
 pub use value::from_value;
 #[doc(inline)]
 pub use value::from_value_opt;
+
+pub mod prelude {
+    #[doc(inline)]
+    pub use value::ConvIr;
+    #[doc(inline)]
+    pub use value::FromRow;
+    #[doc(inline)]
+    pub use value::FromValue;
+    #[doc(inline)]
+    pub use value::ToValue;
+    #[doc(inline)]
+    pub use conn::GenericConnection;
+}
