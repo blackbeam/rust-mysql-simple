@@ -18,23 +18,16 @@ Please use [crates.io](https://crates.io/crates/mysql)
 mysql = "*"
 ```
 
-rust-mysql-simple offer support of SSL via `ssl` cargo feature which is enabled by default. If you have no plans to use SSL, then you should disable that feature to not to depend on rust-openssl:
+rust-mysql-simple offer support of SSL via `ssl` cargo feature which is disabled by default.
+Add `ssl` feature to enable:
 
 ```toml
 [dependencies.mysql]
 version = "*"
-default-features = false
-features = ["socket"]
+features = ["ssl"]
 ```
 
 ### Windows support (since 0.18.0)
-Currently rust-mysql-simple have no support of SSL on windows. To use crate on Windows you have to disable default features.
-
-```toml
-[dependencies.mysql]
-version = "*"
-default-features = false
-features = ["pipe"]
-```
+Windows is supported but currently rust-mysql-simple has no support of SSL on Windows.
 
 [Simple example](http://blackbeam.org/doc/mysql/index.html#example)

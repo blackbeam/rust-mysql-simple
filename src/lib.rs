@@ -9,27 +9,18 @@
 //! mysql = "*"
 //! ```
 //!
-//! rust-mysql-simple offers support of SSL via `ssl` cargo feature which is enabled by default.
-//! If you have no plans to use SSL, then you should disable that feature to not to depend on
-//! rust-openssl:
+//! rust-mysql-simple offers support of SSL via `ssl` cargo feature which is disabled by default.
+//! Add `ssl` feature to enable:
 //!
 //! ```toml
 //! [dependencies.mysql]
 //! version = "*"
-//! default-features = false
-//! features = ["socket"]
+//! features = ["ssl"]
 //! ```
 //!
 //! #### Windows support (since 0.18.0)
 //!
-//! Currently rust-mysql-simple has no support for SSL on Windows.
-//!
-//! ```toml
-//! [dependencies.mysql]
-//! version = "*"
-//! default-features = false
-//! features = ["pipe"]
-//! ```
+//! Windows is supported but currently rust-mysql-simple has no support of SSL on Windows.
 //!
 //! #### Example
 //!
