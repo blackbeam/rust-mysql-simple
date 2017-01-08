@@ -8,6 +8,8 @@ use std::time::Duration;
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use conn::SslOpts;
 
+use net2::TcpStreamExt;
+
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
@@ -381,12 +383,14 @@ impl Stream {
     pub fn connect_tcp(ip_or_hostname: &str,
                        port: u16,
                        read_timeout: Option<Duration>,
-                       write_timeout: Option<Duration>) -> MyResult<Stream>
+                       write_timeout: Option<Duration>,
+                       tcp_keepalive_time: Option<u32>) -> MyResult<Stream>
     {
         match net::TcpStream::connect((ip_or_hostname, port)) {
             Ok(stream) => {
                 try!(stream.set_read_timeout(read_timeout));
                 try!(stream.set_write_timeout(write_timeout));
+                try!(stream.set_keepalive_ms(tcp_keepalive_time));
                 Ok(Stream::TcpStream(Some(TcpStream::Insecure(BufStream::new(stream)))))
             },
             Err(e) => {

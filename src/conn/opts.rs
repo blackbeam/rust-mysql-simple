@@ -64,7 +64,8 @@ pub struct Opts {
     /// connection to `127.0.0.1` if `true`.
     prefer_socket: bool,
 
-    // XXX: Wait for keepalive_timeout stabilization
+    /// TCP keep alive time for mysql connection.
+    tcp_keepalive_time: Option<u32>,
 
     /// Commands to execute on each new database connection.
     init: Vec<String>,
@@ -180,6 +181,11 @@ impl Opts {
         self.verify_peer = val;
     }
 
+    /// TCP keep alive time for mysql connection.
+    pub fn get_tcp_keepalive_time_ms(&self) -> Option<u32> {
+        self.tcp_keepalive_time
+    }
+
     /// Callback to handle requests for local files.
     pub fn get_local_infile_handler(&self) -> &Option<LocalInfileHandler> {
         &self.local_infile_handler
@@ -201,6 +207,7 @@ impl Default for Opts {
             init: vec![],
             verify_peer: false,
             ssl_opts: None,
+            tcp_keepalive_time: None,
             local_infile_handler: None,
         }
     }
@@ -286,6 +293,12 @@ impl OptsBuilder {
     /// it is likely error to pass the zero `Duration` to this method.
     pub fn write_timeout(&mut self, write_timeout: Option<Duration>) -> &mut Self {
         self.opts.write_timeout = write_timeout;
+        self
+    }
+
+    /// TCP keep alive time for mysql connection (defaults to `None`).
+    pub fn tcp_keepalive_time_ms(&mut self, tcp_keepalive_time_ms: Option<u32>) -> &mut Self {
+        self.opts.tcp_keepalive_time = tcp_keepalive_time_ms;
         self
     }
 
@@ -462,6 +475,15 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
                     return Err(UrlError::InvalidValue("verify_peer".into(), value));
                 }
             }
+        } else if key == "tcp_keepalive_time_ms" {
+            match u32::from_str(&*value) {
+                Ok(tcp_keepalive_time_ms) => {
+                    opts.tcp_keepalive_time = Some(tcp_keepalive_time_ms);
+                },
+                _ => {
+                    return Err(UrlError::InvalidValue("tcp_keepalive_time_ms".into(), value));
+                }
+            }
         } else {
             return Err(UrlError::UnknownParameter(key));
         }
@@ -485,7 +507,7 @@ mod test {
     #[test]
     #[cfg(feature = "ssl")]
     fn should_convert_url_into_opts() {
-        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true";
+        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true&tcp_keepalive_time_ms=5000";
         assert_eq!(Opts {
             user: Some("us r".to_string()),
             pass: Some("p w".to_string()),
@@ -494,6 +516,7 @@ mod test {
             db_name: Some("db-name".to_string()),
             prefer_socket: false,
             verify_peer: true,
+            tcp_keepalive_time: Some(5000),
             ..Opts::default()
         }, opts.into());
     }

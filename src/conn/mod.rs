@@ -1026,11 +1026,16 @@ impl Conn {
     fn connect_stream(&mut self) -> MyResult<()> {
         let read_timeout = self.opts.get_read_timeout().clone();
         let write_timeout = self.opts.get_write_timeout().clone();
+        let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms().clone();
         let stream = if let Some(ref socket) = *self.opts.get_socket() {
             try!(Stream::connect_socket(&*socket, read_timeout, write_timeout))
         } else if let Some(ref ip_or_hostname) = *self.opts.get_ip_or_hostname() {
             let port = self.opts.get_tcp_port();
-            try!(Stream::connect_tcp(&*ip_or_hostname, port, read_timeout, write_timeout))
+            try!(Stream::connect_tcp(&*ip_or_hostname,
+                                     port,
+                                     read_timeout,
+                                     write_timeout,
+                                     tcp_keepalive_time))
         } else {
             return Err(DriverError(CouldNotConnect(None)));
         };

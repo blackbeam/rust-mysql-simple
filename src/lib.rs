@@ -136,6 +136,7 @@ extern crate security_framework;
 extern crate regex;
 #[macro_use]
 extern crate lazy_static;
+extern crate net2;
 #[macro_use]
 extern crate nom;
 #[macro_use]
