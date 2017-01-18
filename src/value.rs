@@ -1867,7 +1867,10 @@ fn parse_mysql_datetime_string(bytes: &[u8]) -> Option<(u32, u32, u32, u32, u32,
     }).map(|capts| {
         let year = capts.at(1).unwrap().parse::<u32>().unwrap();
         let month = capts.at(2).unwrap().parse::<u32>().unwrap();
-        let day = capts.at(3).unwrap().parse::<u32>().unwrap();
+        let mut day = capts.at(3).unwrap().parse::<u32>().unwrap();
+        if day == 0 {
+            day = 1;
+        }
         let (hour, minute, second, micros) = if capts.len() > 4 {
             let hour = capts.at(4).unwrap().parse::<u32>().unwrap();
             let minute = capts.at(5).unwrap().parse::<u32>().unwrap();
