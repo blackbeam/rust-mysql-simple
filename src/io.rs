@@ -104,7 +104,8 @@ pub trait Read: ReadBytesExt + io::BufRead {
             ColumnType::MYSQL_TYPE_VARCHAR |
             ColumnType::MYSQL_TYPE_BIT |
             ColumnType::MYSQL_TYPE_NEWDECIMAL |
-            ColumnType::MYSQL_TYPE_GEOMETRY => {
+            ColumnType::MYSQL_TYPE_GEOMETRY |
+            ColumnType::MYSQL_TYPE_JSON => {
                 Ok(Bytes(try!(self.read_lenenc_bytes())))
             },
             ColumnType::MYSQL_TYPE_TINY => {

@@ -111,6 +111,7 @@ pub enum ColumnType {
     MYSQL_TYPE_YEAR        = 0x0d_u8,
     MYSQL_TYPE_VARCHAR     = 0x0f_u8,
     MYSQL_TYPE_BIT         = 0x10_u8,
+    MYSQL_TYPE_JSON        = 0xf5_u8,
     MYSQL_TYPE_NEWDECIMAL  = 0xf6_u8,
     MYSQL_TYPE_ENUM        = 0xf7_u8,
     MYSQL_TYPE_SET         = 0xf8_u8,
@@ -142,6 +143,7 @@ impl From<u8> for ColumnType {
             0x0d_u8 => ColumnType::MYSQL_TYPE_YEAR,
             0x0f_u8 => ColumnType::MYSQL_TYPE_VARCHAR,
             0x10_u8 => ColumnType::MYSQL_TYPE_BIT,
+            0xf5_u8 => ColumnType::MYSQL_TYPE_JSON,
             0xf6_u8 => ColumnType::MYSQL_TYPE_NEWDECIMAL,
             0xf7_u8 => ColumnType::MYSQL_TYPE_ENUM,
             0xf8_u8 => ColumnType::MYSQL_TYPE_SET,
@@ -152,7 +154,7 @@ impl From<u8> for ColumnType {
             0xfd_u8 => ColumnType::MYSQL_TYPE_VAR_STRING,
             0xfe_u8 => ColumnType::MYSQL_TYPE_STRING,
             0xff_u8 => ColumnType::MYSQL_TYPE_GEOMETRY,
-            _ => panic!("Unknown column type"),
+            _ => panic!("Unknown column type {}", x),
         }
     }
 }

@@ -58,6 +58,8 @@ chrono = "~0.2"
 nom = "~1.2"
 uuid = "~0.3"
 net2 = "~0.2"
+rustc-serialize = "~0.3.22"
+
 
 [dependencies.regex]
 version = "~0.1"

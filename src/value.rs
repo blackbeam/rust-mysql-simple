@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use std::str::from_utf8;
+use std::str::{from_utf8, from_utf8_unchecked};
 use std::borrow::ToOwned;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::Occupied;
@@ -39,6 +39,9 @@ use chrono::{
 
 use byteorder::LittleEndian as LE;
 use byteorder::{WriteBytesExt};
+
+use rustc_serialize::{Decodable, Encodable};
+use rustc_serialize::json::{Json, self};
 
 use fnv::FnvHasher;
 
@@ -1170,6 +1173,31 @@ impl From<String> for Value {
     }
 }
 
+impl From<Json> for Value {
+    fn from(x: Json) -> Value {
+        Value::Bytes(json::encode(&x).unwrap().into())
+    }
+}
+
+/// Use it to pass `T: Encodable` as JSON to a prepared statement.
+///
+/// ```ignore
+/// #[derive(RustcEncodable)]
+/// struct EncodableStruct {
+///     // ...
+/// }
+///
+/// conn.prep_exec("INSERT INTO table (json_column) VALUES (?)",
+///                (Serialized(EncosdableStruct),));
+/// ```
+pub struct Serialized<T>(pub T);
+
+impl<T: Encodable> From<Serialized<T>> for Value {
+    fn from(x: Serialized<T>) -> Value {
+        Value::Bytes(json::encode(&x.0).unwrap().into())
+    }
+}
+
 impl From<NaiveDateTime> for Value {
     fn from(x: NaiveDateTime) -> Value {
         if 1000 > x.year() || x.year() > 9999 {
@@ -1381,6 +1409,100 @@ macro_rules! impl_from_value {
             }
         }
     );
+}
+
+#[derive(Debug)]
+pub struct JsonIr {
+    bytes: Vec<u8>,
+    output: Json,
+}
+
+impl ConvIr<Json> for JsonIr {
+    fn new(v: Value) -> MyResult<JsonIr> {
+        let (output, bytes) = {
+            let bytes = match v {
+                Value::Bytes(bytes) => match from_utf8(&*bytes) {
+                    Ok(_) => bytes,
+                    Err(_) => return Err(Error::FromValueError(Value::Bytes(bytes))),
+                },
+                v => return Err(Error::FromValueError(v)),
+            };
+            let output = {
+                match Json::from_str(unsafe { from_utf8_unchecked(&*bytes) }) {
+                    Ok(output) => output,
+                    Err(_) => return Err(Error::FromValueError(Value::Bytes(bytes))),
+                }
+            };
+            (output, bytes)
+        };
+        Ok(JsonIr { bytes: bytes, output: output })
+    }
+
+    fn commit(self) -> Json {
+        self.output
+    }
+
+    fn rollback(self) -> Value {
+        Value::Bytes(self.bytes)
+    }
+}
+
+impl FromValue for Json {
+    type Intermediate = JsonIr;
+}
+
+/// Use it to parse `T: Decodable` from `Value`.
+///
+/// ```ignore
+/// #[derive(RustcDecodable)]
+/// struct DecodableStruct {
+///     // ...
+/// }
+/// // ...
+/// let (Unserialized(val),): (Unserialized<DecodableStruct>,)
+///     = from_row(row_with_single_json_column);
+/// ```
+#[derive(Debug)]
+pub struct Unserialized<T>(pub T);
+
+#[derive(Debug)]
+pub struct UnserializedIr<T> {
+    bytes: Vec<u8>,
+    output: Unserialized<T>,
+}
+
+impl<T: Decodable> ConvIr<Unserialized<T>> for UnserializedIr<T> {
+    fn new(v: Value) -> MyResult<UnserializedIr<T>> {
+        let (output, bytes) = {
+            let bytes = match v {
+                Value::Bytes(bytes) => match from_utf8(&*bytes) {
+                    Ok(_) => bytes,
+                    Err(_) => return Err(Error::FromValueError(Value::Bytes(bytes))),
+                },
+                v => return Err(Error::FromValueError(v)),
+            };
+            let output = {
+                match json::decode(unsafe { from_utf8_unchecked(&*bytes) }) {
+                    Ok(output) => output,
+                    Err(_) => return Err(Error::FromValueError(Value::Bytes(bytes))),
+                }
+            };
+            (output, bytes)
+        };
+        Ok(UnserializedIr { bytes: bytes, output: Unserialized(output) })
+    }
+
+    fn commit(self) -> Unserialized<T> {
+        self.output
+    }
+
+    fn rollback(self) -> Value {
+        Value::Bytes(self.bytes)
+    }
+}
+
+impl<T: Decodable> FromValue for Unserialized<T> {
+    type Intermediate = UnserializedIr<T>;
 }
 
 #[derive(Debug)]

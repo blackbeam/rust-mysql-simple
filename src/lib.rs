@@ -149,6 +149,7 @@ extern crate bufstream;
 extern crate fnv;
 pub extern crate chrono;
 extern crate twox_hash;
+extern crate rustc_serialize;
 
 mod scramble;
 pub mod consts;
@@ -212,6 +213,10 @@ pub use value::from_row_opt;
 pub use value::from_value;
 #[doc(inline)]
 pub use value::from_value_opt;
+#[doc(inline)]
+pub use value::Serialized;
+#[doc(inline)]
+pub use value::Unserialized;
 
 pub mod prelude {
     #[doc(inline)]
