@@ -149,7 +149,7 @@ extern crate bufstream;
 extern crate fnv;
 pub extern crate chrono;
 extern crate twox_hash;
-extern crate rustc_serialize;
+pub extern crate rustc_serialize;
 
 mod scramble;
 pub mod consts;
