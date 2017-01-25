@@ -111,9 +111,9 @@ fn parse_version(bytes: &[u8]) -> error::Result<ServerVersion> {
     VERSION_RE.captures(&ver_str[..])
     .and_then(|capts| {
         Some((
-            (capts.at(1).unwrap().parse::<u16>()).unwrap_or(0),
-            (capts.at(2).unwrap().parse::<u16>()).unwrap_or(0),
-            (capts.at(3).unwrap().parse::<u16>()).unwrap_or(0),
+            (capts.get(1).unwrap().as_str().parse::<u16>()).unwrap_or(0),
+            (capts.get(2).unwrap().as_str().parse::<u16>()).unwrap_or(0),
+            (capts.get(3).unwrap().as_str().parse::<u16>()).unwrap_or(0),
         ))
     }).and_then(|version| {
         if version == (0, 0, 0) {

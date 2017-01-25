@@ -49,24 +49,24 @@ nightly = []
 lazy_static = "~0.2"
 time = "~0.1"
 bitflags = "~0.7"
-byteorder = "~0.5"
+byteorder = "~1.0"
 url = "^1.1"
 bufstream = "~0.1"
 fnv = "~1.0"
 twox-hash = "~1.0"
 chrono = "~0.2"
-nom = "~1.2"
+nom = "~2.0"
 uuid = "~0.3"
 net2 = "~0.2"
 rustc-serialize = "~0.3.22"
 
 
 [dependencies.regex]
-version = "~0.1"
+version = "~0.2"
 default-features = false
 
 [target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies.openssl]
-version = "~0.7"
+version = "~0.9"
 optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.security-framework]

@@ -1987,25 +1987,25 @@ fn parse_mysql_datetime_string(bytes: &[u8]) -> Option<(u32, u32, u32, u32, u32,
             DATETIME_RE_YMD_HMS_NS.captures(s_ref)
         })
     }).map(|capts| {
-        let year = capts.at(1).unwrap().parse::<u32>().unwrap();
-        let month = capts.at(2).unwrap().parse::<u32>().unwrap();
-        let day = capts.at(3).unwrap().parse::<u32>().unwrap();
+        let year = capts.get(1).unwrap().as_str().parse::<u32>().unwrap();
+        let month = capts.get(2).unwrap().as_str().parse::<u32>().unwrap();
+        let day = capts.get(3).unwrap().as_str().parse::<u32>().unwrap();
         let (hour, minute, second, micros) = if capts.len() > 4 {
-            let hour = capts.at(4).unwrap().parse::<u32>().unwrap();
-            let minute = capts.at(5).unwrap().parse::<u32>().unwrap();
-            let second = capts.at(6).unwrap().parse::<u32>().unwrap();
+            let hour = capts.get(4).unwrap().as_str().parse::<u32>().unwrap();
+            let minute = capts.get(5).unwrap().as_str().parse::<u32>().unwrap();
+            let second = capts.get(6).unwrap().as_str().parse::<u32>().unwrap();
             let micros = if capts.len() == 8 {
-                let micros_str = capts.at(7).unwrap();
+                let micros_str = capts.get(7).unwrap();
                 let mut left_zero_cnt = 0;
-                for b in micros_str.bytes() {
+                for b in micros_str.as_str().bytes() {
                     if b == b'0' {
                         left_zero_cnt += 1;
                     } else {
                         break;
                     }
                 }
-                let mut micros = micros_str.parse::<u32>().unwrap();
-                for _ in 0..(6 - left_zero_cnt - (micros_str.len() - left_zero_cnt)) {
+                let mut micros = micros_str.as_str().parse::<u32>().unwrap();
+                for _ in 0..(6 - left_zero_cnt - (micros_str.as_str().len() - left_zero_cnt)) {
                     micros *= 10;
                 }
                 micros
@@ -2048,21 +2048,21 @@ fn parse_mysql_time_string(mut bytes: &[u8]) -> Option<(bool, u32, u32, u32, u32
             TIME_RE_HH_MM_SS_MS.captures(t_ref)
         })
     }).map(|capts| {
-        let hours = capts.at(1).unwrap().parse::<u32>().unwrap();
-        let minutes = capts.at(2).unwrap().parse::<u32>().unwrap();
-        let seconds = capts.at(3).unwrap().parse::<u32>().unwrap();
+        let hours = capts.get(1).unwrap().as_str().parse::<u32>().unwrap();
+        let minutes = capts.get(2).unwrap().as_str().parse::<u32>().unwrap();
+        let seconds = capts.get(3).unwrap().as_str().parse::<u32>().unwrap();
         let microseconds = if capts.len() == 5 {
-            let micros_str = capts.at(4).unwrap();
+            let micros_str = capts.get(4).unwrap();
             let mut left_zero_cnt = 0;
-            for b in micros_str.bytes() {
+            for b in micros_str.as_str().bytes() {
                 if b == b'0' {
                     left_zero_cnt += 1;
                 } else {
                     break;
                 }
             }
-            let mut micros = capts.at(4).unwrap().parse::<u32>().unwrap();
-            for _ in 0..(6 - left_zero_cnt - (micros_str.len() - left_zero_cnt)) {
+            let mut micros = capts.get(4).unwrap().as_str().parse::<u32>().unwrap();
+            for _ in 0..(6 - left_zero_cnt - (micros_str.as_str().len() - left_zero_cnt)) {
                 micros *= 10;
             }
             micros
