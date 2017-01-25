@@ -5,7 +5,12 @@ use std::result;
 use std::sync;
 
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-use openssl::ssl::error::SslError;
+use openssl::error::{
+    Error as SslError,
+    ErrorStack as SslErrorStack,
+};
+#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+use openssl::ssl::Error as OpensslError;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::base::Error as SslError;
 
@@ -115,6 +120,27 @@ impl From<MySqlError> for Error {
 impl From<SslError> for Error {
     fn from(err: SslError) -> Error {
         Error::SslError(err)
+    }
+}
+
+#[cfg(all(feature = "ssl", unix, not(target_os = "macos")))]
+impl From<SslErrorStack> for Error {
+    fn from(err: SslErrorStack) -> Error {
+        Error::SslError(err.errors()[0].clone())
+    }
+}
+
+#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+impl From<OpensslError> for Error {
+    fn from(err: OpensslError) -> Error {
+        match err {
+            OpensslError::ZeroReturn => io::Error::new(io::ErrorKind::Other, "The SSL session has been closed by the other end").into(),
+            OpensslError::WantRead(err) => err.into(),
+            OpensslError::WantWrite(err) => err.into(),
+            OpensslError::WantX509Lookup => io::Error::new(io::ErrorKind::Other, "The client certificate callback requested to be called again").into(),
+            OpensslError::Stream(err) => err.into(),
+            OpensslError::Ssl(err) => err.into()
+        }
     }
 }
 

@@ -510,19 +510,19 @@ impl Stream {
     pub fn make_secure(mut self, verify_peer: bool, _: &Option<String>, ssl_opts: &SslOpts) -> MyResult<Stream>
     {
         if self.is_insecure() {
-            let mut ctx = try!(SslContext::new(ssl::SslMethod::Tlsv1));
+            let mut ctx = try!(SslContext::builder(ssl::SslMethod::tls()));
             let mode = if verify_peer {
                 ssl::SSL_VERIFY_PEER
             } else {
                 ssl::SSL_VERIFY_NONE
             };
-            ctx.set_verify(mode, None);
+            ctx.set_verify(mode);
             match *ssl_opts {
-                Some((ref ca_cert, None)) => try!(ctx.set_CA_file(&ca_cert)),
+                Some((ref ca_cert, None)) => try!(ctx.set_ca_file(&ca_cert)),
                 Some((ref ca_cert, Some((ref client_cert, ref client_key)))) => {
-                    try!(ctx.set_CA_file(&ca_cert));
-                    try!(ctx.set_certificate_file(&client_cert, x509::X509FileType::PEM));
-                    try!(ctx.set_private_key_file(&client_key, x509::X509FileType::PEM));
+                    try!(ctx.set_ca_file(&ca_cert));
+                    try!(ctx.set_certificate_file(&client_cert, x509::X509_FILETYPE_PEM));
+                    try!(ctx.set_private_key_file(&client_key, x509::X509_FILETYPE_PEM));
                 },
                 _ => unreachable!(),
             }
@@ -531,7 +531,15 @@ impl Stream {
                     let stream = opt_stream.take().unwrap();
                     match stream {
                         TcpStream::Insecure(stream) => {
-                            let sstream = try!(ssl::SslStream::connect(&ctx, stream.into_inner().unwrap()));
+                            let ctx = ctx.build();
+                            let sstream = match try!(ssl::Ssl::new(&ctx)).connect(stream.into_inner().unwrap()) {
+                                Ok(sstream) => sstream,
+                                Err(handshake_err) => match handshake_err {
+                                    ssl::HandshakeError::SetupFailure(err) => return Err(err.into()),
+                                    ssl::HandshakeError::Failure(mid_stream) => return Err(mid_stream.into_error().into()),
+                                    ssl::HandshakeError::Interrupted(_) => unreachable!("Interrupted"),
+                                },
+                            };
                             Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(sstream)))))
                         },
                         _ => unreachable!(),
