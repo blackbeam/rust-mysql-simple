@@ -1190,6 +1190,7 @@ impl From<Json> for Value {
 /// conn.prep_exec("INSERT INTO table (json_column) VALUES (?)",
 ///                (Serialized(EncosdableStruct),));
 /// ```
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 pub struct Serialized<T>(pub T);
 
 impl<T: Encodable> From<Serialized<T>> for Value {
@@ -1462,7 +1463,7 @@ impl FromValue for Json {
 /// let (Unserialized(val),): (Unserialized<DecodableStruct>,)
 ///     = from_row(row_with_single_json_column);
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 pub struct Unserialized<T>(pub T);
 
 #[derive(Debug)]
