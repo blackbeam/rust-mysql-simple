@@ -41,9 +41,10 @@ opt-level = 0
 debug = true
 
 [features]
-default = []
+default = ["rustc-serialize"]
 ssl = ["openssl", "security-framework"]
 nightly = []
+serde_integration = ["serde", "serde_json"]
 
 [dependencies]
 lazy_static = "~0.2"
@@ -58,7 +59,9 @@ chrono = "~0.2"
 nom = "~2.0"
 uuid = "~0.3"
 net2 = "~0.2"
-rustc-serialize = "~0.3.22"
+rustc-serialize = { version= "~0.3.22", optional= true }
+serde = {version = "^0.9" ,optional = true }
+serde_json = { version = "^0.9", optional= true }
 
 
 [dependencies.regex]
