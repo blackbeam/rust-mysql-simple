@@ -60,7 +60,7 @@ nom = "~2.0"
 uuid = "~0.3"
 net2 = "~0.2"
 rustc-serialize = { version= "~0.3.22", optional= true }
-serde = {version = "^0.9" ,optional = true }
+serde = { version = "^0.9" ,optional = true }
 serde_json = { version = "^0.9", optional= true }
 
 
