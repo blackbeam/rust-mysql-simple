@@ -149,7 +149,13 @@ extern crate bufstream;
 extern crate fnv;
 pub extern crate chrono;
 extern crate twox_hash;
-pub extern crate rustc_serialize;
+#[cfg(not(feature="serde_integration"))]
+extern crate rustc_serialize;
+#[cfg(feature="serde_integration")]
+pub extern crate serde;
+#[cfg(feature ="serde_integration")]
+pub extern crate serde_json;
+
 
 mod scramble;
 pub mod consts;
@@ -162,6 +168,7 @@ pub mod value;
 pub mod conn;
 mod named_params;
 mod my_uuid;
+mod json;
 
 #[doc(inline)]
 pub use conn::Column;
@@ -214,9 +221,9 @@ pub use value::from_value;
 #[doc(inline)]
 pub use value::from_value_opt;
 #[doc(inline)]
-pub use value::Serialized;
+pub use json::Serialized;
 #[doc(inline)]
-pub use value::Unserialized;
+pub use json::Unserialized;
 
 pub mod prelude {
     #[doc(inline)]
