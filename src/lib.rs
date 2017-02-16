@@ -149,9 +149,9 @@ extern crate bufstream;
 extern crate fnv;
 pub extern crate chrono;
 extern crate twox_hash;
-#[cfg(not(feature ="serde_integration"))]
-pub extern crate rustc_serialize;
-#[cfg(feature ="serde_integration")]
+#[cfg(not(feature="serde_integration"))]
+extern crate rustc_serialize;
+#[cfg(feature="serde_integration")]
 pub extern crate serde;
 #[cfg(feature ="serde_integration")]
 pub extern crate serde_json;

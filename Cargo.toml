@@ -41,7 +41,7 @@ opt-level = 0
 debug = true
 
 [features]
-default = ["rustc-serialize"]
+default = []
 ssl = ["openssl", "security-framework"]
 nightly = []
 serde_integration = ["serde", "serde_json"]
@@ -59,10 +59,14 @@ chrono = "~0.2"
 nom = "~2.0"
 uuid = "~0.3"
 net2 = "~0.2"
-rustc-serialize = { version= "~0.3.22", optional= true }
-serde = { version = "^0.9" ,optional = true }
-serde_json = { version = "^0.9", optional= true }
 
+[dependencies.serde]
+version = "^0.9"
+optional = true
+
+[dependencies.serde_json]
+version = "^0.9"
+optional= true
 
 [dependencies.regex]
 version = "~0.2"
@@ -79,3 +83,6 @@ features = ["OSX_10_8"]
 
 [target.'cfg(target_os = "windows")'.dependencies.named_pipe]
 version = "~0.2"
+
+[target.'cfg(not(feature ="serde_integration"))'.dependencies.rustc-serialize]
+version= "~0.3.22"
