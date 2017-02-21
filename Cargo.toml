@@ -85,4 +85,8 @@ features = ["OSX_10_8"]
 version = "~0.2"
 
 [target.'cfg(not(feature ="serde_integration"))'.dependencies.rustc-serialize]
-version= "~0.3.22"
+version = "~0.3.22"
+
+[target.'cfg(unix)'.dependencies]
+libc = "~0.2.20"
+nix = "~0.7.0"

@@ -179,6 +179,7 @@ impl fmt::Debug for Error {
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum DriverError {
+    ConnectTimeout,
     // (address, description)
     CouldNotConnect(Option<(String, String, io::ErrorKind)>),
     UnsupportedProtocol(u8),
@@ -208,6 +209,9 @@ impl error::Error for DriverError {
 impl fmt::Display for DriverError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            DriverError::ConnectTimeout => {
+                write!(f, "Could not connect: connection timeout")
+            }
             DriverError::CouldNotConnect(None) => {
                 write!(f, "Could not connect: address not specified")
             }

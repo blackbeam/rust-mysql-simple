@@ -78,13 +78,18 @@ pub struct Opts {
     /// Only available if `ssl` feature enabled.
     ssl_opts: SslOpts,
 
-    /// Callback to handle requests for local files. These are
-    /// caused by using `LOAD DATA LOCAL INFILE` queries. The
-    /// callback is passed the filename, and a `Write`able object
+    /// Callback to handle requests for local files.
+    ///
+    /// These are caused by using `LOAD DATA LOCAL INFILE` queries.
+    /// The callback is passed the filename, and a `Write`able object
     /// to receive the contents of that file.
+    ///
     /// If unset, the default callback will read files relative to
     /// the current directory.
     local_infile_handler: Option<LocalInfileHandler>,
+
+    /// Tcp connect timeout (unix only, defaults to `None`).
+    tcp_connect_timeout: Option<Duration>,
 }
 
 impl Opts {
@@ -190,6 +195,11 @@ impl Opts {
     pub fn get_local_infile_handler(&self) -> &Option<LocalInfileHandler> {
         &self.local_infile_handler
     }
+
+    /// Tcp connect timeout (unix only, defaults to `None`).
+    pub fn get_tcp_connect_timeout(&self) -> Option<Duration> {
+        self.tcp_connect_timeout
+    }
 }
 
 impl Default for Opts {
@@ -209,6 +219,7 @@ impl Default for Opts {
             ssl_opts: None,
             tcp_keepalive_time: None,
             local_infile_handler: None,
+            tcp_connect_timeout: None,
         }
     }
 }
@@ -382,6 +393,12 @@ impl OptsBuilder {
         self.opts.local_infile_handler = handler;
         self
     }
+
+    /// Tcp connect timeout (unix only, defaults to `None`).
+    pub fn tcp_connect_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
+        self.opts.tcp_connect_timeout = timeout;
+        self
+    }
 }
 
 impl From<OptsBuilder> for Opts {
@@ -482,6 +499,15 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
                 },
                 _ => {
                     return Err(UrlError::InvalidValue("tcp_keepalive_time_ms".into(), value));
+                }
+            }
+        } else if key == "tcp_connect_timeout_ms" {
+            match u64::from_str(&*value) {
+                Ok(tcp_connect_timeout_ms) => {
+                    opts.tcp_connect_timeout = Some(Duration::from_millis(tcp_connect_timeout_ms));
+                },
+                _ => {
+                    return Err(UrlError::InvalidValue("tcp_connect_timeout_ms".into(), value));
                 }
             }
         } else {

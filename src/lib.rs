@@ -134,6 +134,10 @@ extern crate openssl;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 extern crate security_framework;
 extern crate regex;
+#[cfg(unix)]
+extern crate libc;
+#[cfg(unix)]
+extern crate nix;
 #[macro_use]
 extern crate lazy_static;
 extern crate net2;

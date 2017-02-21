@@ -1027,6 +1027,7 @@ impl Conn {
         let read_timeout = self.opts.get_read_timeout().clone();
         let write_timeout = self.opts.get_write_timeout().clone();
         let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms().clone();
+        let tcp_connect_timeout = self.opts.get_tcp_connect_timeout();
         let stream = if let Some(ref socket) = *self.opts.get_socket() {
             try!(Stream::connect_socket(&*socket, read_timeout, write_timeout))
         } else if let Some(ref ip_or_hostname) = *self.opts.get_ip_or_hostname() {
@@ -1035,7 +1036,8 @@ impl Conn {
                                      port,
                                      read_timeout,
                                      write_timeout,
-                                     tcp_keepalive_time))
+                                     tcp_keepalive_time,
+                                     tcp_connect_timeout))
         } else {
             return Err(DriverError(CouldNotConnect(None)));
         };
@@ -2506,6 +2508,27 @@ mod test {
             assert_eq!(out2.name(), b"name");
             assert_eq!(out2.org_name(), b"org_name");
             assert_eq!(out2.default_values(), Some(&b"default"[..]));
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn should_handle_tcp_connect_timeout() {
+            use error::Error::DriverError;
+            use error::DriverError::ConnectTimeout;
+
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.prefer_socket(false);
+            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
+            Conn::new(opts).unwrap();
+
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.prefer_socket(false);
+            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
+            opts.ip_or_hostname(Some("127.0.0.0"));
+            match Conn::new(opts).unwrap_err() {
+                DriverError(ConnectTimeout) => {},
+                _ => unreachable!(),
+            }
         }
     }
 

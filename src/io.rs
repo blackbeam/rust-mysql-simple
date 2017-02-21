@@ -2,13 +2,12 @@ use std::io;
 use std::io::Read as StdRead;
 use std::io::Write as StdWrite;
 use std::net;
+use std::net::ToSocketAddrs;
 use std::fmt;
 use std::time::Duration;
 
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use conn::SslOpts;
-
-use net2::TcpStreamExt;
 
 use super::value::Value;
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
@@ -16,6 +15,7 @@ use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
 use super::error::Error::DriverError;
+use super::error::DriverError::ConnectTimeout;
 use super::error::DriverError::CouldNotConnect;
 use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
@@ -47,6 +47,117 @@ use byteorder::LittleEndian as LE;
 use std::os::unix as unix;
 #[cfg(windows)]
 use named_pipe as np;
+use net2::TcpStreamExt;
+
+#[inline(always)]
+fn connect_tcp_stream<T: ToSocketAddrs>(address: T) -> io::Result<net::TcpStream> {
+    net::TcpStream::connect(address)
+}
+
+use self::connect_timeout::connect_tcp_stream_timeout;
+
+#[cfg(not(unix))]
+mod connect_timeout {
+    use std::io;
+    use std::net::ToSocketAddrs;
+    use std::time::Duration;
+
+    pub fn connect_tcp_stream_timeout<T>(_: T, _: Duration) -> io::Result<TcpStream>
+        where T: ToSocketAddrs,
+    {
+        unimplemented!("tcp_connect_timeout is unix-only feature");
+    }
+}
+
+#[cfg(unix)]
+mod connect_timeout {
+    use libc::*;
+    use net2::TcpBuilder;
+    use nix;
+    use std::io;
+    use std::net::TcpStream;
+    use std::net::ToSocketAddrs;
+    use std::os::unix::prelude::*;
+    use std::os::raw::c_ulong;
+    use std::time::Duration;
+
+    fn set_non_blocking(fd: RawFd, non_blocking: bool) -> io::Result<()> {
+        let result = unsafe {
+            ioctl(fd, FIONBIO, &mut (non_blocking as c_ulong))
+        };
+
+        if result == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub fn connect_tcp_stream_timeout<T>(address: T, timeout: Duration) -> io::Result<TcpStream>
+        where T: ToSocketAddrs
+    {
+        let builder = TcpBuilder::new_v4()?;
+        let fd = builder.as_raw_fd();
+
+        set_non_blocking(fd, true)?;
+
+        let err = io::Error::new(io::ErrorKind::Other,
+                                 "no socket addresses resolved");
+        let addresses = address.to_socket_addrs()?;
+        addresses.fold(Err(err), |prev, addr| {
+            let inet_addr = nix::sys::socket::InetAddr::from_std(&addr);
+            let sock_addr = nix::sys::socket::SockAddr::Inet(inet_addr);
+            prev.or_else(|_| {
+                match nix::sys::socket::connect(fd, &sock_addr) {
+                    Ok(_) => Ok(()),
+                    Err(err) => {
+                        match err.errno() {
+                            nix::errno::Errno::EALREADY |
+                            nix::errno::Errno::EINPROGRESS => Ok(()),
+                            errno => {
+                                Err(io::Error::from_raw_os_error(errno as i32))
+                            },
+                        }
+                    }
+                }
+            })
+        })?;
+
+        let mut fd_set = nix::sys::select::FdSet::new();
+        let socket_fd = fd;
+        fd_set.insert(socket_fd);
+        let mut timeout_timeval = nix::sys::time::TimeVal::microseconds(
+            timeout.as_secs() as i64 * 1000 * 1000);
+
+        let select_res = nix::sys::select::select(
+            socket_fd + 1,
+            None,
+            Some(&mut fd_set),
+            None,
+            Some(&mut timeout_timeval),
+        )?;
+
+        if select_res == -1 {
+            return Err(io::Error::last_os_error());
+        }
+
+        if select_res != 1 {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+
+        let socket_error_code = nix::sys::socket::getsockopt(
+            socket_fd,
+            nix::sys::socket::sockopt::SocketError,
+        )?;
+
+        if socket_error_code != 0 {
+            return Err(io::Error::from_raw_os_error(socket_error_code));
+        }
+
+        set_non_blocking(fd, false)?;
+
+        builder.to_tcp_stream()
+    }
+}
 
 pub trait Read: ReadBytesExt + io::BufRead {
     fn read_lenenc_int(&mut self) -> io::Result<u64> {
@@ -385,21 +496,26 @@ impl Stream {
                        port: u16,
                        read_timeout: Option<Duration>,
                        write_timeout: Option<Duration>,
-                       tcp_keepalive_time: Option<u32>) -> MyResult<Stream>
+                       tcp_keepalive_time: Option<u32>,
+                       tcp_connect_timeout: Option<Duration>) -> MyResult<Stream>
     {
-        match net::TcpStream::connect((ip_or_hostname, port)) {
-            Ok(stream) => {
-                try!(stream.set_read_timeout(read_timeout));
-                try!(stream.set_write_timeout(write_timeout));
-                try!(stream.set_keepalive_ms(tcp_keepalive_time));
-                Ok(Stream::TcpStream(Some(TcpStream::Insecure(BufStream::new(stream)))))
-            },
-            Err(e) => {
+        match tcp_connect_timeout {
+            Some(timeout) => connect_tcp_stream_timeout((ip_or_hostname, port), timeout),
+            None => connect_tcp_stream((ip_or_hostname, port)),
+        }.and_then(|stream| {
+            stream.set_read_timeout(read_timeout)?;
+            stream.set_write_timeout(write_timeout)?;
+            stream.set_keepalive_ms(tcp_keepalive_time)?;
+            Ok(Stream::TcpStream(Some(TcpStream::Insecure(BufStream::new(stream)))))
+        }).map_err(|e| {
+            if e.kind() == io::ErrorKind::TimedOut {
+                DriverError(ConnectTimeout)
+            } else {
                 let addr = format!("{}:{}", ip_or_hostname, port);
                 let desc = format!("{}", e);
-                Err(DriverError(CouldNotConnect(Some((addr, desc, e.kind())))))
+                DriverError(CouldNotConnect(Some((addr, desc, e.kind()))))
             }
-        }
+        })
     }
 
     pub fn is_insecure(&self) -> bool {
