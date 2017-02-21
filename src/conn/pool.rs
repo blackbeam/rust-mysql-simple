@@ -768,8 +768,8 @@ mod test {
             }
             pool.prep_exec("SELECT 1", ()).and_then(|mut res1| {
                 pool.prep_exec("SELECT 2", ()).map(|mut res2| {
-                    let (x1,) = from_row(res1.next().unwrap().unwrap());
-                    let (x2,) = from_row(res2.next().unwrap().unwrap());
+                    let (x1,) = from_row::<(u8,)>(res1.next().unwrap().unwrap());
+                    let (x2,) = from_row::<(u8,)>(res2.next().unwrap().unwrap());
                     assert_eq!(1, x1);
                     assert_eq!(2, x2);
                 })
