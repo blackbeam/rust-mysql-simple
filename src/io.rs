@@ -65,7 +65,7 @@ mod connect_timeout {
     pub fn connect_tcp_stream_timeout<T>(_: T, _: Duration) -> io::Result<TcpStream>
         where T: ToSocketAddrs,
     {
-        unimplemented!("tcp_connect_timeout is unix-only feature");
+        panic!("tcp_connect_timeout is unix-only feature");
     }
 }
 
