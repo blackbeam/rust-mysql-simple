@@ -2524,7 +2524,7 @@ mod test {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
             opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
-            opts.ip_or_hostname(Some("127.0.0.0"));
+            opts.ip_or_hostname(Some("192.168.255.255"));
             match Conn::new(opts).unwrap_err() {
                 DriverError(ConnectTimeout) => {},
                 err => panic!("Unexpected error: {}", err),
