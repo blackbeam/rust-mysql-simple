@@ -60,6 +60,7 @@ use self::connect_timeout::connect_tcp_stream_timeout;
 mod connect_timeout {
     use std::io;
     use std::net::ToSocketAddrs;
+    use std::net::TcpStream;
     use std::time::Duration;
 
     pub fn connect_tcp_stream_timeout<T>(_: T, _: Duration) -> io::Result<TcpStream>
