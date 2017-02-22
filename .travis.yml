@@ -6,9 +6,9 @@ rust:
 addons:
   apt:
     packages:
-      - iproute2
+      - net-tools
 env:
   global:
     - secure: DLtoi131hH5kOKHzpBB0ZoVDjCWwSiHmTeGaS86ZPx+IHYQzZ6Ll4x/e82SBDG8YGRoOiJUYfatju84ew7Tk9RLK/xvULPJ/WNhSwBK/p9pYWmAl1+QFoaYT3VvsnuIzmIoFjAz6jluBAxvZ5L+pgagayC0BM1Kw83dMS6Ef1LY=
 script:
-  - ip a && make test
+  - /sbin/ifconfig && make test
