@@ -2527,7 +2527,7 @@ mod test {
             opts.ip_or_hostname(Some("127.0.0.0"));
             match Conn::new(opts).unwrap_err() {
                 DriverError(ConnectTimeout) => {},
-                _ => unreachable!(),
+                err => panic!("Unexpected error: {}", err),
             }
         }
 
