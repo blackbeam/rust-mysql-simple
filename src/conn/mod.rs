@@ -2530,6 +2530,55 @@ mod test {
                 _ => unreachable!(),
             }
         }
+
+        #[test]
+        fn should_handle_json_columns() {
+            #[cfg(not(feature = "serde_integration"))]
+            use rustc_serialize::json::Json;
+            #[cfg(feature = "serde_integration")]
+            use serde_json::Value as Json;
+            #[cfg(feature = "serde_integration")]
+            use std::str::FromStr;
+            use Serialized;
+            use Unserialized;
+
+            #[cfg(not(feature = "serde_integration"))]
+            #[derive(RustcDecodable, RustcEncodable, Debug, Eq, PartialEq)]
+            pub struct DecTest {
+                foo: String,
+                quux: (u64, String),
+            }
+
+            #[cfg(feature = "serde_integration")]
+            #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+            pub struct DecTest {
+                foo: String,
+                quux: (u64, String),
+            }
+
+            let decodable = DecTest {
+                foo: "bar".into(),
+                quux: (42, "hello".into()),
+            };
+
+            let mut conn = Conn::new(get_opts()).unwrap();
+            if conn.query("CREATE TEMPORARY TABLE x.tbl(a VARCHAR(32), b JSON)").is_err() {
+                conn.query("CREATE TEMPORARY TABLE x.tbl(a VARCHAR(32), b TEXT)").unwrap();
+            }
+            conn.prep_exec(
+                r#"INSERT INTO x.tbl VALUES ('hello', ?)"#,
+                (Serialized(&decodable), )
+            ).unwrap();
+
+            let row = conn.first("SELECT a, b FROM x.tbl").unwrap().unwrap();
+            let (a, b): (String, Json) = from_row(row);
+            assert_eq!((a, b), ("hello".into(), Json::from_str(r#"{"foo": "bar", "quux": [42, "hello"]}"#).unwrap()));
+
+
+            let row = conn.first_exec("SELECT a, b FROM x.tbl WHERE a = ?", ("hello", )).unwrap().unwrap();
+            let (a, Unserialized(b)) = from_row(row);
+            assert_eq!((a, b), (String::from("hello"), decodable));
+        }
     }
 
     #[cfg(feature = "nightly")]

@@ -46,6 +46,9 @@ ssl = ["openssl", "security-framework"]
 nightly = []
 serde_integration = ["serde", "serde_json"]
 
+[dev-dependencies]
+serde_derive = "~0.9"
+
 [dependencies]
 lazy_static = "~0.2"
 time = "~0.1"
@@ -84,7 +87,7 @@ features = ["OSX_10_8"]
 [target.'cfg(target_os = "windows")'.dependencies.named_pipe]
 version = "~0.2"
 
-[target.'cfg(not(feature ="serde_integration"))'.dependencies.rustc-serialize]
+[target.'cfg(not(feature = "serde_integration"))'.dependencies.rustc-serialize]
 version = "~0.3.22"
 
 [target.'cfg(unix)'.dependencies]

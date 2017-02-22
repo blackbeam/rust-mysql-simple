@@ -78,7 +78,6 @@ mod connect_timeout {
     use std::net::TcpStream;
     use std::net::ToSocketAddrs;
     use std::os::unix::prelude::*;
-    use std::os::raw::c_ulong;
     use std::time::Duration;
 
     fn set_non_blocking(fd: RawFd, non_blocking: bool) -> io::Result<()> {
