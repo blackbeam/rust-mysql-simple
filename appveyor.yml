@@ -12,8 +12,8 @@ environment:
     RUST_INSTALLER: rust-nightly-x86_64-pc-windows-gnu.msi
   - RUST_URL: https://static.rust-lang.org/dist/rust-beta-x86_64-pc-windows-gnu.msi
     RUST_INSTALLER: rust-beta-x86_64-pc-windows-gnu.msi
-  - RUST_URL: https://static.rust-lang.org/dist/rust-1.14.0-x86_64-pc-windows-gnu.msi
-    RUST_INSTALLER: rust-1.14.0-x86_64-pc-windows-gnu.msi
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.15.1-x86_64-pc-windows-gnu.msi
+    RUST_INSTALLER: rust-1.15.1-x86_64-pc-windows-gnu.msi
 services: mysql
 install:
 - cmd: >-
@@ -39,4 +39,4 @@ test_script:
 
     SET RUST_BACKTRACE=1
 
-    cargo test && cargo test --no-default-features --features ssl
+    cargo test && cargo test --no-default-features --features serde_integration && cargo test --no-default-features --features ssl
