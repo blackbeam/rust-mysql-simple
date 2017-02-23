@@ -18,13 +18,26 @@ Please use [crates.io](https://crates.io/crates/mysql)
 mysql = "*"
 ```
 
-rust-mysql-simple offer support of SSL via `ssl` cargo feature which is disabled by default.
+### SSL Support
+
+rust-mysql-simple offers support of SSL via `ssl` cargo feature which is disabled by default.
 Add `ssl` feature to enable:
 
 ```toml
 [dependencies.mysql]
 version = "*"
 features = ["ssl"]
+```
+
+### JSON Support
+
+rust-mysql-simple offers JSON support based on *rustc-serialize*, but you can switch to *serde* using `serde_integration`
+feature:
+
+```toml
+[dependencies.mysql]
+version = "*"
+features = ["serde_integration"]
 ```
 
 ### Windows support (since 0.18.0)
