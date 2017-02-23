@@ -178,7 +178,7 @@ impl<'a> Transaction<'a> {
 
     /// Will consume and commit transaction.
     pub fn commit(mut self) -> MyResult<()> {
-        try!(self.conn.query("COMMIT"));
+        self.conn.query("COMMIT")?;
         self.committed = true;
         Ok(())
     }
@@ -186,7 +186,7 @@ impl<'a> Transaction<'a> {
     /// Will consume and rollback transaction. You also can rely on `Drop` implementation but it
     /// will swallow errors.
     pub fn rollback(mut self) -> MyResult<()> {
-        try!(self.conn.query("ROLLBACK"));
+        self.conn.query("ROLLBACK")?;
         self.rolled_back = true;
         Ok(())
     }
@@ -260,10 +260,10 @@ struct InnerStmt {
 impl InnerStmt {
     fn from_payload(pld: &[u8], named_params: Option<Vec<String>>) -> io::Result<InnerStmt> {
         let mut reader = &pld[1..];
-        let statement_id = try!(reader.read_u32::<LE>());
-        let num_columns = try!(reader.read_u16::<LE>());
-        let num_params = try!(reader.read_u16::<LE>());
-        let warning_count = try!(reader.read_u16::<LE>());
+        let statement_id = reader.read_u32::<LE>()?;
+        let num_columns = reader.read_u16::<LE>()?;
+        let num_params = reader.read_u16::<LE>()?;
+        let warning_count = reader.read_u16::<LE>()?;
         Ok(InnerStmt {
             named_params: named_params,
             statement_id: statement_id,
@@ -447,7 +447,7 @@ impl<'a> Stmt<'a> {
     }
 
     fn prep_exec<T: Into<Params>>(mut self, params: T) -> MyResult<QueryResult<'a>> {
-        let (columns, ok_packet) = try!(self.conn._execute(&self.stmt, params.into()));
+        let (columns, ok_packet) = self.conn._execute(&self.stmt, params.into())?;
         Ok(QueryResult::new(ResultConnRef::ViaStmt(self), columns, ok_packet, true))
     }
 }
@@ -774,9 +774,9 @@ impl<'a> ColumnIndex for &'a str {
 ///
 /// conn.set_local_infile_handler(Some(
 ///     LocalInfileHandler::new(|file_name, writer| {
-///         try!(writer.write_all(b"row1: file name is "));
-///         try!(writer.write_all(file_name));
-///         try!(writer.write_all(b"\n"));
+///         writer.write_all(b"row1: file name is ")?;
+///         writer.write_all(file_name)?;
+///         writer.write_all(b"\n")?;
 ///
 ///         writer.write_all(b"row2: foobar\n")
 ///     })
@@ -841,7 +841,7 @@ impl<'a> io::Write for LocalInfile<'a> {
         let result = self.buffer.write(buf);
         if let Ok(_) = result {
             if self.buffer.position() as usize >= self.buffer.get_ref().len() {
-                try!(self.flush());
+                self.flush()?;
             }
         }
         result
@@ -850,9 +850,9 @@ impl<'a> io::Write for LocalInfile<'a> {
         let n = self.buffer.position() as usize;
         if n > 0 {
             let range = &self.buffer.get_ref()[..n];
-            try!(self.conn.write_packet(range).map_err(|e| {
+            self.conn.write_packet(range).map_err(|e| {
                 io::Error::new(io::ErrorKind::Other, Box::new(e))
-            }));
+            })?;
         }
         self.buffer.set_position(0);
         Ok(())
@@ -934,38 +934,38 @@ impl Conn {
     /// Creates new `Conn`.
     pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
         let mut conn = Conn::empty(opts);
-        try!(conn.connect_stream());
-        try!(conn.connect());
+        conn.connect_stream()?;
+        conn.connect()?;
         let mut conn = {
             if let Some(new_opts) = conn.can_improved() {
                 drop(conn);
                 let mut improved_conn = Conn::empty(new_opts);
-                try!(improved_conn.connect_stream());
-                try!(improved_conn.connect());
+                improved_conn.connect_stream()?;
+                improved_conn.connect()?;
                 improved_conn
             } else {
                 conn
             }
         };
         for cmd in conn.opts.get_init().clone() {
-            try!(conn.query(cmd));
+            conn.query(cmd)?;
         }
         return Ok(conn);
     }
 
     fn soft_reset(&mut self) -> MyResult<()> {
-        try!(self.write_command(Command::COM_RESET_CONNECTION));
+        self.write_command(Command::COM_RESET_CONNECTION)?;
         self.read_packet().and_then(|pld| {
             match pld[0] {
                 0 => {
-                    let ok = try!(OkPacket::from_payload(&*pld));
+                    let ok = OkPacket::from_payload(&*pld)?;
                     self.handle_ok(&ok);
                     self.last_command = 0;
                     self.stmts.clear();
                     Ok(())
                 },
                 _ => {
-                    let err = try!(ErrPacket::from_payload(&*pld, self.capability_flags));
+                    let err = ErrPacket::from_payload(&*pld, self.capability_flags)?;
                     Err(MySqlError(err.into()))
                 },
             }
@@ -986,7 +986,7 @@ impl Conn {
         self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
         self.connected = false;
         self.has_results = false;
-        try!(self.connect_stream());
+        self.connect_stream()?;
         self.connect()
     }
 
@@ -1010,9 +1010,9 @@ impl Conn {
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         if self.stream.is_some() {
             let stream = self.stream.take().unwrap();
-            let stream = try!(stream.make_secure(self.opts.get_verify_peer(),
-                                                 self.opts.get_ip_or_hostname(),
-                                                 self.opts.get_ssl_opts()));
+            let stream = stream.make_secure(self.opts.get_verify_peer(),
+                                            self.opts.get_ip_or_hostname(),
+                                            self.opts.get_ssl_opts())?;
             self.stream = Some(stream);
         }
         Ok(())
@@ -1029,15 +1029,15 @@ impl Conn {
         let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms().clone();
         let tcp_connect_timeout = self.opts.get_tcp_connect_timeout();
         let stream = if let Some(ref socket) = *self.opts.get_socket() {
-            try!(Stream::connect_socket(&*socket, read_timeout, write_timeout))
+            Stream::connect_socket(&*socket, read_timeout, write_timeout)?
         } else if let Some(ref ip_or_hostname) = *self.opts.get_ip_or_hostname() {
             let port = self.opts.get_tcp_port();
-            try!(Stream::connect_tcp(&*ip_or_hostname,
-                                     port,
-                                     read_timeout,
-                                     write_timeout,
-                                     tcp_keepalive_time,
-                                     tcp_connect_timeout))
+            Stream::connect_tcp(&*ip_or_hostname,
+                                port,
+                                read_timeout,
+                                write_timeout,
+                                tcp_keepalive_time,
+                                tcp_connect_timeout)?
         } else {
             return Err(DriverError(CouldNotConnect(None)));
         };
@@ -1047,14 +1047,14 @@ impl Conn {
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let old_seq_id = self.seq_id;
-        let (data, seq_id) = try!(self.get_mut_stream().as_mut().read_packet(old_seq_id));
+        let (data, seq_id) = self.get_mut_stream().as_mut().read_packet(old_seq_id)?;
         self.seq_id = seq_id;
         Ok(data)
     }
 
     fn drop_packet(&mut self) -> MyResult<()> {
         let old_seq_id = self.seq_id;
-        let seq_id = try!(self.get_mut_stream().as_mut().drop_packet(old_seq_id));
+        let seq_id = self.get_mut_stream().as_mut().drop_packet(old_seq_id)?;
         self.seq_id = seq_id;
         Ok(())
     }
@@ -1062,7 +1062,7 @@ impl Conn {
     fn write_packet(&mut self, data: &[u8]) -> MyResult<()> {
         let seq_id = self.seq_id;
         let max_allowed_packet = self.max_allowed_packet;
-        self.seq_id = try!(self.get_mut_stream().as_mut().write_packet(data, seq_id, max_allowed_packet));
+        self.seq_id = self.get_mut_stream().as_mut().write_packet(data, seq_id, max_allowed_packet)?;
         Ok(())
     }
 
@@ -1088,12 +1088,12 @@ impl Conn {
         self.read_packet().and_then(|pld| {
             match pld[0] {
                 0xFF => {
-                    let error_packet = try!(ErrPacket::from_payload(pld.as_ref(),
-                                                                    self.capability_flags));
+                    let error_packet = ErrPacket::from_payload(pld.as_ref(),
+                                                               self.capability_flags)?;
                     Err(MySqlError(error_packet.into()))
                 },
                 _ => {
-                    let handshake = try!(HandshakePacket::from_payload(pld.as_ref()));
+                    let handshake = HandshakePacket::from_payload(pld.as_ref())?;
                     if handshake.protocol_version != 10u8 {
                         return Err(DriverError(UnsupportedProtocol(handshake.protocol_version)));
                     }
@@ -1106,8 +1106,8 @@ impl Conn {
                             if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
                                 return Err(DriverError(SslNotSupported));
                             } else {
-                                try!(self.do_ssl_request(&handshake));
-                                try!(self.switch_to_ssl());
+                                self.do_ssl_request(&handshake)?;
+                                self.switch_to_ssl()?;
                             }
                         }
                     }
@@ -1119,13 +1119,13 @@ impl Conn {
         }).and_then(|pld| {
             match pld[0] {
                 0u8 => {
-                    let ok = try!(OkPacket::from_payload(pld.as_ref()));
+                    let ok = OkPacket::from_payload(pld.as_ref())?;
                     self.handle_ok(&ok);
                     Ok(())
                 },
                 0xffu8 => {
-                    let err = try!(ErrPacket::from_payload(pld.as_ref(),
-                                                           self.capability_flags));
+                    let err = ErrPacket::from_payload(pld.as_ref(),
+                                                      self.capability_flags)?;
                     Err(MySqlError(err.into()))
                 },
                 _ => Err(DriverError(UnexpectedPacket))
@@ -1161,10 +1161,10 @@ impl Conn {
         let mut buf = [0; 4 + 4 + 1 + 23];
         {
             let mut writer = &mut buf[..];
-            try!(writer.write_u32::<LE>(client_flags.bits()));
-            try!(writer.write_all(&[0u8; 4]));
-            try!(writer.write_u8(hp.get_default_collation()));
-            try!(writer.write_all(&[0u8; 23]));
+            writer.write_u32::<LE>(client_flags.bits())?;
+            writer.write_all(&[0u8; 4])?;
+            writer.write_u8(hp.get_default_collation())?;
+            writer.write_all(&[0u8; 23])?;
         }
         self.write_packet(&buf[..])
     }
@@ -1186,22 +1186,22 @@ impl Conn {
         let mut buf = vec![0u8; payload_len];
         {
             let mut writer = &mut *buf;
-            try!(writer.write_u32::<LE>(client_flags.bits()));
-            try!(writer.write_all(&[0u8; 4]));
-            try!(writer.write_u8(hp.get_default_collation()));
-            try!(writer.write_all(&[0u8; 23]));
+            writer.write_u32::<LE>(client_flags.bits())?;
+            writer.write_all(&[0u8; 4])?;
+            writer.write_u8(hp.get_default_collation())?;
+            writer.write_all(&[0u8; 23])?;
             if let &Some(ref user) = self.opts.get_user() {
-                try!(writer.write_all(user.as_bytes()));
+                writer.write_all(user.as_bytes())?;
             }
-            try!(writer.write_u8(0u8));
-            try!(writer.write_u8(scramble_buf_len as u8));
+            writer.write_u8(0u8)?;
+            writer.write_u8(scramble_buf_len as u8)?;
             if let Some(scr) = scramble_buf {
-                try!(writer.write_all(scr.as_ref()));
+                writer.write_all(scr.as_ref())?;
             }
             if db_name_len > 0 {
                 let db_name = self.opts.get_db_name().as_ref().unwrap();
-                try!(writer.write_all(db_name.as_bytes()));
-                try!(writer.write_u8(0u8));
+                writer.write_all(db_name.as_bytes())?;
+                writer.write_u8(0u8)?;
             }
         }
         self.write_packet(&*buf)
@@ -1234,11 +1234,11 @@ impl Conn {
                         let mut buf = vec![0u8; chunk_len];
                         {
                             let mut writer = &mut *buf;
-                            try!(writer.write_u32::<LE>(stmt.statement_id));
-                            try!(writer.write_u16::<LE>(id));
-                            try!(writer.write_all(chunk));
+                            writer.write_u32::<LE>(stmt.statement_id)?;
+                            writer.write_u16::<LE>(id)?;
+                            writer.write_all(chunk)?;
                         }
-                        try!(self.write_command_data(Command::COM_STMT_SEND_LONG_DATA, &*buf));
+                        self.write_command_data(Command::COM_STMT_SEND_LONG_DATA, &*buf)?;
                     }
                 },
                 _ => unreachable!(),
@@ -1258,9 +1258,9 @@ impl Conn {
                 }
                 {
                     let mut writer = &mut buf[..];
-                    try!(writer.write_u32::<LE>(stmt.statement_id));
-                    try!(writer.write_u8(0u8));
-                    try!(writer.write_u32::<LE>(1u32));
+                    writer.write_u32::<LE>(stmt.statement_id)?;
+                    writer.write_u8(0u8)?;
+                    writer.write_u32::<LE>(1u32)?;
                 }
                 out = &buf[..];
             },
@@ -1270,40 +1270,39 @@ impl Conn {
                 }
                 if let Some(ref sparams) = stmt.params {
                     let (bitmap, values, large_ids) =
-                        try!(Value::to_bin_payload(sparams.as_ref(),
-                                                   &params,
-                                                   self.max_allowed_packet));
+                        Value::to_bin_payload(sparams.as_ref(),
+                                              &params,
+                                              self.max_allowed_packet)?;
                     match large_ids {
-                        Some(ids) => try!(self.send_long_data(stmt, &params, ids)),
+                        Some(ids) => self.send_long_data(stmt, &params, ids)?,
                         _ => ()
                     }
                     data = vec![0u8; 9 + bitmap.len() + 1 + params.len() * 2 + values.len()];
                     {
                         let mut writer = &mut *data;
-                        try!(writer.write_u32::<LE>(stmt.statement_id));
-                        try!(writer.write_u8(0u8));
-                        try!(writer.write_u32::<LE>(1u32));
-                        try!(writer.write_all(bitmap.as_ref()));
-                        try!(writer.write_u8(1u8));
+                        writer.write_u32::<LE>(stmt.statement_id)?;
+                        writer.write_u8(0u8)?;
+                        writer.write_u32::<LE>(1u32)?;
+                        writer.write_all(bitmap.as_ref())?;
+                        writer.write_u8(1u8)?;
                         for i in 0..params.len() {
                             match params[i] {
-                                NULL => try!(writer.write_all(
-                                    &[sparams[i].column_type as u8, 0u8])),
-                                Bytes(..) => try!(
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0u8])),
-                                Int(..) => try!(
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0u8])),
-                                UInt(..) => try!(
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128u8])),
-                                Float(..) => try!(
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0u8])),
-                                Date(..) => try!(
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0u8])),
-                                Time(..) => try!(
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0u8]))
+                                NULL => writer.write_all(&[sparams[i].column_type as u8, 0u8])?,
+                                Bytes(..) =>
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0u8])?,
+                                Int(..) =>
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0u8])?,
+                                UInt(..) =>
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128u8])?,
+                                Float(..) =>
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0u8])?,
+                                Date(..) =>
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0u8])?,
+                                Time(..) =>
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0u8])?
                             }
                         }
-                        try!(writer.write_all(values.as_ref()));
+                        writer.write_all(values.as_ref())?;
                     }
                     out = &*data;
                 } else {
@@ -1315,10 +1314,10 @@ impl Conn {
                     return Err(DriverError(NamedParamsForPositionalQuery));
                 }
                 let named_params = stmt.named_params.as_ref().unwrap();
-                return self._execute(stmt, try!(params.into_positional(named_params)))
+                return self._execute(stmt, params.into_positional(named_params)?)
             }
         }
-        try!(self.write_command_data(Command::COM_STMT_EXECUTE, out));
+        self.write_command_data(Command::COM_STMT_EXECUTE, out)?;
         self.handle_result_set()
     }
 
@@ -1336,22 +1335,22 @@ impl Conn {
                           isolation_level: Option<IsolationLevel>,
                           readonly: Option<bool>) -> MyResult<()> {
         if let Some(i_level) = isolation_level {
-            let _ = try!(self.query(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level)));
+            let _ = self.query(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
         }
         if let Some(readonly) = readonly {
             if self.server_version < (5, 6, 5) {
                 return Err(DriverError(ReadOnlyTransNotSupported));
             }
             let _ = if readonly {
-                try!(self.query("SET TRANSACTION READ ONLY"))
+                self.query("SET TRANSACTION READ ONLY")?
             } else {
-                try!(self.query("SET TRANSACTION READ WRITE"))
+                self.query("SET TRANSACTION READ WRITE")?
             };
         }
         let _ = if consistent_snapshot {
-            try!(self.query("START TRANSACTION WITH CONSISTENT SNAPSHOT"))
+            self.query("START TRANSACTION WITH CONSISTENT SNAPSHOT")?
         } else {
-            try!(self.query("START TRANSACTION"))
+            self.query("START TRANSACTION")?
         };
         Ok(())
     }
@@ -1372,20 +1371,20 @@ impl Conn {
                 // method is not re-entrant, because `LocalInfile` does not expose the
                 // connection.
                 let mut handler_fn = &mut *handler.0.lock().unwrap();
-                try!(handler_fn(file_name, &mut local_infile));
+                handler_fn(file_name, &mut local_infile)?;
             } else {
                 let path = String::from_utf8_lossy(file_name);
                 let path = path.into_owned();
                 let path: path::PathBuf = path.into();
-                let mut file = try!(fs::File::open(&path));
-                try!(io::copy(&mut file, &mut local_infile));
+                let mut file = fs::File::open(&path)?;
+                io::copy(&mut file, &mut local_infile)?;
             };
-            try!(local_infile.flush());
+            local_infile.flush()?;
         }
-        try!(self.write_packet(&[]));
-        let pld = try!(self.read_packet());
+        self.write_packet(&[])?;
+        let pld = self.read_packet()?;
         if pld[0] == 0u8 {
-            let ok = try!(OkPacket::from_payload(pld.as_ref()));
+            let ok = OkPacket::from_payload(pld.as_ref())?;
             self.handle_ok(&ok);
             return Ok(Some(ok));
         }
@@ -1393,36 +1392,36 @@ impl Conn {
     }
 
     fn handle_result_set(&mut self) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
-        let pld = try!(self.read_packet());
+        let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
-                let ok = try!(OkPacket::from_payload(pld.as_ref()));
+                let ok = OkPacket::from_payload(pld.as_ref())?;
                 self.handle_ok(&ok);
                 Ok((Vec::new(), Some(ok)))
             },
             0xfb => {
                 let mut reader = &pld[1..];
                 let mut file_name = Vec::with_capacity(reader.len());
-                try!(reader.read_to_end(&mut file_name));
+                reader.read_to_end(&mut file_name)?;
                 match self.send_local_infile(file_name.as_ref()) {
                     Ok(x) => Ok((Vec::new(), x)),
                     Err(err) => Err(err)
                 }
             },
             0xff => {
-                let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
+                let err = ErrPacket::from_payload(pld.as_ref(), self.capability_flags)?;
                 Err(MySqlError(err.into()))
             },
             _ => {
                 let mut reader = &pld[..];
-                let column_count = try!(reader.read_lenenc_int());
+                let column_count = reader.read_lenenc_int()?;
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
                 for _ in 0..column_count {
-                    let pld = try!(self.read_packet());
-                    columns.push(try!(Column::from_payload(pld)));
+                    let pld = self.read_packet()?;
+                    columns.push(Column::from_payload(pld)?);
                 }
                 // skip eof packet
-                try!(self.read_packet());
+                self.read_packet()?;
                 self.has_results = true;
                 Ok((columns, None))
             }
@@ -1430,7 +1429,7 @@ impl Conn {
     }
 
     fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
-        try!(self.write_command_data(Command::COM_QUERY, query.as_bytes()));
+        self.write_command_data(Command::COM_QUERY, query.as_bytes())?;
         self.handle_result_set()
     }
 
@@ -1451,7 +1450,7 @@ impl Conn {
                                  consistent_snapshot: bool,
                                  isolation_level: Option<IsolationLevel>,
                                  readonly: Option<bool>) -> MyResult<Transaction<'a>> {
-        let _ = try!(self._start_transaction(consistent_snapshot, isolation_level, readonly));
+        let _ = self._start_transaction(consistent_snapshot, isolation_level, readonly)?;
         Ok(Transaction::new(self))
     }
 
@@ -1481,32 +1480,32 @@ impl Conn {
     fn _true_prepare(&mut self,
                      query: &str,
                      named_params: Option<Vec<String>>) -> MyResult<InnerStmt> {
-        try!(self.write_command_data(Command::COM_STMT_PREPARE, query.as_bytes()));
-        let pld = try!(self.read_packet());
+        self.write_command_data(Command::COM_STMT_PREPARE, query.as_bytes())?;
+        let pld = self.read_packet()?;
         match pld[0] {
             0xff => {
-                let err = try!(ErrPacket::from_payload(pld.as_ref(), self.capability_flags));
+                let err = ErrPacket::from_payload(pld.as_ref(), self.capability_flags)?;
                 Err(MySqlError(err.into()))
             },
             _ => {
-                let mut stmt = try!(InnerStmt::from_payload(pld.as_ref(), named_params));
+                let mut stmt = InnerStmt::from_payload(pld.as_ref(), named_params)?;
                 if stmt.num_params > 0 {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as usize);
                     for _ in 0..stmt.num_params {
-                        let pld = try!(self.read_packet());
-                        params.push(try!(Column::from_payload(pld)));
+                        let pld = self.read_packet()?;
+                        params.push(Column::from_payload(pld)?);
                     }
                     stmt.params = Some(params);
-                    try!(self.read_packet());
+                    self.read_packet()?;
                 }
                 if stmt.num_columns > 0 {
                     let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as usize);
                     for _ in 0..stmt.num_columns {
-                        let pld = try!(self.read_packet());
-                        columns.push(try!(Column::from_payload(pld)));
+                        let pld = self.read_packet()?;
+                        columns.push(Column::from_payload(pld)?);
                     }
                     stmt.columns = Some(columns);
-                    try!(self.read_packet());
+                    self.read_packet()?;
                 }
                 Ok(stmt)
             }
@@ -1519,7 +1518,7 @@ impl Conn {
             return Ok(inner_st.clone());
         }
 
-        let inner_st = try!(self._true_prepare(query, named_params));
+        let inner_st = self._true_prepare(query, named_params)?;
         self.stmts.insert(query.to_owned(), inner_st.clone());
         Ok(inner_st)
     }
@@ -1602,7 +1601,7 @@ impl Conn {
     /// ```
     pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
         let query = query.as_ref();
-        let (named_params, real_query) = try!(parse_named_params(query));
+        let (named_params, real_query) = parse_named_params(query)?;
         match self._prepare(real_query.borrow(), named_params) {
             Ok(stmt) => Ok(Stmt::new(stmt, self)),
             Err(err) => Err(err),
@@ -1616,10 +1615,10 @@ impl Conn {
     pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
     where A: AsRef<str>,
           T: Into<Params> {
-        try!(self.prepare(query)).prep_exec(params.into())
+        self.prepare(query)?.prep_exec(params.into())
     }
 
-    /// Executs statement and returns first row.
+    /// Executes statement and returns first row.
     pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
     where Q: AsRef<str>,
           P: Into<Params>,
@@ -1681,7 +1680,7 @@ impl Conn {
         let x = pld[0];
         if x == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
-            let p = try!(EOFPacket::from_payload(pld.as_ref()));
+            let p = EOFPacket::from_payload(pld.as_ref())?;
             self.handle_eof(&p);
             return Ok(None);
         }
@@ -1710,7 +1709,7 @@ impl Conn {
         if (x == 0xfe || x == 0xff) && pld.len() < 0xfe {
             self.has_results = false;
             if x == 0xfe {
-                let p = try!(EOFPacket::from_payload(pld.as_ref()));
+                let p = EOFPacket::from_payload(pld.as_ref())?;
                 self.handle_eof(&p);
                 return Ok(None);
             } else /* x == 0xff */ {
@@ -2345,7 +2344,7 @@ mod test {
                     let mut cell_data = vec![b'Z'; 65535];
                     cell_data.push(b'\n');
                     for _ in 0..1536 {
-                        try!(stream.write_all(&*cell_data));
+                        stream.write_all(&*cell_data)?;
                     }
                     Ok(())
                 })

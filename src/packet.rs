@@ -31,13 +31,13 @@ impl OkPacket {
     pub fn from_payload(pld: &[u8]) -> io::Result<OkPacket> {
         let mut reader = &pld[1..];
         Ok(OkPacket{
-            affected_rows: try!(reader.read_lenenc_int()),
-            last_insert_id: try!(reader.read_lenenc_int()),
-            status_flags: StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>())),
-            warnings: try!(reader.read_u16::<LE>()),
+            affected_rows: reader.read_lenenc_int()?,
+            last_insert_id: reader.read_lenenc_int()?,
+            status_flags: StatusFlags::from_bits_truncate(reader.read_u16::<LE>()?),
+            warnings: reader.read_u16::<LE>()?,
             info: {
                 let mut info = Vec::with_capacity(reader.len());
-                try!(reader.read_to_end(&mut info));
+                reader.read_to_end(&mut info)?;
                 info
             },
         })
@@ -54,14 +54,14 @@ pub struct ErrPacket {
 impl ErrPacket {
     pub fn from_payload(pld: &[u8], c_flags: consts::CapabilityFlags) -> io::Result<ErrPacket> {
         let mut reader = &pld[1..];
-        let error_code = try!(reader.read_u16::<LE>());
+        let error_code = reader.read_u16::<LE>()?;
         Ok(ErrPacket{
             error_code: error_code,
             sql_state: {
                 if c_flags.contains(consts::CLIENT_PROTOCOL_41) {
-                    try!(reader.read_u8());
+                    reader.read_u8()?;
                     let mut sql_state = Vec::with_capacity(5);
-                    try!(reader.by_ref().take(5).read_to_end(&mut sql_state));
+                    reader.by_ref().take(5).read_to_end(&mut sql_state)?;
                     sql_state
                 } else {
                     b"NY000".to_vec()
@@ -69,7 +69,7 @@ impl ErrPacket {
             },
             error_message: {
                 let mut error_message = Vec::with_capacity(reader.len());
-                try!(reader.read_to_end(&mut error_message));
+                reader.read_to_end(&mut error_message)?;
                 error_message
             },
         })
@@ -97,8 +97,8 @@ impl EOFPacket {
     pub fn from_payload(pld: &[u8]) -> io::Result<EOFPacket> {
         let mut reader = &pld[1..];
         Ok(EOFPacket{
-            warnings: try!(reader.read_u16::<LE>()),
-            status_flags: StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>())),
+            warnings: reader.read_u16::<LE>()?,
+            status_flags: StatusFlags::from_bits_truncate(reader.read_u16::<LE>()?),
         })
     }
 }
@@ -109,11 +109,11 @@ pub type ServerVersion = (u16, u16, u16);
 fn parse_version(bytes: &[u8]) -> error::Result<ServerVersion> {
     let ver_str = String::from_utf8_lossy(bytes).into_owned();
     VERSION_RE.captures(&ver_str[..])
-    .and_then(|capts| {
+    .and_then(|captures| {
         Some((
-            (capts.get(1).unwrap().as_str().parse::<u16>()).unwrap_or(0),
-            (capts.get(2).unwrap().as_str().parse::<u16>()).unwrap_or(0),
-            (capts.get(3).unwrap().as_str().parse::<u16>()).unwrap_or(0),
+            (captures.get(1).unwrap().as_str().parse::<u16>()).unwrap_or(0),
+            (captures.get(2).unwrap().as_str().parse::<u16>()).unwrap_or(0),
+            (captures.get(3).unwrap().as_str().parse::<u16>()).unwrap_or(0),
         ))
     }).and_then(|version| {
         if version == (0, 0, 0) {
@@ -144,23 +144,23 @@ impl HandshakePacket {
         let mut character_set = 0u8;
         let mut status_flags = StatusFlags::empty();
         let mut reader = &pld[..];
-        let protocol_version = try!(reader.read_u8());
-        let version_bytes = try!(reader.read_to_null());
-        let server_version = try!(parse_version(&version_bytes[..]));
-        let connection_id = try!(reader.read_u32::<LE>());
+        let protocol_version = reader.read_u8()?;
+        let version_bytes = reader.read_to_null()?;
+        let server_version = parse_version(&version_bytes[..])?;
+        let connection_id = reader.read_u32::<LE>()?;
         auth_plugin_data.resize(8, 0);
-        try!(reader.read_exact(&mut *auth_plugin_data));
+        reader.read_exact(&mut *auth_plugin_data)?;
         // skip filler
         reader = &reader[1..];
-        let lower_cf = try!(reader.read_u16::<LE>());
+        let lower_cf = reader.read_u16::<LE>()?;
         let mut capability_flags = CapabilityFlags::from_bits_truncate(lower_cf as u32);
         if reader.len() > 0 {
-            character_set = try!(reader.read_u8());
-            status_flags = StatusFlags::from_bits_truncate(try!(reader.read_u16::<LE>()));
-            let upper_cf = try!(reader.read_u16::<LE>());
+            character_set = reader.read_u8()?;
+            status_flags = StatusFlags::from_bits_truncate(reader.read_u16::<LE>()?);
+            let upper_cf = reader.read_u16::<LE>()?;
             capability_flags.insert(CapabilityFlags::from_bits_truncate((upper_cf as u32) << 16));
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                length_of_auth_plugin_data = try!(reader.read_u8()) as i16;
+                length_of_auth_plugin_data = reader.read_u8()? as i16;
             } else {
                 reader = &reader[1..];
             }
@@ -170,22 +170,22 @@ impl HandshakePacket {
                 len = if len > 13i16 { len } else { 13i16 };
                 auth_plugin_data.reserve_exact(len as usize);
                 auth_plugin_data.resize(len as usize + 8, 0);
-                try!(reader.read_exact(&mut auth_plugin_data[8..]));
+                reader.read_exact(&mut auth_plugin_data[8..])?;
                 if auth_plugin_data[auth_plugin_data.len() - 1] == 0u8 {
                     auth_plugin_data.pop();
                 }
             }
             if capability_flags.contains(consts::CLIENT_PLUGIN_AUTH) {
-                try!(reader.read_to_end(&mut auth_plugin_name));
+                reader.read_to_end(&mut auth_plugin_name)?;
                 if auth_plugin_name[auth_plugin_name.len() - 1] == 0u8 {
                     auth_plugin_name.pop();
                 }
             }
         }
         Ok(HandshakePacket{protocol_version: protocol_version, connection_id: connection_id,
-                         auth_plugin_data: auth_plugin_data, server_version: server_version,
-                         capability_flags: capability_flags, character_set: character_set,
-                         status_flags: status_flags, auth_plugin_name: auth_plugin_name})
+                           auth_plugin_data: auth_plugin_data, server_version: server_version,
+                           capability_flags: capability_flags, character_set: character_set,
+                           status_flags: status_flags, auth_plugin_name: auth_plugin_name})
     }
     pub fn get_default_collation(&self) -> u8 {
         // MySQL version 5.5.3 introduced "utf8mb4"

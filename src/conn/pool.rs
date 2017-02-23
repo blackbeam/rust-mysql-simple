@@ -39,7 +39,7 @@ impl InnerPool {
             pool: VecDeque::with_capacity(max),
         };
         for _ in 0..min {
-            try!(pool.new_conn());
+            pool.new_conn()?;
         }
         Ok(pool)
     }
@@ -152,7 +152,7 @@ impl Pool {
             if self.use_cache {
                 if let Some(query) = stmt {
                     let mut id = None;
-                    let mut pool = try!(inner_pool.lock());
+                    let mut pool = inner_pool.lock()?;
                     for (i, conn) in pool.pool.iter().rev().enumerate() {
                         if conn.has_stmt(query.as_ref()) {
                             id = Some(i);
@@ -172,7 +172,7 @@ impl Pool {
             conn
         } else {
             let out_conn;
-            let mut pool = try!(inner_pool.lock());
+            let mut pool = inner_pool.lock()?;
             loop {
                 if let Some(conn) = pool.pool.pop_front() {
                     drop(pool);
@@ -180,16 +180,16 @@ impl Pool {
                     break;
                 } else {
                     if self.count.load(Ordering::Relaxed) < self.max.load(Ordering::Relaxed) {
-                        try!(pool.new_conn());
+                        pool.new_conn()?;
                         self.count.fetch_add(1, Ordering::SeqCst);
                     } else {
                         pool = if let Some((start, timeout, std_timeout)) = times {
                             if SteadyTime::now() - start > timeout {
                                 return Err(DriverError::Timeout.into());
                             }
-                            try!(condvar.wait_timeout(pool, std_timeout)).0
+                            condvar.wait_timeout(pool, std_timeout)?.0
                         } else {
-                            try!(condvar.wait(pool))
+                            condvar.wait(pool)?
                         }
                     }
                 }
@@ -199,7 +199,7 @@ impl Pool {
 
         if call_ping && self.check_health {
             if !conn.ping() {
-                try!(conn.reset());
+                conn.reset()?;
             }
         }
 
@@ -213,7 +213,7 @@ impl Pool {
 
     /// Same as `new` but you can set `min` and `max`.
     pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> MyResult<Pool> {
-        let pool = try!(InnerPool::new(min, max, opts.into()));
+        let pool = InnerPool::new(min, max, opts.into())?;
         Ok(Pool{
             inner: Arc::new((Mutex::new(pool), Condvar::new())),
             min: Arc::new(AtomicUsize::new(min)),
@@ -268,24 +268,24 @@ impl Pool {
     ///
     /// It will try to find connection which has this statement cached.
     pub fn prepare<T: AsRef<str>>(&self, query: T) -> MyResult<Stmt<'static>> {
-        let conn = try!(self.get_conn_by_stmt(query.as_ref(), true));
+        let conn = self.get_conn_by_stmt(query.as_ref(), true)?;
         conn.pooled_prepare(query)
     }
 
-    /// Shortcut for `try!(pool.get_conn()).prep_exec(..)`. See
+    /// Shortcut for `pool.get_conn()?.prep_exec(..)`. See
     /// [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
     ///
     /// It will try to find connection which has this statement cached.
     pub fn prep_exec<A, T>(&self, query: A, params: T) -> MyResult<QueryResult<'static>>
     where A: AsRef<str>,
           T: Into<Params> {
-        let conn = try!(self.get_conn_by_stmt(query.as_ref(), false));
+        let conn = self.get_conn_by_stmt(query.as_ref(), false)?;
         let params = params.into();
         match conn.pooled_prep_exec(query.as_ref(), params.clone()) {
             Ok(stmt) => Ok(stmt),
             Err(e) => {
                 if e.is_connectivity_error() {
-                    let conn = try!(self._get_conn(None::<String>, None, true));
+                    let conn = self._get_conn(None::<String>, None, true)?;
                     conn.pooled_prep_exec(query, params)
                 } else {
                     Err(e)
@@ -307,19 +307,19 @@ impl Pool {
         })
     }
 
-    /// Shortcut for `try!(pool.get_conn()).start_transaction(..)`.
+    /// Shortcut for `pool.get_conn()?.start_transaction(..)`.
     pub fn start_transaction(&self,
                              consistent_snapshot: bool,
                              isolation_level: Option<IsolationLevel>,
                              readonly: Option<bool>) -> MyResult<Transaction<'static>> {
-        let conn = try!(self._get_conn(None::<String>, None, false));
+        let conn = self._get_conn(None::<String>, None, false)?;
         let result = conn.pooled_start_transaction(consistent_snapshot,
                                                    isolation_level,
                                                    readonly);
         match result {
             Ok(trans) => Ok(trans),
             Err(ref e) if e.is_connectivity_error() => {
-                let conn = try!(self._get_conn(None::<String>, None, true));
+                let conn = self._get_conn(None::<String>, None, true)?;
                 conn.pooled_start_transaction(consistent_snapshot,
                                               isolation_level,
                                               readonly)
@@ -497,7 +497,7 @@ impl PooledConn {
 
     fn pooled_prepare<'a, T: AsRef<str>>(mut self, query: T) -> MyResult<Stmt<'a>> {
         let query = query.as_ref();
-        let (named_params, real_query) = try!(parse_named_params(query));
+        let (named_params, real_query) = parse_named_params(query)?;
         self.as_mut()._prepare(real_query.borrow(), named_params)
                      .map(|stmt| Stmt::new_pooled(stmt, self))
     }
@@ -507,8 +507,8 @@ impl PooledConn {
           T: Into<Params>
     {
         let query = query.as_ref();
-        let (named_params, real_query) = try!(parse_named_params(query));
-        let stmt = try!(self.as_mut()._prepare(real_query.borrow(), named_params));
+        let (named_params, real_query) = parse_named_params(query)?;
+        let stmt = self.as_mut()._prepare(real_query.borrow(), named_params)?;
         let stmt = Stmt::new_pooled(stmt, self);
         stmt.prep_exec(params)
     }
@@ -517,9 +517,9 @@ impl PooledConn {
                                     consistent_snapshot: bool,
                                     isolation_level: Option<IsolationLevel>,
                                     readonly: Option<bool>) -> MyResult<Transaction<'a>> {
-        let _ = try!(self.as_mut()._start_transaction(consistent_snapshot,
-                                                      isolation_level,
-                                                      readonly));
+        let _ = self.as_mut()._start_transaction(consistent_snapshot,
+                                                 isolation_level,
+                                                 readonly)?;
         Ok(Transaction::new_pooled(self))
     }
 

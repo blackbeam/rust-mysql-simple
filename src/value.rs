@@ -177,62 +177,62 @@ impl Value {
         match *self {
             Value::NULL => (),
             Value::Bytes(ref x) => {
-                try!(writer.write_lenenc_bytes(&x[..]));
+                writer.write_lenenc_bytes(&x[..])?;
             },
             Value::Int(x) => {
-                try!(writer.write_i64::<LE>(x));
+                writer.write_i64::<LE>(x)?;
             },
             Value::UInt(x) => {
-                try!(writer.write_u64::<LE>(x));
+                writer.write_u64::<LE>(x)?;
             },
             Value::Float(x) => {
-                try!(writer.write_f64::<LE>(x));
+                writer.write_f64::<LE>(x)?;
             },
             Value::Date(0u16, 0u8, 0u8, 0u8, 0u8, 0u8, 0u32) => {
-                try!(writer.write_u8(0u8));
+                writer.write_u8(0u8)?;
             },
             Value::Date(y, m, d, 0u8, 0u8, 0u8, 0u32) => {
-                try!(writer.write_u8(4u8));
-                try!(writer.write_u16::<LE>(y));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(d));
+                writer.write_u8(4u8)?;
+                writer.write_u16::<LE>(y)?;
+                writer.write_u8(m)?;
+                writer.write_u8(d)?;
             },
             Value::Date(y, m, d, h, i, s, 0u32) => {
-                try!(writer.write_u8(7u8));
-                try!(writer.write_u16::<LE>(y));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(d));
-                try!(writer.write_u8(h));
-                try!(writer.write_u8(i));
-                try!(writer.write_u8(s));
+                writer.write_u8(7u8)?;
+                writer.write_u16::<LE>(y)?;
+                writer.write_u8(m)?;
+                writer.write_u8(d)?;
+                writer.write_u8(h)?;
+                writer.write_u8(i)?;
+                writer.write_u8(s)?;
             },
             Value::Date(y, m, d, h, i, s, u) => {
-                try!(writer.write_u8(11u8));
-                try!(writer.write_u16::<LE>(y));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(d));
-                try!(writer.write_u8(h));
-                try!(writer.write_u8(i));
-                try!(writer.write_u8(s));
-                try!(writer.write_u32::<LE>(u));
+                writer.write_u8(11u8)?;
+                writer.write_u16::<LE>(y)?;
+                writer.write_u8(m)?;
+                writer.write_u8(d)?;
+                writer.write_u8(h)?;
+                writer.write_u8(i)?;
+                writer.write_u8(s)?;
+                writer.write_u32::<LE>(u)?;
             },
-            Value::Time(_, 0u32, 0u8, 0u8, 0u8, 0u32) => try!(writer.write_u8(0u8)),
+            Value::Time(_, 0u32, 0u8, 0u8, 0u8, 0u32) => writer.write_u8(0u8)?,
             Value::Time(neg, d, h, m, s, 0u32) => {
-                try!(writer.write_u8(8u8));
-                try!(writer.write_u8(if neg {1u8} else {0u8}));
-                try!(writer.write_u32::<LE>(d));
-                try!(writer.write_u8(h));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(s));
+                writer.write_u8(8u8)?;
+                writer.write_u8(if neg {1u8} else {0u8})?;
+                writer.write_u32::<LE>(d)?;
+                writer.write_u8(h)?;
+                writer.write_u8(m)?;
+                writer.write_u8(s)?;
             },
             Value::Time(neg, d, h, m, s, u) => {
-                try!(writer.write_u8(12u8));
-                try!(writer.write_u8(if neg {1u8} else {0u8}));
-                try!(writer.write_u32::<LE>(d));
-                try!(writer.write_u8(h));
-                try!(writer.write_u8(m));
-                try!(writer.write_u8(s));
-                try!(writer.write_u32::<LE>(u));
+                writer.write_u8(12u8)?;
+                writer.write_u8(if neg {1u8} else {0u8})?;
+                writer.write_u32::<LE>(d)?;
+                writer.write_u8(h)?;
+                writer.write_u8(m)?;
+                writer.write_u8(s)?;
+                writer.write_u32::<LE>(u)?;
             }
         };
         Ok(writer)
@@ -249,7 +249,7 @@ impl Value {
                 reader = &reader[1..];
                 output.push(Value::NULL);
             } else {
-                output.push(Value::Bytes(try!(reader.read_lenenc_bytes())));
+                output.push(Value::Bytes(reader.read_lenenc_bytes()?));
             }
         }
         Ok(output)
@@ -268,8 +268,8 @@ impl Value {
         for i in 0..columns.len() {
             let c = &columns[i];
             if bitmap[(i + bit_offset) / 8] & (1 << ((i + bit_offset) % 8)) == 0 {
-                values.push(try!(reader.read_bin_value(c.column_type,
-                                                       c.flags.contains(consts::UNSIGNED_FLAG))));
+                values.push(reader.read_bin_value(c.column_type,
+                                                  c.flags.contains(consts::UNSIGNED_FLAG))?);
             } else {
                 values.push(Value::NULL);
             }
@@ -291,10 +291,10 @@ impl Value {
             match *value {
                 Value::NULL => bitmap[i as usize / 8] |= 1 << ((i % 8u16) as usize),
                 _ => {
-                    let val = try!(value.to_bin());
+                    let val = value.to_bin()?;
                     if val.len() < cap - written {
                         written += val.len();
-                        try!(writer.write_all(&val[..]));
+                        writer.write_all(&val[..])?;
                     } else {
                         large_ids.push(i);
                     }
@@ -1364,7 +1364,7 @@ pub trait FromValue: Sized {
 
     /// Will return `Err(Error::FromValueError(v))` if could not convert `v` to `Self`.
     fn from_value_opt(v: Value) -> MyResult<Self> {
-        let ir = try!(Self::Intermediate::new(v));
+        let ir = Self::Intermediate::new(v)?;
         Ok(ir.commit())
     }
 
@@ -1799,7 +1799,7 @@ impl ConvIr<NaiveDateTime> for ParseIr<NaiveDateTime> {
             v => Err(Error::FromValueError(v)),
         };
 
-        let (date, time, value) = try!(result);
+        let (date, time, value) = result?;
 
         if date.is_some() && time.is_some() {
             Ok(ParseIr {
@@ -1836,7 +1836,7 @@ impl ConvIr<NaiveDate> for ParseIr<NaiveDate> {
             v => Err(Error::FromValueError(v)),
         };
 
-        let (date, value) = try!(result);
+        let (date, value) = result?;
 
         if date.is_some() {
             Ok(ParseIr {
@@ -1973,7 +1973,7 @@ impl ConvIr<NaiveTime> for ParseIr<NaiveTime> {
             v => Err(Error::FromValueError(v))
         };
 
-        let (time, value) = try!(result);
+        let (time, value) = result?;
 
         if time.is_some() {
             Ok(ParseIr {
