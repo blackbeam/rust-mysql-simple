@@ -307,13 +307,15 @@ impl OptsBuilder {
         self
     }
 
-    /// TCP keep alive time for mysql connection (defaults to `None`).
+    /// TCP keep alive time for mysql connection (defaults to `None`). Available as
+    /// `tcp_keepalive_time_ms` url parameter.
     pub fn tcp_keepalive_time_ms(&mut self, tcp_keepalive_time_ms: Option<u32>) -> &mut Self {
         self.opts.tcp_keepalive_time = tcp_keepalive_time_ms;
         self
     }
 
-    /// Prefer socket connection (defaults to `true`).
+    /// Prefer socket connection (defaults to `true`). Available as `prefer_socket` url parameter
+    /// with value `true` or `false`.
     ///
     /// Will reconnect via socket (on named pipe on windows) after TCP connection
     /// to `127.0.0.1` if `true`.
@@ -322,7 +324,6 @@ impl OptsBuilder {
         self
     }
 
-    // XXX: Wait for keepalive_timeout stabilization
     /// Commands to execute on each new database connection.
     pub fn init<T: Into<String>>(&mut self, init: Vec<T>) -> &mut Self {
         self.opts.init = init.into_iter().map(Into::into).collect();
@@ -330,7 +331,9 @@ impl OptsBuilder {
     }
 
     /// #### Only available if `ssl` feature enabled.
-    /// Perform or not ssl peer verification (defaults to `false`).
+    /// Perform or not ssl peer verification (defaults to `false`). Available as `verify_peer` url
+    /// parameter with value `true` or `false`.
+    ///
     /// Only make sense if ssl_opts is not None.
     pub fn verify_peer(&mut self, verify_peer: bool) -> &mut Self {
         self.opts.verify_peer = verify_peer;
@@ -394,7 +397,8 @@ impl OptsBuilder {
         self
     }
 
-    /// Tcp connect timeout (unix only, defaults to `None`).
+    /// Tcp connect timeout (unix only, defaults to `None`). Available as `tcp_connect_timeout_ms`
+    /// url parameter.
     pub fn tcp_connect_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.opts.tcp_connect_timeout = timeout;
         self
