@@ -60,7 +60,7 @@ fnv = "~1.0"
 twox-hash = "~1.0"
 chrono = "~0.2"
 nom = "~2.0"
-uuid = "~0.3"
+uuid = "~0.4"
 net2 = "~0.2"
 
 [dependencies.serde]
