@@ -593,6 +593,7 @@ mod test {
             let pool2 = Pool::new(builder).unwrap();
             let row = pool2.first_exec("SELECT COUNT(*) FROM a", ()).unwrap().unwrap();
             assert_eq!((1u8,), from_row(row));
+            pool.prep_exec("DROP DATABASE A", ()).unwrap();
         }
 
         struct A {
