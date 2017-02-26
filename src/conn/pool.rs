@@ -63,21 +63,20 @@ impl InnerPool {
 /// use std::default::Default;
 /// use mysql::conn::Opts;
 /// # use mysql::conn::OptsBuilder;
-/// # use mysql::conn::Row;
 /// use std::thread;
 ///
 /// fn get_opts() -> Opts {
 ///       // ...
-/// #     let USER = "root";
-/// #     let ADDR = "127.0.0.1";
+/// #     let user = "root";
+/// #     let addr = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
 /// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(USER))
+/// #     builder.user(Some(user))
 /// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(ADDR))
+/// #            .ip_or_hostname(Some(addr))
 /// #            .tcp_port(port);
 /// #     builder.into()
 /// }
@@ -327,19 +326,18 @@ impl fmt::Debug for Pool {
 /// # use mysql::conn::pool;
 /// # use mysql::conn::{Opts, OptsBuilder};
 /// # use mysql::value::{from_value, Value};
-/// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # fn get_opts() -> Opts {
-/// #     let USER = "root";
-/// #     let ADDR = "127.0.0.1";
+/// #     let user = "root";
+/// #     let addr = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
 /// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(USER))
+/// #     builder.user(Some(user))
 /// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(ADDR))
+/// #            .ip_or_hostname(Some(addr))
 /// #            .tcp_port(port)
 /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
 /// #     builder.into()
@@ -352,12 +350,12 @@ impl fmt::Debug for Pool {
 ///     let cell = result.next().unwrap().unwrap().take(0).unwrap();
 ///     assert_eq!(cell, Value::Bytes(b"42".to_vec()));
 ///     assert_eq!(from_value::<i64>(cell), 42i64);
-/// });
+/// }).unwrap();
 /// conn.prep_exec("SELECT 42", ()).map(|mut result| {
 ///     let cell = result.next().unwrap().unwrap().take(0).unwrap();
 ///     assert_eq!(cell, Value::Int(42i64));
 ///     assert_eq!(from_value::<i64>(cell), 42i64);
-/// });
+/// }).unwrap();
 /// ```
 ///
 /// For more info on how to work with query results please look at

@@ -366,20 +366,19 @@ impl<'a> Stmt<'a> {
     /// # use mysql::conn::pool;
     /// # use mysql::conn::{Opts, OptsBuilder};
     /// # use mysql::value::{from_value, from_row, ToValue, Value};
-    /// # use std::thread::Thread;
     /// # use std::default::Default;
     /// # use std::iter::repeat;
     /// # fn get_opts() -> Opts {
-    /// #     let USER = "root";
-    /// #     let ADDR = "127.0.0.1";
+    /// #     let user = "root";
+    /// #     let addr = "127.0.0.1";
     /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
     /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
     /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
     /// #                                .unwrap_or(3307);
     /// #     let mut builder = OptsBuilder::default();
-    /// #     builder.user(Some(USER.to_string()))
+    /// #     builder.user(Some(user.to_string()))
     /// #            .pass(Some(pwd))
-    /// #            .ip_or_hostname(Some(ADDR.to_string()))
+    /// #            .ip_or_hostname(Some(addr.to_string()))
     /// #            .tcp_port(port)
     /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()]);
     /// #     builder.into()
@@ -586,30 +585,27 @@ impl Column {
 /// ```rust
 /// # use mysql::conn::pool;
 /// # use mysql::conn::{Opts, OptsBuilder};
-/// # use mysql::value::{from_value, from_row, ToValue, Value};
-/// # use std::thread::Thread;
 /// # use std::default::Default;
-/// # use std::iter::repeat;
 /// # fn get_opts() -> Opts {
-/// #     let USER = "root";
-/// #     let ADDR = "127.0.0.1";
+/// #     let user = "root";
+/// #     let addr = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
 /// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(USER))
+/// #     builder.user(Some(user))
 /// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(ADDR))
+/// #            .ip_or_hostname(Some(addr))
 /// #            .tcp_port(port)
 /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
 /// #     builder.into()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = pool::Pool::new_manual(1, 1, opts).unwrap();
-/// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ());
+/// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ()).unwrap();
 /// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
-/// #                (1, "John", 17, "foo@bar.baz"));
+/// #                (1, "John", 17, "foo@bar.baz")).unwrap();
 /// pool.prep_exec("SELECT * FROM tmp.Users", ()).map(|mut result| {
 ///     let mut row = result.next().unwrap().unwrap();
 ///     let id: u32 = row.take("id").unwrap();
@@ -621,7 +617,7 @@ impl Column {
 ///     assert_eq!("John", name);
 ///     assert_eq!(17, age);
 ///     assert_eq!("foo@bar.baz", email);
-/// });
+/// }).unwrap();
 /// ```
 ///
 #[derive(Clone, PartialEq, Debug)]
@@ -745,30 +741,28 @@ impl<'a> ColumnIndex for &'a str {
 /// # use mysql::LocalInfileHandler;
 /// # use mysql::conn::pool;
 /// # use mysql::conn::{Opts, OptsBuilder};
-/// # use mysql::value::{from_value, from_row, ToValue, Value};
-/// # use std::thread::Thread;
+/// # use mysql::value::from_row;
 /// # use std::default::Default;
-/// # use std::iter::repeat;
 /// # fn get_opts() -> Opts {
-/// #     let USER = "root";
-/// #     let ADDR = "127.0.0.1";
+/// #     let user = "root";
+/// #     let addr = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
 /// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(USER))
+/// #     builder.user(Some(user))
 /// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(ADDR))
+/// #            .ip_or_hostname(Some(addr))
 /// #            .tcp_port(port)
 /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
 /// #     builder.into()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = pool::Pool::new_manual(1, 1, opts).unwrap();
-/// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ());
+/// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ()).unwrap();
 /// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
-/// #                (1, "John", 17, "foo@bar.baz"));
+/// #                (1, "John", 17, "foo@bar.baz")).unwrap();
 /// # let mut conn = pool.get_conn().unwrap();
 /// conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").unwrap();
 ///
@@ -1540,25 +1534,23 @@ impl Conn {
     /// # #[macro_use] extern crate mysql; fn main() {
     /// # use mysql::conn::pool;
     /// # use mysql::conn::{Opts, OptsBuilder};
-    /// # use mysql::value::{from_value, from_row, ToValue, Value};
-    /// # use std::thread::Thread;
+    /// # use mysql::value::from_row;
     /// # use std::default::Default;
-    /// # use std::iter::repeat;
     /// # use mysql::Error::DriverError;
     /// # use mysql::DriverError::MixedParams;
     /// # use mysql::DriverError::MissingNamedParameter;
     /// # use mysql::DriverError::NamedParamsForPositionalQuery;
     /// # fn get_opts() -> Opts {
-    /// #     let USER = "root";
-    /// #     let ADDR = "127.0.0.1";
+    /// #     let user = "root";
+    /// #     let addr = "127.0.0.1";
     /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
     /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
     /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
     /// #                                .unwrap_or(3307);
     /// #     let mut builder = OptsBuilder::default();
-    /// #     builder.user(Some(USER.to_string()))
+    /// #     builder.user(Some(user.to_string()))
     /// #            .pass(Some(pwd))
-    /// #            .ip_or_hostname(Some(ADDR.to_string()))
+    /// #            .ip_or_hostname(Some(addr.to_string()))
     /// #            .tcp_port(port)
     /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()]);
     /// #     builder.into()
@@ -1838,20 +1830,18 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// use mysql::value::from_row;
 /// # use mysql::conn::pool;
 /// # use mysql::conn::{Opts, OptsBuilder};
-/// # use mysql::value::Value;
-/// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # fn get_opts() -> Opts {
-/// #     let USER = "root";
-/// #     let ADDR = "127.0.0.1";
+/// #     let user = "root";
+/// #     let addr = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
 /// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(USER))
+/// #     builder.user(Some(user))
 /// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(ADDR))
+/// #            .ip_or_hostname(Some(addr))
 /// #            .tcp_port(port)
 /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
 /// #     builder.into()

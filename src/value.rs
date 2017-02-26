@@ -84,19 +84,18 @@ lazy_static! {
 /// # use mysql::conn::pool;
 /// # use mysql::conn::{Opts, OptsBuilder};
 /// use mysql::value::from_row;
-/// # use std::thread::Thread;
 /// # use std::default::Default;
 /// # fn get_opts() -> Opts {
-/// #     let USER = "root";
-/// #     let ADDR = "127.0.0.1";
+/// #     let user = "root";
+/// #     let addr = "127.0.0.1";
 /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
 /// #                                .unwrap_or(3307);
 /// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(USER))
+/// #     builder.user(Some(user))
 /// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(ADDR))
+/// #            .ip_or_hostname(Some(addr))
 /// #            .tcp_port(port);
 /// #     builder.into()
 /// # }

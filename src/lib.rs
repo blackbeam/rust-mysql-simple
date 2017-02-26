@@ -40,22 +40,23 @@
 //! }
 //!
 //! fn main() {
-//! #   let USER = "root";
-//! #   let ADDR = "127.0.0.1";
+//! #   let user = "root";
+//! #   let addr = "127.0.0.1";
 //! #   let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
 //! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
 //! #                              .unwrap_or(3307);
 //! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 //! #   let pool = if port == 3307 && pwd == "password" {
 //!     let pool = my::Pool::new("mysql://root:password@localhost:3307").unwrap();
-//! #       pool
+//! #       drop(pool);
+//! #       my::Pool::new_manual(1, 1, "mysql://root:password@localhost:3307").unwrap()
 //! #   } else {
 //! #       let mut builder = my::OptsBuilder::default();
-//! #       builder.user(Some(USER))
+//! #       builder.user(Some(user))
 //! #              .pass(Some(pwd))
-//! #              .ip_or_hostname(Some(ADDR))
+//! #              .ip_or_hostname(Some(addr))
 //! #              .tcp_port(port);
-//! #       my::Pool::new(builder).unwrap()
+//! #       my::Pool::new_manual(1, 1, builder).unwrap()
 //! #   };
 //!
 //!     // Let's create payment table.
@@ -116,6 +117,7 @@
 //!     assert_eq!(payments, selected_payments);
 //!     println!("Yay!");
 //! }
+//! # main();
 //! # }
 //! ```
 
