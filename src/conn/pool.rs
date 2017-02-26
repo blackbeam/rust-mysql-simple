@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::{Arc, Mutex, Condvar};
@@ -18,10 +17,6 @@ use super::super::value::Params;
 use super::{Conn, Opts, Stmt, QueryResult};
 use super::super::error::Result as MyResult;
 use super::LocalInfileHandler;
-
-thread_local! {
-    static TLS_CONN: UnsafeCell<Option<Conn>> = UnsafeCell::new(None)
-}
 
 #[derive(Debug)]
 struct InnerPool {
@@ -137,35 +132,22 @@ impl Pool {
 
         let &(ref inner_pool, ref condvar) = &*self.inner;
 
-        let conn = if self.use_tls {
-            TLS_CONN.with(|tls_conn| {
-                unsafe { &mut *tls_conn.get() }.take()
-            })
-        } else {
-            None
-        };
-
-        let conn = if let Some(conn) = conn {
-            self.count.fetch_add(1, Ordering::SeqCst);
-            Some(conn)
-        } else {
-            if self.use_cache {
-                if let Some(query) = stmt {
-                    let mut id = None;
-                    let mut pool = inner_pool.lock()?;
-                    for (i, conn) in pool.pool.iter().rev().enumerate() {
-                        if conn.has_stmt(query.as_ref()) {
-                            id = Some(i);
-                            break;
-                        }
+        let conn = if self.use_cache {
+            if let Some(query) = stmt {
+                let mut id = None;
+                let mut pool = inner_pool.lock()?;
+                for (i, conn) in pool.pool.iter().rev().enumerate() {
+                    if conn.has_stmt(query.as_ref()) {
+                        id = Some(i);
+                        break;
                     }
-                    id.and_then(|id| pool.pool.swap_remove_back(id))
-                } else {
-                    None
                 }
+                id.and_then(|id| pool.pool.swap_remove_back(id))
             } else {
                 None
             }
+        } else {
+            None
         };
 
         let mut conn = if let Some(conn) = conn {
@@ -395,23 +377,6 @@ pub struct PooledConn {
 
 impl Drop for PooledConn {
     fn drop(&mut self) {
-        let out = if self.pool.use_tls {
-            TLS_CONN.with(|tls_conn| {
-                let mut val = unsafe { &mut *tls_conn.get() };
-                if val.is_none() {
-                    *val = self.conn.take();
-                    val.is_some()
-                } else {
-                    false
-                }
-            })
-        } else {
-            false
-        };
-        if out {
-            self.pool.count.fetch_sub(1, Ordering::SeqCst);
-            return;
-        }
         if self.pool.count.load(Ordering::Relaxed) > self.pool.max.load(Ordering::Relaxed) || self.conn.is_none() {
             self.pool.count.fetch_sub(1, Ordering::SeqCst);
         } else {
