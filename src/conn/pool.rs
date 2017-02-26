@@ -107,7 +107,6 @@ pub struct Pool {
     count: Arc<AtomicUsize>,
     check_health: bool,
     use_cache: bool,
-    use_tls: bool,
 }
 
 impl Pool {
@@ -203,7 +202,6 @@ impl Pool {
             count: Arc::new(AtomicUsize::new(min)),
             use_cache: true,
             check_health: true,
-            use_tls: true,
         })
     }
 
@@ -216,11 +214,6 @@ impl Pool {
     /// (`prep_exec` is not affected) (on by default).
     pub fn check_health(&mut self, check_health: bool) {
         self.check_health = check_health;
-    }
-
-    /// A way to turn off TLS slot usage (on by default).
-    pub fn use_tls(&mut self, use_tls: bool) {
-        self.use_tls = use_tls;
     }
 
     /// Gives you a [`PooledConn`](struct.PooledConn.html).
@@ -611,16 +604,6 @@ mod test {
             fn add(&mut self) {
                 self.x += 1;
             }
-        }
-
-        #[test]
-        fn should_not_block_when_pool_capacity_goes_to_tls() {
-            let pool = Pool::new_manual(1, 1, get_opts()).unwrap();
-            let pool1 = pool.clone();
-            thread::spawn(move || {
-                pool1.get_conn().unwrap()
-            }).join().unwrap();
-            pool.get_conn().unwrap();
         }
 
         #[test]
