@@ -579,6 +579,7 @@ mod test {
     }
 
     mod pool {
+        use OptsBuilder;
         use std::thread;
         use std::time::Duration;
 
@@ -587,6 +588,19 @@ mod test {
         use super::super::Pool;
         use super::super::super::super::value::from_value;
         use super::super::super::super::error::{Error, DriverError};
+
+        #[test]
+        fn multiple_pools_should_work() {
+            let pool = Pool::new(get_opts()).unwrap();
+            pool.prep_exec("CREATE DATABASE A", ()).unwrap();
+            pool.prep_exec("CREATE TABLE A.a (id INT)", ()).unwrap();
+            pool.prep_exec("INSERT INTO A.a VALUES (1)", ()).unwrap();
+            let mut builder = OptsBuilder::from_opts(get_opts());
+            builder.db_name(Some("A"));
+            let pool2 = Pool::new(builder).unwrap();
+            let row = pool2.first_exec("SELECT COUNT(*) FROM a", ()).unwrap().unwrap();
+            assert_eq!((1u8,), from_row(row));
+        }
 
         struct A {
             pool: Pool,
