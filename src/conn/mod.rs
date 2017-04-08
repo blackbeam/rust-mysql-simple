@@ -1524,6 +1524,22 @@ impl Conn {
     ///
     /// This call will take statement from cache if has been prepared on this connection.
     ///
+    /// ### JSON caveats
+    ///
+    /// For the following statement you will get somewhat unexpected result `{"a": 0}`, because
+    /// booleans in mysql binary protocol is `TINYINT(1)` and will be interpreted as `0`:
+    ///
+    /// ```ignore
+    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)", (false,));
+    /// ```
+    ///
+    /// You should wrap such parameters to a proper json value. For example if you are using
+    /// *rustc_serialize* for Json support:
+    ///
+    /// ```ignore
+    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)", (Json::Boolean(false),));
+    /// ```
+    ///
     /// ### Named parameters support
     ///
     /// `prepare` supports named parameters in form of `:named_param_name`. Allowed characters for
