@@ -2538,23 +2538,23 @@ mod test {
 
         #[test]
         fn should_handle_json_columns() {
-            #[cfg(not(feature = "serde_integration"))]
+            #[cfg(feature = "rustc_serialize")]
             use rustc_serialize::json::Json;
-            #[cfg(feature = "serde_integration")]
+            #[cfg(not(feature = "rustc_serialize"))]
             use serde_json::Value as Json;
-            #[cfg(feature = "serde_integration")]
+            #[cfg(not(feature = "rustc_serialize"))]
             use std::str::FromStr;
             use Serialized;
             use Unserialized;
 
-            #[cfg(not(feature = "serde_integration"))]
+            #[cfg(feature = "rustc_serialize")]
             #[derive(RustcDecodable, RustcEncodable, Debug, Eq, PartialEq)]
             pub struct DecTest {
                 foo: String,
                 quux: (u64, String),
             }
 
-            #[cfg(feature = "serde_integration")]
+            #[cfg(not(feature = "rustc_serialize"))]
             #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
             pub struct DecTest {
                 foo: String,

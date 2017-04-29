@@ -1,6 +1,6 @@
-#[cfg(not(feature ="serde_integration"))]
+#[cfg(feature = "rustc_serialize")]
 pub mod rustc_integration;
-#[cfg(feature ="serde_integration")]
+#[cfg(not(feature ="rustc_serialize"))]
 pub mod serde_integration;
 
 

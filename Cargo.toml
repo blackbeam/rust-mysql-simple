@@ -44,10 +44,10 @@ debug = true
 default = []
 ssl = ["openssl", "security-framework"]
 nightly = []
-serde_integration = ["serde", "serde_json"]
+rustc_serialize = ["rustc-serialize"]
 
 [dev-dependencies]
-serde_derive = "~0.9"
+serde_derive = "~1.0"
 
 [dependencies]
 lazy_static = "~0.2"
@@ -63,12 +63,8 @@ nom = "~2.1"
 uuid = "~0.4"
 net2 = "~0.2"
 
-[dependencies.serde]
-version = "^0.9"
-optional = true
-
-[dependencies.serde_json]
-version = "^0.9"
+[dependencies.rustc-serialize]
+version = "0.3"
 optional= true
 
 [dependencies.regex]
@@ -87,8 +83,11 @@ features = ["OSX_10_8"]
 [target.'cfg(target_os = "windows")'.dependencies.named_pipe]
 version = "~0.2"
 
-[target.'cfg(not(feature = "serde_integration"))'.dependencies.rustc-serialize]
-version = "~0.3.22"
+[target.'cfg(not(feature = "rustc_serialize"))'.dependencies.serde]
+version = "~1.0"
+
+[target.'cfg(not(feature = "rustc_serialize"))'.dependencies.serde_json]
+version = "~1.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "~0.2.20"

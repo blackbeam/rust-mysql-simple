@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::{self, Value as Json};
 use super::{Serialized, Unserialized, UnserializedIr};
 use value::{Value, ConvIr, FromValue};
@@ -20,7 +21,7 @@ impl<T: Serialize> From<Serialized<T>> for Value {
 }
 
 
-impl<T: Deserialize> ConvIr<Unserialized<T>> for UnserializedIr<T> {
+impl<T: DeserializeOwned> ConvIr<Unserialized<T>> for UnserializedIr<T> {
     fn new(v: Value) -> MyResult<UnserializedIr<T>> {
         let (output, bytes) = {
             let bytes = match v {
@@ -55,7 +56,7 @@ impl<T: Deserialize> ConvIr<Unserialized<T>> for UnserializedIr<T> {
     }
 }
 
-impl<T: Deserialize> FromValue for Unserialized<T> {
+impl<T: DeserializeOwned> FromValue for Unserialized<T> {
     type Intermediate = UnserializedIr<T>;
 }
 

@@ -8,7 +8,7 @@ MYSQL_PORT = 3307
 BASEDIR := $(shell mysqld --verbose --help 2>/dev/null | grep -e '^basedir' | awk '{ print $$2 }')
 OS := $(shell uname)
 
-FEATURES := "serde_integration" "ssl"
+FEATURES := "rustc-serialize" "ssl"
 BENCH_FEATURES := "nightly" "nightly ssl"
 
 define run-mysql
