@@ -31,13 +31,13 @@ features = ["ssl"]
 
 ### JSON Support
 
-rust-mysql-simple offers JSON support based on *rustc-serialize*, but you can switch to *serde* using `serde_integration`
+rust-mysql-simple offers JSON support based on *serde*, but you can switch to *rustc-serialize* using `rustc-serialize`
 feature:
 
 ```toml
 [dependencies.mysql]
 version = "*"
-features = ["serde_integration"]
+features = ["rustc-serialize"]
 ```
 
 ### Windows support (since 0.18.0)
