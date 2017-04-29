@@ -2545,7 +2545,7 @@ mod test {
             #[cfg(not(feature = "rustc_serialize"))]
             use std::str::FromStr;
             use Serialized;
-            use Unserialized;
+            use Deserialized;
 
             #[cfg(feature = "rustc_serialize")]
             #[derive(RustcDecodable, RustcEncodable, Debug, Eq, PartialEq)]
@@ -2581,7 +2581,7 @@ mod test {
 
 
             let row = conn.first_exec("SELECT a, b FROM x.tbl WHERE a = ?", ("hello", )).unwrap().unwrap();
-            let (a, Unserialized(b)) = from_row(row);
+            let (a, Deserialized(b)) = from_row(row);
             assert_eq!((a, b), (String::from("hello"), decodable));
         }
     }

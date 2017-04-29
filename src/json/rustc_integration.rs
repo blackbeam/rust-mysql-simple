@@ -1,6 +1,6 @@
 use rustc_serialize::{Decodable, Encodable};
 use rustc_serialize::json::{self, Json};
-use super::{Serialized, Unserialized, UnserializedIr};
+use super::{Serialized, Deserialized, DeserializedIr};
 use value::{Value, ConvIr, FromValue};
 use error::{Error, Result as MyResult};
 use std::convert::From;
@@ -20,8 +20,8 @@ impl<T: Encodable> From<Serialized<T>> for Value {
 }
 
 
-impl<T: Decodable> ConvIr<Unserialized<T>> for UnserializedIr<T> {
-    fn new(v: Value) -> MyResult<UnserializedIr<T>> {
+impl<T: Decodable> ConvIr<Deserialized<T>> for DeserializedIr<T> {
+    fn new(v: Value) -> MyResult<DeserializedIr<T>> {
         let (output, bytes) = {
             let bytes = match v {
                 Value::Bytes(bytes) => {
@@ -40,13 +40,13 @@ impl<T: Decodable> ConvIr<Unserialized<T>> for UnserializedIr<T> {
             };
             (output, bytes)
         };
-        Ok(UnserializedIr {
+        Ok(DeserializedIr {
             bytes: bytes,
-            output: Unserialized(output),
+            output: Deserialized(output),
         })
     }
 
-    fn commit(self) -> Unserialized<T> {
+    fn commit(self) -> Deserialized<T> {
         self.output
     }
 
@@ -55,8 +55,8 @@ impl<T: Decodable> ConvIr<Unserialized<T>> for UnserializedIr<T> {
     }
 }
 
-impl<T: Decodable> FromValue for Unserialized<T> {
-    type Intermediate = UnserializedIr<T>;
+impl<T: Decodable> FromValue for Deserialized<T> {
+    type Intermediate = DeserializedIr<T>;
 }
 
 

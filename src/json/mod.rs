@@ -27,14 +27,14 @@ pub struct Serialized<T>(pub T);
 ///     // ...
 /// }
 /// // ...
-/// let (Unserialized(val),): (Unserialized<DecodableStruct>,)
+/// let (Deserialized(val),): (Deserialized<DecodableStruct>,)
 ///     = from_row(row_with_single_json_column);
 /// ```
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
-pub struct Unserialized<T>(pub T);
+pub struct Deserialized<T>(pub T);
 
 #[derive(Debug)]
-pub struct UnserializedIr<T> {
+pub struct DeserializedIr<T> {
     bytes: Vec<u8>,
-    output: Unserialized<T>,
+    output: Deserialized<T>,
 }

@@ -1,7 +1,7 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{self, Value as Json};
-use super::{Serialized, Unserialized, UnserializedIr};
+use super::{Serialized, Deserialized, DeserializedIr};
 use value::{Value, ConvIr, FromValue};
 use error::{Error, Result as MyResult};
 use std::convert::From;
@@ -21,8 +21,8 @@ impl<T: Serialize> From<Serialized<T>> for Value {
 }
 
 
-impl<T: DeserializeOwned> ConvIr<Unserialized<T>> for UnserializedIr<T> {
-    fn new(v: Value) -> MyResult<UnserializedIr<T>> {
+impl<T: DeserializeOwned> ConvIr<Deserialized<T>> for DeserializedIr<T> {
+    fn new(v: Value) -> MyResult<DeserializedIr<T>> {
         let (output, bytes) = {
             let bytes = match v {
                 Value::Bytes(bytes) => {
@@ -41,13 +41,13 @@ impl<T: DeserializeOwned> ConvIr<Unserialized<T>> for UnserializedIr<T> {
             };
             (output, bytes)
         };
-        Ok(UnserializedIr {
+        Ok(DeserializedIr {
             bytes: bytes,
-            output: Unserialized(output),
+            output: Deserialized(output),
         })
     }
 
-    fn commit(self) -> Unserialized<T> {
+    fn commit(self) -> Deserialized<T> {
         self.output
     }
 
@@ -56,8 +56,8 @@ impl<T: DeserializeOwned> ConvIr<Unserialized<T>> for UnserializedIr<T> {
     }
 }
 
-impl<T: DeserializeOwned> FromValue for Unserialized<T> {
-    type Intermediate = UnserializedIr<T>;
+impl<T: DeserializeOwned> FromValue for Deserialized<T> {
+    type Intermediate = DeserializedIr<T>;
 }
 
 

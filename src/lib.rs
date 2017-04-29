@@ -232,7 +232,7 @@ pub use value::from_value_opt;
 #[doc(inline)]
 pub use json::Serialized;
 #[doc(inline)]
-pub use json::Unserialized;
+pub use json::Deserialized;
 
 pub mod prelude {
     #[doc(inline)]
