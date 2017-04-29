@@ -39,4 +39,4 @@ test_script:
 
     SET RUST_BACKTRACE=1
 
-    cargo test && cargo test --no-default-features --features serde_integration && cargo test --no-default-features --features ssl
+    cargo test && cargo test --no-default-features --features rustc-serialize && cargo test --no-default-features --features ssl
