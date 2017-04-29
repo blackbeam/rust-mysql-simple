@@ -75,6 +75,7 @@ mod connect_timeout {
     use libc::*;
     use net2::TcpBuilder;
     use nix;
+    use nix::sys::time::TimeValLike;
     use std::io;
     use std::net::TcpStream;
     use std::net::ToSocketAddrs;
