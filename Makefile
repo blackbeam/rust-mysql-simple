@@ -92,6 +92,7 @@ test:
 	fi
 	for var in $(FEATURES); \
 	do \
+		sleep 15; \
 		echo TESTING FEATURS: $$var; \
 		if ! (cargo test --no-default-features --features "$$var"); \
 		then \
