@@ -1022,6 +1022,7 @@ impl Conn {
         let write_timeout = self.opts.get_write_timeout().clone();
         let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms().clone();
         let tcp_connect_timeout = self.opts.get_tcp_connect_timeout();
+        let bind_address = self.opts.bind_address().cloned();
         let stream = if let Some(ref socket) = *self.opts.get_socket() {
             Stream::connect_socket(&*socket, read_timeout, write_timeout)?
         } else if let Some(ref ip_or_hostname) = *self.opts.get_ip_or_hostname() {
@@ -1031,7 +1032,8 @@ impl Conn {
                                 read_timeout,
                                 write_timeout,
                                 tcp_keepalive_time,
-                                tcp_connect_timeout)?
+                                tcp_connect_timeout,
+                                bind_address)?
         } else {
             return Err(DriverError(CouldNotConnect(None)));
         };
@@ -2534,6 +2536,31 @@ mod test {
                 DriverError(ConnectTimeout) => {},
                 err => panic!("Unexpected error: {}", err),
             }
+        }
+
+        #[test]
+        #[cfg(not(feature = "ssl"))]
+        fn should_bind_before_connect() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.prefer_socket(false);
+            opts.ip_or_hostname(Some("127.0.0.1"));
+            opts.bind_address(Some(([127, 0, 0, 1], 27272)));
+            let conn = Conn::new(opts).unwrap();
+            let debug_format: String = format!("{:?}", conn);
+            assert!(debug_format.contains("addr: V4(127.0.0.1:27272)"));
+        }
+
+        #[test]
+        #[cfg(all(unix, not(feature = "ssl")))]
+        fn should_bind_before_connect_with_timeout() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.prefer_socket(false);
+            opts.ip_or_hostname(Some("127.0.0.1"));
+            opts.bind_address(Some(([127, 0, 0, 1], 27273)));
+            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
+            let conn = Conn::new(opts).unwrap();
+            let debug_format: String = format!("{:?}", conn);
+            assert!(debug_format.contains("addr: V4(127.0.0.1:27273)"));
         }
 
         #[test]

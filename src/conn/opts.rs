@@ -1,4 +1,4 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use std::path;
 use std::str::FromStr;
@@ -90,6 +90,9 @@ pub struct Opts {
 
     /// Tcp connect timeout (unix only, defaults to `None`).
     tcp_connect_timeout: Option<Duration>,
+
+    /// Bind address for a client.
+    bind_address: Option<SocketAddr>,
 }
 
 impl Opts {
@@ -200,6 +203,11 @@ impl Opts {
     pub fn get_tcp_connect_timeout(&self) -> Option<Duration> {
         self.tcp_connect_timeout
     }
+
+    /// Bind address for a client.
+    pub fn bind_address(&self) -> Option<&SocketAddr> {
+        self.bind_address.as_ref()
+    }
 }
 
 impl Default for Opts {
@@ -220,6 +228,7 @@ impl Default for Opts {
             tcp_keepalive_time: None,
             local_infile_handler: None,
             tcp_connect_timeout: None,
+            bind_address: None,
         }
     }
 }
@@ -401,6 +410,14 @@ impl OptsBuilder {
     /// url parameter.
     pub fn tcp_connect_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.opts.tcp_connect_timeout = timeout;
+        self
+    }
+
+    /// Bind address for a client.
+    pub fn bind_address<T>(&mut self, bind_address: Option<T>) -> &mut Self
+        where T: Into<SocketAddr>
+    {
+        self.opts.bind_address = bind_address.map(Into::into);
         self
     }
 }
