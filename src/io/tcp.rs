@@ -1,15 +1,20 @@
+#[cfg(unix)]
 use libc::*;
 use net2::{TcpBuilder, TcpStreamExt};
+#[cfg(unix)]
 use nix::errno::Errno;
+#[cfg(unix)]
 use nix::sys::select;
+#[cfg(unix)]
 use nix::sys::socket;
+#[cfg(unix)]
 use nix::sys::time::{TimeVal, TimeValLike};
 use std::io;
 use std::net::{TcpStream, SocketAddr, ToSocketAddrs};
 #[cfg(unix)]
 use std::os::unix::prelude::*;
 #[cfg(target_os = "windows")]
-use std::os::windows::prelude;
+use std::os::windows::prelude::*;
 use std::time::Duration;
 
 pub struct MyTcpBuilder<T> {
@@ -89,7 +94,10 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
                         }
                     }
                     if let Some(connect_timeout) = connect_timeout {
+                        #[cfg(unix)]
                         connect_fd_timeout(builder.as_raw_fd(), &sock_addr, connect_timeout)?;
+                        #[cfg(target_os = "windows")]
+                        connect_fd_timeout(builder.as_raw_socket(), &sock_addr, connect_timeout)?;
                         builder.to_tcp_stream()
                     } else {
                         builder.connect(sock_addr)
@@ -175,6 +183,6 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
 }
 
 #[cfg(not(unix))]
-fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> io::Result<()> {
+fn connect_fd_timeout(socket: RawSocket, sock_addr: &SocketAddr, timeout: Duration) -> io::Result<()> {
     panic!("tcp_connect_timeout is unix-only feature");
 }
