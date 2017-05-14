@@ -10,12 +10,19 @@ use nix::sys::socket;
 #[cfg(unix)]
 use nix::sys::time::{TimeVal, TimeValLike};
 use std::io;
+use std::mem;
 use std::net::{TcpStream, SocketAddr, ToSocketAddrs};
+use std::os::raw::*;
 #[cfg(unix)]
 use std::os::unix::prelude::*;
 #[cfg(target_os = "windows")]
 use std::os::windows::prelude::*;
+use std::ptr;
 use std::time::Duration;
+#[cfg(target_os = "windows")]
+use winapi::*;
+#[cfg(target_os = "windows")]
+use ws2_32::*;
 
 pub struct MyTcpBuilder<T> {
     address: T,
@@ -115,19 +122,18 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
 
 #[cfg(unix)]
 fn set_non_blocking(fd: RawFd, non_blocking: bool) -> io::Result<()> {
-    let mut non_blocking = non_blocking as c_ulong;
-    let result = unsafe {
-        ioctl(fd, FIONBIO, &mut non_blocking)
-    };
-    if result == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+    let stream = unsafe { TcpStream::from_raw_fd(fd) };
+    let result = stream.set_nonblocking(non_blocking);
+    mem::forget(stream);
+    result
 }
 
 #[cfg(not(unix))]
 fn set_non_blocking(socket: RawSocket, non_blocking: bool) -> io::Result<()> {
-    unimplemented!();
+    let stream = unsafe { TcpStream::from_raw_socket(socket) };
+    let result = stream.set_nonblocking(non_blocking);
+    mem::forget(stream);
+    result
 }
 
 #[cfg(unix)]
@@ -183,6 +189,74 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
 }
 
 #[cfg(not(unix))]
-fn connect_fd_timeout(socket: RawSocket, sock_addr: &SocketAddr, timeout: Duration) -> io::Result<()> {
-    panic!("tcp_connect_timeout is unix-only feature");
+fn connect_fd_timeout(socket: RawSocket,
+                      sock_addr: &SocketAddr,
+                      timeout: Duration) -> io::Result<()> {
+    set_non_blocking(socket, true)?;
+    let (name, name_len) = match *sock_addr {
+        SocketAddr::V4(ref a) => {
+            (a as *const _ as *const _, mem::size_of_val(a) as c_int)
+        },
+        SocketAddr::V6(ref a) => {
+            (a as *const _ as *const _, mem::size_of_val(a) as c_int)
+        }
+    };
+    let result = unsafe { connect(socket, name, name_len) };
+    if result == SOCKET_ERROR {
+        let err = io::Error::last_os_error();
+        match err.raw_os_error().map(|x| x as u32) {
+            Some(WSAEWOULDBLOCK) => {
+                let mut write_fds = fd_set {
+                    fd_count: 1,
+                    fd_array: [0; FD_SETSIZE]
+                };
+                write_fds.fd_array[0] = socket;
+                let mut err_fds = write_fds.clone();
+                let timeout = timeval {
+                    tv_sec: timeout.as_secs() as c_long,
+                    tv_usec: 0,
+                };
+
+                let result = unsafe {
+                    select(0, ptr::null_mut(), &mut write_fds, &mut err_fds, &timeout)
+                };
+
+                if result == 0 {
+                    return Err(io::ErrorKind::TimedOut.into());
+                } else if result == SOCKET_ERROR {
+                    return Err(io::Error::last_os_error());
+                } else {
+                    let mut error = None;
+                    for i in 0..(err_fds.fd_count as usize) {
+                        if err_fds.fd_array[i] == socket {
+                            error = Some(true);
+                        }
+                    }
+                    for i in 0..(write_fds.fd_count as usize) {
+                        if write_fds.fd_array[i] == socket {
+                            error = Some(false);
+                        }
+                    }
+                    match error {
+                        Some(false) => (),
+                        Some(true) => {
+                            let mut opt_val = 0i32;
+                            let mut opt_len = mem::size_of::<i32>() as c_int;
+                            let result = unsafe {
+                                getsockopt(socket,
+                                           SOL_SOCKET,
+                                           SO_ERROR,
+                                           &mut opt_val as *mut _ as *mut _,
+                                           &mut opt_len)
+                            };
+                            return Err(io::Error::from_raw_os_error(result));
+                        },
+                        None => unreachable!(),
+                    }
+                }
+            },
+            _ => return Err(err),
+        }
+    }
+    set_non_blocking(socket, false)
 }

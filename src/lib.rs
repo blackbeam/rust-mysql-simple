@@ -164,6 +164,10 @@ pub extern crate serde_json;
 #[cfg(test)]
 #[macro_use]
 extern crate serde_derive;
+#[cfg(target_os = "windows")]
+extern crate winapi;
+#[cfg(target_os = "windows")]
+extern crate ws2_32;
 
 
 mod scramble;

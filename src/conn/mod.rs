@@ -2518,7 +2518,6 @@ mod test {
         }
 
         #[test]
-        #[cfg(unix)]
         fn should_handle_tcp_connect_timeout() {
             use error::Error::DriverError;
             use error::DriverError::ConnectTimeout;
@@ -2526,7 +2525,8 @@ mod test {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
             opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
-            Conn::new(opts).unwrap();
+            assert!(Conn::new(opts).unwrap().ping());
+
 
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
@@ -2551,14 +2551,15 @@ mod test {
         }
 
         #[test]
-        #[cfg(all(unix, not(feature = "ssl")))]
+        #[cfg(not(feature = "ssl"))]
         fn should_bind_before_connect_with_timeout() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
             opts.ip_or_hostname(Some("127.0.0.1"));
             opts.bind_address(Some(([127, 0, 0, 1], 27273)));
             opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
-            let conn = Conn::new(opts).unwrap();
+            let mut conn = Conn::new(opts).unwrap();
+            assert!(conn.ping());
             let debug_format: String = format!("{:?}", conn);
             assert!(debug_format.contains("addr: V4(127.0.0.1:27273)"));
         }

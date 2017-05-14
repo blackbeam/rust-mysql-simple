@@ -88,7 +88,7 @@ pub struct Opts {
     /// the current directory.
     local_infile_handler: Option<LocalInfileHandler>,
 
-    /// Tcp connect timeout (unix only, defaults to `None`).
+    /// Tcp connect timeout (defaults to `None`).
     tcp_connect_timeout: Option<Duration>,
 
     /// Bind address for a client.
@@ -199,7 +199,7 @@ impl Opts {
         &self.local_infile_handler
     }
 
-    /// Tcp connect timeout (unix only, defaults to `None`).
+    /// Tcp connect timeout (defaults to `None`).
     pub fn get_tcp_connect_timeout(&self) -> Option<Duration> {
         self.tcp_connect_timeout
     }
@@ -406,7 +406,7 @@ impl OptsBuilder {
         self
     }
 
-    /// Tcp connect timeout (unix only, defaults to `None`). Available as `tcp_connect_timeout_ms`
+    /// Tcp connect timeout (defaults to `None`). Available as `tcp_connect_timeout_ms`
     /// url parameter.
     pub fn tcp_connect_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.opts.tcp_connect_timeout = timeout;
