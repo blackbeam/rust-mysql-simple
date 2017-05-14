@@ -1,5 +1,3 @@
-#[cfg(unix)]
-use libc::*;
 use net2::{TcpBuilder, TcpStreamExt};
 #[cfg(unix)]
 use nix::errno::Errno;
@@ -12,11 +10,13 @@ use nix::sys::time::{TimeVal, TimeValLike};
 use std::io;
 use std::mem;
 use std::net::{TcpStream, SocketAddr, ToSocketAddrs};
+#[cfg(target_os = "windows")]
 use std::os::raw::*;
 #[cfg(unix)]
 use std::os::unix::prelude::*;
 #[cfg(target_os = "windows")]
 use std::os::windows::prelude::*;
+#[cfg(target_os = "windows")]
 use std::ptr;
 use std::time::Duration;
 #[cfg(target_os = "windows")]
@@ -128,7 +128,7 @@ fn set_non_blocking(fd: RawFd, non_blocking: bool) -> io::Result<()> {
     result
 }
 
-#[cfg(not(unix))]
+#[cfg(target_os = "windows")]
 fn set_non_blocking(socket: RawSocket, non_blocking: bool) -> io::Result<()> {
     let stream = unsafe { TcpStream::from_raw_socket(socket) };
     let result = stream.set_nonblocking(non_blocking);
@@ -188,7 +188,7 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
     set_non_blocking(fd, false)
 }
 
-#[cfg(not(unix))]
+#[cfg(target_os = "windows")]
 fn connect_fd_timeout(socket: RawSocket,
                       sock_addr: &SocketAddr,
                       timeout: Duration) -> io::Result<()> {
