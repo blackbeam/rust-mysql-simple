@@ -161,7 +161,7 @@ extern crate rustc_serialize;
 pub extern crate serde;
 #[cfg(not(feature = "rustc_serialize"))]
 pub extern crate serde_json;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "rustc_serialize")))]
 #[macro_use]
 extern crate serde_derive;
 #[cfg(target_os = "windows")]
