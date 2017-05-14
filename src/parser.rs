@@ -1,15 +1,5 @@
-use nom::{IResult, le_u8, le_u16, le_u32, le_u64, Needed};
+use nom::{IResult, le_u8, le_u16, le_u24, le_u32, le_u64};
 use nom::IResult::*;
-
-#[inline]
-fn le_u24(i: &[u8]) -> IResult<&[u8], u32> {
-    if i.len() < 3 {
-        Incomplete(Needed::Size(3))
-    } else {
-        let res = ((i[2] as u32) << 16) + ((i[1] as u32) << 8) + i[0] as u32;
-        Done(&i[3..], res)
-    }
-}
 
 #[inline]
 pub fn lenenc_int(i: &[u8]) -> IResult<&[u8], (u8, u64)> {
@@ -44,33 +34,29 @@ pub fn lenenc_bytes(i: &[u8]) -> IResult<&[u8], (u64, &[u8])> {
 ///     decimals,
 ///     default_values,
 /// )
-/// }
 /// ```
-pub type ColumnDef<'a> = (&'a [u8], &'a[u8], &'a[u8], &'a[u8], &'a[u8], u16, u32, u8, u16, u8, Option<&'a[u8]>);
-
-pub fn column_def<'a>(pld: &'a [u8]) -> IResult<&[u8], ColumnDef<'a>> {
-    chain! (pld,
-        // Skip catalog which is always "\x03def"
-        take!(4) ~
-        schema: call!(lenenc_bytes) ~
-        table: call!(lenenc_bytes) ~
-        org_table: call!(lenenc_bytes) ~
-        name: call!(lenenc_bytes) ~
-        org_name: call!(lenenc_bytes) ~
-        take!(1) ~
-        character_set: call!(le_u16) ~
-        column_length: call!(le_u32) ~
-        column_type: call!(le_u8) ~
-        flags: call!(le_u16) ~
-        decimals: call!(le_u8) ~
-        take!(2) ~
-        len: opt!(complete!(call!(lenenc_int))) ~
+named!(pub column_def<&[u8], (&[u8], &[u8], &[u8], &[u8], &[u8], u16, u32, u8, u16, u8, Option<&[u8]>)>,
+    do_parse! (
+        take!(4) >>
+        schema: call!(lenenc_bytes) >>
+        table: call!(lenenc_bytes) >>
+        org_table: call!(lenenc_bytes) >>
+        name: call!(lenenc_bytes) >>
+        org_name: call!(lenenc_bytes) >>
+        take!(1) >>
+        character_set: call!(le_u16) >>
+        column_length: call!(le_u32) >>
+        column_type: call!(le_u8) >>
+        flags: call!(le_u16) >>
+        decimals: call!(le_u8) >>
+        take!(2) >>
+        len: opt!(complete!(call!(lenenc_int))) >>
         default_values: cond!(
             len.is_some(),
             take!(len.unwrap().1)
-        ),
-        || {
-            return (
+        ) >>
+        (
+            (
                 schema.1,
                 table.1,
                 org_table.1,
@@ -82,10 +68,10 @@ pub fn column_def<'a>(pld: &'a [u8]) -> IResult<&[u8], ColumnDef<'a>> {
                 flags,
                 decimals,
                 default_values,
-            );
-        }
+            )
+        )
     )
-}
+);
 
 #[cfg(test)]
 mod test {

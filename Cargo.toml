@@ -59,7 +59,7 @@ bufstream = "~0.1"
 fnv = "~1.0"
 twox-hash = "~1.1"
 chrono = "~0.3"
-nom = "~2.2"
+nom = "~3"
 uuid = "~0.5"
 net2 = "~0.2"
 
