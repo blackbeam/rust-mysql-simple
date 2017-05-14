@@ -91,7 +91,10 @@ pub struct Opts {
     /// Tcp connect timeout (defaults to `None`).
     tcp_connect_timeout: Option<Duration>,
 
-    /// Bind address for a client.
+    /// Bind address for a client (defaults to `None`).
+    ///
+    /// Use carefully. Will probably make pool unusable because of *address already in use*
+    /// errors.
     bind_address: Option<SocketAddr>,
 }
 
@@ -204,7 +207,10 @@ impl Opts {
         self.tcp_connect_timeout
     }
 
-    /// Bind address for a client.
+    /// Bind address for a client (defaults to `None`).
+    ///
+    /// Use carefully. Will probably make pool unusable because of *address already in use*
+    /// errors.
     pub fn bind_address(&self) -> Option<&SocketAddr> {
         self.bind_address.as_ref()
     }
@@ -413,7 +419,10 @@ impl OptsBuilder {
         self
     }
 
-    /// Bind address for a client.
+    /// Bind address for a client (defaults to `None`).
+    ///
+    /// Use carefully. Will probably make pool unusable because of *address already in use*
+    /// errors.
     pub fn bind_address<T>(&mut self, bind_address: Option<T>) -> &mut Self
         where T: Into<SocketAddr>
     {
