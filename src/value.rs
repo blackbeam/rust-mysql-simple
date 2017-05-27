@@ -309,14 +309,6 @@ impl Value {
     }
 }
 
-macro_rules! rollback {
-    ($x:ident) => (match $x {
-        Ok(x) => x.rollback(),
-        Err(Error::FromValueError(x)) => x,
-        _ => unreachable!(),
-    });
-}
-
 /// Will *panic* if could not convert `row` to `T`.
 #[inline]
 pub fn from_row<T: FromRow>(row: Row) -> T {
