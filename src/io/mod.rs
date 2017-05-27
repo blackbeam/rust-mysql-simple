@@ -322,7 +322,7 @@ pub enum Stream {
     TcpStream(Option<TcpStream>),
 }
 
-trait IoPack: io::Read + io::Write + io::BufRead + 'static { }
+pub trait IoPack: io::Read + io::Write + io::BufRead + 'static { }
 
 impl<T: io::Read + io::Write + 'static> IoPack for BufStream<T> { }
 
