@@ -472,8 +472,8 @@ fn get_opts_db_name_from_url(url: &Url) -> Option<String> {
     }
 }
 
-fn from_url_basic(url_str: &str) -> Result<(Opts, Vec<(String, String)>), UrlError> {
-    let url = Url::parse(url_str)?;
+fn from_url_basic<S: AsRef<str>>(url_str: S) -> Result<(Opts, Vec<(String, String)>), UrlError> {
+    let url = Url::parse(url_str.as_ref())?;
     if url.scheme() != "mysql" {
         return Err(UrlError::UnsupportedScheme(url.scheme().to_string()));
     }
@@ -499,7 +499,7 @@ fn from_url_basic(url_str: &str) -> Result<(Opts, Vec<(String, String)>), UrlErr
     Ok((opts, query_pairs))
 }
 
-fn from_url(url: &str) -> Result<Opts, UrlError> {
+fn from_url<S: AsRef<str>>(url: S) -> Result<Opts, UrlError> {
     let (mut opts, query_pairs) = from_url_basic(url)?;
     for (key, value) in query_pairs {
         if key == "prefer_socket" {
@@ -547,9 +547,9 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
     Ok(opts)
 }
 
-impl<'a> From<&'a str> for Opts {
-    fn from(url: &'a str) -> Opts {
-        match from_url(url) {
+impl<S: Into<String>> From<S> for Opts {
+    fn from(url: S) -> Opts {
+        match from_url(url.into()) {
             Ok(opts) => opts,
             Err(err) => panic!("{}", err),
         }

@@ -606,6 +606,15 @@ mod test {
         }
 
         #[test]
+        fn get_opts_from_string() {
+            let pass: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(super::PASS.to_string());
+            let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+                                   .map(|my_port| my_port.parse().ok().unwrap_or(super::PORT))
+                                   .unwrap_or(super::PORT);
+            Pool::new(format!("mysql://{}:{}@{}:{}", super::USER, pass, super::ADDR, port)).unwrap();
+        }
+
+        #[test]
         fn should_fix_connectivity_errors_on_prepare() {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
