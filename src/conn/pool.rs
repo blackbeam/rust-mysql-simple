@@ -606,6 +606,11 @@ mod test {
         }
 
         #[test]
+        fn get_opts_from_string() {
+            let pool = Pool::new(format!("mysql://{}:{}@{}:{}", USER, PASS, ADDR, PORT)).unwrap();
+        }
+
+        #[test]
         fn should_fix_connectivity_errors_on_prepare() {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
