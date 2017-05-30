@@ -607,7 +607,11 @@ mod test {
 
         #[test]
         fn get_opts_from_string() {
-            let pool = Pool::new(format!("mysql://{}:{}@{}:{}", USER, PASS, ADDR, PORT)).unwrap();
+            let pass: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(super::PASS.to_string());
+            let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+                                   .map(|my_port| my_port.parse().ok().unwrap_or(super::PORT))
+                                   .unwrap_or(super::PORT);
+            Pool::new(format!("mysql://{}:{}@{}:{}", super::USER, pass, super::ADDR, port)).unwrap();
         }
 
         #[test]
