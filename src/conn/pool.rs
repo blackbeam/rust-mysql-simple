@@ -607,7 +607,7 @@ mod test {
 
         #[test]
         fn get_opts_from_string() {
-            let pool = Pool::new(format!("mysql://{}:{}@{}:{}", USER, PASS, ADDR, PORT)).unwrap();
+            Pool::new(format!("mysql://{}:{}@{}:{}", super::USER, super::PASS, super::ADDR, super::PORT)).unwrap();
         }
 
         #[test]
