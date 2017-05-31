@@ -547,9 +547,9 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
     Ok(opts)
 }
 
-impl<'a> From<&'a str> for Opts {
-    fn from(url: &'a str) -> Opts {
-        match from_url(url) {
+impl<S: AsRef<str>> From<S> for Opts {
+    fn from(url: S) -> Opts {
+        match from_url(url.as_ref()) {
             Ok(opts) => opts,
             Err(err) => panic!("{}", err),
         }
