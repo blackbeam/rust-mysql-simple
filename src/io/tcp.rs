@@ -63,7 +63,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
 
     pub fn new(address: T) -> MyTcpBuilder<T> {
         MyTcpBuilder {
-            address,
+            address: address,
             bind_address: None,
             connect_timeout: None,
             read_timeout: None,
