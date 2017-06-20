@@ -96,6 +96,9 @@ pub struct Opts {
     /// Use carefully. Will probably make pool unusable because of *address already in use*
     /// errors.
     bind_address: Option<SocketAddr>,
+
+    /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
+    stmt_cache_size: usize,
 }
 
 impl Opts {
@@ -214,6 +217,11 @@ impl Opts {
     pub fn bind_address(&self) -> Option<&SocketAddr> {
         self.bind_address.as_ref()
     }
+
+    /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
+    pub fn get_stmt_cache_size(&self) -> usize {
+        self.stmt_cache_size
+    }
 }
 
 impl Default for Opts {
@@ -235,6 +243,7 @@ impl Default for Opts {
             local_infile_handler: None,
             tcp_connect_timeout: None,
             bind_address: None,
+            stmt_cache_size: 10,
         }
     }
 }
@@ -429,6 +438,16 @@ impl OptsBuilder {
         self.opts.bind_address = bind_address.map(Into::into);
         self
     }
+
+    /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
+    ///
+    /// Call with `None` to reset to default.
+    pub fn stmt_cache_size<T>(&mut self, cache_size: T) -> &mut Self
+        where T: Into<Option<usize>>
+    {
+        self.opts.stmt_cache_size = cache_size.into().unwrap_or(10);
+        self
+    }
 }
 
 impl From<OptsBuilder> for Opts {
@@ -538,6 +557,15 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
                 },
                 _ => {
                     return Err(UrlError::InvalidValue("tcp_connect_timeout_ms".into(), value));
+                }
+            }
+        } else if key == "stmt_cache_size" {
+            match usize::from_str(&*value) {
+                Ok(stmt_cache_size) => {
+                    opts.stmt_cache_size = stmt_cache_size;
+                },
+                _ => {
+                    return Err(UrlError::InvalidValue("stmt_cache_size".into(), value));
                 }
             }
         } else {
