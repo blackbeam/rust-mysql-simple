@@ -1,3 +1,4 @@
+use packet::{Column, InnerStmt};
 use std::borrow::Borrow;
 use std::cmp;
 use std::collections::HashMap;
@@ -43,7 +44,6 @@ use super::error::DriverError::SslNotSupported;
 use named_params::parse_named_params;
 use super::scramble::scramble;
 use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
-use super::parser::column_def;
 use super::value::{
     Params,
     Value,
@@ -54,7 +54,7 @@ use super::value::{
 use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 
 use byteorder::LittleEndian as LE;
-use byteorder::{ReadBytesExt, WriteBytesExt};
+use byteorder::WriteBytesExt;
 use fnv::FnvHasher;
 
 pub mod pool;
@@ -247,36 +247,6 @@ impl<'a> Drop for Transaction<'a> {
  *
  *
  */
-#[derive(Eq, PartialEq, Clone, Debug)]
-struct InnerStmt {
-    /// Positions and names of named parameters
-    named_params: Option<Vec<String>>,
-    params: Option<Vec<Column>>,
-    columns: Option<Vec<Column>>,
-    statement_id: u32,
-    num_columns: u16,
-    num_params: u16,
-    warning_count: u16,
-}
-
-impl InnerStmt {
-    fn from_payload(pld: &[u8], named_params: Option<Vec<String>>) -> io::Result<InnerStmt> {
-        let mut reader = &pld[1..];
-        let statement_id = reader.read_u32::<LE>()?;
-        let num_columns = reader.read_u16::<LE>()?;
-        let num_params = reader.read_u16::<LE>()?;
-        let warning_count = reader.read_u16::<LE>()?;
-        Ok(InnerStmt {
-            named_params: named_params,
-            statement_id: statement_id,
-            num_columns: num_columns,
-            num_params: num_params,
-            warning_count: warning_count,
-            params: None,
-            columns: None,
-        })
-    }
-}
 
 /// Possible ways to pass conn to a statement or transaction
 #[derive(Debug)]
@@ -331,26 +301,20 @@ impl<'a> Stmt<'a> {
     /// Returns a slice of a [`Column`s](struct.Column.html) which represents
     /// `Stmt`'s params if any.
     pub fn params_ref(&self) -> Option<&[Column]> {
-        match self.stmt.params {
-            Some(ref params) => Some(params.as_ref()),
-            None => None
-        }
+        self.stmt.params()
     }
 
     /// Returns a slice of a [`Column`s](struct.Column.html) which represents
     /// `Stmt`'s columns if any.
     pub fn columns_ref(&self) -> Option<&[Column]> {
-        match self.stmt.columns {
-            Some(ref columns) => Some(columns.as_ref()),
-            None => None
-        }
+        self.stmt.columns()
     }
 
     /// Returns index of a `Stmt`'s column by name.
     pub fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize> {
-        match self.stmt.columns {
+        match self.stmt.columns() {
             None => None,
-            Some(ref columns) => {
+            Some(columns) => {
                 let name = name.as_ref().as_bytes();
                 for (i, c) in columns.iter().enumerate() {
                     if c.name() == name {
@@ -457,134 +421,9 @@ impl<'a> Drop for Stmt<'a> {
     fn drop(&mut self) {
         if self.conn.stmt_cache.get_cap() == 0 {
             let mut stmt_id = [0u8; 4];
-            let _ = (&mut stmt_id[..]).write_u32::<LE>(self.stmt.statement_id);
+            let _ = (&mut stmt_id[..]).write_u32::<LE>(self.stmt.id());
             let _ = self.conn.write_command_data(Command::COM_STMT_CLOSE, &stmt_id[..]);
         }
-    }
-}
-
-/***
- *     .d8888b.           888
- *    d88P  Y88b          888
- *    888    888          888
- *    888         .d88b.  888 888  888 88888b.d88b.  88888b.
- *    888        d88""88b 888 888  888 888 "888 "88b 888 "88b
- *    888    888 888  888 888 888  888 888  888  888 888  888
- *    Y88b  d88P Y88..88P 888 Y88b 888 888  888  888 888  888
- *     "Y8888P"   "Y88P"  888  "Y88888 888  888  888 888  888
- *
- *
- *
- */
-
-/// Mysql
-/// [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition).
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub struct Column {
-    payload: Vec<u8>,
-    schema: (usize, usize),
-    table: (usize, usize),
-    org_table: (usize, usize),
-    name: (usize, usize),
-    org_name: (usize, usize),
-    default_values: Option<(usize, usize)>,
-    pub column_length: u32,
-    pub character_set: u16,
-    pub flags: consts::ColumnFlags,
-    pub column_type: consts::ColumnType,
-    pub decimals: u8,
-}
-
-impl Column {
-    #[doc(hidden)]
-    pub fn from_payload(pld: Vec<u8>) -> io::Result<Column> {
-        let (
-            schema,
-            table,
-            org_table,
-            name,
-            org_name,
-            character_set,
-            column_length,
-            column_type,
-            flags,
-            decimals,
-            default_values
-        ) = {
-            let (
-                schema,
-                table,
-                org_table,
-                name,
-                org_name,
-                character_set,
-                column_length,
-                column_type,
-                flags,
-                decimals,
-                default_values
-            ) = match column_def(&*pld) {
-                ::nom::IResult::Done(_, def) => def,
-                _ => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Can't parse column"))
-            };
-            let schema = (schema.as_ptr() as usize - pld.as_ptr() as usize, schema.len());
-            let table = (table.as_ptr() as usize - pld.as_ptr() as usize, table.len());
-            let org_table = (org_table.as_ptr() as usize - pld.as_ptr() as usize, org_table.len());
-            let name = (name.as_ptr() as usize - pld.as_ptr() as usize, name.len());
-            let org_name = (org_name.as_ptr() as usize - pld.as_ptr() as usize, org_name.len());
-            let default_values = default_values.map(|v| {
-                (v.as_ptr() as usize - pld.as_ptr() as usize, v.len())
-            });
-            (schema, table, org_table, name, org_name, character_set, column_length, column_type,
-             flags, decimals, default_values)
-        };
-
-        Ok(Column {
-            payload: pld,
-            schema: schema,
-            table: table,
-            org_table: org_table,
-            name: name,
-            org_name: org_name,
-            default_values: default_values,
-            column_length: column_length,
-            character_set: character_set,
-            flags: consts::ColumnFlags::from_bits_truncate(flags),
-            column_type: consts::ColumnType::from(column_type),
-            decimals: decimals,
-        })
-    }
-
-    /// Schema name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
-    pub fn schema<'a>(&'a self) -> &'a [u8] {
-        &self.payload[self.schema.0..self.schema.0+self.schema.1]
-    }
-
-    /// Virtual table name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
-    pub fn table<'a>(&'a self) -> &'a [u8] {
-        &self.payload[self.table.0..self.table.0+self.table.1]
-    }
-
-    /// Physical table name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
-    pub fn org_table<'a>(&'a self) -> &'a [u8] {
-        &self.payload[self.org_table.0..self.org_table.0+self.org_table.1]
-    }
-
-    /// Virtual column name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
-    pub fn name<'a>(&'a self) -> &'a [u8] {
-        &self.payload[self.name.0..self.name.0+self.name.1]
-    }
-
-    /// Physical column name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
-    pub fn org_name<'a>(&'a self) -> &'a [u8] {
-        &self.payload[self.org_name.0..self.org_name.0+self.org_name.1]
-    }
-
-    /// Default values (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
-    pub fn default_values<'a>(&'a self) -> Option<&'a [u8]> {
-        self.default_values.map(|(offset, len)| {
-            &self.payload[offset..offset + len]
-        })
     }
 }
 
@@ -1241,7 +1080,7 @@ impl Conn {
                         let mut buf = vec![0u8; chunk_len];
                         {
                             let mut writer = &mut *buf;
-                            writer.write_u32::<LE>(stmt.statement_id)?;
+                            writer.write_u32::<LE>(stmt.id())?;
                             writer.write_u16::<LE>(id)?;
                             writer.write_all(chunk)?;
                         }
@@ -1260,24 +1099,24 @@ impl Conn {
         let out;
         match params {
             Params::Empty => {
-                if stmt.num_params != 0 {
-                    return Err(DriverError(MismatchedStmtParams(stmt.num_params, 0)));
+                if stmt.num_params() != 0 {
+                    return Err(DriverError(MismatchedStmtParams(stmt.num_params(), 0)));
                 }
                 {
                     let mut writer = &mut buf[..];
-                    writer.write_u32::<LE>(stmt.statement_id)?;
+                    writer.write_u32::<LE>(stmt.id())?;
                     writer.write_u8(0u8)?;
                     writer.write_u32::<LE>(1u32)?;
                 }
                 out = &buf[..];
             },
             Params::Positional(params) => {
-                if stmt.num_params != params.len() as u16 {
-                    return Err(DriverError(MismatchedStmtParams(stmt.num_params, params.len())));
+                if stmt.num_params() != params.len() as u16 {
+                    return Err(DriverError(MismatchedStmtParams(stmt.num_params(), params.len())));
                 }
-                if let Some(ref sparams) = stmt.params {
+                if let Some(sparams) = stmt.params() {
                     let (bitmap, values, large_ids) =
-                        Value::to_bin_payload(sparams.as_ref(),
+                        Value::to_bin_payload(sparams,
                                               &params,
                                               self.max_allowed_packet)?;
                     match large_ids {
@@ -1287,7 +1126,7 @@ impl Conn {
                     data = vec![0u8; 9 + bitmap.len() + 1 + params.len() * 2 + values.len()];
                     {
                         let mut writer = &mut *data;
-                        writer.write_u32::<LE>(stmt.statement_id)?;
+                        writer.write_u32::<LE>(stmt.id())?;
                         writer.write_u8(0u8)?;
                         writer.write_u32::<LE>(1u32)?;
                         writer.write_all(bitmap.as_ref())?;
@@ -1317,10 +1156,10 @@ impl Conn {
                 }
             },
             Params::Named(_) => {
-                if let None = stmt.named_params {
+                if let None = stmt.named_params() {
                     return Err(DriverError(NamedParamsForPositionalQuery));
                 }
-                let named_params = stmt.named_params.as_ref().unwrap();
+                let named_params = stmt.named_params().unwrap();
                 return self._execute(stmt, params.into_positional(named_params)?)
             }
         }
@@ -1496,22 +1335,22 @@ impl Conn {
             },
             _ => {
                 let mut stmt = InnerStmt::from_payload(pld.as_ref(), named_params)?;
-                if stmt.num_params > 0 {
-                    let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params as usize);
-                    for _ in 0..stmt.num_params {
+                if stmt.num_params() > 0 {
+                    let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
+                    for _ in 0..stmt.num_params() {
                         let pld = self.read_packet()?;
                         params.push(Column::from_payload(pld)?);
                     }
-                    stmt.params = Some(params);
+                    stmt.set_params(Some(params));
                     self.read_packet()?;
                 }
-                if stmt.num_columns > 0 {
-                    let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns as usize);
-                    for _ in 0..stmt.num_columns {
+                if stmt.num_columns() > 0 {
+                    let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns() as usize);
+                    for _ in 0..stmt.num_columns() {
                         let pld = self.read_packet()?;
                         columns.push(Column::from_payload(pld)?);
                     }
-                    stmt.columns = Some(columns);
+                    stmt.set_columns(Some(columns));
                     self.read_packet()?;
                 }
                 Ok(stmt)
@@ -1522,7 +1361,7 @@ impl Conn {
     fn _prepare(&mut self, query: &str, named_params: Option<Vec<String>>) -> MyResult<InnerStmt> {
         if let Some(inner_st) = self.stmt_cache.get(query) {
             let mut inner_st = inner_st.clone();
-            inner_st.named_params = named_params;
+            inner_st.set_named_params(named_params);
             return Ok(inner_st);
         }
 
@@ -1531,7 +1370,7 @@ impl Conn {
         if self.stmt_cache.get_cap() > 0 {
             if let Some(old_st) = self.stmt_cache.put(query.into(), inner_st.clone()) {
                 let mut stmt_id = [0u8; 4];
-                (&mut stmt_id[..]).write_u32::<LE>(old_st.statement_id)?;
+                (&mut stmt_id[..]).write_u32::<LE>(old_st.id())?;
                 self.write_command_data(Command::COM_STMT_CLOSE, &stmt_id[..])?;
             }
         }
@@ -1804,7 +1643,7 @@ impl Drop for Conn {
         let stmt_cache = mem::replace(&mut self.stmt_cache, StmtCache::new(0));
         let mut stmt_id = [0u8; 4];
         for (_, inner_st) in stmt_cache.into_iter() {
-            let _ = (&mut stmt_id[..]).write_u32::<LE>(inner_st.statement_id);
+            let _ = (&mut stmt_id[..]).write_u32::<LE>(inner_st.id());
             let _ = self.write_command_data(Command::COM_STMT_CLOSE, &stmt_id[..]);
         }
     }

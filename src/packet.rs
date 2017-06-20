@@ -1,3 +1,4 @@
+use parser::column_def;
 use std::io;
 use std::io::Read as StdRead;
 
@@ -196,6 +197,184 @@ impl HandshakePacket {
             // Fall-back to the "utf8" collation which only supports up to 3-byte code-points
             consts::UTF8_GENERAL_CI
         }
+    }
+}
+
+#[derive(Eq, PartialEq, Clone, Debug)]
+pub struct InnerStmt {
+    /// Positions and names of named parameters
+    named_params: Option<Vec<String>>,
+    params: Option<Vec<Column>>,
+    columns: Option<Vec<Column>>,
+    statement_id: u32,
+    num_columns: u16,
+    num_params: u16,
+    warning_count: u16,
+}
+
+impl InnerStmt {
+    pub fn from_payload(pld: &[u8], named_params: Option<Vec<String>>) -> io::Result<InnerStmt> {
+        let mut reader = &pld[1..];
+        let statement_id = reader.read_u32::<LE>()?;
+        let num_columns = reader.read_u16::<LE>()?;
+        let num_params = reader.read_u16::<LE>()?;
+        let warning_count = reader.read_u16::<LE>()?;
+        Ok(InnerStmt {
+            named_params: named_params,
+            statement_id: statement_id,
+            num_columns: num_columns,
+            num_params: num_params,
+            warning_count: warning_count,
+            params: None,
+            columns: None,
+        })
+    }
+
+    pub fn set_named_params(&mut self, named_params: Option<Vec<String>>) {
+        self.named_params = named_params;
+    }
+
+    pub fn set_params(&mut self, params: Option<Vec<Column>>) {
+        self.params = params;
+    }
+
+    pub fn set_columns(&mut self, columns: Option<Vec<Column>>) {
+        self.columns = columns
+    }
+
+    pub fn columns(&self) -> Option<&[Column]> {
+        self.columns.as_ref().map(AsRef::as_ref)
+    }
+
+    pub fn params(&self) -> Option<&[Column]> {
+        self.params.as_ref().map(AsRef::as_ref)
+    }
+
+    pub fn id(&self) -> u32 {
+        self.statement_id
+    }
+
+    pub fn num_params(&self) -> u16 {
+        self.num_params
+    }
+
+    pub fn num_columns(&self) -> u16 {
+        self.num_columns
+    }
+
+    pub fn named_params(&self) -> Option<&Vec<String>> {
+        self.named_params.as_ref()
+    }
+}
+
+/// Mysql
+/// [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition).
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct Column {
+    payload: Vec<u8>,
+    schema: (usize, usize),
+    table: (usize, usize),
+    org_table: (usize, usize),
+    name: (usize, usize),
+    org_name: (usize, usize),
+    default_values: Option<(usize, usize)>,
+    pub column_length: u32,
+    pub character_set: u16,
+    pub flags: consts::ColumnFlags,
+    pub column_type: consts::ColumnType,
+    pub decimals: u8,
+}
+
+impl Column {
+    #[doc(hidden)]
+    pub fn from_payload(pld: Vec<u8>) -> io::Result<Column> {
+        let (
+            schema,
+            table,
+            org_table,
+            name,
+            org_name,
+            character_set,
+            column_length,
+            column_type,
+            flags,
+            decimals,
+            default_values
+        ) = {
+            let (
+                schema,
+                table,
+                org_table,
+                name,
+                org_name,
+                character_set,
+                column_length,
+                column_type,
+                flags,
+                decimals,
+                default_values
+            ) = match column_def(&*pld) {
+                ::nom::IResult::Done(_, def) => def,
+                _ => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Can't parse column"))
+            };
+            let schema = (schema.as_ptr() as usize - pld.as_ptr() as usize, schema.len());
+            let table = (table.as_ptr() as usize - pld.as_ptr() as usize, table.len());
+            let org_table = (org_table.as_ptr() as usize - pld.as_ptr() as usize, org_table.len());
+            let name = (name.as_ptr() as usize - pld.as_ptr() as usize, name.len());
+            let org_name = (org_name.as_ptr() as usize - pld.as_ptr() as usize, org_name.len());
+            let default_values = default_values.map(|v| {
+                (v.as_ptr() as usize - pld.as_ptr() as usize, v.len())
+            });
+            (schema, table, org_table, name, org_name, character_set, column_length, column_type,
+             flags, decimals, default_values)
+        };
+
+        Ok(Column {
+            payload: pld,
+            schema: schema,
+            table: table,
+            org_table: org_table,
+            name: name,
+            org_name: org_name,
+            default_values: default_values,
+            column_length: column_length,
+            character_set: character_set,
+            flags: consts::ColumnFlags::from_bits_truncate(flags),
+            column_type: consts::ColumnType::from(column_type),
+            decimals: decimals,
+        })
+    }
+
+    /// Schema name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
+    pub fn schema<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.schema.0..self.schema.0+self.schema.1]
+    }
+
+    /// Virtual table name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
+    pub fn table<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.table.0..self.table.0+self.table.1]
+    }
+
+    /// Physical table name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
+    pub fn org_table<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.org_table.0..self.org_table.0+self.org_table.1]
+    }
+
+    /// Virtual column name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
+    pub fn name<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.name.0..self.name.0+self.name.1]
+    }
+
+    /// Physical column name (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
+    pub fn org_name<'a>(&'a self) -> &'a [u8] {
+        &self.payload[self.org_name.0..self.org_name.0+self.org_name.1]
+    }
+
+    /// Default values (see [`Column`](http://dev.mysql.com/doc/internals/en/com-query-response.html#packet-Protocol::ColumnDefinition)).
+    pub fn default_values<'a>(&'a self) -> Option<&'a [u8]> {
+        self.default_values.map(|(offset, len)| {
+            &self.payload[offset..offset + len]
+        })
     }
 }
 

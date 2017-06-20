@@ -184,8 +184,6 @@ mod my_uuid;
 mod json;
 
 #[doc(inline)]
-pub use conn::Column;
-#[doc(inline)]
 pub use conn::Conn;
 #[doc(inline)]
 pub use conn::LocalInfile;
@@ -221,6 +219,8 @@ pub use error::Result;
 pub use error::ServerError;
 #[doc(inline)]
 pub use error::UrlError;
+#[doc(inline)]
+pub use packet::Column;
 #[doc(inline)]
 pub use value::Params;
 #[doc(inline)]

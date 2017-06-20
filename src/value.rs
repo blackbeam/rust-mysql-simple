@@ -1,3 +1,4 @@
+use packet::Column;
 use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
@@ -17,7 +18,6 @@ use time::{
 };
 
 use super::consts;
-use super::conn::{Column};
 use super::error::{
     Error,
     Result as MyResult,

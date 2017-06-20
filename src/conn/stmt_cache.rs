@@ -1,8 +1,8 @@
+use packet::InnerStmt;
 use std::borrow::Borrow;
 use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::IntoIter;
 use std::hash::{BuildHasherDefault, Hash};
-use super::InnerStmt;
 use twox_hash::XxHash;
 
 #[derive(Debug)]
