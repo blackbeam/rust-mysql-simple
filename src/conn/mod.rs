@@ -7,6 +7,7 @@ use std::hash::BuildHasherDefault as BldHshrDflt;
 use std::io;
 use std::io::Read;
 use std::io::Write as NewWrite;
+use std::mem;
 use std::ops::{
     Deref,
     DerefMut,
@@ -55,10 +56,11 @@ use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
 use byteorder::LittleEndian as LE;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use fnv::FnvHasher;
-use twox_hash::XxHash;
 
 pub mod pool;
 mod opts;
+mod stmt_cache;
+use self::stmt_cache::StmtCache;
 pub use self::opts::Opts;
 pub use self::opts::OptsBuilder;
 #[cfg(feature = "ssl")]
@@ -448,6 +450,16 @@ impl<'a> Stmt<'a> {
     fn prep_exec<T: Into<Params>>(mut self, params: T) -> MyResult<QueryResult<'a>> {
         let (columns, ok_packet) = self.conn._execute(&self.stmt, params.into())?;
         Ok(QueryResult::new(ResultConnRef::ViaStmt(self), columns, ok_packet, true))
+    }
+}
+
+impl<'a> Drop for Stmt<'a> {
+    fn drop(&mut self) {
+        if self.conn.stmt_cache.get_cap() == 0 {
+            let mut stmt_id = [0u8; 4];
+            let _ = (&mut stmt_id[..]).write_u32::<LE>(self.stmt.statement_id);
+            let _ = self.conn.write_command_data(Command::COM_STMT_CLOSE, &stmt_id[..]);
+        }
     }
 }
 
@@ -854,17 +866,15 @@ impl<'a> io::Write for LocalInfile<'a> {
 }
 
 /***
- *    888b     d888           .d8888b.
- *    8888b   d8888          d88P  Y88b
- *    88888b.d88888          888    888
- *    888Y88888P888 888  888 888         .d88b.  88888b.  88888b.
- *    888 Y888P 888 888  888 888        d88""88b 888 "88b 888 "88b
- *    888  Y8P  888 888  888 888    888 888  888 888  888 888  888
- *    888   "   888 Y88b 888 Y88b  d88P Y88..88P 888  888 888  888
- *    888       888  "Y88888  "Y8888P"   "Y88P"  888  888 888  888
- *                       888
- *                  Y8b d88P
- *                   "Y88P"
+ *     .d8888b.
+ *    d88P  Y88b
+ *    888    888
+ *    888         .d88b.  88888b.  88888b.
+ *    888        d88""88b 888 "88b 888 "88b
+ *    888    888 888  888 888  888 888  888
+ *    Y88b  d88P Y88..88P 888  888 888  888
+ *     "Y8888P"   "Y88P"  888  888 888  888
+ *
  */
 
 /// Mysql connection.
@@ -872,7 +882,7 @@ impl<'a> io::Write for LocalInfile<'a> {
 pub struct Conn {
     opts: Opts,
     stream: Option<Stream>,
-    stmts: HashMap<String, InnerStmt, BldHshrDflt<XxHash>>,
+    stmt_cache: StmtCache,
     server_version: ServerVersion,
     affected_rows: u64,
     last_insert_id: u64,
@@ -890,10 +900,11 @@ pub struct Conn {
 
 impl Conn {
     fn empty<T: Into<Opts>>(opts: T) -> Conn {
+        let opts = opts.into();
         Conn {
-            opts: opts.into(),
+            stmt_cache: StmtCache::new(opts.get_stmt_cache_size()),
+            opts: opts,
             stream: None,
-            stmts: HashMap::default(),
             seq_id: 0u8,
             capability_flags: consts::CapabilityFlags::empty(),
             status_flags: consts::StatusFlags::empty(),
@@ -955,7 +966,7 @@ impl Conn {
                     let ok = OkPacket::from_payload(&*pld)?;
                     self.handle_ok(&ok);
                     self.last_command = 0;
-                    self.stmts.clear();
+                    self.stmt_cache.clear();
                     Ok(())
                 },
                 _ => {
@@ -968,7 +979,7 @@ impl Conn {
 
     fn hard_reset(&mut self) -> MyResult<()> {
         self.stream = None;
-        self.stmts.clear();
+        self.stmt_cache.clear();
         self.seq_id = 0;
         self.capability_flags = consts::CapabilityFlags::empty();
         self.status_flags = consts::StatusFlags::empty();
@@ -1509,13 +1520,22 @@ impl Conn {
     }
 
     fn _prepare(&mut self, query: &str, named_params: Option<Vec<String>>) -> MyResult<InnerStmt> {
-        if let Some(inner_st) = self.stmts.get_mut(query) {
+        if let Some(inner_st) = self.stmt_cache.get(query) {
+            let mut inner_st = inner_st.clone();
             inner_st.named_params = named_params;
-            return Ok(inner_st.clone());
+            return Ok(inner_st);
         }
 
         let inner_st = self._true_prepare(query, named_params)?;
-        self.stmts.insert(query.to_owned(), inner_st.clone());
+
+        if self.stmt_cache.get_cap() > 0 {
+            if let Some(old_st) = self.stmt_cache.put(query.into(), inner_st.clone()) {
+                let mut stmt_id = [0u8; 4];
+                (&mut stmt_id[..]).write_u32::<LE>(old_st.statement_id)?;
+                self.write_command_data(Command::COM_STMT_CLOSE, &stmt_id[..])?;
+            }
+        }
+
         Ok(inner_st)
     }
 
@@ -1741,7 +1761,7 @@ impl Conn {
     }
 
     fn has_stmt(&self, query: &str) -> bool {
-        self.stmts.contains_key(query)
+        self.stmt_cache.contains(query)
     }
 
     /// Sets a callback to handle requests for local files. These are
@@ -1781,15 +1801,11 @@ impl GenericConnection for Conn {
 
 impl Drop for Conn {
     fn drop(&mut self) {
-        let keys: Vec<String> = self.stmts.keys().map(Clone::clone).collect();
-        for key in keys {
-            for stmt in self.stmts.remove(&key) {
-                let data: [u8; 4] = [(stmt.statement_id & 0x000000FF) as u8,
-                                     ((stmt.statement_id & 0x0000FF00) >> 08) as u8,
-                                     ((stmt.statement_id & 0x00FF0000) >> 16) as u8,
-                                     ((stmt.statement_id & 0xFF000000) >> 24) as u8,];
-                let _ = self.write_command_data(Command::COM_STMT_CLOSE, &data);
-            }
+        let stmt_cache = mem::replace(&mut self.stmt_cache, StmtCache::new(0));
+        let mut stmt_id = [0u8; 4];
+        for (_, inner_st) in stmt_cache.into_iter() {
+            let _ = (&mut stmt_id[..]).write_u32::<LE>(inner_st.statement_id);
+            let _ = self.write_command_data(Command::COM_STMT_CLOSE, &stmt_id[..]);
         }
     }
 }
@@ -1957,7 +1973,7 @@ impl<'a> QueryResult<'a> {
     }
 
     /// Returns HashMap which maps column names to column indexes.
-    pub fn column_indexes<'b, 'c>(&'b self) -> HashMap<String, usize, BldHshrDflt<FnvHasher>> {
+    pub fn column_indexes(&self) -> HashMap<String, usize, BldHshrDflt<FnvHasher>> {
         let mut indexes = HashMap::default();
         for (i, column) in self.columns.iter().enumerate() {
             indexes.insert(from_utf8(column.name()).unwrap().to_string(), i);
