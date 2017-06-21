@@ -1,4 +1,5 @@
 use packet::Column;
+use std::fmt;
 use std::str::FromStr;
 use std::str::from_utf8;
 use std::borrow::ToOwned;
@@ -109,7 +110,7 @@ lazy_static! {
 ///     assert_eq!(c, 16.0_f32);
 /// }
 /// ```
-#[derive(Clone, PartialEq, PartialOrd, Debug)]
+#[derive(Clone, PartialEq, PartialOrd)]
 pub enum Value {
     NULL,
     Bytes(Vec<u8>),
@@ -120,6 +121,28 @@ pub enum Value {
     Date(u16, u8, u8, u8, u8, u8, u32),
     /// is negative, days, hours, minutes, seconds, micro seconds
     Time(bool, u32, u8, u8, u8, u32)
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Value::NULL => f.debug_tuple("Null").finish(),
+            Value::Bytes(ref bytes) => {
+                let mut debug = f.debug_tuple("Bytes");
+                if bytes.len() <= 8 {
+                    debug.field(&String::from_utf8_lossy(&*bytes).replace("\n", "\\n")).finish()
+                } else {
+                    let bytes = String::from_utf8_lossy(&bytes[..8]).replace("\n", "\\n");
+                    debug.field(&format!("{}..", bytes)).finish()
+                }
+            },
+            Value::Int(ref val) => f.debug_tuple("Int").field(val).finish(),
+            Value::UInt(ref val) => f.debug_tuple("UInt").field(val).finish(),
+            Value::Float(ref val) => f.debug_tuple("Float").field(val).finish(),
+            Value::Date(..) => f.debug_tuple("Date").field(&self.into_str()).finish(),
+            Value::Time(..) => f.debug_tuple("Time").field(&self.into_str()).finish(),
+        }
+    }
 }
 
 impl Value {
