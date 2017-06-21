@@ -471,10 +471,27 @@ impl<'a> Drop for Stmt<'a> {
 /// }).unwrap();
 /// ```
 ///
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq)]
 pub struct Row {
     values: Vec<Option<Value>>,
     columns: Arc<Vec<Column>>
+}
+
+impl fmt::Debug for Row {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut debug = f.debug_tuple("Row");
+        for val in self.values.iter() {
+            match *val {
+                Some(ref val) => {
+                    debug.field(val);
+                },
+                None => {
+                    debug.field(&"<taken>");
+                },
+            }
+        }
+        debug.finish()
+    }
 }
 
 impl Row {
