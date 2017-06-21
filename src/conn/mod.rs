@@ -2420,6 +2420,37 @@ mod test {
         }
 
         #[test]
+        fn should_not_cache_statements_if_stmt_cache_size_is_zero() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.stmt_cache_size(0);
+            let mut conn = Conn::new(opts).unwrap();
+            conn.prepare("DO 1").unwrap();
+            conn.prepare("DO 2").unwrap();
+            conn.prepare("DO 3").unwrap();
+            let row = conn.first("SHOW SESSION STATUS LIKE 'Com_stmt_close';").unwrap().unwrap();
+            assert_eq!(from_row::<(String, usize)>(row).1, 3);
+        }
+
+        #[test]
+        fn should_hold_stmt_cache_size_bound() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.stmt_cache_size(3);
+            let mut conn = Conn::new(opts).unwrap();
+            conn.prepare("DO 1").unwrap();
+            conn.prepare("DO 2").unwrap();
+            conn.prepare("DO 3").unwrap();
+            conn.prepare("DO 1").unwrap();
+            conn.prepare("DO 4").unwrap();
+            conn.prepare("DO 3").unwrap();
+            conn.prepare("DO 5").unwrap();
+            conn.prepare("DO 6").unwrap();
+            let row = conn.first("SHOW SESSION STATUS LIKE 'Com_stmt_close';").unwrap().unwrap();
+            assert_eq!(from_row::<(String, usize)>(row).1, 3);
+            let order = conn.stmt_cache.iter().collect::<Vec<&String>>();
+            assert_eq!(order, &["DO 3", "DO 5", "DO 6"]);
+        }
+
+        #[test]
         fn should_handle_json_columns() {
             #[cfg(feature = "rustc_serialize")]
             use rustc_serialize::json::Json;

@@ -2,6 +2,8 @@ use packet::InnerStmt;
 use std::borrow::Borrow;
 use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::IntoIter;
+#[cfg(test)]
+use std::collections::vec_deque::Iter;
 use std::hash::{BuildHasherDefault, Hash};
 use twox_hash::XxHash;
 
@@ -61,6 +63,11 @@ impl StmtCache {
     pub fn clear(&mut self) {
         self.map.clear();
         self.order.clear();
+    }
+
+    #[cfg(test)]
+    pub fn iter<'a>(&'a self) -> Iter<'a, String> {
+        self.order.iter()
     }
 
     pub fn into_iter(self) -> IntoIter<String, InnerStmt> {
