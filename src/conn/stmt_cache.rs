@@ -50,9 +50,9 @@ impl StmtCache {
 
     pub fn put(&mut self, key: String, value: InnerStmt) -> Option<InnerStmt> {
         self.map.insert(key.clone(), value);
-        self.order.push_front(key);
+        self.order.push_back(key);
         if self.order.len() > self.cap {
-            self.order.pop_back().and_then(|stmt| self.map.remove(&stmt))
+            self.order.pop_front().and_then(|stmt| self.map.remove(&stmt))
         } else {
             None
         }
