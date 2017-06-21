@@ -204,7 +204,11 @@ impl Pool {
         })
     }
 
-    /// A way to turn off pool level statments cache (on by default).
+    /// A way to turn off searching for cached statement (on by default).
+    ///
+    /// If turned on, then calls to `Pool::{prepare, prep_exec, first_exec}` will search for cached
+    /// statement through all connections in the pool. Useless if the value of the `stmt_cache_size`
+    /// option is 0.
     pub fn use_cache(&mut self, use_cache: bool) {
         self.use_cache = use_cache;
     }
