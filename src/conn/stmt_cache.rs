@@ -38,10 +38,9 @@ impl StmtCache {
               T: ?Sized
     {
         if self.map.contains_key(key) {
-            if let Some(mut pos) = self.order.iter().position(|x| x == key) {
-                while pos < self.order.len() - 1 {
-                    self.order.swap(pos, pos + 1);
-                    pos += 1;
+            if let Some(pos) = self.order.iter().position(|x| x == key) {
+                if let Some(inner_st) = self.order.remove(pos) {
+                    self.order.push_back(inner_st);
                 }
             }
             self.map.get(key)
