@@ -659,9 +659,9 @@ impl Row {
         })
     }
 
-    /// Will copy value at index `index` if it was not taken by `Row::take` earlier,
-    /// then will convert it to `T`. Returns `None` if the value was taken taken by
-    /// `Row::take` or was not able to be converted to `T`.
+    /// Will copy value at index `index` if it was not taken by `Row::take` or `Row::take_opt`
+    /// earlier, then will attempt convert it to `T`. Unlike `Row::get`, `Row::get_opt` will
+    /// allow you to directly handle errors if the value could not be converted to `T`.
     pub fn get_opt<T, I>(&mut self, index: I) -> Option<MyResult<T>>
     where T: FromValue,
           I: ColumnIndex {
@@ -682,8 +682,8 @@ impl Row {
     }
 
     /// Will take value of a column with index `index` if it exists and wasn't taken earlier then
-    /// will converts it to `T`. Returns `None` if the value was taken earlier or was not able
-    /// to be converted to `T`.
+    /// will attempt to convert it to `T`. Unlike `Row::take`, `Row::take_opt` will allow you to
+    /// directly handle errors if the value could not be converted to `T`.
     pub fn take_opt<T, I>(&mut self, index: I) -> Option<MyResult<T>>
     where T: FromValue,
           I: ColumnIndex {
