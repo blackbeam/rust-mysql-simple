@@ -527,6 +527,18 @@ impl Row {
         })
     }
 
+    /// Will copy value at index `index` if it was not taken by `Row::take` or `Row::take_opt`
+    /// earlier, then will attempt convert it to `T`. Unlike `Row::get`, `Row::get_opt` will
+    /// allow you to directly handle errors if the value could not be converted to `T`.
+    pub fn get_opt<T, I>(&mut self, index: I) -> Option<MyResult<T>>
+    where T: FromValue,
+          I: ColumnIndex {
+        index.idx(&*self.columns)
+             .and_then(|idx| self.values.get(idx))
+             .and_then(|x| x.as_ref())
+             .and_then(|x| Some(from_value_opt::<T>(x.clone())))
+    }
+
     /// Will take value of a column with index `index` if it exists and wasn't taken earlier then
     /// will converts it to `T`.
     pub fn take<T, I>(&mut self, index: I) -> Option<T>
@@ -535,6 +547,18 @@ impl Row {
         index.idx(&*self.columns).and_then(|idx| {
             self.values.get_mut(idx).and_then(|x| x.take()).map(from_value::<T>)
         })
+    }
+
+    /// Will take value of a column with index `index` if it exists and wasn't taken earlier then
+    /// will attempt to convert it to `T`. Unlike `Row::take`, `Row::take_opt` will allow you to
+    /// directly handle errors if the value could not be converted to `T`.
+    pub fn take_opt<T, I>(&mut self, index: I) -> Option<MyResult<T>>
+    where T: FromValue,
+          I: ColumnIndex {
+        index.idx(&*self.columns)
+             .and_then(|idx| self.values.get_mut(idx))
+             .and_then(|x| x.take())
+             .and_then(|x| Some(from_value_opt::<T>(x)))
     }
 
     /// Unwraps values of a row.
