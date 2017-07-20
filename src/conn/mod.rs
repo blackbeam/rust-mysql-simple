@@ -954,7 +954,7 @@ impl Conn {
     }
 
     fn handle_handshake(&mut self, hp: &HandshakePacket) {
-        self.capability_flags = hp.capability_flags;
+        self.capability_flags = hp.capability_flags & self.get_client_flags();
         self.status_flags = hp.status_flags;
         self.connection_id = hp.connection_id;
         self.character_set = hp.character_set;
