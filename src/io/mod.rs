@@ -9,8 +9,7 @@ use std::time::Duration;
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use conn::SslOpts;
 
-use super::value::Value;
-use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
+use Value::{self, NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
 use super::consts::Command;
 use super::consts::ColumnType;
@@ -223,12 +222,11 @@ pub trait Read: ReadBytesExt + io::BufRead {
 
     /// Reads mysql packet payload returns it with new seq_id value.
     fn read_packet(&mut self, mut seq_id: u8) -> MyResult<(Vec<u8>, u8)> {
-        use std::io::ErrorKind::Other;
+        let mut total_read = 0;
         let mut output = Vec::new();
         loop {
             let payload_len = self.read_uint::<LE>(3)? as usize;
-            let srv_seq_id = self.read_u8()?;
-            if srv_seq_id != seq_id {
+            if self.read_u8()? != seq_id {
                 return Err(DriverError(PacketOutOfSync));
             }
             seq_id = seq_id.wrapping_add(1);
@@ -236,11 +234,9 @@ pub trait Read: ReadBytesExt + io::BufRead {
                 break;
             } else {
                 output.reserve(payload_len);
-                let mut chunk = self.take(payload_len as u64);
-                let count = chunk.read_to_end(&mut output)?;
-                if count != payload_len {
-                    return Err(io::Error::new(Other, "Unexpected EOF while reading packet").into())
-                }
+                unsafe { output.set_len(total_read + payload_len); }
+                self.read_exact(&mut output[total_read..total_read+payload_len])?;
+                total_read += payload_len;
                 if payload_len != consts::MAX_PAYLOAD_LEN {
                     break;
                 }

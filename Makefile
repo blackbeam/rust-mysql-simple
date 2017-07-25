@@ -83,7 +83,7 @@ doc:
 
 test:
 	$(run-mysql)
-	if ! (cargo test --no-default-features); \
+	if ! (cargo test); \
 	then \
 		echo TESTING WITHOUT FEATURES; \
 		kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \

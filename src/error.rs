@@ -4,6 +4,10 @@ use std::io;
 use std::result;
 use std::sync;
 
+use myc::packets::ErrPacket;
+use myc::named_params::MixedParamsError;
+use myc::params::MissingNamedParameterError;
+
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 use openssl::error::{
     Error as SslError,
@@ -14,10 +18,20 @@ use openssl::ssl::Error as OpensslError;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::base::Error as SslError;
 
-use super::conn::Row;
-use super::value::Value;
+use Row;
+use Value;
 
 use url::ParseError;
+
+impl<'a> From<ErrPacket<'a>> for MySqlError {
+    fn from(x: ErrPacket<'a>) -> MySqlError {
+        MySqlError {
+            state: x.sql_state_str().into_owned(),
+            code: x.error_code(),
+            message: x.message_str().into_owned(),
+        }
+    }
+}
 
 #[derive(Eq, PartialEq, Clone)]
 pub struct MySqlError {
@@ -95,6 +109,18 @@ impl error::Error for Error {
             Error::SslError(ref err) => Some(err),
             _ => None
         }
+    }
+}
+
+impl From<MissingNamedParameterError> for Error {
+    fn from(MissingNamedParameterError(name): MissingNamedParameterError) -> Error {
+        Error::DriverError(DriverError::MissingNamedParameter(name))
+    }
+}
+
+impl From<MixedParamsError> for Error {
+    fn from(_: MixedParamsError) -> Error {
+        Error::DriverError(DriverError::MixedParams)
     }
 }
 

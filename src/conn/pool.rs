@@ -7,13 +7,13 @@ use std::time::Duration as StdDuration;
 
 use time::{Duration, SteadyTime};
 
+use Params;
 use Row;
-use named_params::parse_named_params;
+use myc::named_params::parse_named_params;
 use super::IsolationLevel;
 use super::Transaction;
 use super::GenericConnection;
 use super::super::error::{Error, DriverError};
-use super::super::value::Params;
 use super::{Conn, Opts, Stmt, QueryResult};
 use super::super::error::Result as MyResult;
 use super::LocalInfileHandler;
@@ -59,10 +59,8 @@ impl InnerPool {
 /// Example of multithreaded `Pool` usage:
 ///
 /// ```rust
-/// use mysql::conn::pool;
-/// use std::default::Default;
-/// use mysql::conn::Opts;
-/// # use mysql::conn::OptsBuilder;
+/// use mysql::{Pool, Opts};
+/// # use mysql::OptsBuilder;
 /// use std::thread;
 ///
 /// fn get_opts() -> Opts {
@@ -82,7 +80,7 @@ impl InnerPool {
 /// }
 ///
 /// let opts = get_opts();
-/// let pool = pool::Pool::new(opts).unwrap();
+/// let pool = Pool::new(opts).unwrap();
 /// let mut threads = Vec::new();
 /// for _ in 0..100 {
 ///     let pool = pool.clone();
@@ -327,10 +325,7 @@ impl fmt::Debug for Pool {
 /// `Value::Bytes` as a result and `from_value` will need to parse it if you want, for example, `i64`
 ///
 /// ```rust
-/// # use mysql::conn::pool;
-/// # use mysql::conn::{Opts, OptsBuilder};
-/// # use mysql::value::{from_value, Value};
-/// # use std::default::Default;
+/// # use mysql::{Pool, Opts, OptsBuilder, from_value, Value};
 /// # fn get_opts() -> Opts {
 /// #     let user = "root";
 /// #     let addr = "127.0.0.1";
@@ -347,7 +342,7 @@ impl fmt::Debug for Pool {
 /// #     builder.into()
 /// # }
 /// # let opts = get_opts();
-/// # let pool = pool::Pool::new(opts).unwrap();
+/// # let pool = Pool::new(opts).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// conn.query("SELECT 42").map(|mut result| {
@@ -579,16 +574,18 @@ mod test {
         use std::time::Duration;
 
         use from_row;
+        use from_value;
         use super::get_opts;
         use super::super::Pool;
-        use super::super::super::super::value::from_value;
         use super::super::super::super::error::{Error, DriverError};
 
         #[test]
         fn multiple_pools_should_work() {
             let pool = Pool::new(get_opts()).unwrap();
+            pool.prep_exec("DROP DATABASE IF EXISTS A", ()).unwrap();
             pool.prep_exec("CREATE DATABASE A", ()).unwrap();
-            pool.prep_exec("CREATE TABLE A.a (id INT)", ()).unwrap();
+            pool.prep_exec("DROP TABLE IF EXISTS A.a", ()).unwrap();
+            pool.prep_exec("CREATE TABLE IF NOT EXISTS A.a (id INT)", ()).unwrap();
             pool.prep_exec("INSERT INTO A.a VALUES (1)", ()).unwrap();
             let mut builder = OptsBuilder::from_opts(get_opts());
             builder.db_name(Some("A"));

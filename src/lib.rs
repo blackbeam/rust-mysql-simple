@@ -129,8 +129,7 @@
 #[cfg(feature = "nightly")]
 extern crate test;
 
-pub extern crate time;
-pub extern crate uuid;
+extern crate bit_vec;
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 extern crate openssl;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
@@ -140,23 +139,23 @@ extern crate regex;
 extern crate libc;
 #[cfg(unix)]
 extern crate nix;
-#[macro_use]
-extern crate lazy_static;
 extern crate net2;
-#[macro_use]
-extern crate nom;
-#[macro_use]
-extern crate bitflags;
 extern crate byteorder;
+extern crate mysql_common as myc;
 #[cfg(windows)]
 extern crate named_pipe;
 extern crate url;
 extern crate bufstream;
 extern crate fnv;
-pub extern crate chrono;
 extern crate twox_hash;
+extern crate smallvec;
+#[cfg(target_os = "windows")]
+extern crate winapi;
+#[cfg(target_os = "windows")]
+extern crate ws2_32;
+
 #[cfg(feature = "rustc_serialize")]
-extern crate rustc_serialize;
+pub extern crate rustc_serialize;
 #[cfg(not(feature = "rustc_serialize"))]
 pub extern crate serde;
 #[cfg(not(feature = "rustc_serialize"))]
@@ -164,24 +163,36 @@ pub extern crate serde_json;
 #[cfg(all(test, not(feature = "rustc_serialize")))]
 #[macro_use]
 extern crate serde_derive;
-#[cfg(target_os = "windows")]
-extern crate winapi;
-#[cfg(target_os = "windows")]
-extern crate ws2_32;
 
+/// Reexport of `chrono` crate.
+pub use myc::chrono;
+/// Reexport of `time` crate.
+pub use myc::time;
+/// Reexport of `uuid` crate.
+pub use myc::uuid;
+
+// Until `macro_reexport` stabilisation.
+#[macro_export]
+macro_rules! params {
+    ($($name:expr => $value:expr),*) => (
+        vec![
+            $((::std::string::String::from($name), $crate::Value::from($value))),*
+        ]
+    );
+    ($($name:expr => $value:expr),*,) => (
+        params!($($name => $value),*)
+    );
+}
 
 mod scramble;
-pub mod consts;
 pub mod error;
 mod packet;
-mod parser;
 mod io;
-#[macro_use]
-pub mod value;
-pub mod conn;
-mod named_params;
-mod my_uuid;
-mod json;
+mod conn;
+
+
+#[doc(inline)]
+pub use myc::constants as consts;
 
 #[doc(inline)]
 pub use conn::Conn;
@@ -197,8 +208,6 @@ pub use conn::Opts;
 pub use conn::OptsBuilder;
 #[doc(inline)]
 pub use conn::QueryResult;
-#[doc(inline)]
-pub use conn::Row;
 #[doc(inline)]
 pub use conn::Stmt;
 #[doc(inline)]
@@ -220,33 +229,41 @@ pub use error::ServerError;
 #[doc(inline)]
 pub use error::UrlError;
 #[doc(inline)]
-pub use packet::Column;
+pub use myc::packets::Column;
 #[doc(inline)]
-pub use value::Params;
+pub use myc::row::Row;
 #[doc(inline)]
-pub use value::Value;
+pub use myc::row::convert::{
+    FromRowError,
+    from_row,
+    from_row_opt
+};
 #[doc(inline)]
-pub use value::from_row;
+pub use myc::params::Params;
 #[doc(inline)]
-pub use value::from_row_opt;
+pub use myc::value::Value;
 #[doc(inline)]
-pub use value::from_value;
+pub use myc::value::convert::{
+    FromValueError,
+    from_value,
+    from_value_opt,
+};
 #[doc(inline)]
-pub use value::from_value_opt;
+pub use myc::value::json::Serialized;
 #[doc(inline)]
-pub use json::Serialized;
-#[doc(inline)]
-pub use json::Deserialized;
+pub use myc::value::json::Deserialized;
 
 pub mod prelude {
     #[doc(inline)]
-    pub use value::ConvIr;
+    pub use myc::value::convert::{
+        ConvIr,
+        FromValue,
+        ToValue,
+    };
     #[doc(inline)]
-    pub use value::FromRow;
-    #[doc(inline)]
-    pub use value::FromValue;
-    #[doc(inline)]
-    pub use value::ToValue;
+    pub use myc::row::convert::{
+        FromRow,
+    };
     #[doc(inline)]
     pub use conn::GenericConnection;
 }

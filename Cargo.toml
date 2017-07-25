@@ -24,6 +24,7 @@ debug = true
 
 opt-level = 3
 debug = false
+lto = true
 
 [profile.test]
 
@@ -34,6 +35,7 @@ debug = true
 
 opt-level = 3
 debug = false
+lto = true
 
 [profile.doc]
 
@@ -41,31 +43,30 @@ opt-level = 0
 debug = true
 
 [features]
-default = []
-ssl = ["openssl", "security-framework"]
-nightly = []
-rustc_serialize = ["rustc-serialize"]
+default = ['mysql_common']
+nightly = ['mysql_common']
+rustc_serialize = ['mysql_common/rustc_serialize', 'rustc-serialize']
+ssl = ['mysql_common', "openssl", "security-framework"]
 
 [dev-dependencies]
-serde_derive = "~1.0"
+serde_derive = "1"
 
 [dependencies]
-lazy_static = "~0.2"
-time = "~0.1"
-bitflags = "~0.8"
+bit-vec = "0.4"
 byteorder = "1"
 url = "1"
 bufstream = "~0.1"
 fnv = "1"
 twox-hash = "1"
-chrono = "~0.3"
-nom = "~3"
-uuid = "~0.5"
 net2 = "~0.2"
+smallvec = "0.4"
+serde = "1"
+serde_json = "1"
+mysql_common = { version = "0.1", optional = true }
 
 [dependencies.rustc-serialize]
 version = "0.3"
-optional= true
+optional = true
 
 [dependencies.regex]
 version = "~0.2"
@@ -84,10 +85,6 @@ features = ["OSX_10_8"]
 named_pipe = "~0.2"
 winapi = "~0.2"
 ws2_32-sys = "~0.2"
-
-[target.'cfg(not(feature = "rustc_serialize"))'.dependencies]
-serde = "~1.0"
-serde_json = "~1.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "~0.2.20"

@@ -1,4 +1,7 @@
-use packet::{Column, InnerStmt};
+use bit_vec::BitVec;
+use packet::InnerStmt;
+use Row;
+use smallvec::SmallVec;
 use std::borrow::Borrow;
 use std::cmp;
 use std::collections::HashMap;
@@ -12,10 +15,8 @@ use std::mem;
 use std::ops::{
     Deref,
     DerefMut,
-    Index,
 };
 use std::path;
-use std::str::from_utf8;
 use std::sync::{Arc, Mutex};
 
 use super::consts;
@@ -41,21 +42,20 @@ use super::error::DriverError::{
 };
 use super::error::Result as MyResult;
 use super::error::DriverError::SslNotSupported;
-use named_params::parse_named_params;
+use myc::named_params::parse_named_params;
 use super::scramble::scramble;
-use super::packet::{OkPacket, EOFPacket, ErrPacket, HandshakePacket, ServerVersion};
-use super::value::{
-    Params,
-    Value,
-    from_value_opt,
-    from_value,
-    FromValue,
-};
-use super::value::Value::{NULL, Int, UInt, Float, Bytes, Date, Time};
+use Params;
+use Value::{self, NULL, Int, UInt, Float, Bytes, Date, Time};
+use from_value;
+use from_value_opt;
 
 use byteorder::LittleEndian as LE;
 use byteorder::WriteBytesExt;
 use fnv::FnvHasher;
+use myc::packets::{Column, HandshakePacket, OkPacket, column_from_payload, parse_handshake_packet,
+                   parse_err_packet, parse_ok_packet};
+use myc::row::new_row;
+use myc::value::{read_bin_values, read_text_values, serialize_bin_many};
 
 pub mod pool;
 mod opts;
@@ -317,7 +317,7 @@ impl<'a> Stmt<'a> {
             Some(columns) => {
                 let name = name.as_ref().as_bytes();
                 for (i, c) in columns.iter().enumerate() {
-                    if c.name() == name {
+                    if c.name_ref() == name {
                         return Some(i)
                     }
                 }
@@ -329,9 +329,8 @@ impl<'a> Stmt<'a> {
     /// Executes prepared statement with parameters passed as a [`Into<Params>`] implementor.
     ///
     /// ```rust
-    /// # use mysql::conn::pool;
-    /// # use mysql::conn::{Opts, OptsBuilder};
-    /// # use mysql::value::{from_value, from_row, ToValue, Value};
+    /// # use mysql::{Pool, Opts, OptsBuilder, from_value, from_row, Value};
+    /// # use mysql::prelude::ToValue;
     /// # use std::default::Default;
     /// # use std::iter::repeat;
     /// # fn get_opts() -> Opts {
@@ -350,7 +349,7 @@ impl<'a> Stmt<'a> {
     /// #     builder.into()
     /// # }
     /// # let opts = get_opts();
-    /// # let pool = pool::Pool::new(opts).unwrap();
+    /// # let pool = Pool::new(opts).unwrap();
     /// let mut stmt0 = pool.prepare("SELECT 42").unwrap();
     /// let mut stmt1 = pool.prepare("SELECT ?").unwrap();
     /// let mut stmt2 = pool.prepare("SELECT ?, ?").unwrap();
@@ -412,8 +411,8 @@ impl<'a> Stmt<'a> {
     }
 
     fn prep_exec<T: Into<Params>>(mut self, params: T) -> MyResult<QueryResult<'a>> {
-        let (columns, ok_packet) = self.conn._execute(&self.stmt, params.into())?;
-        Ok(QueryResult::new(ResultConnRef::ViaStmt(self), columns, ok_packet, true))
+        let columns = self.conn._execute(&self.stmt, params.into())?;
+        Ok(QueryResult::new(ResultConnRef::ViaStmt(self), columns, true))
     }
 }
 
@@ -427,214 +426,13 @@ impl<'a> Drop for Stmt<'a> {
     }
 }
 
-/// Mysql row representation.
-///
-/// It allows you to move column values out of a row with `Row::take` method but note that it
-/// makes row incomplete. Calls to `from_row_opt` on incomplete row will return
-/// `Error::FromRowError` and also numerical indexing on taken columns will panic.
-///
-/// ```rust
-/// # use mysql::conn::pool;
-/// # use mysql::conn::{Opts, OptsBuilder};
-/// # use std::default::Default;
-/// # fn get_opts() -> Opts {
-/// #     let user = "root";
-/// #     let addr = "127.0.0.1";
-/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
-/// #                                .unwrap_or(3307);
-/// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(user))
-/// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(addr))
-/// #            .tcp_port(port)
-/// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
-/// #     builder.into()
-/// # }
-/// # let opts = get_opts();
-/// # let pool = pool::Pool::new_manual(1, 1, opts).unwrap();
-/// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ()).unwrap();
-/// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
-/// #                (1, "John", 17, "foo@bar.baz")).unwrap();
-/// pool.prep_exec("SELECT * FROM tmp.Users", ()).map(|mut result| {
-///     let mut row = result.next().unwrap().unwrap();
-///     let id: u32 = row.take("id").unwrap();
-///     let name: String = row.take("name").unwrap();
-///     let age: u32 = row.take("age").unwrap();
-///     let email: String = row.take("email").unwrap();
-///
-///     assert_eq!(1, id);
-///     assert_eq!("John", name);
-///     assert_eq!(17, age);
-///     assert_eq!("foo@bar.baz", email);
-/// }).unwrap();
-/// ```
-///
-#[derive(Clone, PartialEq)]
-pub struct Row {
-    values: Vec<Option<Value>>,
-    columns: Arc<Vec<Column>>
-}
-
-impl fmt::Debug for Row {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut debug = f.debug_tuple("Row");
-        for val in self.values.iter() {
-            match *val {
-                Some(ref val) => {
-                    debug.field(val);
-                },
-                None => {
-                    debug.field(&"<taken>");
-                },
-            }
-        }
-        debug.finish()
-    }
-}
-
-impl Row {
-    /// Creates instance of `Row` from raw row representation
-    #[doc(hidden)]
-    pub fn new(raw_row: Vec<Value>, columns: Arc<Vec<Column>>) -> Row {
-        Row {
-            values: raw_row.into_iter().map(|value| Some(value)).collect(),
-            columns: columns
-        }
-    }
-
-    /// Returns length of a row.
-    pub fn len(&self) -> usize {
-        self.values.len()
-    }
-
-    /// Returns reference to the value of a column with index `index` if it exists and wasn't taken
-    /// by `Row::take` method.
-    ///
-    /// Non panicking version of `row[usize]`.
-    pub fn as_ref(&self, index: usize) -> Option<&Value> {
-        self.values.get(index).and_then(|x| x.as_ref())
-    }
-
-    /// Will copy value at index `index` if it was not taken by `Row::take` earlier,
-    /// then will convert it to `T`.
-    pub fn get<T, I>(&mut self, index: I) -> Option<T>
-    where T: FromValue,
-          I: ColumnIndex {
-        index.idx(&*self.columns).and_then(|idx| {
-            self.values.get(idx).and_then(|x| x.as_ref()).map(|x| from_value::<T>(x.clone()))
-        })
-    }
-
-    /// Will copy value at index `index` if it was not taken by `Row::take` or `Row::take_opt`
-    /// earlier, then will attempt convert it to `T`. Unlike `Row::get`, `Row::get_opt` will
-    /// allow you to directly handle errors if the value could not be converted to `T`.
-    pub fn get_opt<T, I>(&mut self, index: I) -> Option<MyResult<T>>
-    where T: FromValue,
-          I: ColumnIndex {
-        index.idx(&*self.columns)
-             .and_then(|idx| self.values.get(idx))
-             .and_then(|x| x.as_ref())
-             .and_then(|x| Some(from_value_opt::<T>(x.clone())))
-    }
-
-    /// Will take value of a column with index `index` if it exists and wasn't taken earlier then
-    /// will converts it to `T`.
-    pub fn take<T, I>(&mut self, index: I) -> Option<T>
-    where T: FromValue,
-          I: ColumnIndex {
-        index.idx(&*self.columns).and_then(|idx| {
-            self.values.get_mut(idx).and_then(|x| x.take()).map(from_value::<T>)
-        })
-    }
-
-    /// Will take value of a column with index `index` if it exists and wasn't taken earlier then
-    /// will attempt to convert it to `T`. Unlike `Row::take`, `Row::take_opt` will allow you to
-    /// directly handle errors if the value could not be converted to `T`.
-    pub fn take_opt<T, I>(&mut self, index: I) -> Option<MyResult<T>>
-    where T: FromValue,
-          I: ColumnIndex {
-        index.idx(&*self.columns)
-             .and_then(|idx| self.values.get_mut(idx))
-             .and_then(|x| x.take())
-             .and_then(|x| Some(from_value_opt::<T>(x)))
-    }
-
-    /// Unwraps values of a row.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any of columns was taken by `take` method.
-    pub fn unwrap(self) -> Vec<Value> {
-        self.values.into_iter()
-        .map(|x| x.expect("Can't unwrap row if some of columns was taken"))
-        .collect()
-    }
-
-    #[doc(hidden)]
-    pub fn place(&mut self, index: usize, value: Value) {
-        self.values[index] = Some(value);
-    }
-}
-
-impl Index<usize> for Row {
-    type Output = Value;
-
-    fn index<'a>(&'a self, index: usize) -> &'a Value {
-        self.values[index].as_ref().unwrap()
-    }
-}
-
-impl<'a> Index<&'a str> for Row {
-    type Output = Value;
-
-    fn index<'r>(&'r self, index: &'a str) -> &'r Value {
-        for (i, column) in self.columns.iter().enumerate() {
-            if column.name() == index.as_bytes() {
-                return self.values[i].as_ref().unwrap();
-            }
-        }
-        panic!("No such column: `{}`", index);
-    }
-}
-
-pub trait ColumnIndex {
-    fn idx(&self, columns: &Vec<Column>) -> Option<usize>;
-}
-
-impl ColumnIndex for usize {
-    fn idx(&self, columns: &Vec<Column>) -> Option<usize> {
-        if *self >= columns.len() {
-            None
-        } else {
-            Some(*self)
-        }
-    }
-}
-
-impl<'a> ColumnIndex for &'a str {
-    fn idx(&self, columns: &Vec<Column>) -> Option<usize> {
-        for (i, c) in columns.iter().enumerate() {
-            if c.name() == self.as_bytes() {
-                return Some(i);
-            }
-        }
-        None
-    }
-}
-
 /// Callback to handle requests for local files.
 /// Consult [Mysql documentation](https://dev.mysql.com/doc/refman/5.7/en/load-data.html) for the
 /// format of local infile data.
 ///
 /// ```rust
 /// # use std::io::Write;
-/// # use mysql::LocalInfileHandler;
-/// # use mysql::conn::pool;
-/// # use mysql::conn::{Opts, OptsBuilder};
-/// # use mysql::value::from_row;
-/// # use std::default::Default;
+/// # use mysql::{Pool, Opts, OptsBuilder, LocalInfileHandler, from_row};
 /// # fn get_opts() -> Opts {
 /// #     let user = "root";
 /// #     let addr = "127.0.0.1";
@@ -651,7 +449,7 @@ impl<'a> ColumnIndex for &'a str {
 /// #     builder.into()
 /// # }
 /// # let opts = get_opts();
-/// # let pool = pool::Pool::new_manual(1, 1, opts).unwrap();
+/// # let pool = Pool::new_manual(1, 1, opts).unwrap();
 /// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ()).unwrap();
 /// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
 /// #                (1, "John", 17, "foo@bar.baz")).unwrap();
@@ -763,9 +561,12 @@ pub struct Conn {
     opts: Opts,
     stream: Option<Stream>,
     stmt_cache: StmtCache,
-    server_version: ServerVersion,
+    server_version: Option<(u16, u16, u16)>,
+    mariadb_server_version: Option<(u16, u16, u16)>,
     affected_rows: u64,
     last_insert_id: u64,
+    warnings: u16,
+    info: Option<Vec<u8>>,
     max_allowed_packet: usize,
     capability_flags: consts::CapabilityFlags,
     connection_id: u32,
@@ -792,11 +593,14 @@ impl Conn {
             character_set: 0u8,
             affected_rows: 0u64,
             last_insert_id: 0u64,
+            warnings: 0,
+            info: None,
             last_command: 0u8,
             max_allowed_packet: consts::MAX_PAYLOAD_LEN,
             connected: false,
             has_results: false,
-            server_version: (0, 0, 0),
+            server_version: None,
+            mariadb_server_version: None,
             local_infile_handler: None
         }
     }
@@ -808,8 +612,10 @@ impl Conn {
                 if self.opts.get_socket().is_none() {
                     let mut socket_opts = OptsBuilder::from_opts(self.opts.clone());
                     let socket = from_value::<String>(socket);
-                    socket_opts.socket(Some(socket));
-                    return Some(socket_opts.into())
+                    if socket.len() > 0 {
+                        socket_opts.socket(Some(socket));
+                        return Some(socket_opts.into())
+                    }
                 }
             }
         }
@@ -843,14 +649,14 @@ impl Conn {
         self.read_packet().and_then(|pld| {
             match pld[0] {
                 0 => {
-                    let ok = OkPacket::from_payload(&*pld)?;
+                    let ok = parse_ok_packet(&*pld, self.capability_flags)?;
                     self.handle_ok(&ok);
                     self.last_command = 0;
                     self.stmt_cache.clear();
                     Ok(())
                 },
                 _ => {
-                    let err = ErrPacket::from_payload(&*pld, self.capability_flags)?;
+                    let err = parse_err_packet(&*pld, self.capability_flags)?;
                     Err(MySqlError(err.into()))
                 },
             }
@@ -867,6 +673,8 @@ impl Conn {
         self.character_set = 0;
         self.affected_rows = 0;
         self.last_insert_id = 0;
+        self.warnings = 0;
+        self.info = None;
         self.last_command = 0;
         self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
         self.connected = false;
@@ -877,13 +685,14 @@ impl Conn {
 
     /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> MyResult<()> {
-        if self.server_version > (5, 7, 2) {
-            match self.soft_reset() {
-                Ok(_) => Ok(()),
-                _ => self.hard_reset()
-            }
-        } else {
-            self.hard_reset()
+        match (self.server_version, self.mariadb_server_version) {
+            (Some(ref version), _) if *version > (5, 7, 3) => {
+                self.soft_reset().or_else(|_| self.hard_reset())
+            },
+            (_, Some(ref version)) if *version >= (10, 2, 7)  => {
+                self.soft_reset().or_else(|_| self.hard_reset())
+            },
+            _ => self.hard_reset()
         }
     }
 
@@ -954,46 +763,45 @@ impl Conn {
     }
 
     fn handle_handshake(&mut self, hp: &HandshakePacket) {
-        self.capability_flags = hp.capability_flags & self.get_client_flags();
-        self.status_flags = hp.status_flags;
-        self.connection_id = hp.connection_id;
-        self.character_set = hp.character_set;
-        self.server_version = hp.server_version;
+        self.capability_flags = hp.capabilities() & self.get_client_flags();
+        self.status_flags = hp.status_flags();
+        self.connection_id = hp.connection_id();
+        self.character_set = hp.default_collation();
+        self.server_version = hp.server_version_parsed();
+        self.mariadb_server_version = hp.maria_db_server_version_parsed();
     }
 
     fn handle_ok(&mut self, op: &OkPacket) {
-        self.affected_rows = op.affected_rows;
-        self.last_insert_id = op.last_insert_id;
-        self.status_flags = op.status_flags;
-    }
-
-    fn handle_eof(&mut self, eof: &EOFPacket) {
-        self.status_flags = eof.status_flags;
+        self.affected_rows = op.affected_rows();
+        self.last_insert_id = op.last_insert_id().unwrap_or(0);
+        self.status_flags = op.status_flags();
+        self.warnings = op.warnings();
+        self.info = op.info_ref().map(Into::into);
     }
 
     fn do_handshake(&mut self) -> MyResult<()> {
         self.read_packet().and_then(|pld| {
             match pld[0] {
                 0xFF => {
-                    let error_packet = ErrPacket::from_payload(pld.as_ref(),
-                                                               self.capability_flags)?;
+                    let error_packet = parse_err_packet(pld.as_ref(),
+                                                        self.capability_flags)?;
                     Err(MySqlError(error_packet.into()))
                 },
                 _ => {
-                    let handshake = HandshakePacket::from_payload(pld.as_ref())?;
-                    if handshake.protocol_version != 10u8 {
-                        return Err(DriverError(UnsupportedProtocol(handshake.protocol_version)));
+                    let handshake = parse_handshake_packet(pld.as_ref())?;
+                    if handshake.protocol_version() != 10u8 {
+                        return Err(DriverError(UnsupportedProtocol(handshake.protocol_version())));
                     }
-                    if !handshake.capability_flags.contains(consts::CLIENT_PROTOCOL_41) {
+                    if !handshake.capabilities().contains(consts::CLIENT_PROTOCOL_41) {
                         return Err(DriverError(Protocol41NotSet));
                     }
                     self.handle_handshake(&handshake);
                     if self.opts.get_ssl_opts().is_some() && self.stream.is_some() {
                         if self.stream.as_ref().unwrap().is_insecure() {
-                            if !handshake.capability_flags.contains(consts::CLIENT_SSL) {
+                            if !handshake.capabilities().contains(consts::CLIENT_SSL) {
                                 return Err(DriverError(SslNotSupported));
                             } else {
-                                self.do_ssl_request(&handshake)?;
+                                self.do_ssl_request()?;
                                 self.switch_to_ssl()?;
                             }
                         }
@@ -1006,13 +814,13 @@ impl Conn {
         }).and_then(|pld| {
             match pld[0] {
                 0u8 => {
-                    let ok = OkPacket::from_payload(pld.as_ref())?;
+                    let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
                     self.handle_ok(&ok);
                     Ok(())
                 },
                 0xffu8 => {
-                    let err = ErrPacket::from_payload(pld.as_ref(),
-                                                      self.capability_flags)?;
+                    let err = parse_err_packet(pld.as_ref(),
+                                               self.capability_flags)?;
                     Err(MySqlError(err.into()))
                 },
                 _ => Err(DriverError(UnexpectedPacket))
@@ -1043,14 +851,21 @@ impl Conn {
         client_flags
     }
 
-    fn do_ssl_request(&mut self, hp: &HandshakePacket) -> MyResult<()> {
+    fn get_default_collation(&self) -> u8 {
+        match self.server_version {
+            Some(ref version) if *version > (5, 5, 3) => consts::UTF8MB4_GENERAL_CI as u8,
+            _ => consts::UTF8_GENERAL_CI as u8,
+        }
+    }
+
+    fn do_ssl_request(&mut self) -> MyResult<()> {
         let client_flags = self.get_client_flags();
         let mut buf = [0; 4 + 4 + 1 + 23];
         {
             let mut writer = &mut buf[..];
             writer.write_u32::<LE>(client_flags.bits())?;
             writer.write_all(&[0u8; 4])?;
-            writer.write_u8(hp.get_default_collation())?;
+            writer.write_u8(self.get_default_collation())?;
             writer.write_all(&[0u8; 23])?;
         }
         self.write_packet(&buf[..])
@@ -1059,7 +874,9 @@ impl Conn {
     fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
         let client_flags = self.get_client_flags();
         let scramble_buf = if let &Some(ref pass) = self.opts.get_pass() {
-            scramble(&*hp.auth_plugin_data, pass.as_bytes())
+            let mut scramble_data = Vec::from(hp.scramble_1_ref());
+            scramble_data.extend_from_slice(hp.scramble_2_ref().unwrap_or(&[][..]));
+            scramble(&*scramble_data, pass.as_bytes())
         } else {
             None
         };
@@ -1075,7 +892,7 @@ impl Conn {
             let mut writer = &mut *buf;
             writer.write_u32::<LE>(client_flags.bits())?;
             writer.write_all(&[0u8; 4])?;
-            writer.write_u8(hp.get_default_collation())?;
+            writer.write_u8(self.get_default_collation())?;
             writer.write_all(&[0u8; 23])?;
             if let &Some(ref user) = self.opts.get_user() {
                 writer.write_all(user.as_bytes())?;
@@ -1112,29 +929,31 @@ impl Conn {
         self.write_packet(&*buf)
     }
 
-    fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: Vec<u16>) -> MyResult<()> {
-        for &id in ids.iter() {
-            match params[id as usize] {
-                Bytes(ref x) => {
-                    for chunk in x.chunks(self.max_allowed_packet - 7) {
-                        let chunk_len = chunk.len() + 7;
-                        let mut buf = vec![0u8; chunk_len];
-                        {
-                            let mut writer = &mut *buf;
-                            writer.write_u32::<LE>(stmt.id())?;
-                            writer.write_u16::<LE>(id)?;
-                            writer.write_all(chunk)?;
+    fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value], ids: BitVec<u8>) -> MyResult<()> {
+        for (i, bit) in ids.into_iter().enumerate() {
+            if bit {
+                match params[i as usize] {
+                    Bytes(ref x) => {
+                        for chunk in x.chunks(self.max_allowed_packet - 7) {
+                            let chunk_len = chunk.len() + 7;
+                            let mut buf = vec![0u8; chunk_len];
+                            {
+                                let mut writer = &mut *buf;
+                                writer.write_u32::<LE>(stmt.id())?;
+                                writer.write_u16::<LE>(i as u16)?;
+                                writer.write_all(chunk)?;
+                            }
+                            self.write_command_data(Command::COM_STMT_SEND_LONG_DATA, &*buf)?;
                         }
-                        self.write_command_data(Command::COM_STMT_SEND_LONG_DATA, &*buf)?;
-                    }
-                },
-                _ => unreachable!(),
+                    },
+                    _ => unreachable!(),
+                }
             }
         }
         Ok(())
     }
 
-    fn _execute(&mut self, stmt: &InnerStmt, params: Params) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
+    fn _execute(&mut self, stmt: &InnerStmt, params: Params) -> MyResult<Vec<Column>> {
         let mut buf = [0u8; 4 + 1 + 4];
         let mut data: Vec<u8>;
         let out;
@@ -1156,41 +975,47 @@ impl Conn {
                     return Err(DriverError(MismatchedStmtParams(stmt.num_params(), params.len())));
                 }
                 if let Some(sparams) = stmt.params() {
-                    let (bitmap, values, large_ids) =
-                        Value::to_bin_payload(sparams,
-                                              &params,
-                                              self.max_allowed_packet)?;
-                    match large_ids {
-                        Some(ids) => self.send_long_data(stmt, &params, ids)?,
-                        _ => ()
+                    let (serialized, null_bitmap, large_bitmap) =
+                        serialize_bin_many(sparams, &params, self.max_allowed_packet)?;
+
+                    if large_bitmap.any() {
+                        self.send_long_data(stmt, &params, large_bitmap)?;
                     }
-                    data = vec![0u8; 9 + bitmap.len() + 1 + params.len() * 2 + values.len()];
+
+                    data = vec![0u8; 9 + null_bitmap.storage().len() + 1 + params.len() * 2 + serialized.len()];
                     {
                         let mut writer = &mut *data;
                         writer.write_u32::<LE>(stmt.id())?;
-                        writer.write_u8(0u8)?;
+                        writer.write_u8(0)?;
                         writer.write_u32::<LE>(1u32)?;
-                        writer.write_all(bitmap.as_ref())?;
-                        writer.write_u8(1u8)?;
-                        for i in 0..params.len() {
-                            match params[i] {
-                                NULL => writer.write_all(&[sparams[i].column_type as u8, 0u8])?,
-                                Bytes(..) =>
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0u8])?,
-                                Int(..) =>
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0u8])?,
-                                UInt(..) =>
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128u8])?,
-                                Float(..) =>
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0u8])?,
-                                Date(..) =>
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0u8])?,
-                                Time(..) =>
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0u8])?
+                        writer.write_all(null_bitmap.storage())?;
+                        writer.write_u8(1)?;
+                        for (value, column) in params.iter().zip(sparams.iter()) {
+                            match *value {
+                                NULL => writer.write_all(&[column.column_type() as u8, 0])?,
+                                Bytes(..) => {
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0])?
+                                }
+                                Int(..) => {
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0])?
+                                }
+                                UInt(..) => {
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128])?
+                                }
+                                Float(..) => {
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0])?
+                                }
+                                Date(..) => {
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_DATETIME as u8, 0])?
+                                }
+                                Time(..) => {
+                                    writer.write_all(&[ColumnType::MYSQL_TYPE_TIME as u8, 0])?
+                                }
                             }
                         }
-                        writer.write_all(values.as_ref())?;
+                        writer.write_all(&*serialized)?;
                     }
+
                     out = &*data;
                 } else {
                     unreachable!();
@@ -1210,8 +1035,8 @@ impl Conn {
 
     fn execute<'a, T: Into<Params>>(&'a mut self, stmt: &InnerStmt, params: T) -> MyResult<QueryResult<'a>> {
         match self._execute(stmt, params.into()) {
-            Ok((columns, ok_packet)) => {
-                Ok(QueryResult::new(ResultConnRef::ViaConnRef(self), columns, ok_packet, true))
+            Ok(columns) => {
+                Ok(QueryResult::new(ResultConnRef::ViaConnRef(self), columns, true))
             },
             Err(err) => Err(err)
         }
@@ -1225,7 +1050,16 @@ impl Conn {
             let _ = self.query(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
         }
         if let Some(readonly) = readonly {
-            if self.server_version < (5, 6, 5) {
+            let supported = match (self.server_version, self.mariadb_server_version) {
+                (Some(ref version), _) if *version < (5, 6, 5) => {
+                    true
+                }
+                (_, Some(ref version)) if *version < (10, 0, 0) => {
+                    true
+                }
+                _ => false,
+            };
+            if !supported {
                 return Err(DriverError(ReadOnlyTransNotSupported));
             }
             let _ = if readonly {
@@ -1242,7 +1076,7 @@ impl Conn {
         Ok(())
     }
 
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<Option<OkPacket>> {
+    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()> {
         {
             let buffer_size = cmp::min(consts::MAX_PAYLOAD_LEN - 1, self.max_allowed_packet - 1);
             let chunk = vec![0u8; buffer_size].into_boxed_slice();
@@ -1271,32 +1105,31 @@ impl Conn {
         self.write_packet(&[])?;
         let pld = self.read_packet()?;
         if pld[0] == 0u8 {
-            let ok = OkPacket::from_payload(pld.as_ref())?;
+            let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
             self.handle_ok(&ok);
-            return Ok(Some(ok));
         }
-        Ok(None)
+        Ok(())
     }
 
-    fn handle_result_set(&mut self) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
+    fn handle_result_set(&mut self) -> MyResult<Vec<Column>> {
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
-                let ok = OkPacket::from_payload(pld.as_ref())?;
+                let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
                 self.handle_ok(&ok);
-                Ok((Vec::new(), Some(ok)))
+                Ok(Vec::new())
             },
             0xfb => {
                 let mut reader = &pld[1..];
                 let mut file_name = Vec::with_capacity(reader.len());
                 reader.read_to_end(&mut file_name)?;
                 match self.send_local_infile(file_name.as_ref()) {
-                    Ok(x) => Ok((Vec::new(), x)),
+                    Ok(_) => Ok(Vec::new()),
                     Err(err) => Err(err)
                 }
             },
             0xff => {
-                let err = ErrPacket::from_payload(pld.as_ref(), self.capability_flags)?;
+                let err = parse_err_packet(pld.as_ref(), self.capability_flags)?;
                 Err(MySqlError(err.into()))
             },
             _ => {
@@ -1305,17 +1138,17 @@ impl Conn {
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
                 for _ in 0..column_count {
                     let pld = self.read_packet()?;
-                    columns.push(Column::from_payload(pld)?);
+                    columns.push(column_from_payload(pld)?);
                 }
                 // skip eof packet
                 self.read_packet()?;
                 self.has_results = true;
-                Ok((columns, None))
+                Ok(columns)
             }
         }
     }
 
-    fn _query(&mut self, query: &str) -> MyResult<(Vec<Column>, Option<OkPacket>)> {
+    fn _query(&mut self, query: &str) -> MyResult<Vec<Column>> {
         self.write_command_data(Command::COM_QUERY, query.as_bytes())?;
         self.handle_result_set()
     }
@@ -1347,8 +1180,8 @@ impl Conn {
     /// will borrow `Conn` until the end of its scope.
     pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
         match self._query(query.as_ref()) {
-            Ok((columns, ok_packet)) => {
-                Ok(QueryResult::new(ResultConnRef::ViaConnRef(self), columns, ok_packet, false))
+            Ok(columns) => {
+                Ok(QueryResult::new(ResultConnRef::ViaConnRef(self), columns, false))
             },
             Err(err) => Err(err),
         }
@@ -1371,7 +1204,7 @@ impl Conn {
         let pld = self.read_packet()?;
         match pld[0] {
             0xff => {
-                let err = ErrPacket::from_payload(pld.as_ref(), self.capability_flags)?;
+                let err = parse_err_packet(pld.as_ref(), self.capability_flags)?;
                 Err(MySqlError(err.into()))
             },
             _ => {
@@ -1380,7 +1213,7 @@ impl Conn {
                     let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
                     for _ in 0..stmt.num_params() {
                         let pld = self.read_packet()?;
-                        params.push(Column::from_payload(pld)?);
+                        params.push(column_from_payload(pld)?);
                     }
                     stmt.set_params(Some(params));
                     self.read_packet()?;
@@ -1389,7 +1222,7 @@ impl Conn {
                     let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns() as usize);
                     for _ in 0..stmt.num_columns() {
                         let pld = self.read_packet()?;
-                        columns.push(Column::from_payload(pld)?);
+                        columns.push(column_from_payload(pld)?);
                     }
                     stmt.set_columns(Some(columns));
                     self.read_packet()?;
@@ -1450,10 +1283,7 @@ impl Conn {
     ///
     /// ```
     /// # #[macro_use] extern crate mysql; fn main() {
-    /// # use mysql::conn::pool;
-    /// # use mysql::conn::{Opts, OptsBuilder};
-    /// # use mysql::value::from_row;
-    /// # use std::default::Default;
+    /// # use mysql::{Pool, Opts, OptsBuilder, from_row};
     /// # use mysql::Error::DriverError;
     /// # use mysql::DriverError::MixedParams;
     /// # use mysql::DriverError::MissingNamedParameter;
@@ -1474,7 +1304,7 @@ impl Conn {
     /// #     builder.into()
     /// # }
     /// # let opts = get_opts();
-    /// # let pool = pool::Pool::new(opts).unwrap();
+    /// # let pool = Pool::new(opts).unwrap();
     /// // Names could be repeated
     /// pool.prep_exec("SELECT :a+:b, :a * :b, ':c'", params!{"a" => 2, "b" => 3}).map(|mut result| {
     ///     let row = result.next().unwrap().unwrap();
@@ -1490,7 +1320,9 @@ impl Conn {
     /// // You must pass all named parameters for statement
     /// let err = pool.prep_exec("SELECT :name", params!{"another_name" => 42}).unwrap_err();
     /// match err {
-    ///     DriverError(e) => assert_eq!(MissingNamedParameter(String::from("name")), e),
+    ///     DriverError(e) => {
+    ///         assert_eq!(MissingNamedParameter("name".into()), e);
+    ///     }
     ///     _ => unreachable!(),
     /// }
     ///
@@ -1564,7 +1396,7 @@ impl Conn {
     }
 
     fn get_system_var(&mut self, name: &str) -> Option<Value> {
-        for row in self.query(format!("SELECT @@{};", name)).unwrap() {
+        for row in self.query(format!("SELECT @@{}", name)).unwrap() {
             match row {
                 Ok(mut r) => match r.len() {
                     0 => (),
@@ -1576,7 +1408,7 @@ impl Conn {
         return None;
     }
 
-    fn next_bin(&mut self, columns: &Vec<Column>) -> MyResult<Option<Vec<Value>>> {
+    fn next_bin(&mut self, columns: &Vec<Column>) -> MyResult<Option<SmallVec<[Value; 12]>>> {
         if ! self.has_results {
             return Ok(None);
         }
@@ -1590,11 +1422,11 @@ impl Conn {
         let x = pld[0];
         if x == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
-            let p = EOFPacket::from_payload(pld.as_ref())?;
-            self.handle_eof(&p);
+            let p = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+            self.handle_ok(&p);
             return Ok(None);
         }
-        let res = Value::from_bin_payload(pld.as_ref(), columns.as_ref());
+        let res = read_bin_values(&*pld, columns.as_ref());
         match res {
             Ok(p) => Ok(Some(p)),
             Err(e) => {
@@ -1604,7 +1436,7 @@ impl Conn {
         }
     }
 
-    fn next_text(&mut self, col_count: usize) -> MyResult<Option<Vec<Value>>> {
+    fn next_text(&mut self, col_count: usize) -> MyResult<Option<SmallVec<[Value; 12]>>> {
         if ! self.has_results {
             return Ok(None);
         }
@@ -1619,18 +1451,18 @@ impl Conn {
         if (x == 0xfe || x == 0xff) && pld.len() < 0xfe {
             self.has_results = false;
             if x == 0xfe {
-                let p = EOFPacket::from_payload(pld.as_ref())?;
-                self.handle_eof(&p);
+                let p = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+                self.handle_ok(&p);
                 return Ok(None);
             } else /* x == 0xff */ {
-                let p = ErrPacket::from_payload(pld.as_ref(), self.capability_flags);
+                let p = parse_err_packet(pld.as_ref(), self.capability_flags);
                 match p {
                     Ok(p) => return Err(MySqlError(p.into())),
                     Err(err) => return Err(IoError(err))
                 }
             }
         }
-        let res = Value::from_payload(pld.as_ref(), col_count);
+        let res = read_text_values(&*pld, col_count);
         match res {
             Ok(p) => Ok(Some(p)),
             Err(err) => {
@@ -1652,6 +1484,10 @@ impl Conn {
     /// in the `Opts` for this connection.
     pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
         self.local_infile_handler = handler;
+    }
+
+    pub fn no_backslash_escape(&self) -> bool {
+        self.status_flags.contains(consts::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
     }
 }
 
@@ -1741,10 +1577,8 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// `FromValue` implementors up to arity 12, or on `FromValue` trait for rows with higher arity.
 ///
 /// ```rust
-/// use mysql::value::from_row;
-/// # use mysql::conn::pool;
-/// # use mysql::conn::{Opts, OptsBuilder};
-/// # use std::default::Default;
+/// # use mysql::Pool;
+/// # use mysql::{Opts, OptsBuilder, from_row};
 /// # fn get_opts() -> Opts {
 /// #     let user = "root";
 /// #     let addr = "127.0.0.1";
@@ -1761,7 +1595,7 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// #     builder.into()
 /// # }
 /// # let opts = get_opts();
-/// # let pool = pool::Pool::new(opts).unwrap();
+/// # let pool = Pool::new(opts).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
 /// for row in conn.prep_exec("SELECT ?, ?", (42, 2.5)).unwrap() {
@@ -1776,20 +1610,17 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 pub struct QueryResult<'a> {
     conn: ResultConnRef<'a>,
     columns: Arc<Vec<Column>>,
-    ok_packet: Option<OkPacket>,
     is_bin: bool,
 }
 
 impl<'a> QueryResult<'a> {
     fn new(conn: ResultConnRef<'a>,
            columns: Vec<Column>,
-           ok_packet: Option<OkPacket>,
            is_bin: bool) -> QueryResult<'a>
     {
         QueryResult {
             conn: conn,
             columns: Arc::new(columns),
-            ok_packet: ok_packet,
             is_bin: is_bin
         }
     }
@@ -1797,9 +1628,8 @@ impl<'a> QueryResult<'a> {
     fn handle_if_more_results(&mut self) -> Option<MyResult<Row>> {
         if self.conn.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
             match self.conn.handle_result_set() {
-                Ok((cols, ok_p)) => {
+                Ok(cols) => {
                     self.columns = Arc::new(cols);
-                    self.ok_packet = ok_p;
                     None
                 },
                 Err(e) => return Some(Err(e)),
@@ -1827,25 +1657,21 @@ impl<'a> QueryResult<'a> {
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// warnings count.
     pub fn warnings(&self) -> u16 {
-        self.ok_packet.as_ref().map(|ok_p| ok_p.warnings).unwrap_or(0u16)
+        self.conn.warnings
     }
 
     /// Returns
     /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
     /// info.
     pub fn info(&self) -> Vec<u8> {
-        if self.ok_packet.is_some() {
-            self.ok_packet.as_ref().unwrap().info.clone()
-        } else {
-            Vec::with_capacity(0)
-        }
+        self.conn.info.as_ref().map(Clone::clone).unwrap_or(vec![])
     }
 
     /// Returns index of a `QueryResult`'s column by name.
     pub fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize> {
         let name = name.as_ref().as_bytes();
         for (i, c) in self.columns.iter().enumerate() {
-            if c.name() == name {
+            if c.name_ref() == name {
                 return Some(i)
             }
         }
@@ -1856,7 +1682,7 @@ impl<'a> QueryResult<'a> {
     pub fn column_indexes(&self) -> HashMap<String, usize, BldHshrDflt<FnvHasher>> {
         let mut indexes = HashMap::default();
         for (i, column) in self.columns.iter().enumerate() {
-            indexes.insert(from_utf8(column.name()).unwrap().to_string(), i);
+            indexes.insert(column.name_str().into_owned(), i);
         }
         indexes
     }
@@ -1903,7 +1729,7 @@ impl<'a> Iterator for QueryResult<'a> {
         match values {
             Ok(values) => {
                 match values {
-                    Some(values) => Some(Ok(Row::new(values, self.columns.clone()))),
+                    Some(values) => Some(Ok(new_row(values, self.columns.clone()))),
                     None => self.handle_if_more_results(),
                 }
             },
@@ -2009,10 +1835,11 @@ mod test {
         use OptsBuilder;
         use Params;
         use LocalInfileHandler;
-        use super::super::super::value::{ToValue, from_value, from_row};
-        use super::super::super::value::Value::{NULL, Int, Bytes, Date};
+        use Value::{NULL, Int, Bytes, Date};
+        use from_row;
+        use from_value;
+        use prelude::ToValue;
         use super::get_opts;
-        use super::super::Column;
 
         #[test]
         fn should_connect() {
@@ -2392,28 +2219,6 @@ mod test {
         }
 
         #[test]
-        fn should_parse_column_from_payload() {
-            let payload1 = b"\x03def\x06schema\x05table\x09org_table\x04name\x08org_name\
-                         \x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec();
-            let payload2 = b"\x03def\x06schema\x05table\x09org_table\x04name\x08org_name\
-                         \x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x07default".to_vec();
-            let out1 = Column::from_payload(payload1).unwrap();
-            let out2 = Column::from_payload(payload2).unwrap();
-            assert_eq!(out1.schema(), b"schema");
-            assert_eq!(out1.table(), b"table");
-            assert_eq!(out1.org_table(), b"org_table");
-            assert_eq!(out1.name(), b"name");
-            assert_eq!(out1.org_name(), b"org_name");
-            assert_eq!(out1.default_values(), None);
-            assert_eq!(out2.schema(), b"schema");
-            assert_eq!(out2.table(), b"table");
-            assert_eq!(out2.org_table(), b"org_table");
-            assert_eq!(out2.name(), b"name");
-            assert_eq!(out2.org_name(), b"org_name");
-            assert_eq!(out2.default_values(), Some(&b"default"[..]));
-        }
-
-        #[test]
         fn should_handle_tcp_connect_timeout() {
             use error::Error::DriverError;
             use error::DriverError::ConnectTimeout;
@@ -2545,8 +2350,8 @@ mod test {
     mod bench {
         use test;
         use super::get_opts;
-        use super::super::{Conn};
-        use super::super::super::value::Value::NULL;
+        use Conn;
+        use Value::NULL;
 
         #[bench]
         fn simple_exec(bencher: &mut test::Bencher) {
