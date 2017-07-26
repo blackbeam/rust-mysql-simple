@@ -142,6 +142,15 @@ impl From<MySqlError> for Error {
     }
 }
 
+impl From<::nix::Error> for Error {
+    fn from(x: ::nix::Error) -> Error {
+        match x {
+            ::nix::Error::Sys(errno) => Error::from(io::Error::from_raw_os_error(errno as i32)),
+            _ => Error::from(io::Error::new(io::ErrorKind::Other, x)),
+        }
+    }
+}
+
 #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
 impl From<SslError> for Error {
     fn from(err: SslError) -> Error {

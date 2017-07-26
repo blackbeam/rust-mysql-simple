@@ -145,12 +145,13 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
     match socket::connect(fd, &sock_addr) {
         Ok(_) => (),
         Err(err) => {
-            match err.errno() {
-                Errno::EALREADY |
-                Errno::EINPROGRESS => (),
-                errno => {
-                    return Err(io::Error::from_raw_os_error(errno as i32));
+            match err {
+                ::nix::Error::Sys(Errno::EALREADY) |
+                ::nix::Error::Sys(Errno::EINPROGRESS) => (),
+                ::nix::Error::Sys(errno) => {
+                    return Err(io::Error::from_raw_os_error(errno as i32))
                 },
+                _ => return Err(io::Error::new(io::ErrorKind::Other, err)),
             }
         }
     }
@@ -166,7 +167,14 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
         Some(&mut fd_set),
         None,
         Some(&mut timeout_timeval),
-    )?;
+    );
+
+    let select_res = select_res.map_err(|err| {
+        match err {
+            ::nix::Error::Sys(errno) => io::Error::from_raw_os_error(errno as i32),
+            _ => io::Error::new(io::ErrorKind::Other, err),
+        }
+    })?;
 
     if select_res == -1 {
         return Err(io::Error::last_os_error());
@@ -179,7 +187,14 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
     let socket_error_code = socket::getsockopt(
         socket_fd,
         socket::sockopt::SocketError,
-    )?;
+    );
+
+    let socket_error_code = socket_error_code.map_err(|err| {
+        match err {
+            ::nix::Error::Sys(errno) => io::Error::from_raw_os_error(errno as i32),
+            _ => io::Error::new(io::ErrorKind::Other, err),
+        }
+    })?;
 
     if socket_error_code != 0 {
         return Err(io::Error::from_raw_os_error(socket_error_code));
