@@ -186,20 +186,20 @@ macro_rules! arg_to_key_val {
 #[macro_export]
 macro_rules! params_expander {
     ($vec:expr;) => {};
-    ($vec:expr; $name:ident, $($tail:tt)*) => {
-        $vec.push(arg_to_key_val!($name));
-        params_expander!($vec; $($tail)*);
-    };
-    ($vec:expr; $name:ident $(, $tail:tt)*) => {
-        $vec.push(arg_to_key_val!($name));
-        params_expander!($vec; $($tail)*);
-    };
     ($vec:expr; $name:expr => $value:expr, $($tail:tt)*) => {
         $vec.push(arg_to_key_val!($name => $value));
         params_expander!($vec; $($tail)*);
     };
     ($vec:expr; $name:expr => $value:expr $(, $tail:tt)*) => {
         $vec.push(arg_to_key_val!($name => $value));
+        params_expander!($vec; $($tail)*);
+    };
+    ($vec:expr; $name:ident, $($tail:tt)*) => {
+        $vec.push(arg_to_key_val!($name));
+        params_expander!($vec; $($tail)*);
+    };
+    ($vec:expr; $name:ident $(, $tail:tt)*) => {
+        $vec.push(arg_to_key_val!($name));
         params_expander!($vec; $($tail)*);
     };
 }
