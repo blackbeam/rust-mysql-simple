@@ -172,39 +172,6 @@ pub use myc::time;
 pub use myc::uuid;
 
 // Until `macro_reexport` stabilisation.
-#[macro_export]
-macro_rules! arg_to_key_val {
-    ($name:expr => $value:expr) => (
-        (::std::string::String::from($name), $crate::Value::from($value))
-    );
-    ($name:ident) => (
-        (::std::string::String::from(stringify!($name)), $crate::Value::from($name))
-    );
-}
-
-// Until `macro_reexport` stabilisation.
-#[macro_export]
-macro_rules! params_expander {
-    ($vec:expr;) => {};
-    ($vec:expr; $name:expr => $value:expr, $($tail:tt)*) => {
-        $vec.push(arg_to_key_val!($name => $value));
-        params_expander!($vec; $($tail)*);
-    };
-    ($vec:expr; $name:expr => $value:expr $(, $tail:tt)*) => {
-        $vec.push(arg_to_key_val!($name => $value));
-        params_expander!($vec; $($tail)*);
-    };
-    ($vec:expr; $name:ident, $($tail:tt)*) => {
-        $vec.push(arg_to_key_val!($name));
-        params_expander!($vec; $($tail)*);
-    };
-    ($vec:expr; $name:ident $(, $tail:tt)*) => {
-        $vec.push(arg_to_key_val!($name));
-        params_expander!($vec; $($tail)*);
-    };
-}
-
-// Until `macro_reexport` stabilisation.
 /// This macro is a convenient way to pass named parameters to a statement.
 ///
 /// ```ignore
@@ -217,10 +184,33 @@ macro_rules! params_expander {
 #[macro_export]
 macro_rules! params {
     () => {};
+    (@to_pair $name:expr => $value:expr) => (
+        (::std::string::String::from($name), $crate::Value::from($value))
+    );
+    (@to_pair $name:ident) => (
+        (::std::string::String::from(stringify!($name)), $crate::Value::from($name))
+    );
+    (@expand $vec:expr;) => {};
+    (@expand $vec:expr; $name:expr => $value:expr, $($tail:tt)*) => {
+        $vec.push(params!(@to_pair $name => $value));
+        params!(@expand $vec; $($tail)*);
+    };
+    (@expand $vec:expr; $name:expr => $value:expr $(, $tail:tt)*) => {
+        $vec.push(params!(@to_pair $name => $value));
+        params!(@expand $vec; $($tail)*);
+    };
+    (@expand $vec:expr; $name:ident, $($tail:tt)*) => {
+        $vec.push(params!(@to_pair $name));
+        params!(@expand $vec; $($tail)*);
+    };
+    (@expand $vec:expr; $name:ident $(, $tail:tt)*) => {
+        $vec.push(params!(@to_pair $name));
+        params!(@expand $vec; $($tail)*);
+    };
     ($($tail:tt)*) => {
         {
             let mut output = vec![];
-            params_expander!(output; $($tail)*);
+            params!(@expand output; $($tail)*);
             output
         }
     };
