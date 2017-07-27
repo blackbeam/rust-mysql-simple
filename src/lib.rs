@@ -173,15 +173,57 @@ pub use myc::uuid;
 
 // Until `macro_reexport` stabilisation.
 #[macro_export]
+macro_rules! arg_to_key_val {
+    ($name:expr => $value:expr) => (
+        (::std::string::String::from($name), $crate::Value::from($value))
+    );
+    ($name:ident) => (
+        (::std::string::String::from(stringify!($name)), $crate::Value::from($name))
+    );
+}
+
+// Until `macro_reexport` stabilisation.
+#[macro_export]
+macro_rules! params_expander {
+    ($vec:expr;) => {};
+    ($vec:expr; $name:ident, $($tail:tt)*) => {
+        $vec.push(arg_to_key_val!($name));
+        params_expander!($vec; $($tail)*);
+    };
+    ($vec:expr; $name:ident $(, $tail:tt)*) => {
+        $vec.push(arg_to_key_val!($name));
+        params_expander!($vec; $($tail)*);
+    };
+    ($vec:expr; $name:expr => $value:expr, $($tail:tt)*) => {
+        $vec.push(arg_to_key_val!($name => $value));
+        params_expander!($vec; $($tail)*);
+    };
+    ($vec:expr; $name:expr => $value:expr $(, $tail:tt)*) => {
+        $vec.push(arg_to_key_val!($name => $value));
+        params_expander!($vec; $($tail)*);
+    };
+}
+
+// Until `macro_reexport` stabilisation.
+/// This macro is a convenient way to pass named parameters to a statement.
+///
+/// ```ignore
+/// let foo = 42;
+/// conn.prep_exec("SELECT :foo, :foo2x", params! {
+///     foo,
+///     "foo2x" => foo * 2,
+/// });
+/// ```
+#[macro_export]
 macro_rules! params {
-    ($($name:expr => $value:expr),*) => (
-        vec![
-            $((::std::string::String::from($name), $crate::Value::from($value))),*
-        ]
-    );
-    ($($name:expr => $value:expr),*,) => (
-        params!($($name => $value),*)
-    );
+    () => {};
+    ($($tail:tt)*) => {
+        {
+            let mut output = vec![];
+            params_expander!(output; $($tail)*);
+            output
+        }
+    };
 }
 
 mod scramble;
@@ -266,4 +308,75 @@ pub mod prelude {
     };
     #[doc(inline)]
     pub use conn::GenericConnection;
+}
+
+#[cfg(test)]
+#[test]
+fn params_macro_test() {
+    let foo = 42;
+    let bar = "bar";
+    assert_eq!(
+        vec![(String::from("foo"), Value::Int(42))],
+        params! { foo }
+    );
+    assert_eq!(
+        vec![(String::from("foo"), Value::Int(42))],
+        params! { foo, }
+    );
+    assert_eq!(
+        vec![
+            (String::from("foo"), Value::Int(42)),
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+        ],
+        params! { foo, bar }
+    );
+    assert_eq!(
+        vec![
+            (String::from("foo"), Value::Int(42)),
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+        ],
+        params! { foo, bar, }
+    );
+    assert_eq!(
+        vec![
+            (String::from("foo"), Value::Int(42)),
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+        ],
+        params! { "foo" => foo, "bar" => bar }
+    );
+    assert_eq!(
+        vec![
+            (String::from("foo"), Value::Int(42)),
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+        ],
+        params! { "foo" => foo, "bar" => bar, }
+    );
+    assert_eq!(
+        vec![
+            (String::from("foo"), Value::Int(42)),
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+        ],
+        params! { foo, "bar" => bar }
+    );
+    assert_eq!(
+        vec![
+            (String::from("foo"), Value::Int(42)),
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+        ],
+        params! { "foo" => foo, bar }
+    );
+    assert_eq!(
+        vec![
+            (String::from("foo"), Value::Int(42)),
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+        ],
+        params! { foo, "bar" => bar, }
+    );
+    assert_eq!(
+        vec![
+            (String::from("foo"), Value::Int(42)),
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+        ],
+        params! { "foo" => foo, bar, }
+    );
 }
