@@ -142,6 +142,7 @@ impl From<MySqlError> for Error {
     }
 }
 
+#[cfg(unix)]
 impl From<::nix::Error> for Error {
     fn from(x: ::nix::Error) -> Error {
         match x {
