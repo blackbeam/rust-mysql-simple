@@ -293,6 +293,8 @@ pub mod prelude {
         ToValue,
     };
     #[doc(inline)]
+    pub use myc::row::ColumnIndex;
+    #[doc(inline)]
     pub use myc::row::convert::{
         FromRow,
     };

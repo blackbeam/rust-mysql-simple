@@ -486,7 +486,11 @@ impl PooledConn {
     }
 }
 
-impl GenericConnection for PooledConn {
+impl<'a> GenericConnection<'a> for PooledConn {
+    type QueryResult = QueryResult<'a>;
+    type Stmt = Stmt<'a>;
+    type Row = Row;
+
     fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
         self.query(query)
     }

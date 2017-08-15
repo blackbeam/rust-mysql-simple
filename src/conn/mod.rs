@@ -44,10 +44,12 @@ use super::error::Result as MyResult;
 use super::error::DriverError::SslNotSupported;
 use myc::named_params::parse_named_params;
 use super::scramble::scramble;
+use FromValueError;
 use Params;
 use Value::{self, NULL, Int, UInt, Float, Bytes, Date, Time};
 use from_value;
 use from_value_opt;
+use prelude::{ColumnIndex, FromValue};
 
 use byteorder::LittleEndian as LE;
 use byteorder::WriteBytesExt;
@@ -67,30 +69,110 @@ pub use self::opts::OptsBuilder;
 pub use self::opts::SslOpts;
 
 /// A trait allowing abstraction over connections and transactions
-pub trait GenericConnection {
+pub trait GenericConnection<'a> {
+    type QueryResult: GenericQueryResult + Iterator<Item=MyResult<Self::Row>>;
+    type Stmt: GenericStmt<'a, QueryResult=Self::QueryResult, Row=Self::Row>;
+    type Row: GenericRow;
+
     /// See
     /// [`Conn#query`](struct.Conn.html#method.query).
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult>;
+    fn query<T: AsRef<str>>(&'a mut self, query: T) -> MyResult<Self::QueryResult>;
 
     /// See
     /// [`Conn#first`](struct.Conn.html#method.first).
-    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>>;
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Self::Row>>;
 
     /// See
     /// [`Conn#prepare`](struct.Conn.html#method.prepare).
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt>;
+    fn prepare<T: AsRef<str>>(&'a mut self, query: T) -> MyResult<Self::Stmt>;
 
     /// See
     /// [`Conn#prep_exec`](struct.Conn.html#method.prep_exec).
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    fn prep_exec<A, T>(&'a mut self, query: A, params: T) -> MyResult<Self::QueryResult>
         where A: AsRef<str>, T: Into<Params>;
 
     /// See
     /// [`Conn#first_exec`](struct.Conn.html#method.first_exec).
-    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Self::Row>>
         where Q: AsRef<str>, P: Into<Params>;
 }
 
+/// A trait allowing to mock statement.
+pub trait GenericStmt<'a> {
+    type QueryResult: GenericQueryResult + Iterator<Item=MyResult<Self::Row>>;
+    type Row: GenericRow;
+
+    fn params_ref(&self) -> Option<&[Column]>;
+    fn columns_ref(&self) -> Option<&[Column]>;
+    fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize>;
+    fn execute<T: Into<Params>>(&'a mut self, params: T) -> MyResult<Self::QueryResult>;
+    fn first_exec<T: Into<Params>>(&'a mut self, params: T) -> MyResult<Option<Self::Row>>;
+}
+
+/// A trait allowing to mock query result.
+pub trait GenericQueryResult {
+    fn affected_rows(&self) -> u64;
+    fn last_insert_id(&self) -> u64;
+    fn warnings(&self) -> u16;
+    fn info(&self) -> Vec<u8>;
+    fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize>;
+    fn column_indexes(&self) -> HashMap<String, usize, BldHshrDflt<FnvHasher>>;
+    fn columns_ref(&self) -> &[Column];
+    fn more_results_exists(&self) -> bool;
+}
+
+/// A trait allowing to mock row.
+pub trait GenericRow {
+    fn len(&self) -> usize;
+    fn as_ref(&self, index: usize) -> Option<&Value>;
+    fn get<T, I>(&mut self, index: I) -> Option<T>
+        where I: ColumnIndex, T: FromValue;
+    fn get_opt<T, I>(&mut self, index: I) -> Option<Result<T, FromValueError>>
+        where I: ColumnIndex, T: FromValue;
+    fn take<T, I>(&mut self, index: I) -> Option<T>
+        where I: ColumnIndex, T: FromValue;
+    fn take_opt<T, I>(&mut self, index: I) -> Option<Result<T, FromValueError>>
+        where I: ColumnIndex, T: FromValue;
+    fn unwrap(self) -> Vec<Value>;
+}
+
+impl GenericRow for Row {
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn as_ref(&self, index: usize) -> Option<&Value> {
+        self.as_ref(index)
+    }
+
+    fn get<T, I>(&mut self, index: I) -> Option<T>
+        where I: ColumnIndex, T: FromValue
+    {
+        self.get(index)
+    }
+
+    fn get_opt<T, I>(&mut self, index: I) -> Option<Result<T, FromValueError>>
+        where I: ColumnIndex, T: FromValue
+    {
+        self.get_opt(index)
+    }
+
+    fn take<T, I>(&mut self, index: I) -> Option<T>
+        where I: ColumnIndex, T: FromValue
+    {
+        self.take(index)
+    }
+
+    fn take_opt<T, I>(&mut self, index: I) -> Option<Result<T, FromValueError>>
+        where I: ColumnIndex, T: FromValue
+    {
+        self.take_opt(index)
+    }
+
+    fn unwrap(self) -> Vec<Value> {
+        self.unwrap()
+    }
+}
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum IsolationLevel {
@@ -200,25 +282,29 @@ impl<'a> Transaction<'a> {
     }
 }
 
-impl<'a> GenericConnection for Transaction<'a> {
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+impl<'a> GenericConnection<'a> for Transaction<'a> {
+    type QueryResult = QueryResult<'a>;
+    type Stmt = Stmt<'a>;
+    type Row = Row;
+
+    fn query<T: AsRef<str>>(&'a mut self, query: T) -> MyResult<Self::QueryResult> {
         self.query(query)
     }
 
-    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Self::Row>> {
         self.first(query)
     }
 
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+    fn prepare<T: AsRef<str>>(&'a mut self, query: T) -> MyResult<Self::Stmt> {
         self.prepare(query)
     }
 
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    fn prep_exec<A, T>(&'a mut self, query: A, params: T) -> MyResult<Self::QueryResult>
         where A: AsRef<str>, T: Into<Params> {
         self.prep_exec(query, params)
     }
 
-    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Self::Row>>
         where Q: AsRef<str>, P: Into<Params> {
         self.first_exec(query, params)
     }
@@ -413,6 +499,31 @@ impl<'a> Stmt<'a> {
     fn prep_exec<T: Into<Params>>(mut self, params: T) -> MyResult<QueryResult<'a>> {
         let columns = self.conn._execute(&self.stmt, params.into())?;
         Ok(QueryResult::new(ResultConnRef::ViaStmt(self), columns, true))
+    }
+}
+
+impl<'a> GenericStmt<'a> for Stmt<'a> {
+    type QueryResult = QueryResult<'a>;
+    type Row = Row;
+
+    fn params_ref(&self) -> Option<&[Column]> {
+        self.params_ref()
+    }
+
+    fn columns_ref(&self) -> Option<&[Column]> {
+        self.columns_ref()
+    }
+
+    fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize> {
+        self.column_index(name)
+    }
+
+    fn execute<T: Into<Params>>(&'a mut self, params: T) -> MyResult<Self::QueryResult> {
+        self.execute(params)
+    }
+
+    fn first_exec<T: Into<Params>>(&'a mut self, params: T) -> MyResult<Option<Self::Row>> {
+        self.first_exec(params)
     }
 }
 
@@ -1491,25 +1602,29 @@ impl Conn {
     }
 }
 
-impl GenericConnection for Conn {
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+impl<'a> GenericConnection<'a> for Conn {
+    type QueryResult = QueryResult<'a>;
+    type Stmt = Stmt<'a>;
+    type Row = Row;
+
+    fn query<T: AsRef<str>>(&'a mut self, query: T) -> MyResult<Self::QueryResult> {
         self.query(query)
     }
 
-    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Self::Row>> {
         self.first(query)
     }
 
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+    fn prepare<T: AsRef<str>>(&'a mut self, query: T) -> MyResult<Self::Stmt> {
         self.prepare(query)
     }
 
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    fn prep_exec<A, T>(&'a mut self, query: A, params: T) -> MyResult<Self::QueryResult>
         where A: AsRef<str>, T: Into<Params> {
         self.prep_exec(query, params)
     }
 
-    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Self::Row>>
         where Q: AsRef<str>, P: Into<Params> {
         self.first_exec(query, params)
     }
@@ -1735,6 +1850,40 @@ impl<'a> Iterator for QueryResult<'a> {
             },
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+impl<'a> GenericQueryResult for QueryResult<'a> {
+    fn affected_rows(&self) -> u64 {
+        self.affected_rows()
+    }
+
+    fn last_insert_id(&self) -> u64 {
+        self.last_insert_id()
+    }
+
+    fn warnings(&self) -> u16 {
+        self.warnings()
+    }
+
+    fn info(&self) -> Vec<u8> {
+        self.info()
+    }
+
+    fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize> {
+        self.column_index(name)
+    }
+
+    fn column_indexes(&self) -> HashMap<String, usize, BldHshrDflt<FnvHasher>> {
+        self.column_indexes()
+    }
+
+    fn columns_ref(&self) -> &[Column] {
+        self.columns_ref()
+    }
+
+    fn more_results_exists(&self) -> bool {
+        self.more_results_exists()
     }
 }
 
