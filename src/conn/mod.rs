@@ -779,7 +779,12 @@ impl Conn {
         }
     }
 
-    #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+    #[cfg(not(feature = "ssl"))]
+    fn switch_to_ssl(&mut self) -> MyResult<()> {
+        unimplemented!();
+    }
+
+    #[cfg(all(feature = "ssl", any(unix, target_os = "macos", target_os = "windows")))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         match self.stream.take() {
             Some(ConnStream::Plain(stream)) => {
@@ -796,11 +801,6 @@ impl Conn {
             None => (),
         }
         Ok(())
-    }
-
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
-    fn switch_to_ssl(&mut self) -> MyResult<()> {
-        unimplemented!();
     }
 
     fn connect_stream(&mut self) -> MyResult<()> {
@@ -2075,7 +2075,11 @@ mod test {
         builder.into()
     }
 
-    #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
+    #[cfg(all(
+        feature = "ssl",
+        not(target_os = "macos"),
+        any(unix, target_os = "windows")
+    ))]
     pub fn get_opts() -> Opts {
         let pwd: String = env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = env::var("MYSQL_SERVER_PORT")
@@ -2099,7 +2103,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
+    #[cfg(not(feature = "ssl"))]
     pub fn get_opts() -> Opts {
         let pwd: String = env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = env::var("MYSQL_SERVER_PORT")
@@ -2556,7 +2560,7 @@ mod test {
         }
 
         #[test]
-        #[cfg(all(feature = "ssl", any(target_os = "macos", unix)))]
+        #[cfg(all(feature = "ssl", any(target_os = "macos", target_os = "windows", unix)))]
         fn should_connect_via_ssl() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);

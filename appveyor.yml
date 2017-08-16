@@ -46,6 +46,8 @@ before_test:
 
     $newText = ([System.IO.File]::ReadAllText($iniPath)).Replace("# enable-named-pipe", "enable-named-pipe")
 
+    $newText = $newText + "`nssl-ca=c:/clone/tests/ca-cert.pem`nssl-cert=c:/clone/tests/server-cert.pem`nssl-key=c:/clone/tests/server-key.pem"
+
     [System.IO.File]::WriteAllText($iniPath, $newText)
 
     Restart-Service MySQL57
