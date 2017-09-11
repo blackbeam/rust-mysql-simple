@@ -9,5 +9,5 @@ env:
     - MYSQL_SERVER_PASS=""
     - MYSQL_SERVER_PORT="3306"
 script:
-  - cargo test --no-default-features --features "rustc_serialize"
-  - cargo test --no-default-features --features "ssl"
+  - cat ~travis/.my.cnf
+  - cargo test && cargo test --no-default-features --features "rustc_serialize" && cargo test --no-default-features --features "ssl"
