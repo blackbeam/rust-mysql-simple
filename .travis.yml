@@ -7,4 +7,4 @@ env:
   global:
     - secure: DLtoi131hH5kOKHzpBB0ZoVDjCWwSiHmTeGaS86ZPx+IHYQzZ6Ll4x/e82SBDG8YGRoOiJUYfatju84ew7Tk9RLK/xvULPJ/WNhSwBK/p9pYWmAl1+QFoaYT3VvsnuIzmIoFjAz6jluBAxvZ5L+pgagayC0BM1Kw83dMS6Ef1LY=
 script:
-  - mysql --version && mysql --help && make test
+  - mysql --version && mysqld --verbose --help && make test
