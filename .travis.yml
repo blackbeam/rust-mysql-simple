@@ -9,4 +9,5 @@ env:
     - MYSQL_SERVER_PASS=""
     - MYSQL_SERVER_PORT="3306"
 script:
-  - make test
+  - cargo test --no-default-features --features "rustc_serialize"
+  - cargo test --no-default-features --features "ssl"
