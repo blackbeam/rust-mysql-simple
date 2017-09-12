@@ -11,7 +11,7 @@ env:
     - MYSQL_SERVER_PASS=""
     - MYSQL_SERVER_PORT="3306"
 before_install:
-  - echo '[mysqld]' >> /usr/share/mysql/my-default.cnf
-  - echo 'sql_mode=NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES' >> /usr/share/mysql/my-default.cnf
+  - sudo bash -c "echo '[mysqld]' >> /usr/share/mysql/my-default.cnf"
+  - sudo bash -c "echo 'sql_mode=NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES' >> /usr/share/mysql/my-default.cnf"
 script:
   - make test
