@@ -10,6 +10,7 @@ use time::{Duration, SteadyTime};
 use Params;
 use Row;
 use myc::named_params::parse_named_params;
+use myc::row::convert::{FromRow, from_row};
 use super::IsolationLevel;
 use super::Transaction;
 use super::GenericConnection;
@@ -387,10 +388,10 @@ impl PooledConn {
     }
 
     /// See [`Conn::first`](struct.Conn.html#method.first).
-    pub fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+    pub fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
         self.query(query).and_then(|result| {
             for row in result {
-                return row.map(Some);
+                return row.map(|x| Some(from_row(x)));
             }
             return Ok(None)
         })
@@ -410,13 +411,14 @@ impl PooledConn {
     }
 
     /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
-    pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    pub fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
     where Q: AsRef<str>,
           P: Into<Params>,
+          T: FromRow
     {
         self.prep_exec(query, params).and_then(|result| {
             for row in result {
-                return row.map(Some);
+                return row.map(|x| Some(from_row(x)));
             }
             return Ok(None)
         })
@@ -491,7 +493,7 @@ impl GenericConnection for PooledConn {
         self.query(query)
     }
 
-    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+    fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
         self.first(query)
     }
 
@@ -504,8 +506,8 @@ impl GenericConnection for PooledConn {
         self.prep_exec(query, params)
     }
 
-    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
-        where Q: AsRef<str>, P: Into<Params> {
+    fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
+        where Q: AsRef<str>, P: Into<Params>, T: FromRow {
         self.first_exec(query, params)
     }
 }
