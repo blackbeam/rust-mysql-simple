@@ -8,7 +8,7 @@ Mysql client library implemented in rust. Feel free to open a new issues and pul
 Available [here](https://github.com/blackbeam/rust-mysql-simple/releases)
 
 ### Documentation
-Latest crate API docs hosted [here](http://blackbeam.org/doc/mysql/index.html).
+Latest crate API docs hosted on [docs.rs](https://docs.rs/crate/mysql).
 
 ### Installation
 Please use [crates.io](https://crates.io/crates/mysql)
@@ -31,8 +31,8 @@ features = ["ssl"]
 
 ### JSON Support
 
-rust-mysql-simple offers JSON support based on *serde*, but you can switch to *rustc-serialize* using `rustc-serialize`
-feature:
+rust-mysql-simple offers [JSON](https://dev.mysql.com/doc/refman/5.7/en/json.html) support
+based on *serde*, but you can switch to *rustc-serialize* using `rustc-serialize` feature:
 
 ```toml
 [dependencies.mysql]
