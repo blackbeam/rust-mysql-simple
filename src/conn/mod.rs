@@ -19,9 +19,7 @@ use std::ops::{
 use std::path;
 use std::sync::{Arc, Mutex};
 
-use super::consts;
-use super::consts::Command;
-use super::consts::ColumnType;
+use super::consts::{CapabilityFlags, Command, ColumnType, StatusFlags, MAX_PAYLOAD_LEN, UTF8_GENERAL_CI, UTF8MB4_GENERAL_CI};
 use super::io::Read as MyRead;
 use super::io::Write;
 use super::io::Stream;
@@ -55,6 +53,7 @@ use fnv::FnvHasher;
 use myc::packets::{Column, HandshakePacket, OkPacket, column_from_payload, parse_handshake_packet,
                    parse_err_packet, parse_ok_packet};
 use myc::row::new_row;
+use myc::row::convert::{from_row, FromRow};
 use myc::value::{read_bin_values, read_text_values, serialize_bin_many};
 
 pub mod pool;
@@ -74,7 +73,7 @@ pub trait GenericConnection {
 
     /// See
     /// [`Conn#first`](struct.Conn.html#method.first).
-    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>>;
+    fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>>;
 
     /// See
     /// [`Conn#prepare`](struct.Conn.html#method.prepare).
@@ -87,8 +86,8 @@ pub trait GenericConnection {
 
     /// See
     /// [`Conn#first_exec`](struct.Conn.html#method.first_exec).
-    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
-        where Q: AsRef<str>, P: Into<Params>;
+    fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
+        where Q: AsRef<str>, P: Into<Params>, T: FromRow;
 }
 
 
@@ -146,10 +145,10 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`Conn::first`](struct.Conn.html#method.first).
-    pub fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+    pub fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
         self.query(query).and_then(|result| {
             for row in result {
-                return row.map(Some);
+                return row.map(|x| Some(from_row(x)));
             }
             return Ok(None)
         })
@@ -166,13 +165,14 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
-    pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    pub fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
     where Q: AsRef<str>,
           P: Into<Params>,
+          T: FromRow
     {
         self.prep_exec(query, params).and_then(|result| {
             for row in result {
-                return row.map(Some);
+                return row.map(|x| Some(from_row(x)));
             }
             return Ok(None)
         })
@@ -205,7 +205,7 @@ impl<'a> GenericConnection for Transaction<'a> {
         self.query(query)
     }
 
-    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+    fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
         self.first(query)
     }
 
@@ -218,8 +218,8 @@ impl<'a> GenericConnection for Transaction<'a> {
         self.prep_exec(query, params)
     }
 
-    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
-        where Q: AsRef<str>, P: Into<Params> {
+    fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
+        where Q: AsRef<str>, P: Into<Params>, T: FromRow {
         self.first_exec(query, params)
     }
 }
@@ -399,12 +399,13 @@ impl<'a> Stmt<'a> {
     }
 
     /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
-    pub fn first_exec<P>(&mut self, params: P) -> MyResult<Option<Row>>
+    pub fn first_exec<P, T>(&mut self, params: P) -> MyResult<Option<T>>
     where P: Into<Params>,
+          T: FromRow,
     {
         self.execute(params).and_then(|result| {
             for row in result {
-                return row.map(Some);
+                return row.map(|x| Some(from_row(x)));
             }
             return Ok(None)
         })
@@ -568,9 +569,9 @@ pub struct Conn {
     warnings: u16,
     info: Option<Vec<u8>>,
     max_allowed_packet: usize,
-    capability_flags: consts::CapabilityFlags,
+    capability_flags: CapabilityFlags,
     connection_id: u32,
-    status_flags: consts::StatusFlags,
+    status_flags: StatusFlags,
     seq_id: u8,
     character_set: u8,
     last_command: u8,
@@ -587,8 +588,8 @@ impl Conn {
             opts: opts,
             stream: None,
             seq_id: 0u8,
-            capability_flags: consts::CapabilityFlags::empty(),
-            status_flags: consts::StatusFlags::empty(),
+            capability_flags: CapabilityFlags::empty(),
+            status_flags: StatusFlags::empty(),
             connection_id: 0u32,
             character_set: 0u8,
             affected_rows: 0u64,
@@ -596,7 +597,7 @@ impl Conn {
             warnings: 0,
             info: None,
             last_command: 0u8,
-            max_allowed_packet: consts::MAX_PAYLOAD_LEN,
+            max_allowed_packet: MAX_PAYLOAD_LEN,
             connected: false,
             has_results: false,
             server_version: None,
@@ -667,8 +668,8 @@ impl Conn {
         self.stream = None;
         self.stmt_cache.clear();
         self.seq_id = 0;
-        self.capability_flags = consts::CapabilityFlags::empty();
-        self.status_flags = consts::StatusFlags::empty();
+        self.capability_flags = CapabilityFlags::empty();
+        self.status_flags = StatusFlags::empty();
         self.connection_id = 0;
         self.character_set = 0;
         self.affected_rows = 0;
@@ -676,7 +677,7 @@ impl Conn {
         self.warnings = 0;
         self.info = None;
         self.last_command = 0;
-        self.max_allowed_packet = consts::MAX_PAYLOAD_LEN;
+        self.max_allowed_packet = MAX_PAYLOAD_LEN;
         self.connected = false;
         self.has_results = false;
         self.connect_stream()?;
@@ -792,13 +793,13 @@ impl Conn {
                     if handshake.protocol_version() != 10u8 {
                         return Err(DriverError(UnsupportedProtocol(handshake.protocol_version())));
                     }
-                    if !handshake.capabilities().contains(consts::CLIENT_PROTOCOL_41) {
+                    if !handshake.capabilities().contains(CapabilityFlags::CLIENT_PROTOCOL_41) {
                         return Err(DriverError(Protocol41NotSet));
                     }
                     self.handle_handshake(&handshake);
                     if self.opts.get_ssl_opts().is_some() && self.stream.is_some() {
                         if self.stream.as_ref().unwrap().is_insecure() {
-                            if !handshake.capabilities().contains(consts::CLIENT_SSL) {
+                            if !handshake.capabilities().contains(CapabilityFlags::CLIENT_SSL) {
                                 return Err(DriverError(SslNotSupported));
                             } else {
                                 self.do_ssl_request()?;
@@ -828,24 +829,24 @@ impl Conn {
         })
     }
 
-    fn get_client_flags(&self) -> consts::CapabilityFlags {
-        let mut client_flags = consts::CLIENT_PROTOCOL_41 |
-                               consts::CLIENT_SECURE_CONNECTION |
-                               consts::CLIENT_LONG_PASSWORD |
-                               consts::CLIENT_TRANSACTIONS |
-                               consts::CLIENT_LOCAL_FILES |
-                               consts::CLIENT_MULTI_STATEMENTS |
-                               consts::CLIENT_MULTI_RESULTS |
-                               consts::CLIENT_PS_MULTI_RESULTS |
-                               (self.capability_flags & consts::CLIENT_LONG_FLAG);
+    fn get_client_flags(&self) -> CapabilityFlags {
+        let mut client_flags = CapabilityFlags::CLIENT_PROTOCOL_41 |
+            CapabilityFlags::CLIENT_SECURE_CONNECTION |
+            CapabilityFlags::CLIENT_LONG_PASSWORD |
+            CapabilityFlags::CLIENT_TRANSACTIONS |
+            CapabilityFlags::CLIENT_LOCAL_FILES |
+            CapabilityFlags::CLIENT_MULTI_STATEMENTS |
+            CapabilityFlags::CLIENT_MULTI_RESULTS |
+            CapabilityFlags::CLIENT_PS_MULTI_RESULTS |
+                               (self.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
         if let &Some(ref db_name) = self.opts.get_db_name() {
             if db_name.len() > 0 {
-                client_flags.insert(consts::CLIENT_CONNECT_WITH_DB);
+                client_flags.insert(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
             }
         }
         if self.stream.is_some() && self.stream.as_ref().unwrap().is_insecure() {
             if self.opts.get_ssl_opts().is_some() {
-                client_flags.insert(consts::CLIENT_SSL);
+                client_flags.insert(CapabilityFlags::CLIENT_SSL);
             }
         }
         client_flags
@@ -853,8 +854,8 @@ impl Conn {
 
     fn get_default_collation(&self) -> u8 {
         match self.server_version {
-            Some(ref version) if *version > (5, 5, 3) => consts::UTF8MB4_GENERAL_CI as u8,
-            _ => consts::UTF8_GENERAL_CI as u8,
+            Some(ref version) if *version > (5, 5, 3) => UTF8MB4_GENERAL_CI as u8,
+            _ => UTF8_GENERAL_CI as u8,
         }
     }
 
@@ -911,13 +912,13 @@ impl Conn {
         self.write_packet(&*buf)
     }
 
-    fn write_command(&mut self, cmd: consts::Command) -> MyResult<()> {
+    fn write_command(&mut self, cmd: Command) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd as u8;
         self.write_packet(&[cmd as u8])
     }
 
-    fn write_command_data(&mut self, cmd: consts::Command, data: &[u8]) -> MyResult<()> {
+    fn write_command_data(&mut self, cmd: Command, data: &[u8]) -> MyResult<()> {
         self.seq_id = 0u8;
         self.last_command = cmd as u8;
         let mut buf = vec![0u8; data.len() + 1];
@@ -934,8 +935,8 @@ impl Conn {
             if bit {
                 match params[i as usize] {
                     Bytes(ref x) => {
-                        for chunk in x.chunks(self.max_allowed_packet - 7) {
-                            let chunk_len = chunk.len() + 7;
+                        for chunk in x.chunks(MAX_PAYLOAD_LEN - 6) {
+                            let chunk_len = chunk.len() + 6;
                             let mut buf = vec![0u8; chunk_len];
                             {
                                 let mut writer = &mut *buf;
@@ -976,7 +977,7 @@ impl Conn {
                 }
                 if let Some(sparams) = stmt.params() {
                     let (serialized, null_bitmap, large_bitmap) =
-                        serialize_bin_many(sparams, &params, self.max_allowed_packet)?;
+                        serialize_bin_many(sparams, &params)?;
 
                     if large_bitmap.any() {
                         self.send_long_data(stmt, &params, large_bitmap)?;
@@ -1078,7 +1079,7 @@ impl Conn {
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()> {
         {
-            let buffer_size = cmp::min(consts::MAX_PAYLOAD_LEN - 1, self.max_allowed_packet - 1);
+            let buffer_size = cmp::min(MAX_PAYLOAD_LEN - 1, self.max_allowed_packet - 1);
             let chunk = vec![0u8; buffer_size].into_boxed_slice();
             let maybe_handler = self.local_infile_handler.clone().or_else(|| {
                 self.opts.get_local_infile_handler().clone()
@@ -1091,7 +1092,7 @@ impl Conn {
                 // Unwrap won't panic because we have exclusive access to `self` and this
                 // method is not re-entrant, because `LocalInfile` does not expose the
                 // connection.
-                let mut handler_fn = &mut *handler.0.lock().unwrap();
+                let handler_fn = &mut *handler.0.lock().unwrap();
                 handler_fn(file_name, &mut local_infile)?;
             } else {
                 let path = String::from_utf8_lossy(file_name);
@@ -1188,10 +1189,10 @@ impl Conn {
     }
 
     /// Performs query and returns first row.
-    pub fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+    pub fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
         self.query(query).and_then(|result| {
             for row in result {
-                return row.map(Some);
+                return row.map(|x| Some(from_row(x)));
             }
             return Ok(None)
         })
@@ -1361,13 +1362,14 @@ impl Conn {
     }
 
     /// Executes statement and returns first row.
-    pub fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
+    pub fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
     where Q: AsRef<str>,
           P: Into<Params>,
+          T: FromRow
     {
         self.prep_exec(query, params).and_then(|result| {
             for row in result {
-                return row.map(Some);
+                return row.map(|x| Some(from_row(x)));
             }
             return Ok(None)
         })
@@ -1487,7 +1489,7 @@ impl Conn {
     }
 
     pub fn no_backslash_escape(&self) -> bool {
-        self.status_flags.contains(consts::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
+        self.status_flags.contains(StatusFlags::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
     }
 }
 
@@ -1496,7 +1498,7 @@ impl GenericConnection for Conn {
         self.query(query)
     }
 
-    fn first<T: AsRef<str>>(&mut self, query: T) -> MyResult<Option<Row>> {
+    fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
         self.first(query)
     }
 
@@ -1509,8 +1511,8 @@ impl GenericConnection for Conn {
         self.prep_exec(query, params)
     }
 
-    fn first_exec<Q, P>(&mut self, query: Q, params: P) -> MyResult<Option<Row>>
-        where Q: AsRef<str>, P: Into<Params> {
+    fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
+        where Q: AsRef<str>, P: Into<Params>, T: FromRow {
         self.first_exec(query, params)
     }
 }
@@ -1626,7 +1628,7 @@ impl<'a> QueryResult<'a> {
     }
 
     fn handle_if_more_results(&mut self) -> Option<MyResult<Row>> {
-        if self.conn.status_flags.contains(consts::SERVER_MORE_RESULTS_EXISTS) {
+        if self.conn.status_flags.contains(StatusFlags::SERVER_MORE_RESULTS_EXISTS) {
             match self.conn.handle_result_set() {
                 Ok(cols) => {
                     self.columns = Arc::new(cols);
