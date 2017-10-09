@@ -42,5 +42,3 @@ features = ["rustc-serialize"]
 
 ### Windows support (since 0.18.0)
 Windows is supported but currently rust-mysql-simple has no support of SSL on Windows.
-
-[Simple example](http://blackbeam.org/doc/mysql/index.html#example)
