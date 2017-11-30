@@ -9,6 +9,7 @@ documentation = "https://docs.rs/mysql"
 repository = "https://github.com/blackbeam/rust-mysql-simple"
 keywords = ["database", "sql"]
 exclude = ["tests/*", ".*", "Makefile"]
+categories = ["database"]
 
 [lib]
 
