@@ -1052,10 +1052,10 @@ impl Conn {
         }
         if let Some(readonly) = readonly {
             let supported = match (self.server_version, self.mariadb_server_version) {
-                (Some(ref version), _) if *version < (5, 6, 5) => {
+                (Some(ref version), _) if *version >= (5, 6, 5) => {
                     true
                 }
-                (_, Some(ref version)) if *version < (10, 0, 0) => {
+                (_, Some(ref version)) if *version >= (10, 0, 0) => {
                     true
                 }
                 _ => false,
