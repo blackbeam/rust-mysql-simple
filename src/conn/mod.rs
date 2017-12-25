@@ -849,6 +849,9 @@ impl Conn {
                 client_flags.insert(CapabilityFlags::CLIENT_SSL);
             }
         }
+        if self.opts.get_compress() {
+            client_flags.insert(CapabilityFlags::CLIENT_COMPRESS);
+        }
         client_flags
     }
 

@@ -99,6 +99,9 @@ pub struct Opts {
 
     /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
     stmt_cache_size: usize,
+
+    /// Use compression protocol
+    compress: bool,
 }
 
 impl Opts {
@@ -187,12 +190,20 @@ impl Opts {
         &self.ssl_opts
     }
 
+    pub fn get_compress(&self) -> bool {
+        self.compress
+    }
+
     fn set_prefer_socket(&mut self, val: bool) {
         self.prefer_socket = val;
     }
 
     fn set_verify_peer(&mut self, val: bool) {
         self.verify_peer = val;
+    }
+
+    fn set_compress(&mut self, val: bool) {
+        self.compress = val;
     }
 
     /// TCP keep alive time for mysql connection.
@@ -244,6 +255,7 @@ impl Default for Opts {
             tcp_connect_timeout: None,
             bind_address: None,
             stmt_cache_size: 10,
+            compress: false,
         }
     }
 }
@@ -361,6 +373,11 @@ impl OptsBuilder {
     /// Only make sense if ssl_opts is not None.
     pub fn verify_peer(&mut self, verify_peer: bool) -> &mut Self {
         self.opts.verify_peer = verify_peer;
+        self
+    }
+
+    pub fn compress(&mut self, compress: bool) -> &mut Self {
+        self.opts.compress = compress;
         self
     }
 
@@ -567,6 +584,14 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
                 _ => {
                     return Err(UrlError::InvalidValue("stmt_cache_size".into(), value));
                 }
+            }
+        } else if key == "compress" {
+            if value == "true" {
+                opts.set_compress(true);
+            } else if value == "false" {
+                opts.set_compress(false);
+            } else {
+                return Err(UrlError::InvalidValue("compress".into(), value));
             }
         } else {
             return Err(UrlError::UnknownParameter(key));
