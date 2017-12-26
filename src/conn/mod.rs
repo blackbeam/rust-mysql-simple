@@ -935,14 +935,24 @@ impl Conn {
             if bit {
                 match params[i as usize] {
                     Bytes(ref x) => {
-                        for chunk in x.chunks(MAX_PAYLOAD_LEN - 6) {
-                            let chunk_len = chunk.len() + 6;
-                            let mut buf = vec![0u8; chunk_len];
+                        if x.len() > 0 {
+                            for chunk in x.chunks(MAX_PAYLOAD_LEN - 6) {
+                                let chunk_len = chunk.len() + 6;
+                                let mut buf = vec![0u8; chunk_len];
+                                {
+                                    let mut writer = &mut *buf;
+                                    writer.write_u32::<LE>(stmt.id())?;
+                                    writer.write_u16::<LE>(i as u16)?;
+                                    writer.write_all(chunk)?;
+                                }
+                                self.write_command_data(Command::COM_STMT_SEND_LONG_DATA, &*buf)?;
+                            }
+                        } else {
+                            let mut buf = vec![0u8; 6];
                             {
                                 let mut writer = &mut *buf;
                                 writer.write_u32::<LE>(stmt.id())?;
                                 writer.write_u16::<LE>(i as u16)?;
-                                writer.write_all(chunk)?;
                             }
                             self.write_command_data(Command::COM_STMT_SEND_LONG_DATA, &*buf)?;
                         }
@@ -1943,13 +1953,13 @@ mod test {
                               tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now() };
                 let hello = b"hello".to_vec();
                 assert!(stmt.execute((&hello, -123, 123, tm.to_timespec(), 123.123f64)).is_ok());
-                assert!(stmt.execute(&[
-                    &b"world".to_vec() as &ToValue,
+                stmt.execute(&[
+                    &b"".to_vec() as &ToValue,
                     &NULL as &ToValue,
                     &NULL as &ToValue,
                     &NULL as &ToValue,
                     &321.321f64 as &ToValue
-                ][..]).is_ok());
+                ][..]).unwrap();
                 Ok(())
             }).unwrap();
             let _ = conn.prepare("SELECT * from x.tbl").and_then(|mut stmt| {
@@ -1962,7 +1972,7 @@ mod test {
                         assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
                         assert_eq!(row.take::<f64, _>(4).unwrap(), 123.123f64);
                     } else if i == 1 {
-                        assert_eq!(row[0], Bytes(b"world".to_vec()));
+                        assert_eq!(row[0], Bytes(b"".to_vec()));
                         assert_eq!(row[1], NULL);
                         assert_eq!(row[2], NULL);
                         assert_eq!(row[3], NULL);
