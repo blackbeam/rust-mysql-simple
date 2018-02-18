@@ -1,17 +1,14 @@
 use packet::InnerStmt;
 use std::borrow::Borrow;
-use std::collections::{HashMap, VecDeque};
-use std::collections::hash_map::IntoIter;
-#[cfg(test)]
-use std::collections::vec_deque::Iter;
+use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hash};
 use twox_hash::XxHash;
 
 #[derive(Debug)]
 pub struct StmtCache {
     cap: usize,
-    map: HashMap<String, InnerStmt, BuildHasherDefault<XxHash>>,
-    order: VecDeque<String>,
+    map: HashMap<String, (u64, InnerStmt), BuildHasherDefault<XxHash>>,
+    iter: u64,
 }
 
 impl StmtCache {
@@ -19,7 +16,7 @@ impl StmtCache {
         StmtCache {
             cap,
             map: Default::default(),
-            order: VecDeque::with_capacity(cap),
+            iter: 0,
         }
     }
 
@@ -37,40 +34,47 @@ impl StmtCache {
               T: Hash + Eq,
               T: ?Sized
     {
-        if self.map.contains_key(key) {
-            if let Some(pos) = self.order.iter().position(|x| x == key) {
-                if let Some(inner_st) = self.order.remove(pos) {
-                    self.order.push_back(inner_st);
-                }
-            }
-            self.map.get(key)
+        if let Some(&mut (ref mut last, ref st)) = self.map.get_mut(key) {
+            *last = self.iter;
+            self.iter += 1;
+            Some(st)
         } else {
             None
         }
     }
 
     pub fn put(&mut self, key: String, value: InnerStmt) -> Option<InnerStmt> {
-        self.map.insert(key.clone(), value);
-        self.order.push_back(key);
-        if self.order.len() > self.cap {
-            self.order.pop_front().and_then(|stmt| self.map.remove(&stmt))
-        } else {
-            None
+        if self.cap == 0 {
+            return None;
         }
+
+        self.map.insert(key, (self.iter, value));
+        self.iter += 1;
+
+        if self.map.len() > self.cap {
+            if let Some(evict) = self.map
+                .iter()
+                .map(|(key, &(last, _))| (last, key))
+                .min()
+                .map(|(_, key)| key.to_string())
+            {
+                return self.map.remove(&evict).map(|(_, st)| st);
+            }
+        }
+        None
     }
 
     pub fn clear(&mut self) {
         self.map.clear();
-        self.order.clear();
     }
 
     #[cfg(test)]
-    pub fn iter<'a>(&'a self) -> Iter<'a, String> {
-        self.order.iter()
+    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = &'a String> + 'a> {
+        Box::new(self.map.keys())
     }
 
-    pub fn into_iter(self) -> IntoIter<String, InnerStmt> {
-        self.map.into_iter()
+    pub fn into_iter(self) -> Box<Iterator<Item = (String, InnerStmt)>> {
+        Box::new(self.map.into_iter().map(|(k, (_, v))| (k, v)))
     }
 
     pub fn get_cap(&self) -> usize {
