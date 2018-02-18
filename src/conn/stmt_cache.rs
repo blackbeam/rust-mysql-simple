@@ -69,8 +69,8 @@ impl StmtCache {
     }
 
     #[cfg(test)]
-    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = &'a String> + 'a> {
-        Box::new(self.map.keys())
+    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (&'a String, u64)> + 'a> {
+        Box::new(self.map.iter().map(|(stmt, &(i, _))| (stmt, i)))
     }
 
     pub fn into_iter(self) -> Box<Iterator<Item = (String, InnerStmt)>> {

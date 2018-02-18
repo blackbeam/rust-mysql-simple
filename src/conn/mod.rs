@@ -2304,8 +2304,12 @@ mod test {
             conn.prepare("DO 6").unwrap();
             let row = conn.first("SHOW SESSION STATUS LIKE 'Com_stmt_close';").unwrap().unwrap();
             assert_eq!(from_row::<(String, usize)>(row).1, 3);
-            let order = conn.stmt_cache.iter().collect::<Vec<&String>>();
-            assert_eq!(order, &["DO 3", "DO 5", "DO 6"]);
+            let mut order = conn.stmt_cache
+                .iter()
+                .map(|(stmt, i)| (stmt.as_ref(), i))
+                .collect::<Vec<(&str, u64)>>();
+            order.sort();
+            assert_eq!(order, &[("DO 3", 5), ("DO 5", 6), ("DO 6", 7)]);
         }
 
         #[test]
