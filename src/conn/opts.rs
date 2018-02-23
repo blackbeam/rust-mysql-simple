@@ -64,6 +64,12 @@ pub struct Opts {
     /// connection to `127.0.0.1` if `true`.
     prefer_socket: bool,
 
+    /// Whether to enable `TCP_NODELAY` (defaults to `true`).
+    ///
+    /// This option disables Nagle's algorithm, which can cause unusually high latency (~40ms) at
+    /// some cost to maximum throughput. See #132.
+    tcp_nodelay: bool,
+
     /// TCP keep alive time for mysql connection.
     tcp_keepalive_time: Option<u32>,
 
@@ -195,6 +201,11 @@ impl Opts {
         self.verify_peer = val;
     }
 
+    /// Whether `TCP_NODELAY` will be set for mysql connection.
+    pub fn get_tcp_nodelay(&self) -> bool {
+        self.tcp_nodelay
+    }
+
     /// TCP keep alive time for mysql connection.
     pub fn get_tcp_keepalive_time_ms(&self) -> Option<u32> {
         self.tcp_keepalive_time
@@ -240,6 +251,7 @@ impl Default for Opts {
             verify_peer: false,
             ssl_opts: None,
             tcp_keepalive_time: None,
+            tcp_nodelay: true,
             local_infile_handler: None,
             tcp_connect_timeout: None,
             bind_address: None,
@@ -335,6 +347,15 @@ impl OptsBuilder {
     /// `tcp_keepalive_time_ms` url parameter.
     pub fn tcp_keepalive_time_ms(&mut self, tcp_keepalive_time_ms: Option<u32>) -> &mut Self {
         self.opts.tcp_keepalive_time = tcp_keepalive_time_ms;
+        self
+    }
+
+    /// Set the `TCP_NODELAY` option for the mysql connection (defaults to `true`).
+    ///
+    /// Setting this option to false re-enables Nagle's algorithm, which can cause unusually high
+    /// latency (~40ms) but may increase maximum throughput. See #132.
+    pub fn tcp_nodelay(&mut self, nodelay: bool) -> &mut Self {
+        self.opts.tcp_nodelay = nodelay;
         self
     }
 

@@ -384,6 +384,7 @@ impl Stream {
                        read_timeout: Option<Duration>,
                        write_timeout: Option<Duration>,
                        tcp_keepalive_time: Option<u32>,
+                       nodelay: bool,
                        tcp_connect_timeout: Option<Duration>,
                        bind_address: Option<SocketAddr>) -> MyResult<Stream>
     {
@@ -393,6 +394,7 @@ impl Stream {
             .read_timeout(read_timeout)
             .write_timeout(write_timeout)
             .keepalive_time_ms(tcp_keepalive_time)
+            .nodelay(nodelay)
             .bind_address(bind_address);
         builder.connect()
             .map(|stream| Stream::TcpStream(Some(TcpStream::Insecure(BufStream::new(stream)))))

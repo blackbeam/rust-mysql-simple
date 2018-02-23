@@ -31,11 +31,17 @@ pub struct MyTcpBuilder<T> {
     read_timeout: Option<Duration>,
     write_timeout: Option<Duration>,
     keepalive_time_ms: Option<u32>,
+    nodelay: bool,
 }
 
 impl<T: ToSocketAddrs> MyTcpBuilder<T> {
     pub fn keepalive_time_ms(&mut self, keepalive_time_ms: Option<u32>) -> &mut Self {
         self.keepalive_time_ms = keepalive_time_ms;
+        self
+    }
+
+    pub fn nodelay(&mut self, nodelay: bool) -> &mut Self {
+        self.nodelay = nodelay;
         self
     }
 
@@ -69,6 +75,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             read_timeout: None,
             write_timeout: None,
             keepalive_time_ms: None,
+            nodelay: true,
         }
     }
 
@@ -80,6 +87,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             read_timeout,
             write_timeout,
             keepalive_time_ms,
+            nodelay,
         } = self;
         let err_msg = if bind_address.is_none() {
             "could not connect to any address"
@@ -115,6 +123,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
                 stream.set_read_timeout(read_timeout)?;
                 stream.set_write_timeout(write_timeout)?;
                 stream.set_keepalive_ms(keepalive_time_ms)?;
+                stream.set_nodelay(nodelay)?;
                 Ok(stream)
             })
     }
