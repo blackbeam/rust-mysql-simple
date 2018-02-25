@@ -722,6 +722,7 @@ impl Conn {
         let read_timeout = self.opts.get_read_timeout().clone();
         let write_timeout = self.opts.get_write_timeout().clone();
         let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms().clone();
+        let tcp_nodelay = self.opts.get_tcp_nodelay();
         let tcp_connect_timeout = self.opts.get_tcp_connect_timeout();
         let bind_address = self.opts.bind_address().cloned();
         let stream = if let Some(ref socket) = *self.opts.get_socket() {
@@ -733,6 +734,7 @@ impl Conn {
                                 read_timeout,
                                 write_timeout,
                                 tcp_keepalive_time,
+                                tcp_nodelay,
                                 tcp_connect_timeout,
                                 bind_address)?
         } else {
