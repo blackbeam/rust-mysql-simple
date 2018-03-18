@@ -207,13 +207,27 @@ macro_rules! params {
         $vec.push(params!(@to_pair $name));
         params!(@expand $vec; $($tail)*);
     };
-    ($($tail:tt)*) => {
+    ($i:ident, $($tail:tt)*) => {
         {
-            let mut output = vec![];
-            params!(@expand output; $($tail)*);
+            let mut output = ::std::vec::Vec::new();
+            params!(@expand output; $i, $($tail)*);
             output
         }
     };
+    ($i:expr => $($tail:tt)*) => {
+        {
+            let mut output = ::std::vec::Vec::new();
+            params!(@expand output; $i => $($tail)*);
+            output
+        }
+    };
+    ($i:ident) => {
+        {
+            let mut output = ::std::vec::Vec::new();
+            params!(@expand output; $i);
+            output
+        }
+    }
 }
 
 mod scramble;
