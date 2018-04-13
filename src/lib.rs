@@ -130,7 +130,8 @@
 extern crate test;
 
 extern crate bit_vec;
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 extern crate openssl;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 extern crate security_framework;

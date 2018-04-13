@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::fmt;
 use std::time::Duration;
 
-#[cfg(all(feature = "ssl", not(target_os = "windows")))]
+#[cfg(all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "windows")))]
 use conn::SslOpts;
 
 use Value::{self, NULL, Int, UInt, Float, Bytes, Date, Time};
@@ -20,9 +20,11 @@ use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
 use super::error::Result as MyResult;
 
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 use openssl::x509;
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 use openssl::ssl::{self, SslStream, SslContext};
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::secure_transport::{
@@ -512,7 +514,8 @@ impl Stream {
     }
 }
 
-#[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 impl Stream {
     pub fn make_secure(mut self, verify_peer: bool, _: &Option<String>, ssl_opts: &SslOpts) -> MyResult<Stream>
     {
@@ -572,7 +575,7 @@ impl Drop for Stream {
 }
 
 pub enum TcpStream {
-    #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+    #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
     Secure(BufStream<SslStream<net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
 }
@@ -580,7 +583,7 @@ pub enum TcpStream {
 impl AsMut<IoPack> for TcpStream {
     fn as_mut(&mut self) -> &mut IoPack {
         match *self {
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+            #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
             TcpStream::Secure(ref mut stream) => stream,
             TcpStream::Insecure(ref mut stream) => stream,
         }
@@ -590,7 +593,7 @@ impl AsMut<IoPack> for TcpStream {
 impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+            #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
             TcpStream::Secure(_) => write!(f, "Secure stream"),
             TcpStream::Insecure(ref s) => write!(f, "Insecure stream {:?}", s),
         }

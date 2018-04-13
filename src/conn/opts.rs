@@ -1,5 +1,5 @@
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-#[cfg(all(feature = "ssl", not(target_os = "windows")))]
+#[cfg(all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "windows")))]
 use std::path;
 use std::str::FromStr;
 
@@ -22,15 +22,16 @@ use url::percent_encoding::percent_decode;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 pub type SslOpts = Option<Option<(path::PathBuf, String, Vec<path::PathBuf>)>>;
 
-#[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 /// Ssl options: Option<(pem_ca_cert, Option<(pem_client_cert, pem_client_key)>)>.`
 pub type SslOpts = Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>;
 
-#[cfg(all(feature = "ssl", target_os = "windows"))]
+#[cfg(all(any(feature = "ssl", feature = "open-ssl"), target_os = "windows"))]
 /// Not implemented on Windows
 pub type SslOpts = Option<()>;
 
-#[cfg(not(feature = "ssl"))]
+#[cfg(not(any(feature = "ssl", feature = "open-ssl")))]
 /// Requires `ssl` feature
 pub type SslOpts = Option<()>;
 
@@ -385,7 +386,8 @@ impl OptsBuilder {
         self
     }
 
-    #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
+    #[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+    all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
     /// SSL certificates and keys in pem format.
     ///
     /// If not None, then ssl connection implied.
@@ -420,13 +422,13 @@ impl OptsBuilder {
     }
 
     /// Not implemented on windows
-    #[cfg(all(feature = "ssl", target_os = "windows"))]
+    #[cfg(all(any(feature = "ssl", feature = "open-ssl"), target_os = "windows"))]
     pub fn ssl_opts<A, B, C>(&mut self, _: Option<SslOpts>) -> &mut Self {
         panic!("OptsBuilder::ssl_opts is not implemented on Windows");
     }
 
     /// Requires `ssl` feature
-    #[cfg(not(feature = "ssl"))]
+    #[cfg(not(any(feature = "ssl", feature = "open-ssl")))]
     pub fn ssl_opts<A, B, C>(&mut self, _: Option<SslOpts>) -> &mut Self {
         panic!("OptsBuilder::ssl_opts requires `ssl` feature");
     }
@@ -551,7 +553,7 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
                 return Err(UrlError::InvalidValue("prefer_socket".into(), value));
             }
         } else if key == "verify_peer" {
-            if cfg!(not(feature = "ssl")) {
+            if cfg!(not(any(feature = "ssl", feature = "open-ssl"))) {
                 return Err(UrlError::FeatureRequired("`ssl'".into(), "verify_peer".into()));
             } else {
                 if value == "true" {
@@ -610,7 +612,7 @@ mod test {
     use super::Opts;
 
     #[test]
-    #[cfg(feature = "ssl")]
+    #[cfg(any(feature = "ssl", feature = "open-ssl"))]
     fn should_convert_url_into_opts() {
         let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true&tcp_keepalive_time_ms=5000";
         assert_eq!(Opts {
@@ -627,7 +629,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(not(feature = "ssl"))]
+    #[cfg(not(any(feature = "ssl", feature = "open-ssl")))]
     fn should_convert_url_into_opts() {
         let opts = "mysql://usr:pw@192.168.1.1:3309/dbname";
         assert_eq!(Opts {
@@ -663,7 +665,7 @@ mod test {
 
     #[test]
     #[should_panic]
-    #[cfg(not(feature = "ssl"))]
+    #[cfg(not(any(feature = "ssl", feature = "open-ssl")))]
     fn should_panic_if_verify_peer_query_param_requires_feature() {
         let opts = "mysql://usr:pw@localhost:3308/dbname?verify_peer=false";
         let _: Opts = opts.into();
@@ -671,7 +673,7 @@ mod test {
 
     #[test]
     #[should_panic]
-    #[cfg(feature = "ssl")]
+    #[cfg(any(feature = "ssl", feature = "open-ssl"))]
     fn should_panic_on_invalid_verify_peer_param_value() {
         let opts = "mysql://usr:pw@localhost:3308/dbname?verify_peer=invalid";
         let _: Opts = opts.into();

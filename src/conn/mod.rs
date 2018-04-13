@@ -62,7 +62,7 @@ mod stmt_cache;
 use self::stmt_cache::StmtCache;
 pub use self::opts::Opts;
 pub use self::opts::OptsBuilder;
-#[cfg(feature = "ssl")]
+#[cfg(any(feature = "ssl", feature = "open-ssl"))]
 pub use self::opts::SslOpts;
 
 /// A trait allowing abstraction over connections and transactions
@@ -701,7 +701,7 @@ impl Conn {
         self.stream.as_mut().unwrap()
     }
 
-    #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+    #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         if self.stream.is_some() {
             let stream = self.stream.take().unwrap();
@@ -713,7 +713,7 @@ impl Conn {
         Ok(())
     }
 
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
+    #[cfg(any(not(any(feature = "ssl", feature = "open-ssl")), target_os = "windows"))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
         unimplemented!();
     }
@@ -1802,7 +1802,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
+    #[cfg(any(all(feature = "ssl", not(target_os = "macos"), unix)), all(feature = "open-ssl", target_os = "macos"))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -1819,7 +1819,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
+    #[cfg(any(not(any(feature = "ssl", feature = "open-ssl")), target_os = "windows"))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -2115,7 +2115,7 @@ mod test {
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
             let mut opts = OptsBuilder::from_opts(get_opts());
-            #[cfg(all(feature = "ssl", not(target_os = "windows")))]
+            #[cfg(all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "windows")))]
             opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:#?}", conn);
@@ -2126,7 +2126,7 @@ mod test {
         fn should_connect_via_socket_localhost() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ip_or_hostname(Some("localhost"));
-            #[cfg(all(feature = "ssl", not(target_os = "windows")))]
+            #[cfg(all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "windows")))]
             opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
             let debug_format = format!("{:?}", conn);
@@ -2134,7 +2134,7 @@ mod test {
         }
 
         #[test]
-        #[cfg(all(feature = "ssl", any(target_os = "macos", unix)))]
+        #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(target_os = "macos", unix)))]
         fn should_connect_via_ssl() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
@@ -2254,7 +2254,7 @@ mod test {
         }
 
         #[test]
-        #[cfg(not(feature = "ssl"))]
+        #[cfg(not(any(feature = "ssl", feature = "open-ssl")))]
         fn should_bind_before_connect() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
@@ -2266,7 +2266,7 @@ mod test {
         }
 
         #[test]
-        #[cfg(not(feature = "ssl"))]
+        #[cfg(not(any(feature = "ssl", feature = "open-ssl")))]
         fn should_bind_before_connect_with_timeout() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);

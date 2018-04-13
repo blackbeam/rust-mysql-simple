@@ -48,6 +48,7 @@ default = ['mysql_common']
 nightly = ['mysql_common']
 rustc_serialize = ['mysql_common/rustc_serialize', 'rustc-serialize']
 ssl = ['mysql_common', "openssl", "security-framework"]
+open-ssl = ['mysql_common', "openssl"]
 
 [dev-dependencies]
 serde_derive = "1"
@@ -73,7 +74,7 @@ optional = true
 version = "~0.2"
 default-features = false
 
-[target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies.openssl]
+[dependencies.openssl]
 version = "~0.9"
 optional = true
 

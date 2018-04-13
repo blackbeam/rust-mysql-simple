@@ -539,7 +539,8 @@ mod test {
         builder.into()
     }
 
-    #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+    #[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+    all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
@@ -555,7 +556,7 @@ mod test {
         builder.into()
     }
 
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
+    #[cfg(any(not(any(feature = "ssl", feature = "open-ssl")), target_os = "windows"))]
     pub fn get_opts() -> Opts {
         let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
         let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()

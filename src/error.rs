@@ -8,12 +8,14 @@ use myc::packets::ErrPacket;
 use myc::named_params::MixedParamsError;
 use myc::params::MissingNamedParameterError;
 
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 use openssl::error::{
     Error as SslError,
     ErrorStack as SslErrorStack,
 };
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 use openssl::ssl::Error as OpensslError;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::base::Error as SslError;
@@ -63,7 +65,7 @@ pub enum Error {
     MySqlError(MySqlError),
     DriverError(DriverError),
     UrlError(UrlError),
-    #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+    #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
     SslError(SslError),
     FromValueError(Value),
     FromRowError(Row),
@@ -75,7 +77,7 @@ impl Error {
         match self {
             &Error::IoError(_) |
             &Error::DriverError(_) => true,
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+            #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
             &Error::SslError(_) => true,
             &Error::MySqlError(_) |
             &Error::UrlError(_) |
@@ -92,7 +94,7 @@ impl error::Error for Error {
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
             Error::UrlError(_) => "url error",
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+            #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
             Error::SslError(_) => "ssl error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
@@ -105,7 +107,7 @@ impl error::Error for Error {
             Error::DriverError(ref err) => Some(err),
             Error::MySqlError(ref err) => Some(err),
             Error::UrlError(ref err) => Some(err),
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+            #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
             Error::SslError(ref err) => Some(err),
             _ => None
         }
@@ -152,21 +154,23 @@ impl From<::nix::Error> for Error {
     }
 }
 
-#[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+#[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
 impl From<SslError> for Error {
     fn from(err: SslError) -> Error {
         Error::SslError(err)
     }
 }
 
-#[cfg(all(feature = "ssl", unix, not(target_os = "macos")))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 impl From<SslErrorStack> for Error {
     fn from(err: SslErrorStack) -> Error {
         Error::SslError(err.errors()[0].clone())
     }
 }
 
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+#[cfg(any(all(feature = "open-ssl", target_os = "macos"),
+all(any(feature = "ssl", feature = "open-ssl"), not(target_os = "macos"), unix)))]
 impl From<OpensslError> for Error {
     fn from(err: OpensslError) -> Error {
         match err {
@@ -199,7 +203,7 @@ impl fmt::Display for Error {
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
             Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+            #[cfg(all(any(feature = "ssl", feature = "open-ssl"), any(unix, target_os = "macos")))]
             Error::SslError(ref err) => write!(f, "SslError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
