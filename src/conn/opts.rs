@@ -105,6 +105,9 @@ pub struct Opts {
 
     /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
     stmt_cache_size: usize,
+
+    /// If `true`, then client will ask for compression if server supports it (defaults to `false`).
+    compress: bool,
 }
 
 impl Opts {
@@ -233,6 +236,11 @@ impl Opts {
     pub fn get_stmt_cache_size(&self) -> usize {
         self.stmt_cache_size
     }
+
+    /// If `true`, then client will ask for compression if server supports it (defaults to `false`).
+    pub fn get_compress(&self) -> bool {
+        self.compress
+    }
 }
 
 impl Default for Opts {
@@ -256,6 +264,7 @@ impl Default for Opts {
             tcp_connect_timeout: None,
             bind_address: None,
             stmt_cache_size: 10,
+            compress: false,
         }
     }
 }
@@ -469,6 +478,14 @@ impl OptsBuilder {
         self.opts.stmt_cache_size = cache_size.into().unwrap_or(10);
         self
     }
+
+    /// If `true`, then client will ask for compression if server supports it (defaults to `false`).
+    ///
+    /// Call with `None` to reset to default.
+    pub fn compress(&mut self, compress: bool) -> &mut Self {
+        self.opts.compress = compress;
+        self
+    }
 }
 
 impl From<OptsBuilder> for Opts {
@@ -588,6 +605,14 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
                 _ => {
                     return Err(UrlError::InvalidValue("stmt_cache_size".into(), value));
                 }
+            }
+        } else if key == "compress" {
+            if value == "true" {
+                opts.compress = true;
+            } else if value == "false" {
+                opts.compress = false;
+            } else {
+                return Err(UrlError::InvalidValue("compress".into(), value));
             }
         } else {
             return Err(UrlError::UnknownParameter(key));
