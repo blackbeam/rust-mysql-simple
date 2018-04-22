@@ -840,7 +840,10 @@ impl Conn {
             CapabilityFlags::CLIENT_MULTI_STATEMENTS |
             CapabilityFlags::CLIENT_MULTI_RESULTS |
             CapabilityFlags::CLIENT_PS_MULTI_RESULTS |
-                               (self.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
+            (self.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
+        if let true = self.opts.get_compress() {
+            client_flags.insert(CapabilityFlags::CLIENT_COMPRESS);
+        }
         if let &Some(ref db_name) = self.opts.get_db_name() {
             if db_name.len() > 0 {
                 client_flags.insert(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
