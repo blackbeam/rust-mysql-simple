@@ -528,11 +528,11 @@ fn from_url_basic(url_str: &str) -> Result<(Opts, Vec<(String, String)>), UrlErr
 
     let query_pairs = url.query_pairs().into_owned().collect();
     let opts = Opts {
-        user: user,
-        pass: pass,
-        ip_or_hostname: ip_or_hostname,
-        tcp_port: tcp_port,
-        db_name: db_name,
+        user,
+        pass,
+        ip_or_hostname,
+        tcp_port,
+        db_name,
         ..Opts::default()
     };
 
