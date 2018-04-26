@@ -8,6 +8,9 @@ rust:
 env:
   global:
     - secure: DLtoi131hH5kOKHzpBB0ZoVDjCWwSiHmTeGaS86ZPx+IHYQzZ6Ll4x/e82SBDG8YGRoOiJUYfatju84ew7Tk9RLK/xvULPJ/WNhSwBK/p9pYWmAl1+QFoaYT3VvsnuIzmIoFjAz6jluBAxvZ5L+pgagayC0BM1Kw83dMS6Ef1LY=
+  matrix:
+    - COMPRESSION=0
+    - COMPRESSION=1
 before_install:
   - sudo bash -c "echo '[mysqld]' >> /usr/share/mysql/my-default.cnf"
   - sudo bash -c "echo 'sql_mode=NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES' >> /usr/share/mysql/my-default.cnf"
