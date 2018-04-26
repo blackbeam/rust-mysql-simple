@@ -1,9 +1,12 @@
+use std::cmp;
 use std::io;
 use std::io::Read as StdRead;
 use std::io::Write as StdWrite;
+use std::mem;
 use std::net;
 use std::net::SocketAddr;
 use std::fmt;
+use std::slice::Chunks;
 use std::time::Duration;
 
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
@@ -46,8 +49,62 @@ use byteorder::LittleEndian as LE;
 use std::os::unix as unix;
 #[cfg(windows)]
 use named_pipe as np;
+use flate2::{
+    Compression,
+    read::ZlibDecoder,
+    write::ZlibEncoder,
+};
 
 mod tcp;
+
+const MIN_COMPRESS_LENGTH: usize = 50;
+
+/// Maps desired payload to a set of `(<header>, <packet payload>)`.
+struct PacketIterator<'a> {
+    chunks: Chunks<'a, u8>,
+    last_was_max: bool,
+    seq_id: &'a mut u8,
+}
+
+impl<'a> PacketIterator<'a> {
+    fn new(payload: &'a [u8], seq_id: &'a mut u8) -> Self {
+        PacketIterator {
+            last_was_max: payload.len() == 0,
+            seq_id,
+            chunks: payload.chunks(consts::MAX_PAYLOAD_LEN),
+        }
+    }
+}
+
+impl<'a> Iterator for PacketIterator<'a> {
+    type Item = ([u8; 4], &'a [u8]);
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        match self.chunks.next() {
+            Some(chunk) => {
+                let mut header = [0, 0, 0, *self.seq_id];
+
+                *self.seq_id = self.seq_id.wrapping_add(1);
+                self.last_was_max = chunk.len() == consts::MAX_PAYLOAD_LEN;
+
+                match (&mut header[..3]).write_le_uint_n(chunk.len() as u64, 3) {
+                    Ok(_) => Some((header, chunk)),
+                    Err(_) => unreachable!("3 bytes for chunk len should be available"),
+                }
+            },
+            None => if self.last_was_max {
+                let header = [0, 0, 0, *self.seq_id];
+
+                *self.seq_id = self.seq_id.wrapping_add(1);
+                self.last_was_max = false;
+
+                Some((header, &[][..]))
+            } else {
+                None
+            }
+        }
+    }
+}
 
 pub trait Read: ReadBytesExt + io::BufRead {
     fn read_lenenc_int(&mut self) -> io::Result<u64> {
@@ -226,7 +283,8 @@ pub trait Read: ReadBytesExt + io::BufRead {
         let mut output = Vec::new();
         loop {
             let payload_len = self.read_uint::<LE>(3)? as usize;
-            if self.read_u8()? != seq_id {
+            let srv_seq_id = self.read_u8()?;
+            if srv_seq_id != seq_id {
                 return Err(DriverError(PacketOutOfSync));
             }
             seq_id = seq_id.wrapping_add(1);
@@ -281,33 +339,183 @@ pub trait Write: WriteBytesExt {
     }
 
     fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: usize) -> MyResult<u8> {
-        if data.len() > max_allowed_packet && max_allowed_packet < consts::MAX_PAYLOAD_LEN {
+        if data.len() > max_allowed_packet {
             return Err(DriverError(PacketTooLarge));
         }
-        if data.len() == 0 {
-            self.write_all(&[0, 0, 0, seq_id])?;
-            seq_id = seq_id.wrapping_add(1);
-        } else {
-            let mut last_was_max = false;
-            for chunk in data.chunks(consts::MAX_PAYLOAD_LEN) {
-                let chunk_len = chunk.len();
-                self.write_le_uint_n(chunk_len as u64, 3)?;
-                self.write_u8(seq_id)?;
-                self.write_all(chunk)?;
-                last_was_max = chunk_len == consts::MAX_PAYLOAD_LEN;
-                seq_id = seq_id.wrapping_add(1);
-            }
-            if last_was_max {
-                self.write_all(&[0u8, 0u8, 0u8, seq_id])?;
-                seq_id = seq_id.wrapping_add(1);
-            }
+
+        for (header, payload) in PacketIterator::new(data, &mut seq_id) {
+            self.write_all(&header[..])?;
+            self.write_all(payload)?;
         }
-        self.flush()?;
-        Ok(seq_id)
+
+        self.flush()
+            .map_err(Into::into)
+            .map(|_| seq_id)
     }
 }
 
 impl<T: WriteBytesExt> Write for T {}
+
+/// Applies compression to a stream. See [mysql docs][#1]
+///
+/// 1. [https://dev.mysql.com/doc/internals/en/compressed-payload.html]
+#[derive(Debug)]
+pub struct Compressed {
+    stream: Stream,
+    buf: Vec<u8>,
+    pos: usize,
+    comp_seq_id: u8,
+}
+
+impl Compressed {
+    pub fn new(stream: Stream) -> Self {
+        Compressed {
+            stream,
+            buf: Vec::new(),
+            pos: 0,
+            comp_seq_id: 0,
+        }
+    }
+
+    pub fn get_comp_seq_id(&self) -> u8 {
+        self.comp_seq_id
+    }
+
+    fn with_buf_and_stream<F>(&mut self, mut fun: F) -> io::Result<()>
+        where F: FnMut(&mut Vec<u8>, &mut IoPack) -> io::Result<()>,
+    {
+        let mut buf = mem::replace(&mut self.buf, Vec::new());
+        let ret = fun(&mut buf, self.stream.as_mut());
+        self.buf = buf;
+        ret
+    }
+
+    fn read_compressed_packet(&mut self) -> io::Result<()> {
+        assert_eq!(self.buf.len(), 0, "buf should be empty");
+        let compressed_len = self.stream.as_mut().read_uint::<LE>(3)? as usize;
+        let comp_seq_id = self.stream.as_mut().read_u8()?;
+        let uncompressed_len = self.stream.as_mut().read_uint::<LE>(3)? as usize;
+
+        self.comp_seq_id = comp_seq_id.wrapping_add(1);
+
+        self.with_buf_and_stream(|buf, stream| {
+            if uncompressed_len == 0 {
+                buf.resize(compressed_len, 0);
+                stream.read_exact(buf)
+            } else {
+                let mut intermediate_buf = Vec::with_capacity(compressed_len);
+                intermediate_buf.resize(compressed_len, 0);
+                stream.read_exact(&mut intermediate_buf)?;
+
+                let mut decoder = ZlibDecoder::new(&*intermediate_buf);
+                buf.reserve(uncompressed_len);
+                decoder.read_to_end(buf).map(|_| ())
+            }
+        })
+    }
+
+    pub fn write_compressed_packet(
+        &mut self,
+        data: &[u8],
+        mut seq_id: u8,
+        max_allowed_packet: usize
+    )
+        -> MyResult<u8>
+    {
+        if data.len() > max_allowed_packet {
+            return Err(DriverError(PacketTooLarge));
+        }
+
+        let compress = data.len() + 4 > MIN_COMPRESS_LENGTH;
+        let mut comp_seq_id = seq_id;
+        let mut intermediate_buf = Vec::new();
+
+        if compress {
+            let capacity = data.len() + 4 * (data.len() / consts::MAX_PAYLOAD_LEN) + 4;
+            intermediate_buf.reserve(capacity);
+        }
+
+        for (header, payload) in PacketIterator::new(data, &mut seq_id) {
+            if !compress {
+                let chunk_len = header.len() + payload.len();
+                self.stream.as_mut().write_uint::<LE>(chunk_len as u64, 3)?;
+                self.stream.as_mut().write_u8(comp_seq_id)?;
+                comp_seq_id = comp_seq_id.wrapping_add(1);
+                self.stream.as_mut().write_uint::<LE>(0, 3)?;
+                self.stream.as_mut().write_all(&header[..])?;
+                self.stream.as_mut().write_all(payload)?;
+            } else {
+                intermediate_buf.write_all(&header[..])?;
+                intermediate_buf.write_all(payload)?;
+            }
+        }
+
+        if compress {
+            let capacity = cmp::min(intermediate_buf.len(), consts::MAX_PAYLOAD_LEN);
+            let mut compressed_buf = Vec::with_capacity(capacity / 2);
+            for chunk in intermediate_buf.chunks(consts::MAX_PAYLOAD_LEN) {
+                let mut encoder = ZlibEncoder::new(compressed_buf, Compression::default());
+                encoder.write_all(chunk)?;
+                compressed_buf = encoder.finish()?;
+                self.stream.as_mut().write_uint::<LE>(compressed_buf.len() as u64, 3)?;
+                self.stream.as_mut().write_u8(comp_seq_id)?;
+                self.stream.as_mut().write_uint::<LE>(chunk.len() as u64, 3)?;
+                self.stream.as_mut().write_all(&*compressed_buf)?;
+
+                comp_seq_id = comp_seq_id.wrapping_add(1);
+                compressed_buf.truncate(0);
+            }
+        }
+
+        self.comp_seq_id = comp_seq_id;
+        self.stream.as_mut().flush()?;
+        Ok(seq_id)
+    }
+}
+
+impl io::Read for Compressed {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let available = self.buf.len() - self.pos;
+        if available == 0 {
+            self.buf.truncate(0);
+            self.pos = 0;
+            self.read_compressed_packet()?;
+            self.read(buf)
+        } else {
+            let count = cmp::min(buf.len(), self.buf.len() - self.pos);
+            if count > 0 {
+                let end = self.pos + count;
+                (&mut buf[..count]).copy_from_slice(&self.buf[self.pos..end]);
+                self.pos = end;
+            }
+            Ok(count)
+        }
+    }
+}
+
+impl io::BufRead for Compressed {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        self.read_compressed_packet()?;
+        Ok(self.buf.as_ref())
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.pos += amt;
+        assert!(self.pos <= self.buf.len());
+    }
+}
+
+impl Drop for Compressed {
+    fn drop(&mut self) {
+        if let Stream::TcpStream(None) = self.stream {
+            return;
+        }
+        // Write COM_QUIT using compression.
+        let _ =
+            self.write_compressed_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+        self.stream = Stream::TcpStream(None);
+    }
+}
 
 #[derive(Debug)]
 pub enum Stream {

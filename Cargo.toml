@@ -53,6 +53,7 @@ ssl = ['mysql_common', "openssl", "security-framework"]
 serde_derive = "1"
 
 [dependencies]
+flate2 = "0.2"
 bit-vec = "0.4"
 byteorder = "1"
 url = "1"

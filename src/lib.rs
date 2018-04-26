@@ -134,6 +134,7 @@ extern crate bit_vec;
 extern crate openssl;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 extern crate security_framework;
+extern crate flate2;
 extern crate regex;
 #[cfg(unix)]
 extern crate libc;

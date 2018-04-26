@@ -480,8 +480,6 @@ impl OptsBuilder {
     }
 
     /// If `true`, then client will ask for compression if server supports it (defaults to `false`).
-    ///
-    /// Call with `None` to reset to default.
     pub fn compress(&mut self, compress: bool) -> &mut Self {
         self.opts.compress = compress;
         self

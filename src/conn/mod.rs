@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use super::consts::{CapabilityFlags, Command, ColumnType, StatusFlags, MAX_PAYLOAD_LEN, UTF8_GENERAL_CI, UTF8MB4_GENERAL_CI};
 use super::io::Read as MyRead;
 use super::io::Write;
-use super::io::Stream;
+use super::io::{Compressed, Stream};
 use super::error::Error::{
     IoError,
     MySqlError,
@@ -544,6 +544,13 @@ impl<'a> io::Write for LocalInfile<'a> {
     }
 }
 
+/// Wrapper for connection's stream which is ether plain `Stream` or wrapped to a `Compressed.
+#[derive(Debug)]
+enum ConnStream {
+    Plain(Stream),
+    Compressed(Compressed),
+}
+
 /***
  *     .d8888b.
  *    d88P  Y88b
@@ -560,7 +567,7 @@ impl<'a> io::Write for LocalInfile<'a> {
 #[derive(Debug)]
 pub struct Conn {
     opts: Opts,
-    stream: Option<Stream>,
+    stream: Option<ConnStream>,
     stmt_cache: StmtCache,
     server_version: Option<(u16, u16, u16)>,
     mariadb_server_version: Option<(u16, u16, u16)>,
@@ -697,18 +704,21 @@ impl Conn {
         }
     }
 
-    fn get_mut_stream<'a>(&'a mut self) -> &'a mut Stream {
-        self.stream.as_mut().unwrap()
-    }
-
     #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
     fn switch_to_ssl(&mut self) -> MyResult<()> {
-        if self.stream.is_some() {
-            let stream = self.stream.take().unwrap();
-            let stream = stream.make_secure(self.opts.get_verify_peer(),
-                                            self.opts.get_ip_or_hostname(),
-                                            self.opts.get_ssl_opts())?;
-            self.stream = Some(stream);
+        match self.stream.take() {
+            Some(ConnStream::Plain(stream)) => {
+                let stream = stream.make_secure(
+                    self.opts.get_verify_peer(),
+                    self.opts.get_ip_or_hostname(),
+                    self.opts.get_ssl_opts(),
+                )?;
+                self.stream = Some(ConnStream::Plain(stream));
+            },
+            Some(ConnStream::Compressed(_)) => {
+                unreachable!("Connection should be switched to SSL before compression is applied")
+            }
+            None => (),
         }
         Ok(())
     }
@@ -740,20 +750,26 @@ impl Conn {
         } else {
             return Err(DriverError(CouldNotConnect(None)));
         };
-        self.stream = Some(stream);
+        self.stream = Some(ConnStream::Plain(stream));
         return Ok(())
     }
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let old_seq_id = self.seq_id;
-        let (data, seq_id) = self.get_mut_stream().as_mut().read_packet(old_seq_id)?;
+        let (data, seq_id) = match *self.stream.as_mut().unwrap() {
+            ConnStream::Plain(ref mut stream) => stream.as_mut().read_packet(old_seq_id)?,
+            ConnStream::Compressed(ref mut compressed) => compressed.read_packet(old_seq_id)?,
+        };
         self.seq_id = seq_id;
         Ok(data)
     }
 
     fn drop_packet(&mut self) -> MyResult<()> {
         let old_seq_id = self.seq_id;
-        let seq_id = self.get_mut_stream().as_mut().drop_packet(old_seq_id)?;
+        let (_, seq_id) = match *self.stream.as_mut().unwrap() {
+            ConnStream::Plain(ref mut stream) => stream.as_mut().read_packet(old_seq_id)?,
+            ConnStream::Compressed(ref mut compressed) => compressed.read_packet(old_seq_id)?,
+        };
         self.seq_id = seq_id;
         Ok(())
     }
@@ -761,7 +777,15 @@ impl Conn {
     fn write_packet(&mut self, data: &[u8]) -> MyResult<()> {
         let seq_id = self.seq_id;
         let max_allowed_packet = self.max_allowed_packet;
-        self.seq_id = self.get_mut_stream().as_mut().write_packet(data, seq_id, max_allowed_packet)?;
+        let seq_id = match *self.stream.as_mut().unwrap() {
+            ConnStream::Plain(ref mut stream) => {
+                stream.as_mut().write_packet(data, seq_id, max_allowed_packet)?
+            },
+            ConnStream::Compressed(ref mut compressed) => {
+                compressed.write_compressed_packet(data, seq_id, max_allowed_packet)?
+            },
+        };
+        self.seq_id = seq_id;
         Ok(())
     }
 
@@ -800,7 +824,12 @@ impl Conn {
                     }
                     self.handle_handshake(&handshake);
                     if self.opts.get_ssl_opts().is_some() && self.stream.is_some() {
-                        if self.stream.as_ref().unwrap().is_insecure() {
+                        let is_insecure = if let Some(ConnStream::Plain(ref stream)) = self.stream {
+                            stream.is_insecure()
+                        } else {
+                            false
+                        };
+                        if is_insecure {
                             if !handshake.capabilities().contains(CapabilityFlags::CLIENT_SSL) {
                                 return Err(DriverError(SslNotSupported));
                             } else {
@@ -819,6 +848,15 @@ impl Conn {
                 0u8 => {
                     let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
                     self.handle_ok(&ok);
+                    if self.capability_flags.contains(CapabilityFlags::CLIENT_COMPRESS) {
+                        let stream = self.stream.take().unwrap();
+                        self.stream = match stream {
+                            ConnStream::Plain(stream) => {
+                                Some(ConnStream::Compressed(Compressed::new(stream)))
+                            },
+                            stream => Some(stream),
+                        };
+                    }
                     Ok(())
                 },
                 0xffu8 => {
@@ -849,7 +887,12 @@ impl Conn {
                 client_flags.insert(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
             }
         }
-        if self.stream.is_some() && self.stream.as_ref().unwrap().is_insecure() {
+        let is_insecure = if let Some(ConnStream::Plain(ref stream)) = self.stream {
+            stream.is_insecure()
+        } else {
+            false
+        };
+        if is_insecure {
             if self.opts.get_ssl_opts().is_some() {
                 client_flags.insert(CapabilityFlags::CLIENT_SSL);
             }
@@ -1128,6 +1171,10 @@ impl Conn {
     }
 
     fn handle_result_set(&mut self) -> MyResult<Vec<Column>> {
+        // Syncronize seq_ids if compression is used.
+        if let Some(ConnStream::Compressed(ref stream)) = self.stream {
+            self.seq_id = stream.get_comp_seq_id();
+        }
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
@@ -1782,6 +1829,7 @@ impl<'a> Drop for QueryResult<'a> {
 mod test {
     use Opts;
     use OptsBuilder;
+    use std::env;
 
     static USER: &'static str = "root";
     static PASS: &'static str = "password";
@@ -1790,8 +1838,8 @@ mod test {
 
     #[cfg(all(feature = "ssl", target_os = "macos"))]
     pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+        let pwd: String = env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+        let port: u16 = env::var("MYSQL_SERVER_PORT").ok()
             .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
             .unwrap_or(PORT);
         let mut builder = OptsBuilder::default();
@@ -1802,13 +1850,14 @@ mod test {
             .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
             .verify_peer(true)
             .ssl_opts(Some(Some(("tests/client.p12", "pass", vec!["tests/ca-cert.cer"]))));
+        builder.compress(env::var("COMPRESS").map(|x| x == "true" || x == "1").unwrap_or(false));
         builder.into()
     }
 
     #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
     pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+        let pwd: String = env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+        let port: u16 = env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
         let mut builder = OptsBuilder::default();
@@ -1819,13 +1868,14 @@ mod test {
                .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
                .verify_peer(true)
                .ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
+        builder.compress(env::var("COMPRESS").map(|x| x == "true" || x == "1").unwrap_or(false));
         builder.into()
     }
 
     #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
     pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
+        let pwd: String = env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
+        let port: u16 = env::var("MYSQL_SERVER_PORT").ok()
                                    .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
                                    .unwrap_or(PORT);
         let mut builder = OptsBuilder::default();
@@ -1834,6 +1884,7 @@ mod test {
                .ip_or_hostname(Some(ADDR))
                .tcp_port(port)
                .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+        builder.compress(env::var("COMPRESS").map(|x| x == "true" || x == "1").unwrap_or(false));
         builder.into()
     }
 
@@ -2154,15 +2205,20 @@ mod test {
             let mut conn = Conn::new(opts).unwrap();
             assert!(conn.query("DROP PROCEDURE IF EXISTS multi").is_ok());
             assert!(conn.query(r#"CREATE PROCEDURE multi() BEGIN
-                                      SELECT 1;
-                                      SELECT 1;
+                                      SELECT 1 UNION ALL SELECT 2;
+                                      SELECT 3 UNION ALL SELECT 4;
                                   END"#).is_ok());
-            for (i, row) in conn.query("CALL multi()")
-                                .unwrap().enumerate() {
-                match i {
-                    0 | 1 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"1".to_vec())]),
-                    _ => unreachable!(),
-                }
+            {
+                let mut query_result = conn.query("CALL multi()").unwrap();
+                let result_set = query_result.by_ref()
+                    .map(|row| row.unwrap().unwrap().pop().unwrap())
+                    .collect::<Vec<::Value>>();
+                assert_eq!(result_set, vec![Bytes(b"1".to_vec()), Bytes(b"2".to_vec())]);
+                assert!(query_result.more_results_exists());
+                let result_set = query_result.by_ref()
+                    .map(|row| row.unwrap().unwrap().pop().unwrap())
+                    .collect::<Vec<::Value>>();
+                assert_eq!(result_set, vec![Bytes(b"3".to_vec()), Bytes(b"4".to_vec())]);
             }
             let mut result = conn.query("SELECT 1; SELECT 2; SELECT 3;").unwrap();
             let mut i = 0;
