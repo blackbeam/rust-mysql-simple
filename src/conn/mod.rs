@@ -544,7 +544,8 @@ impl<'a> io::Write for LocalInfile<'a> {
     }
 }
 
-/// Wrapper for connection's stream which is ether plain `Stream` or wrapped to a `Compressed.
+/// Wrapper for connection's stream which is ether plain `Stream`
+/// or stream wrapped into the `Compressed` struct.
 #[derive(Debug)]
 enum ConnStream {
     Plain(Stream),
