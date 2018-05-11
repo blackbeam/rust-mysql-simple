@@ -377,10 +377,6 @@ impl Compressed {
         }
     }
 
-    pub fn get_comp_seq_id(&self) -> u8 {
-        self.comp_seq_id
-    }
-
     fn with_buf_and_stream<F>(&mut self, mut fun: F) -> io::Result<()>
         where F: FnMut(&mut Vec<u8>, &mut IoPack) -> io::Result<()>,
     {
@@ -469,7 +465,8 @@ impl Compressed {
 
         self.comp_seq_id = comp_seq_id;
         self.stream.as_mut().flush()?;
-        Ok(seq_id)
+        // Syncronize seq_id with comp_seq_id if compression is used.
+        Ok(if compress { comp_seq_id } else { seq_id })
     }
 }
 

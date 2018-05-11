@@ -1171,10 +1171,6 @@ impl Conn {
     }
 
     fn handle_result_set(&mut self) -> MyResult<Vec<Column>> {
-        // Syncronize seq_ids if compression is used.
-        if let Some(ConnStream::Compressed(ref stream)) = self.stream {
-            self.seq_id = stream.get_comp_seq_id();
-        }
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
