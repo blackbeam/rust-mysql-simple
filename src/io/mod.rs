@@ -377,6 +377,18 @@ impl Compressed {
         }
     }
 
+    pub fn get_comp_seq_id(&self) -> u8 {
+        self.comp_seq_id
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.available() == 0
+    }
+
+    fn available(&self) -> usize {
+        self.buf.len() - self.pos
+    }
+
     fn with_buf_and_stream<F>(&mut self, mut fun: F) -> io::Result<()>
         where F: FnMut(&mut Vec<u8>, &mut IoPack) -> io::Result<()>,
     {
@@ -472,7 +484,7 @@ impl Compressed {
 
 impl io::Read for Compressed {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let available = self.buf.len() - self.pos;
+        let available = self.available();
         if available == 0 {
             self.buf.truncate(0);
             self.pos = 0;

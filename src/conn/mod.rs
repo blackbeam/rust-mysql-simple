@@ -756,23 +756,23 @@ impl Conn {
     }
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
-        let old_seq_id = self.seq_id;
+        let mut old_seq_id = self.seq_id;
         let (data, seq_id) = match *self.stream.as_mut().unwrap() {
             ConnStream::Plain(ref mut stream) => stream.as_mut().read_packet(old_seq_id)?,
-            ConnStream::Compressed(ref mut compressed) => compressed.read_packet(old_seq_id)?,
+            ConnStream::Compressed(ref mut compressed) => {
+                // Synchronize seq_id on compressed packet boundary
+                if compressed.is_empty() {
+                    old_seq_id = compressed.get_comp_seq_id();
+                }
+                compressed.read_packet(old_seq_id)?
+            },
         };
         self.seq_id = seq_id;
         Ok(data)
     }
 
     fn drop_packet(&mut self) -> MyResult<()> {
-        let old_seq_id = self.seq_id;
-        let (_, seq_id) = match *self.stream.as_mut().unwrap() {
-            ConnStream::Plain(ref mut stream) => stream.as_mut().read_packet(old_seq_id)?,
-            ConnStream::Compressed(ref mut compressed) => compressed.read_packet(old_seq_id)?,
-        };
-        self.seq_id = seq_id;
-        Ok(())
+        self.read_packet().map(|_| ())
     }
 
     fn write_packet(&mut self, data: &[u8]) -> MyResult<()> {
