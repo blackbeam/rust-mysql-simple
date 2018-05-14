@@ -29,9 +29,9 @@ use openssl::x509;
 use openssl::ssl::{self, SslStream, SslContext};
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::secure_transport::{
-    ConnectionType,
+    SslConnectionType,
     HandshakeError,
-    ProtocolSide,
+    SslProtocolSide,
     SslContext,
     SslStream,
 };
@@ -650,7 +650,7 @@ impl Stream {
             let mut client_data = Vec::new();
             client_file.read_to_end(&mut client_data)?;
             let mut identities = import.import(&*client_data)?;
-            Ok(identities.pop().map(|x| x.identity))
+            Ok(identities.pop().and_then(|x| x.identity))
         }
 
         fn load_extra_certs(files: &[PathBuf]) -> MyResult<Vec<SecCertificate>> {
@@ -665,7 +665,8 @@ impl Stream {
         }
 
         if self.is_insecure() {
-            let mut ctx: SslContext = SslContext::new(ProtocolSide::Client, ConnectionType::Stream)?;
+            let mut ctx: SslContext =
+                SslContext::new(SslProtocolSide::CLIENT, SslConnectionType::STREAM)?;
             match *ssl_opts {
                 Some(ref ssl_opts) => {
                     if verify_peer {
