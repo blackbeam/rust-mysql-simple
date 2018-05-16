@@ -20,8 +20,6 @@ use std::os::unix::prelude::*;
 use std::time::Duration;
 #[cfg(target_os = "windows")]
 use winapi::um::winsock2::*;
-#[cfg(target_os = "windows")]
-use ws2_32::*;
 
 pub struct MyTcpBuilder<T> {
     address: T,
@@ -227,13 +225,13 @@ fn connect_fd_timeout(socket: RawSocket,
     let result = unsafe { connect(socket, name, name_len) };
     if result == SOCKET_ERROR {
         let err = io::Error::last_os_error();
-        match err.raw_os_error().map(|x| x as u32) {
+        match err.raw_os_error() {
             Some(WSAEWOULDBLOCK) => {
                 let mut write_fds = fd_set {
                     fd_count: 1,
                     fd_array: [0; FD_SETSIZE]
                 };
-                write_fds.fd_array[0] = socket;
+                write_fds.fd_array[0] = socket as usize;
                 let mut err_fds = write_fds.clone();
                 let timeout = timeval {
                     tv_sec: timeout.as_secs() as c_long,
@@ -251,12 +249,12 @@ fn connect_fd_timeout(socket: RawSocket,
                 } else {
                     let mut error = None;
                     for i in 0..(err_fds.fd_count as usize) {
-                        if err_fds.fd_array[i] == socket {
+                        if err_fds.fd_array[i] as u64 == socket {
                             error = Some(true);
                         }
                     }
                     for i in 0..(write_fds.fd_count as usize) {
-                        if write_fds.fd_array[i] == socket {
+                        if write_fds.fd_array[i] as u64 == socket {
                             error = Some(false);
                         }
                     }

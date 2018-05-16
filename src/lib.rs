@@ -152,8 +152,6 @@ extern crate twox_hash;
 extern crate smallvec;
 #[cfg(target_os = "windows")]
 extern crate winapi;
-#[cfg(target_os = "windows")]
-extern crate ws2_32;
 
 #[cfg(feature = "rustc_serialize")]
 pub extern crate rustc_serialize;
