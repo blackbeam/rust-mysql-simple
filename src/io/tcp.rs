@@ -222,7 +222,7 @@ fn connect_fd_timeout(socket: RawSocket,
             (a as *const _ as *const _, mem::size_of_val(a) as c_int)
         }
     };
-    let result = unsafe { connect(socket, name, name_len) };
+    let result = unsafe { connect(socket as usize, name, name_len) };
     if result == SOCKET_ERROR {
         let err = io::Error::last_os_error();
         match err.raw_os_error() {
@@ -264,7 +264,7 @@ fn connect_fd_timeout(socket: RawSocket,
                             let mut opt_val = 0i32;
                             let mut opt_len = mem::size_of::<i32>() as c_int;
                             let result = unsafe {
-                                getsockopt(socket,
+                                getsockopt(socket as usize,
                                            SOL_SOCKET,
                                            SO_ERROR,
                                            &mut opt_val as *mut _ as *mut _,
