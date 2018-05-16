@@ -1,3 +1,5 @@
+use consts::CapabilityFlags;
+
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use std::path;
@@ -108,6 +110,18 @@ pub struct Opts {
 
     /// If `true`, then client will ask for compression if server supports it (defaults to `false`).
     compress: bool,
+
+    /// Additional client capabilities to set (defaults to empty).
+    ///
+    /// This value will be OR'ed with other client capabilities during connection initialisation.
+    ///
+    /// ### Note
+    ///
+    /// It is a good way to set something like `CLIENT_FOUND_ROWS` but you should note that it
+    /// won't let you to interfere with capabilities managed by other options (like
+    /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
+    /// pointless or may broke the connection, so this option should be used with caution.
+    additional_capabilities: CapabilityFlags,
 }
 
 impl Opts {
@@ -241,6 +255,20 @@ impl Opts {
     pub fn get_compress(&self) -> bool {
         self.compress
     }
+
+    /// Additional client capabilities to set (defaults to empty).
+    ///
+    /// This value will be OR'ed with other client capabilities during connection initialisation.
+    ///
+    /// ### Note
+    ///
+    /// It is a good way to set something like `CLIENT_FOUND_ROWS` but you should note that it
+    /// won't let you to interfere with capabilities managed by other options (like
+    /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
+    /// pointless or may broke the connection, so this option should be used with caution.
+    pub fn get_additional_capabilities(&self) -> CapabilityFlags {
+        self.additional_capabilities
+    }
 }
 
 impl Default for Opts {
@@ -265,6 +293,7 @@ impl Default for Opts {
             bind_address: None,
             stmt_cache_size: 10,
             compress: false,
+            additional_capabilities: CapabilityFlags::empty(),
         }
     }
 }
@@ -482,6 +511,38 @@ impl OptsBuilder {
     /// If `true`, then client will ask for compression if server supports it (defaults to `false`).
     pub fn compress(&mut self, compress: bool) -> &mut Self {
         self.opts.compress = compress;
+        self
+    }
+
+    /// Additional client capabilities to set (defaults to empty).
+    ///
+    /// This value will be OR'ed with other client capabilities during connection initialisation.
+    ///
+    /// ### Note
+    ///
+    /// It is a good way to set something like `CLIENT_FOUND_ROWS` but you should note that it
+    /// won't let you to interfere with capabilities managed by other options (like
+    /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
+    /// pointless or may broke the connection, so this option should be used with caution.
+    pub fn additional_capabilities(
+        &mut self,
+        additional_capabilities: CapabilityFlags,
+    )
+        -> &mut Self
+    {
+        let forbidden_flags: CapabilityFlags =
+            CapabilityFlags::CLIENT_PROTOCOL_41
+            | CapabilityFlags::CLIENT_SSL
+            | CapabilityFlags::CLIENT_COMPRESS
+            | CapabilityFlags::CLIENT_SECURE_CONNECTION
+            | CapabilityFlags::CLIENT_LONG_PASSWORD
+            | CapabilityFlags::CLIENT_TRANSACTIONS
+            | CapabilityFlags::CLIENT_LOCAL_FILES
+            | CapabilityFlags::CLIENT_MULTI_STATEMENTS
+            | CapabilityFlags::CLIENT_MULTI_RESULTS
+            | CapabilityFlags::CLIENT_PS_MULTI_RESULTS;
+
+        self.opts.additional_capabilities = additional_capabilities & !forbidden_flags;
         self
     }
 }

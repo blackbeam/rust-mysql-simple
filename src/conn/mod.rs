@@ -898,7 +898,7 @@ impl Conn {
                 client_flags.insert(CapabilityFlags::CLIENT_SSL);
             }
         }
-        client_flags
+        client_flags | self.opts.get_additional_capabilities()
     }
 
     fn get_default_collation(&self) -> u8 {
@@ -2307,6 +2307,20 @@ mod test {
                 DriverError(ConnectTimeout) => {},
                 err => panic!("Unexpected error: {}", err),
             }
+        }
+
+        #[test]
+        fn should_set_additional_capabilities() {
+            use consts::CapabilityFlags;
+
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.additional_capabilities(CapabilityFlags::CLIENT_FOUND_ROWS);
+
+            let mut conn = Conn::new(opts).unwrap();
+            conn.query("CREATE TEMPORARY TABLE x.tbl (a INT, b TEXT)").unwrap();
+            conn.query("INSERT INTO x.tbl (a, b) VALUES (1, 'foo')").unwrap();
+            let result = conn.query("UPDATE x.tbl SET b = 'foo' WHERE a = 1").unwrap();
+            assert_eq!(result.affected_rows(), 1);
         }
 
         #[test]
