@@ -1,26 +1,25 @@
 use net2::{TcpBuilder, TcpStreamExt};
 #[cfg(unix)]
-use nix::errno::Errno;
-#[cfg(unix)]
-use nix::sys::select;
-#[cfg(unix)]
-use nix::sys::socket;
-#[cfg(unix)]
-use nix::sys::time::{TimeVal, TimeValLike};
+use nix::{
+    errno::Errno,
+    sys::select,
+    sys::socket,
+    sys::time::{TimeVal, TimeValLike},
+};
 use std::io;
 use std::mem;
 use std::net::{TcpStream, SocketAddr, ToSocketAddrs};
 #[cfg(target_os = "windows")]
-use std::os::raw::*;
+use std::{
+    os::raw::*,
+    os::windows::prelude::*,
+    ptr,
+};
 #[cfg(unix)]
 use std::os::unix::prelude::*;
-#[cfg(target_os = "windows")]
-use std::os::windows::prelude::*;
-#[cfg(target_os = "windows")]
-use std::ptr;
 use std::time::Duration;
 #[cfg(target_os = "windows")]
-use winapi::*;
+use winapi::um::winsock2::*;
 #[cfg(target_os = "windows")]
 use ws2_32::*;
 
