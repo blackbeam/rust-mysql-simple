@@ -24,8 +24,6 @@ use super::error::DriverError::PacketOutOfSync;
 use super::error::Result as MyResult;
 
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-use openssl::x509;
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 use openssl::ssl::{self, SslStream, SslContext};
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::secure_transport::{
@@ -737,17 +735,17 @@ impl Stream {
         if self.is_insecure() {
             let mut ctx = SslContext::builder(ssl::SslMethod::tls())?;
             let mode = if verify_peer {
-                ssl::SSL_VERIFY_PEER
+                ssl::SslVerifyMode::PEER
             } else {
-                ssl::SSL_VERIFY_NONE
+                ssl::SslVerifyMode::NONE
             };
             ctx.set_verify(mode);
             match *ssl_opts {
                 Some((ref ca_cert, None)) => ctx.set_ca_file(&ca_cert)?,
                 Some((ref ca_cert, Some((ref client_cert, ref client_key)))) => {
                     ctx.set_ca_file(&ca_cert)?;
-                    ctx.set_certificate_file(&client_cert, x509::X509_FILETYPE_PEM)?;
-                    ctx.set_private_key_file(&client_key, x509::X509_FILETYPE_PEM)?;
+                    ctx.set_certificate_file(&client_cert, ssl::SslFiletype::PEM)?;
+                    ctx.set_private_key_file(&client_key, ssl::SslFiletype::PEM)?;
                 },
                 _ => unreachable!(),
             }
@@ -762,7 +760,7 @@ impl Stream {
                                 Err(handshake_err) => match handshake_err {
                                     ssl::HandshakeError::SetupFailure(err) => return Err(err.into()),
                                     ssl::HandshakeError::Failure(mid_stream) => return Err(mid_stream.into_error().into()),
-                                    ssl::HandshakeError::Interrupted(_) => unreachable!("Interrupted"),
+                                    ssl::HandshakeError::WouldBlock(mid_stream) => unreachable!(),
                                 },
                             };
                             Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(s_stream)))))

@@ -9,12 +9,11 @@ use myc::named_params::MixedParamsError;
 use myc::params::MissingNamedParameterError;
 
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-use openssl::error::{
-    Error as SslError,
-    ErrorStack as SslErrorStack,
+use openssl::{
+    ssl::Error as OpensslError,
+    error::Error as SslError,
+    error::ErrorStack as SslErrorStack,
 };
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-use openssl::ssl::Error as OpensslError;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::base::Error as SslError;
 
@@ -169,13 +168,16 @@ impl From<SslErrorStack> for Error {
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 impl From<OpensslError> for Error {
     fn from(err: OpensslError) -> Error {
-        match err {
-            OpensslError::ZeroReturn => io::Error::new(io::ErrorKind::Other, "The SSL session has been closed by the other end").into(),
-            OpensslError::WantRead(err) => err.into(),
-            OpensslError::WantWrite(err) => err.into(),
-            OpensslError::WantX509Lookup => io::Error::new(io::ErrorKind::Other, "The client certificate callback requested to be called again").into(),
-            OpensslError::Stream(err) => err.into(),
-            OpensslError::Ssl(err) => err.into()
+        match err.into_io_error() {
+            Ok(err) => err.into(),
+            Err(err) => {
+                match err.ssl_error() {
+                    Some(err_stack) => {
+                        io::Error::new(io::ErrorKind::Other, err_stack.to_string()).into()
+                    },
+                    None => unreachable!(),
+                }
+            },
         }
     }
 }
