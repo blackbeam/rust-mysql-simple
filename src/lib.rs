@@ -121,35 +121,34 @@
 //! # }
 //! ```
 
-#![crate_name="mysql"]
-#![crate_type="rlib"]
-#![crate_type="dylib"]
-
+#![crate_name = "mysql"]
+#![crate_type = "rlib"]
+#![crate_type = "dylib"]
 #![cfg_attr(feature = "nightly", feature(test, const_fn, drop_types_in_const))]
 #[cfg(feature = "nightly")]
 extern crate test;
 
 extern crate bit_vec;
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-extern crate openssl;
-#[cfg(all(feature = "ssl", target_os = "macos"))]
-extern crate security_framework;
+extern crate bufstream;
+extern crate byteorder;
 extern crate flate2;
-extern crate regex;
+extern crate fnv;
 #[cfg(unix)]
 extern crate libc;
-#[cfg(unix)]
-extern crate nix;
-extern crate net2;
-extern crate byteorder;
 extern crate mysql_common as myc;
 #[cfg(windows)]
 extern crate named_pipe;
-extern crate url;
-extern crate bufstream;
-extern crate fnv;
-extern crate twox_hash;
+extern crate net2;
+#[cfg(unix)]
+extern crate nix;
+#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
+extern crate openssl;
+extern crate regex;
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+extern crate security_framework;
 extern crate smallvec;
+extern crate twox_hash;
+extern crate url;
 #[cfg(target_os = "windows")]
 extern crate winapi;
 
@@ -229,24 +228,27 @@ macro_rules! params {
     }
 }
 
-mod scramble;
-pub mod error;
-mod packet;
-mod io;
 mod conn;
-
+pub mod error;
+mod io;
+mod packet;
+mod scramble;
 
 #[doc(inline)]
 pub use myc::constants as consts;
 
 #[doc(inline)]
+pub use conn::pool::Pool;
+#[doc(inline)]
+pub use conn::pool::PooledConn;
+#[doc(inline)]
 pub use conn::Conn;
+#[doc(inline)]
+pub use conn::IsolationLevel;
 #[doc(inline)]
 pub use conn::LocalInfile;
 #[doc(inline)]
 pub use conn::LocalInfileHandler;
-#[doc(inline)]
-pub use conn::IsolationLevel;
 #[doc(inline)]
 pub use conn::Opts;
 #[doc(inline)]
@@ -257,10 +259,6 @@ pub use conn::QueryResult;
 pub use conn::Stmt;
 #[doc(inline)]
 pub use conn::Transaction;
-#[doc(inline)]
-pub use conn::pool::Pool;
-#[doc(inline)]
-pub use conn::pool::PooledConn;
 #[doc(inline)]
 pub use error::DriverError;
 #[doc(inline)]
@@ -276,41 +274,27 @@ pub use error::UrlError;
 #[doc(inline)]
 pub use myc::packets::Column;
 #[doc(inline)]
-pub use myc::row::Row;
-#[doc(inline)]
-pub use myc::row::convert::{
-    FromRowError,
-    from_row,
-    from_row_opt
-};
-#[doc(inline)]
 pub use myc::params::Params;
 #[doc(inline)]
-pub use myc::value::Value;
+pub use myc::row::convert::{from_row, from_row_opt, FromRowError};
 #[doc(inline)]
-pub use myc::value::convert::{
-    FromValueError,
-    from_value,
-    from_value_opt,
-};
+pub use myc::row::Row;
+#[doc(inline)]
+pub use myc::value::convert::{from_value, from_value_opt, FromValueError};
+#[doc(inline)]
+pub use myc::value::json::Deserialized;
 #[doc(inline)]
 pub use myc::value::json::Serialized;
 #[doc(inline)]
-pub use myc::value::json::Deserialized;
+pub use myc::value::Value;
 
 pub mod prelude {
     #[doc(inline)]
-    pub use myc::value::convert::{
-        ConvIr,
-        FromValue,
-        ToValue,
-    };
-    #[doc(inline)]
-    pub use myc::row::convert::{
-        FromRow,
-    };
-    #[doc(inline)]
     pub use conn::GenericConnection;
+    #[doc(inline)]
+    pub use myc::row::convert::FromRow;
+    #[doc(inline)]
+    pub use myc::value::convert::{ConvIr, FromValue, ToValue};
 }
 
 #[cfg(test)]
@@ -318,10 +302,7 @@ pub mod prelude {
 fn params_macro_test() {
     let foo = 42;
     let bar = "bar";
-    assert_eq!(
-        vec![(String::from("foo"), Value::Int(42))],
-        params! { foo }
-    );
+    assert_eq!(vec![(String::from("foo"), Value::Int(42))], params! { foo });
     assert_eq!(
         vec![(String::from("foo"), Value::Int(42))],
         params! { foo, }
@@ -329,56 +310,56 @@ fn params_macro_test() {
     assert_eq!(
         vec![
             (String::from("foo"), Value::Int(42)),
-            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into())),
         ],
         params! { foo, bar }
     );
     assert_eq!(
         vec![
             (String::from("foo"), Value::Int(42)),
-            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into())),
         ],
         params! { foo, bar, }
     );
     assert_eq!(
         vec![
             (String::from("foo"), Value::Int(42)),
-            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into())),
         ],
         params! { "foo" => foo, "bar" => bar }
     );
     assert_eq!(
         vec![
             (String::from("foo"), Value::Int(42)),
-            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into())),
         ],
         params! { "foo" => foo, "bar" => bar, }
     );
     assert_eq!(
         vec![
             (String::from("foo"), Value::Int(42)),
-            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into())),
         ],
         params! { foo, "bar" => bar }
     );
     assert_eq!(
         vec![
             (String::from("foo"), Value::Int(42)),
-            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into())),
         ],
         params! { "foo" => foo, bar }
     );
     assert_eq!(
         vec![
             (String::from("foo"), Value::Int(42)),
-            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into())),
         ],
         params! { foo, "bar" => bar, }
     );
     assert_eq!(
         vec![
             (String::from("foo"), Value::Int(42)),
-            (String::from("bar"), Value::Bytes((&b"bar"[..]).into()))
+            (String::from("bar"), Value::Bytes((&b"bar"[..]).into())),
         ],
         params! { "foo" => foo, bar, }
     );

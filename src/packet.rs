@@ -1,5 +1,5 @@
 use byteorder::LittleEndian as LE;
-use byteorder::{ReadBytesExt};
+use byteorder::ReadBytesExt;
 use myc::packets::Column;
 use std::io;
 
@@ -73,6 +73,6 @@ impl InnerStmt {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    pub use std::iter;
     pub use super::super::consts;
+    pub use std::iter;
 }

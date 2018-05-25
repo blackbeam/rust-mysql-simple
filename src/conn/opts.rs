@@ -10,8 +10,8 @@ use std::time::Duration;
 use super::super::error::UrlError;
 use super::LocalInfileHandler;
 
-use url::Url;
 use url::percent_encoding::percent_decode;
+use url::Url;
 
 /// Ssl options.
 ///
@@ -128,10 +128,10 @@ impl Opts {
     #[doc(hidden)]
     pub fn addr_is_loopback(&self) -> bool {
         if self.ip_or_hostname.is_some() {
-            let v4addr: Option<Ipv4Addr> = FromStr::from_str(
-                self.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
-            let v6addr: Option<Ipv6Addr> = FromStr::from_str(
-                self.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
+            let v4addr: Option<Ipv4Addr> =
+                FromStr::from_str(self.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
+            let v6addr: Option<Ipv6Addr> =
+                FromStr::from_str(self.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
             if let Some(addr) = v4addr {
                 addr.is_loopback()
             } else if let Some(addr) = v6addr {
@@ -322,9 +322,7 @@ impl OptsBuilder {
     }
 
     pub fn from_opts<T: Into<Opts>>(opts: T) -> Self {
-        OptsBuilder {
-            opts: opts.into(),
-        }
+        OptsBuilder { opts: opts.into() }
     }
 
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
@@ -429,13 +427,16 @@ impl OptsBuilder {
     /// If not None, then ssl connection implied.
     /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
     pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<(A, Option<(B, C)>)>) -> &mut Self
-    where A: Into<path::PathBuf>,
-          B: Into<path::PathBuf>,
-          C: Into<path::PathBuf> {
+    where
+        A: Into<path::PathBuf>,
+        B: Into<path::PathBuf>,
+        C: Into<path::PathBuf>,
+    {
         self.opts.ssl_opts = ssl_opts.map(|(ca_cert, rest)| {
-            (ca_cert.into(), rest.map(|(client_cert, client_key)| {
-                (client_cert.into(), client_key.into())
-            }))
+            (
+                ca_cert.into(),
+                rest.map(|(client_cert, client_key)| (client_cert.into(), client_key.into())),
+            )
         });
         self
     }
@@ -445,13 +446,18 @@ impl OptsBuilder {
     /// See `SslOpts`.
     #[cfg(all(feature = "ssl", target_os = "macos"))]
     pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<Option<(A, C, Vec<B>)>>) -> &mut Self
-        where A: Into<path::PathBuf>,
-              B: Into<path::PathBuf>,
-              C: Into<String>,
+    where
+        A: Into<path::PathBuf>,
+        B: Into<path::PathBuf>,
+        C: Into<String>,
     {
         self.opts.ssl_opts = ssl_opts.map(|opts| {
             opts.map(|(pkcs12_path, pass, certs)| {
-                (pkcs12_path.into(), pass.into(), certs.into_iter().map(Into::into).collect())
+                (
+                    pkcs12_path.into(),
+                    pass.into(),
+                    certs.into_iter().map(Into::into).collect(),
+                )
             })
         });
         self
@@ -492,7 +498,8 @@ impl OptsBuilder {
     /// Use carefully. Will probably make pool unusable because of *address already in use*
     /// errors.
     pub fn bind_address<T>(&mut self, bind_address: Option<T>) -> &mut Self
-        where T: Into<SocketAddr>
+    where
+        T: Into<SocketAddr>,
     {
         self.opts.bind_address = bind_address.map(Into::into);
         self
@@ -502,7 +509,8 @@ impl OptsBuilder {
     ///
     /// Call with `None` to reset to default.
     pub fn stmt_cache_size<T>(&mut self, cache_size: T) -> &mut Self
-        where T: Into<Option<usize>>
+    where
+        T: Into<Option<usize>>,
     {
         self.opts.stmt_cache_size = cache_size.into().unwrap_or(10);
         self
@@ -527,11 +535,8 @@ impl OptsBuilder {
     pub fn additional_capabilities(
         &mut self,
         additional_capabilities: CapabilityFlags,
-    )
-        -> &mut Self
-    {
-        let forbidden_flags: CapabilityFlags =
-            CapabilityFlags::CLIENT_PROTOCOL_41
+    ) -> &mut Self {
+        let forbidden_flags: CapabilityFlags = CapabilityFlags::CLIENT_PROTOCOL_41
             | CapabilityFlags::CLIENT_SSL
             | CapabilityFlags::CLIENT_COMPRESS
             | CapabilityFlags::CLIENT_SECURE_CONNECTION
@@ -564,7 +569,11 @@ impl Default for OptsBuilder {
 fn get_opts_user_from_url(url: &Url) -> Option<String> {
     let user = url.username();
     if user != "" {
-        Some(percent_decode(user.as_ref()).decode_utf8_lossy().into_owned())
+        Some(
+            percent_decode(user.as_ref())
+                .decode_utf8_lossy()
+                .into_owned(),
+        )
     } else {
         None
     }
@@ -572,7 +581,11 @@ fn get_opts_user_from_url(url: &Url) -> Option<String> {
 
 fn get_opts_pass_from_url(url: &Url) -> Option<String> {
     if let Some(pass) = url.password() {
-        Some(percent_decode(pass.as_ref()).decode_utf8_lossy().into_owned())
+        Some(
+            percent_decode(pass.as_ref())
+                .decode_utf8_lossy()
+                .into_owned(),
+        )
     } else {
         None
     }
@@ -581,7 +594,9 @@ fn get_opts_pass_from_url(url: &Url) -> Option<String> {
 fn get_opts_db_name_from_url(url: &Url) -> Option<String> {
     if let Some(mut segments) = url.path_segments() {
         segments.next().map(|db_name| {
-            percent_decode(db_name.as_ref()).decode_utf8_lossy().into_owned()
+            percent_decode(db_name.as_ref())
+                .decode_utf8_lossy()
+                .into_owned()
         })
     } else {
         None
@@ -628,7 +643,10 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
             }
         } else if key == "verify_peer" {
             if cfg!(not(feature = "ssl")) {
-                return Err(UrlError::FeatureRequired("`ssl'".into(), "verify_peer".into()));
+                return Err(UrlError::FeatureRequired(
+                    "`ssl'".into(),
+                    "verify_peer".into(),
+                ));
             } else {
                 if value == "true" {
                     opts.set_verify_peer(true);
@@ -642,25 +660,31 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
             match u32::from_str(&*value) {
                 Ok(tcp_keepalive_time_ms) => {
                     opts.tcp_keepalive_time = Some(tcp_keepalive_time_ms);
-                },
+                }
                 _ => {
-                    return Err(UrlError::InvalidValue("tcp_keepalive_time_ms".into(), value));
+                    return Err(UrlError::InvalidValue(
+                        "tcp_keepalive_time_ms".into(),
+                        value,
+                    ));
                 }
             }
         } else if key == "tcp_connect_timeout_ms" {
             match u64::from_str(&*value) {
                 Ok(tcp_connect_timeout_ms) => {
                     opts.tcp_connect_timeout = Some(Duration::from_millis(tcp_connect_timeout_ms));
-                },
+                }
                 _ => {
-                    return Err(UrlError::InvalidValue("tcp_connect_timeout_ms".into(), value));
+                    return Err(UrlError::InvalidValue(
+                        "tcp_connect_timeout_ms".into(),
+                        value,
+                    ));
                 }
             }
         } else if key == "stmt_cache_size" {
             match usize::from_str(&*value) {
                 Ok(stmt_cache_size) => {
                     opts.stmt_cache_size = stmt_cache_size;
-                },
+                }
                 _ => {
                     return Err(UrlError::InvalidValue("stmt_cache_size".into(), value));
                 }
@@ -697,31 +721,37 @@ mod test {
     #[cfg(feature = "ssl")]
     fn should_convert_url_into_opts() {
         let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true&tcp_keepalive_time_ms=5000";
-        assert_eq!(Opts {
-            user: Some("us r".to_string()),
-            pass: Some("p w".to_string()),
-            ip_or_hostname: Some("localhost".to_string()),
-            tcp_port: 3308,
-            db_name: Some("db-name".to_string()),
-            prefer_socket: false,
-            verify_peer: true,
-            tcp_keepalive_time: Some(5000),
-            ..Opts::default()
-        }, opts.into());
+        assert_eq!(
+            Opts {
+                user: Some("us r".to_string()),
+                pass: Some("p w".to_string()),
+                ip_or_hostname: Some("localhost".to_string()),
+                tcp_port: 3308,
+                db_name: Some("db-name".to_string()),
+                prefer_socket: false,
+                verify_peer: true,
+                tcp_keepalive_time: Some(5000),
+                ..Opts::default()
+            },
+            opts.into()
+        );
     }
 
     #[test]
     #[cfg(not(feature = "ssl"))]
     fn should_convert_url_into_opts() {
         let opts = "mysql://usr:pw@192.168.1.1:3309/dbname";
-        assert_eq!(Opts {
-            user: Some("usr".to_string()),
-            pass: Some("pw".to_string()),
-            ip_or_hostname: Some("192.168.1.1".to_string()),
-            tcp_port: 3309,
-            db_name: Some("dbname".to_string()),
-            ..Opts::default()
-        }, opts.into());
+        assert_eq!(
+            Opts {
+                user: Some("usr".to_string()),
+                pass: Some("pw".to_string()),
+                ip_or_hostname: Some("192.168.1.1".to_string()),
+                tcp_port: 3309,
+                db_name: Some("dbname".to_string()),
+                ..Opts::default()
+            },
+            opts.into()
+        );
     }
 
     #[test]

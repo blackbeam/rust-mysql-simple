@@ -1,23 +1,16 @@
 use net2::{TcpBuilder, TcpStreamExt};
 #[cfg(unix)]
 use nix::{
-    errno::Errno,
-    sys::select,
-    sys::socket,
-    sys::time::{TimeVal, TimeValLike},
+    errno::Errno, sys::select, sys::socket, sys::time::{TimeVal, TimeValLike},
 };
 use std::io;
 use std::mem;
-use std::net::{TcpStream, SocketAddr, ToSocketAddrs};
-#[cfg(target_os = "windows")]
-use std::{
-    os::raw::*,
-    os::windows::prelude::*,
-    ptr,
-};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 #[cfg(unix)]
 use std::os::unix::prelude::*;
 use std::time::Duration;
+#[cfg(target_os = "windows")]
+use std::{os::raw::*, os::windows::prelude::*, ptr};
 #[cfg(target_os = "windows")]
 use winapi::um::winsock2::*;
 
@@ -53,7 +46,8 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
     }
 
     pub fn bind_address<U>(&mut self, bind_address: Option<U>) -> &mut Self
-        where U: Into<SocketAddr>
+    where
+        U: Into<SocketAddr>,
     {
         self.bind_address = bind_address.map(Into::into);
         self
@@ -92,7 +86,8 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             "could not connect to any address with specified bind address"
         };
         let err = io::Error::new(io::ErrorKind::Other, err_msg);
-        address.to_socket_addrs()?
+        address
+            .to_socket_addrs()?
             .fold(Err(err), |prev, sock_addr| {
                 prev.or_else(|_| {
                     let builder = if sock_addr.is_ipv4() {
@@ -150,16 +145,11 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
     let sock_addr = socket::SockAddr::Inet(inet_addr);
     match socket::connect(fd, &sock_addr) {
         Ok(_) => (),
-        Err(err) => {
-            match err {
-                ::nix::Error::Sys(Errno::EALREADY) |
-                ::nix::Error::Sys(Errno::EINPROGRESS) => (),
-                ::nix::Error::Sys(errno) => {
-                    return Err(io::Error::from_raw_os_error(errno as i32))
-                },
-                _ => return Err(io::Error::new(io::ErrorKind::Other, err)),
-            }
-        }
+        Err(err) => match err {
+            ::nix::Error::Sys(Errno::EALREADY) | ::nix::Error::Sys(Errno::EINPROGRESS) => (),
+            ::nix::Error::Sys(errno) => return Err(io::Error::from_raw_os_error(errno as i32)),
+            _ => return Err(io::Error::new(io::ErrorKind::Other, err)),
+        },
     }
 
     let mut fd_set = select::FdSet::new();
@@ -175,11 +165,9 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
         Some(&mut timeout_timeval),
     );
 
-    let select_res = select_res.map_err(|err| {
-        match err {
-            ::nix::Error::Sys(errno) => io::Error::from_raw_os_error(errno as i32),
-            _ => io::Error::new(io::ErrorKind::Other, err),
-        }
+    let select_res = select_res.map_err(|err| match err {
+        ::nix::Error::Sys(errno) => io::Error::from_raw_os_error(errno as i32),
+        _ => io::Error::new(io::ErrorKind::Other, err),
     })?;
 
     if select_res == -1 {
@@ -190,16 +178,11 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
         return Err(io::ErrorKind::TimedOut.into());
     }
 
-    let socket_error_code = socket::getsockopt(
-        socket_fd,
-        socket::sockopt::SocketError,
-    );
+    let socket_error_code = socket::getsockopt(socket_fd, socket::sockopt::SocketError);
 
-    let socket_error_code = socket_error_code.map_err(|err| {
-        match err {
-            ::nix::Error::Sys(errno) => io::Error::from_raw_os_error(errno as i32),
-            _ => io::Error::new(io::ErrorKind::Other, err),
-        }
+    let socket_error_code = socket_error_code.map_err(|err| match err {
+        ::nix::Error::Sys(errno) => io::Error::from_raw_os_error(errno as i32),
+        _ => io::Error::new(io::ErrorKind::Other, err),
     })?;
 
     if socket_error_code != 0 {
@@ -210,17 +193,15 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
 }
 
 #[cfg(target_os = "windows")]
-fn connect_fd_timeout(socket: RawSocket,
-                      sock_addr: &SocketAddr,
-                      timeout: Duration) -> io::Result<()> {
+fn connect_fd_timeout(
+    socket: RawSocket,
+    sock_addr: &SocketAddr,
+    timeout: Duration,
+) -> io::Result<()> {
     set_non_blocking(socket, true)?;
     let (name, name_len) = match *sock_addr {
-        SocketAddr::V4(ref a) => {
-            (a as *const _ as *const _, mem::size_of_val(a) as c_int)
-        },
-        SocketAddr::V6(ref a) => {
-            (a as *const _ as *const _, mem::size_of_val(a) as c_int)
-        }
+        SocketAddr::V4(ref a) => (a as *const _ as *const _, mem::size_of_val(a) as c_int),
+        SocketAddr::V6(ref a) => (a as *const _ as *const _, mem::size_of_val(a) as c_int),
     };
     let result = unsafe { connect(socket as usize, name, name_len) };
     if result == SOCKET_ERROR {
@@ -229,7 +210,7 @@ fn connect_fd_timeout(socket: RawSocket,
             Some(WSAEWOULDBLOCK) => {
                 let mut write_fds = fd_set {
                     fd_count: 1,
-                    fd_array: [0; FD_SETSIZE]
+                    fd_array: [0; FD_SETSIZE],
                 };
                 write_fds.fd_array[0] = socket as usize;
                 let mut err_fds = write_fds.clone();
@@ -238,9 +219,8 @@ fn connect_fd_timeout(socket: RawSocket,
                     tv_usec: 0,
                 };
 
-                let result = unsafe {
-                    select(0, ptr::null_mut(), &mut write_fds, &mut err_fds, &timeout)
-                };
+                let result =
+                    unsafe { select(0, ptr::null_mut(), &mut write_fds, &mut err_fds, &timeout) };
 
                 if result == 0 {
                     return Err(io::ErrorKind::TimedOut.into());
@@ -264,18 +244,20 @@ fn connect_fd_timeout(socket: RawSocket,
                             let mut opt_val = 0i32;
                             let mut opt_len = mem::size_of::<i32>() as c_int;
                             let result = unsafe {
-                                getsockopt(socket as usize,
-                                           SOL_SOCKET,
-                                           SO_ERROR,
-                                           &mut opt_val as *mut _ as *mut _,
-                                           &mut opt_len)
+                                getsockopt(
+                                    socket as usize,
+                                    SOL_SOCKET,
+                                    SO_ERROR,
+                                    &mut opt_val as *mut _ as *mut _,
+                                    &mut opt_len,
+                                )
                             };
                             return Err(io::Error::from_raw_os_error(result));
-                        },
+                        }
                         None => unreachable!(),
                     }
                 }
-            },
+            }
             _ => return Err(err),
         }
     }

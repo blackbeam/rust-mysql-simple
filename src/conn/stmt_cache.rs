@@ -21,18 +21,20 @@ impl StmtCache {
     }
 
     pub fn contains<T>(&self, key: &T) -> bool
-        where String: Borrow<T>,
-              T: Hash + Eq,
-              T: ?Sized
+    where
+        String: Borrow<T>,
+        T: Hash + Eq,
+        T: ?Sized,
     {
         self.map.contains_key(key)
     }
 
     pub fn get<T>(&mut self, key: &T) -> Option<&InnerStmt>
-        where String: Borrow<T>,
-              String: PartialEq<T>,
-              T: Hash + Eq,
-              T: ?Sized
+    where
+        String: Borrow<T>,
+        String: PartialEq<T>,
+        T: Hash + Eq,
+        T: ?Sized,
     {
         if let Some(&mut (ref mut last, ref st)) = self.map.get_mut(key) {
             *last = self.iter;
@@ -52,7 +54,8 @@ impl StmtCache {
         self.iter += 1;
 
         if self.map.len() > self.cap {
-            if let Some(evict) = self.map
+            if let Some(evict) = self
+                .map
                 .iter()
                 .map(|(key, &(last, _))| (last, key))
                 .min()

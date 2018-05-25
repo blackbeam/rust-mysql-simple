@@ -1,57 +1,49 @@
 use std::cmp;
+use std::fmt;
 use std::io;
 use std::io::Read as StdRead;
 use std::io::Write as StdWrite;
 use std::mem;
 use std::net;
 use std::net::SocketAddr;
-use std::fmt;
 use std::slice::Chunks;
 use std::time::Duration;
 
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use conn::SslOpts;
 
-use Value::{self, NULL, Int, UInt, Float, Bytes, Date, Time};
 use super::consts;
-use super::consts::Command;
 use super::consts::ColumnType;
-use super::error::Error::DriverError;
+use super::consts::Command;
 use super::error::DriverError::ConnectTimeout;
 use super::error::DriverError::CouldNotConnect;
-use super::error::DriverError::PacketTooLarge;
 use super::error::DriverError::PacketOutOfSync;
+use super::error::DriverError::PacketTooLarge;
+use super::error::Error::DriverError;
 use super::error::Result as MyResult;
+use Value::{self, Bytes, Date, Float, Int, Time, UInt, NULL};
 
+use bufstream::BufStream;
+use byteorder::LittleEndian as LE;
+use byteorder::ReadBytesExt;
+use byteorder::WriteBytesExt;
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+#[cfg(windows)]
+use named_pipe as np;
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-use openssl::ssl::{self, SslStream, SslContext};
-#[cfg(all(feature = "ssl", target_os = "macos"))]
-use security_framework::secure_transport::{
-    SslConnectionType,
-    HandshakeError,
-    SslProtocolSide,
-    SslContext,
-    SslStream,
-};
+use openssl::ssl::{self, SslContext, SslStream};
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::certificate::SecCertificate;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::cipher_suite::CipherSuite;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::identity::SecIdentity;
-use bufstream::BufStream;
-use byteorder::ReadBytesExt;
-use byteorder::WriteBytesExt;
-use byteorder::LittleEndian as LE;
-#[cfg(unix)]
-use std::os::unix as unix;
-#[cfg(windows)]
-use named_pipe as np;
-use flate2::{
-    Compression,
-    read::ZlibDecoder,
-    write::ZlibEncoder,
+#[cfg(all(feature = "ssl", target_os = "macos"))]
+use security_framework::secure_transport::{
+    HandshakeError, SslConnectionType, SslContext, SslProtocolSide, SslStream,
 };
+#[cfg(unix)]
+use std::os::unix;
 
 mod tcp;
 
@@ -89,7 +81,7 @@ impl<'a> Iterator for PacketIterator<'a> {
                     Ok(_) => Some((header, chunk)),
                     Err(_) => unreachable!("3 bytes for chunk len should be available"),
                 }
-            },
+            }
             None => if self.last_was_max {
                 let header = [0, 0, 0, *self.seq_id];
 
@@ -99,7 +91,7 @@ impl<'a> Iterator for PacketIterator<'a> {
                 Some((header, &[][..]))
             } else {
                 None
-            }
+            },
         }
     }
 }
@@ -128,8 +120,10 @@ pub trait Read: ReadBytesExt + io::BufRead {
         if count as u64 == len {
             Ok(out)
         } else {
-            Err(io::Error::new(io::ErrorKind::Other,
-                               "Unexpected EOF while reading length encoded string"))
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Unexpected EOF while reading length encoded string",
+            ))
         }
     }
 
@@ -146,63 +140,59 @@ pub trait Read: ReadBytesExt + io::BufRead {
         Ok(out)
     }
 
-    fn read_bin_value(&mut self, col_type: consts::ColumnType, unsigned: bool) -> io::Result<Value> {
+    fn read_bin_value(
+        &mut self,
+        col_type: consts::ColumnType,
+        unsigned: bool,
+    ) -> io::Result<Value> {
         match col_type {
-            ColumnType::MYSQL_TYPE_STRING |
-            ColumnType::MYSQL_TYPE_VAR_STRING |
-            ColumnType::MYSQL_TYPE_BLOB |
-            ColumnType::MYSQL_TYPE_TINY_BLOB |
-            ColumnType::MYSQL_TYPE_MEDIUM_BLOB |
-            ColumnType::MYSQL_TYPE_LONG_BLOB |
-            ColumnType::MYSQL_TYPE_SET |
-            ColumnType::MYSQL_TYPE_ENUM |
-            ColumnType::MYSQL_TYPE_DECIMAL |
-            ColumnType::MYSQL_TYPE_VARCHAR |
-            ColumnType::MYSQL_TYPE_BIT |
-            ColumnType::MYSQL_TYPE_NEWDECIMAL |
-            ColumnType::MYSQL_TYPE_GEOMETRY |
-            ColumnType::MYSQL_TYPE_JSON => {
-                Ok(Bytes(self.read_lenenc_bytes()?))
-            },
+            ColumnType::MYSQL_TYPE_STRING
+            | ColumnType::MYSQL_TYPE_VAR_STRING
+            | ColumnType::MYSQL_TYPE_BLOB
+            | ColumnType::MYSQL_TYPE_TINY_BLOB
+            | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+            | ColumnType::MYSQL_TYPE_LONG_BLOB
+            | ColumnType::MYSQL_TYPE_SET
+            | ColumnType::MYSQL_TYPE_ENUM
+            | ColumnType::MYSQL_TYPE_DECIMAL
+            | ColumnType::MYSQL_TYPE_VARCHAR
+            | ColumnType::MYSQL_TYPE_BIT
+            | ColumnType::MYSQL_TYPE_NEWDECIMAL
+            | ColumnType::MYSQL_TYPE_GEOMETRY
+            | ColumnType::MYSQL_TYPE_JSON => Ok(Bytes(self.read_lenenc_bytes()?)),
             ColumnType::MYSQL_TYPE_TINY => {
                 if unsigned {
                     Ok(Int(self.read_u8()? as i64))
                 } else {
                     Ok(Int(self.read_i8()? as i64))
                 }
-            },
-            ColumnType::MYSQL_TYPE_SHORT |
-            ColumnType::MYSQL_TYPE_YEAR => {
+            }
+            ColumnType::MYSQL_TYPE_SHORT | ColumnType::MYSQL_TYPE_YEAR => {
                 if unsigned {
                     Ok(Int(self.read_u16::<LE>()? as i64))
                 } else {
                     Ok(Int(self.read_i16::<LE>()? as i64))
                 }
-            },
-            ColumnType::MYSQL_TYPE_LONG |
-            ColumnType::MYSQL_TYPE_INT24 => {
+            }
+            ColumnType::MYSQL_TYPE_LONG | ColumnType::MYSQL_TYPE_INT24 => {
                 if unsigned {
                     Ok(Int(self.read_u32::<LE>()? as i64))
                 } else {
                     Ok(Int(self.read_i32::<LE>()? as i64))
                 }
-            },
+            }
             ColumnType::MYSQL_TYPE_LONGLONG => {
                 if unsigned {
                     Ok(UInt(self.read_u64::<LE>()?))
                 } else {
                     Ok(Int(self.read_i64::<LE>()?))
                 }
-            },
-            ColumnType::MYSQL_TYPE_FLOAT => {
-                Ok(Float(self.read_f32::<LE>()? as f64))
-            },
-            ColumnType::MYSQL_TYPE_DOUBLE => {
-                Ok(Float(self.read_f64::<LE>()?))
-            },
-            ColumnType::MYSQL_TYPE_TIMESTAMP |
-            ColumnType::MYSQL_TYPE_DATE |
-            ColumnType::MYSQL_TYPE_DATETIME => {
+            }
+            ColumnType::MYSQL_TYPE_FLOAT => Ok(Float(self.read_f32::<LE>()? as f64)),
+            ColumnType::MYSQL_TYPE_DOUBLE => Ok(Float(self.read_f64::<LE>()?)),
+            ColumnType::MYSQL_TYPE_TIMESTAMP
+            | ColumnType::MYSQL_TYPE_DATE
+            | ColumnType::MYSQL_TYPE_DATETIME => {
                 let len = self.read_u8()?;
                 let mut year = 0u16;
                 let mut month = 0u8;
@@ -225,7 +215,7 @@ pub trait Read: ReadBytesExt + io::BufRead {
                     micro_second = self.read_u32::<LE>()?;
                 }
                 Ok(Date(year, month, day, hour, minute, second, micro_second))
-            },
+            }
             ColumnType::MYSQL_TYPE_TIME => {
                 let len = self.read_u8()?;
                 let mut is_negative = false;
@@ -244,8 +234,15 @@ pub trait Read: ReadBytesExt + io::BufRead {
                 if len == 12u8 {
                     micro_seconds = self.read_u32::<LE>()?;
                 }
-                Ok(Time(is_negative, days, hours, minutes, seconds, micro_seconds))
-            },
+                Ok(Time(
+                    is_negative,
+                    days,
+                    hours,
+                    minutes,
+                    seconds,
+                    micro_seconds,
+                ))
+            }
             _ => Ok(NULL),
         }
     }
@@ -264,7 +261,7 @@ pub trait Read: ReadBytesExt + io::BufRead {
                 break;
             } else {
                 if self.fill_buf()?.len() < payload_len {
-                    return Err(io::Error::new(Other, "Unexpected EOF while reading packet").into())
+                    return Err(io::Error::new(Other, "Unexpected EOF while reading packet").into());
                 }
                 self.consume(payload_len);
                 if payload_len != consts::MAX_PAYLOAD_LEN {
@@ -290,8 +287,10 @@ pub trait Read: ReadBytesExt + io::BufRead {
                 break;
             } else {
                 output.reserve(payload_len);
-                unsafe { output.set_len(total_read + payload_len); }
-                self.read_exact(&mut output[total_read..total_read+payload_len])?;
+                unsafe {
+                    output.set_len(total_read + payload_len);
+                }
+                self.read_exact(&mut output[total_read..total_read + payload_len])?;
                 total_read += payload_len;
                 if payload_len != consts::MAX_PAYLOAD_LEN {
                     break;
@@ -336,7 +335,12 @@ pub trait Write: WriteBytesExt {
         self.write_all(bytes)
     }
 
-    fn write_packet(&mut self, data: &[u8], mut seq_id: u8, max_allowed_packet: usize) -> MyResult<u8> {
+    fn write_packet(
+        &mut self,
+        data: &[u8],
+        mut seq_id: u8,
+        max_allowed_packet: usize,
+    ) -> MyResult<u8> {
         if data.len() > max_allowed_packet {
             return Err(DriverError(PacketTooLarge));
         }
@@ -346,9 +350,7 @@ pub trait Write: WriteBytesExt {
             self.write_all(payload)?;
         }
 
-        self.flush()
-            .map_err(Into::into)
-            .map(|_| seq_id)
+        self.flush().map_err(Into::into).map(|_| seq_id)
     }
 }
 
@@ -388,7 +390,8 @@ impl Compressed {
     }
 
     fn with_buf_and_stream<F>(&mut self, mut fun: F) -> io::Result<()>
-        where F: FnMut(&mut Vec<u8>, &mut IoPack) -> io::Result<()>,
+    where
+        F: FnMut(&mut Vec<u8>, &mut IoPack) -> io::Result<()>,
     {
         let mut buf = mem::replace(&mut self.buf, Vec::new());
         let ret = fun(&mut buf, self.stream.as_mut());
@@ -424,10 +427,8 @@ impl Compressed {
         &mut self,
         data: &[u8],
         mut seq_id: u8,
-        max_allowed_packet: usize
-    )
-        -> MyResult<u8>
-    {
+        max_allowed_packet: usize,
+    ) -> MyResult<u8> {
         if data.len() > max_allowed_packet {
             return Err(DriverError(PacketTooLarge));
         }
@@ -463,9 +464,13 @@ impl Compressed {
                 let mut encoder = ZlibEncoder::new(compressed_buf, Compression::default());
                 encoder.write_all(chunk)?;
                 compressed_buf = encoder.finish()?;
-                self.stream.as_mut().write_uint::<LE>(compressed_buf.len() as u64, 3)?;
+                self.stream
+                    .as_mut()
+                    .write_uint::<LE>(compressed_buf.len() as u64, 3)?;
                 self.stream.as_mut().write_u8(comp_seq_id)?;
-                self.stream.as_mut().write_uint::<LE>(chunk.len() as u64, 3)?;
+                self.stream
+                    .as_mut()
+                    .write_uint::<LE>(chunk.len() as u64, 3)?;
                 self.stream.as_mut().write_all(&*compressed_buf)?;
 
                 comp_seq_id = comp_seq_id.wrapping_add(1);
@@ -533,9 +538,9 @@ pub enum Stream {
     TcpStream(Option<TcpStream>),
 }
 
-pub trait IoPack: io::Read + io::Write + io::BufRead + 'static { }
+pub trait IoPack: io::Read + io::Write + io::BufRead + 'static {}
 
-impl<T: io::Read + io::Write + 'static> IoPack for BufStream<T> { }
+impl<T: io::Read + io::Write + 'static> IoPack for BufStream<T> {}
 
 impl AsMut<IoPack> for Stream {
     fn as_mut(&mut self) -> &mut IoPack {
@@ -552,16 +557,17 @@ impl AsMut<IoPack> for Stream {
 
 impl Stream {
     #[cfg(unix)]
-    pub fn connect_socket(socket: &str,
-                          read_timeout: Option<Duration>,
-                          write_timeout: Option<Duration>) -> MyResult<Stream>
-    {
+    pub fn connect_socket(
+        socket: &str,
+        read_timeout: Option<Duration>,
+        write_timeout: Option<Duration>,
+    ) -> MyResult<Stream> {
         match unix::net::UnixStream::connect(socket) {
             Ok(stream) => {
                 stream.set_read_timeout(read_timeout)?;
                 stream.set_write_timeout(write_timeout)?;
                 Ok(Stream::SocketStream(BufStream::new(stream)))
-            },
+            }
             Err(e) => {
                 let addr = format!("{}", socket);
                 let desc = format!("{}", e);
@@ -571,20 +577,25 @@ impl Stream {
     }
 
     #[cfg(windows)]
-    pub fn connect_socket(socket: &str,
-                          read_timeout: Option<Duration>,
-                          write_timeout: Option<Duration>) -> MyResult<Stream>
-    {
+    pub fn connect_socket(
+        socket: &str,
+        read_timeout: Option<Duration>,
+        write_timeout: Option<Duration>,
+    ) -> MyResult<Stream> {
         let full_name = format!(r"\\.\pipe\{}", socket);
         match np::PipeClient::connect(full_name.clone()) {
             Ok(mut stream) => {
                 stream.set_read_timeout(read_timeout);
                 stream.set_write_timeout(write_timeout);
                 Ok(Stream::SocketStream(BufStream::new(stream)))
-            },
+            }
             Err(e) => {
                 let desc = format!("{}", e);
-                Err(DriverError(CouldNotConnect(Some((full_name, desc, e.kind())))))
+                Err(DriverError(CouldNotConnect(Some((
+                    full_name,
+                    desc,
+                    e.kind(),
+                )))))
             }
         }
     }
@@ -594,15 +605,16 @@ impl Stream {
         unimplemented!("Sockets is not implemented on current platform");
     }
 
-    pub fn connect_tcp(ip_or_hostname: &str,
-                       port: u16,
-                       read_timeout: Option<Duration>,
-                       write_timeout: Option<Duration>,
-                       tcp_keepalive_time: Option<u32>,
-                       nodelay: bool,
-                       tcp_connect_timeout: Option<Duration>,
-                       bind_address: Option<SocketAddr>) -> MyResult<Stream>
-    {
+    pub fn connect_tcp(
+        ip_or_hostname: &str,
+        port: u16,
+        read_timeout: Option<Duration>,
+        write_timeout: Option<Duration>,
+        tcp_keepalive_time: Option<u32>,
+        nodelay: bool,
+        tcp_connect_timeout: Option<Duration>,
+        bind_address: Option<SocketAddr>,
+    ) -> MyResult<Stream> {
         let mut builder = tcp::MyTcpBuilder::new((ip_or_hostname, port));
         builder
             .connect_timeout(tcp_connect_timeout)
@@ -611,7 +623,8 @@ impl Stream {
             .keepalive_time_ms(tcp_keepalive_time)
             .nodelay(nodelay)
             .bind_address(bind_address);
-        builder.connect()
+        builder
+            .connect()
             .map(|stream| Stream::TcpStream(Some(TcpStream::Insecure(BufStream::new(stream)))))
             .map_err(|err| {
                 if err.kind() == io::ErrorKind::TimedOut {
@@ -634,9 +647,12 @@ impl Stream {
 
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 impl Stream {
-    pub fn make_secure(mut self, verify_peer: bool, ip_or_hostname: &Option<String>, ssl_opts: &SslOpts)
-    -> MyResult<Stream>
-    {
+    pub fn make_secure(
+        mut self,
+        verify_peer: bool,
+        ip_or_hostname: &Option<String>,
+        ssl_opts: &SslOpts,
+    ) -> MyResult<Stream> {
         use std::path::Path;
         use std::path::PathBuf;
 
@@ -668,7 +684,9 @@ impl Stream {
             match *ssl_opts {
                 Some(ref ssl_opts) => {
                     if verify_peer {
-                        ctx.set_peer_domain_name(ip_or_hostname.as_ref().unwrap_or(&("localhost".into())))?;
+                        ctx.set_peer_domain_name(
+                            ip_or_hostname.as_ref().unwrap_or(&("localhost".into())),
+                        )?;
                     }
                     // Taken from gmail.com
                     ctx.set_enabled_ciphers(&[
@@ -704,22 +722,22 @@ impl Stream {
                             match stream {
                                 TcpStream::Insecure(mut stream) => {
                                     stream.flush()?;
-                                    let s_stream = match ctx.handshake(stream.into_inner().unwrap()) {
+                                    let s_stream = match ctx.handshake(stream.into_inner().unwrap())
+                                    {
                                         Ok(s_stream) => s_stream,
-                                        Err(HandshakeError::Failure(err)) => {
-                                            return Err(err.into())
-                                        },
+                                        Err(HandshakeError::Failure(err)) => return Err(err.into()),
                                         Err(HandshakeError::Interrupted(_)) => unreachable!(),
                                     };
-                                    Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(s_stream)))))
-                                },
+                                    Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(
+                                        s_stream,
+                                    )))))
+                                }
                                 _ => unreachable!(),
                             }
-
-                        },
+                        }
                         _ => unreachable!(),
                     }
-                },
+                }
                 _ => unreachable!(),
             }
         } else {
@@ -730,8 +748,12 @@ impl Stream {
 
 #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
 impl Stream {
-    pub fn make_secure(mut self, verify_peer: bool, _: &Option<String>, ssl_opts: &SslOpts) -> MyResult<Stream>
-    {
+    pub fn make_secure(
+        mut self,
+        verify_peer: bool,
+        _: &Option<String>,
+        ssl_opts: &SslOpts,
+    ) -> MyResult<Stream> {
         if self.is_insecure() {
             let mut ctx = SslContext::builder(ssl::SslMethod::tls())?;
             let mode = if verify_peer {
@@ -746,7 +768,7 @@ impl Stream {
                     ctx.set_ca_file(&ca_cert)?;
                     ctx.set_certificate_file(&client_cert, ssl::SslFiletype::PEM)?;
                     ctx.set_private_key_file(&client_key, ssl::SslFiletype::PEM)?;
-                },
+                }
                 _ => unreachable!(),
             }
             match self {
@@ -755,20 +777,27 @@ impl Stream {
                     match stream {
                         TcpStream::Insecure(stream) => {
                             let ctx = ctx.build();
-                            let s_stream = match ssl::Ssl::new(&ctx)?.connect(stream.into_inner().unwrap()) {
+                            let s_stream = match ssl::Ssl::new(&ctx)?
+                                .connect(stream.into_inner().unwrap())
+                            {
                                 Ok(s_stream) => s_stream,
                                 Err(handshake_err) => match handshake_err {
-                                    ssl::HandshakeError::SetupFailure(err) => return Err(err.into()),
-                                    ssl::HandshakeError::Failure(mid_stream) => return Err(mid_stream.into_error().into()),
+                                    ssl::HandshakeError::SetupFailure(err) => {
+                                        return Err(err.into())
+                                    }
+                                    ssl::HandshakeError::Failure(mid_stream) => {
+                                        return Err(mid_stream.into_error().into())
+                                    }
                                     ssl::HandshakeError::WouldBlock(mid_stream) => unreachable!(),
                                 },
                             };
-                            Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(s_stream)))))
-                        },
+                            Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(
+                                s_stream,
+                            )))))
+                        }
                         _ => unreachable!(),
                     }
-
-                },
+                }
                 _ => unreachable!(),
             }
         } else {
@@ -782,7 +811,9 @@ impl Drop for Stream {
         if let &mut Stream::TcpStream(None) = self {
             return;
         }
-        let _ = self.as_mut().write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
+        let _ = self
+            .as_mut()
+            .write_packet(&[Command::COM_QUIT as u8], 0, consts::MAX_PAYLOAD_LEN);
         let _ = self.as_mut().flush();
     }
 }

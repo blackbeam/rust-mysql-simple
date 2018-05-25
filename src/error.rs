@@ -4,15 +4,13 @@ use std::io;
 use std::result;
 use std::sync;
 
-use myc::packets::ErrPacket;
 use myc::named_params::MixedParamsError;
+use myc::packets::ErrPacket;
 use myc::params::MissingNamedParameterError;
 
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 use openssl::{
-    ssl::Error as OpensslError,
-    error::Error as SslError,
-    error::ErrorStack as SslErrorStack,
+    error::Error as SslError, error::ErrorStack as SslErrorStack, ssl::Error as OpensslError,
 };
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::base::Error as SslError;
@@ -72,14 +70,13 @@ impl Error {
     #[doc(hidden)]
     pub fn is_connectivity_error(&self) -> bool {
         match self {
-            &Error::IoError(_) |
-            &Error::DriverError(_) => true,
+            &Error::IoError(_) | &Error::DriverError(_) => true,
             #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
             &Error::SslError(_) => true,
-            &Error::MySqlError(_) |
-            &Error::UrlError(_) |
-            &Error::FromValueError(_) |
-            &Error::FromRowError(_) => false,
+            &Error::MySqlError(_)
+            | &Error::UrlError(_)
+            | &Error::FromValueError(_)
+            | &Error::FromRowError(_) => false,
         }
     }
 }
@@ -106,7 +103,7 @@ impl error::Error for Error {
             Error::UrlError(ref err) => Some(err),
             #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
             Error::SslError(ref err) => Some(err),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -170,13 +167,11 @@ impl From<OpensslError> for Error {
     fn from(err: OpensslError) -> Error {
         match err.into_io_error() {
             Ok(err) => err.into(),
-            Err(err) => {
-                match err.ssl_error() {
-                    Some(err_stack) => {
-                        io::Error::new(io::ErrorKind::Other, err_stack.to_string()).into()
-                    },
-                    None => unreachable!(),
+            Err(err) => match err.ssl_error() {
+                Some(err_stack) => {
+                    io::Error::new(io::ErrorKind::Other, err_stack.to_string()).into()
                 }
+                None => unreachable!(),
             },
         }
     }
@@ -247,9 +242,7 @@ impl error::Error for DriverError {
 impl fmt::Display for DriverError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            DriverError::ConnectTimeout => {
-                write!(f, "Could not connect: connection timeout")
-            }
+            DriverError::ConnectTimeout => write!(f, "Could not connect: connection timeout"),
             DriverError::CouldNotConnect(None) => {
                 write!(f, "Could not connect: address not specified")
             }
@@ -259,52 +252,39 @@ impl fmt::Display for DriverError {
             DriverError::UnsupportedProtocol(proto_version) => {
                 write!(f, "Unsupported protocol version {}", proto_version)
             }
-            DriverError::PacketOutOfSync => {
-                write!(f, "Packet out of sync")
-            }
-            DriverError::PacketTooLarge => {
-                write!(f, "Packet too large")
-            }
-            DriverError::Protocol41NotSet => {
-                write!(f, "Server must set CLIENT_PROTOCOL_41 flag")
-            }
-            DriverError::UnexpectedPacket => {
-                write!(f, "Unexpected packet")
-            }
-            DriverError::MismatchedStmtParams(exp, prov) => {
-                write!(f, "Statement takes {} parameters but {} was supplied", exp, prov)
-            }
-            DriverError::InvalidPoolConstraints => {
-                write!(f, "Invalid pool constraints")
-            },
-            DriverError::SetupError => {
-                write!(f, "Could not setup connection")
-            },
-            DriverError::SslNotSupported => {
-                write!(f, "Client requires secure connection but server \
-                           does not have this capability")
-            },
-            DriverError::CouldNotParseVersion => {
-                write!(f, "Could not parse MySQL version")
-            },
-            DriverError::ReadOnlyTransNotSupported => {
-                write!(f, "Read-only transactions does not supported in your MySQL version")
-            },
-            DriverError::PoisonedPoolMutex => {
-                write!(f, "Poisoned pool mutex")
-            },
-            DriverError::Timeout => {
-                write!(f, "Operation timed out")
-            },
+            DriverError::PacketOutOfSync => write!(f, "Packet out of sync"),
+            DriverError::PacketTooLarge => write!(f, "Packet too large"),
+            DriverError::Protocol41NotSet => write!(f, "Server must set CLIENT_PROTOCOL_41 flag"),
+            DriverError::UnexpectedPacket => write!(f, "Unexpected packet"),
+            DriverError::MismatchedStmtParams(exp, prov) => write!(
+                f,
+                "Statement takes {} parameters but {} was supplied",
+                exp, prov
+            ),
+            DriverError::InvalidPoolConstraints => write!(f, "Invalid pool constraints"),
+            DriverError::SetupError => write!(f, "Could not setup connection"),
+            DriverError::SslNotSupported => write!(
+                f,
+                "Client requires secure connection but server \
+                 does not have this capability"
+            ),
+            DriverError::CouldNotParseVersion => write!(f, "Could not parse MySQL version"),
+            DriverError::ReadOnlyTransNotSupported => write!(
+                f,
+                "Read-only transactions does not supported in your MySQL version"
+            ),
+            DriverError::PoisonedPoolMutex => write!(f, "Poisoned pool mutex"),
+            DriverError::Timeout => write!(f, "Operation timed out"),
             DriverError::MissingNamedParameter(ref name) => {
                 write!(f, "Missing named parameter `{}' for statement", name)
-            },
+            }
             DriverError::NamedParamsForPositionalQuery => {
                 write!(f, "Can not pass named parameters to positional query")
-            },
-            DriverError::MixedParams => {
-                write!(f, "Can not mix named and positional parameters in one statement")
-            },
+            }
+            DriverError::MixedParams => write!(
+                f,
+                "Can not mix named and positional parameters in one statement"
+            ),
         }
     }
 }
@@ -338,18 +318,20 @@ impl fmt::Display for UrlError {
         match *self {
             UrlError::ParseError(ref err) => write!(f, "URL ParseError {{ {} }}", err),
             UrlError::UnsupportedScheme(ref s) => write!(f, "URL scheme `{}' is not supported", s),
-            UrlError::FeatureRequired(ref feature, ref parameter) => {
-                write!(f, "Url parameter `{}' requires {} feature", parameter, feature)
-            },
-            UrlError::InvalidValue(ref parameter, ref value) => {
-                write!(f, "Invalid value `{}' for URL parameter `{}'", value, parameter)
-            },
+            UrlError::FeatureRequired(ref feature, ref parameter) => write!(
+                f,
+                "Url parameter `{}' requires {} feature",
+                parameter, feature
+            ),
+            UrlError::InvalidValue(ref parameter, ref value) => write!(
+                f,
+                "Invalid value `{}' for URL parameter `{}'",
+                value, parameter
+            ),
             UrlError::UnknownParameter(ref parameter) => {
                 write!(f, "Unknown URL parameter `{}'", parameter)
-            },
-            UrlError::BadUrl => {
-                write!(f, "Invalid or incomplete connection URL")
             }
+            UrlError::BadUrl => write!(f, "Invalid or incomplete connection URL"),
         }
     }
 }
