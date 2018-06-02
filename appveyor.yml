@@ -3,6 +3,9 @@ branches:
   only:
   - master
 clone_folder: c:\clone
+platform:
+  - x86
+  - x64
 environment:
   MYSQL_SERVER_PORT: 3306
   MYSQL_SERVER_PASS: Password12!
@@ -12,10 +15,10 @@ environment:
     RUST_INSTALLER: rust-nightly-x86_64-pc-windows-msvc.msi
   - RUST_URL: https://static.rust-lang.org/dist/rust-beta-x86_64-pc-windows-msvc.msi
     RUST_INSTALLER: rust-beta-x86_64-pc-windows-msvc.msi
-  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.0-x86_64-pc-windows-msvc.msi
-    RUST_INSTALLER: rust-1.26.0-x86_64-pc-windows-msvc.msi
-  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.0-x86_64-pc-windows-msvc.msi
-    RUST_INSTALLER: rust-1.26.0-x86_64-pc-windows-msvc.msi
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.1-x86_64-pc-windows-msvc.msi
+    RUST_INSTALLER: rust-1.26.1-x86_64-pc-windows-msvc.msi
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.1-x86_64-pc-windows-msvc.msi
+    RUST_INSTALLER: rust-1.26.1-x86_64-pc-windows-msvc.msi
     COMPRESS: 1
 services: mysql
 install:

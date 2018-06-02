@@ -229,12 +229,12 @@ fn connect_fd_timeout(
                 } else {
                     let mut error = None;
                     for i in 0..(err_fds.fd_count as usize) {
-                        if err_fds.fd_array[i] as u64 == socket {
+                        if err_fds.fd_array[i] == socket as usize {
                             error = Some(true);
                         }
                     }
                     for i in 0..(write_fds.fd_count as usize) {
-                        if write_fds.fd_array[i] as u64 == socket {
+                        if write_fds.fd_array[i] == socket as usize {
                             error = Some(false);
                         }
                     }

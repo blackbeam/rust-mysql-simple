@@ -2365,6 +2365,7 @@ mod test {
 
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
+            #[allow(unused_mut)]
             let mut opts = OptsBuilder::from_opts(get_opts());
             #[cfg(all(feature = "ssl", not(target_os = "windows")))]
             opts.ssl_opts::<String, String, String>(None);
