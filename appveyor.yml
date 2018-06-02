@@ -3,6 +3,9 @@ branches:
   only:
   - master
 clone_folder: c:\clone
+platform:
+  - x86
+  - x64
 environment:
   MYSQL_SERVER_PORT: 3306
   MYSQL_SERVER_PASS: Password12!
