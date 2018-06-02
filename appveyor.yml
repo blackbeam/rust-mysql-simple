@@ -10,12 +10,23 @@ environment:
   matrix:
   - RUST_URL: https://static.rust-lang.org/dist/rust-nightly-x86_64-pc-windows-msvc.msi
     RUST_INSTALLER: rust-nightly-x86_64-pc-windows-msvc.msi
+    TARGET_ARCH: "x64"
   - RUST_URL: https://static.rust-lang.org/dist/rust-beta-x86_64-pc-windows-msvc.msi
     RUST_INSTALLER: rust-beta-x86_64-pc-windows-msvc.msi
-  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.0-x86_64-pc-windows-msvc.msi
-    RUST_INSTALLER: rust-1.26.0-x86_64-pc-windows-msvc.msi
-  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.0-x86_64-pc-windows-msvc.msi
-    RUST_INSTALLER: rust-1.26.0-x86_64-pc-windows-msvc.msi
+    TARGET_ARCH: "x64"
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.1-x86_64-pc-windows-msvc.msi
+    RUST_INSTALLER: rust-1.26.1-x86_64-pc-windows-msvc.msi
+    TARGET_ARCH: "x64"
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.1-x86_64-pc-windows-msvc.msi
+    RUST_INSTALLER: rust-1.26.1-x86_64-pc-windows-msvc.msi
+    TARGET_ARCH: "x64"
+    COMPRESS: 1
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.1-x86_64-pc-windows-msvc.msi
+    RUST_INSTALLER: rust-1.26.1-x86_64-pc-windows-msvc.msi
+    TARGET_ARCH: "x86"
+  - RUST_URL: https://static.rust-lang.org/dist/rust-1.26.1-x86_64-pc-windows-msvc.msi
+    RUST_INSTALLER: rust-1.26.1-x86_64-pc-windows-msvc.msi
+    TARGET_ARCH: "x86"
     COMPRESS: 1
 services: mysql
 install:
