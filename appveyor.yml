@@ -9,17 +9,29 @@ environment:
   MYSQL_PWD: Password12!
   matrix:
   - TARGET: nightly-x86_64-pc-windows-msvc
+    PATH: C:\msys64\mingw64\bin\;c:\rust\bin;%PATH%
   - TARGET: nightly-i686-pc-windows-msvc
+    PATH: C:\msys64\mingw32\bin\;c:\rust\bin;%PATH%
   - TARGET: nightly-x86_64-pc-windows-gnu
+    PATH: C:\msys64\mingw64\bin\;c:\rust\bin;%PATH%
   - TARGET: nightly-i686-pc-windows-gnu
+    PATH: C:\msys64\mingw32\bin\;c:\rust\bin;%PATH%
   - TARGET: beta-x86_64-pc-windows-msvc
+    PATH: C:\msys64\mingw64\bin\;c:\rust\bin;%PATH%
   - TARGET: beta-i686-pc-windows-msvc
+    PATH: C:\msys64\mingw32\bin\;c:\rust\bin;%PATH%
   - TARGET: beta-x86_64-pc-windows-gnu
+    PATH: C:\msys64\mingw64\bin\;c:\rust\bin;%PATH%
   - TARGET: beta-i686-pc-windows-gnu
+    PATH: C:\msys64\mingw32\bin\;c:\rust\bin;%PATH%
   - TARGET: 1.26.1-x86_64-pc-windows-msvc
+    PATH: C:\msys64\mingw64\bin\;c:\rust\bin;%PATH%
   - TARGET: 1.26.1-i686-pc-windows-msvc
+    PATH: C:\msys64\mingw32\bin\;c:\rust\bin;%PATH%
   - TARGET: 1.26.1-x86_64-pc-windows-gnu
+    PATH: C:\msys64\mingw64\bin\;c:\rust\bin;%PATH%
   - TARGET: 1.26.1-i686-pc-windows-gnu
+    PATH: C:\msys64\mingw32\bin\;c:\rust\bin;%PATH%
     COMPRESS: 1
 services: mysql
 install:
@@ -27,8 +39,6 @@ install:
     appveyor DownloadFile https://static.rust-lang.org/dist/rust-%TARGET%.msi
 
     msiexec /i rust-%TARGET%.msi INSTALLDIR="c:\rust" /qn
-
-    SET PATH=c:\rust\bin;%PATH%
 build: off
 before_test:
 - ps: >-
