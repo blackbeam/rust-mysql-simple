@@ -766,7 +766,7 @@ impl Stream {
     pub fn make_secure(
         mut self,
         verify_peer: bool,
-        _: &Option<String>,
+        _: Option<&str>,
         ssl_opts: &SslOpts,
     ) -> MyResult<Stream> {
         if self.is_insecure() {
