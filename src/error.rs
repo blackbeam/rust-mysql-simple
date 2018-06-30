@@ -231,6 +231,7 @@ pub enum DriverError {
     MissingNamedParameter(String),
     NamedParamsForPositionalQuery,
     MixedParams,
+    UnknownAuthPlugin(String),
 }
 
 impl error::Error for DriverError {
@@ -285,6 +286,9 @@ impl fmt::Display for DriverError {
                 f,
                 "Can not mix named and positional parameters in one statement"
             ),
+            DriverError::UnknownAuthPlugin(ref name) => {
+                write!(f, "Unknown authentication protocol: `{}`", name)
+            }
         }
     }
 }

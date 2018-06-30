@@ -25,16 +25,15 @@ fi
 
 mkdir -p $(MYSQL_DATA_DIR)
 
-if (mysql --version | grep 5.7 >>/dev/null);\
+if ((mysql --version | grep 5.7 >>/dev/null) || (mysql --version | grep Maria >>/dev/null));\
 then \
 	mysql_install_db --no-defaults \
                      --basedir=$(BASEDIR) \
                      --datadir=$(MYSQL_DATA_DIR)/data; \
 else \
-    mysql_install_db --no-defaults \
-                     --basedir=$(BASEDIR) \
-                     --datadir=$(MYSQL_DATA_DIR)/data \
-                     --force; \
+    mysqld --initialize-insecure \
+           --basedir=$(BASEDIR) \
+           --datadir=$(MYSQL_DATA_DIR)/data; \
 fi
 
 mysqld --no-defaults \
@@ -45,7 +44,6 @@ mysqld --no-defaults \
        --pid-file=$(MYSQL_DATA_DIR)/mysqld.pid \
        --port=$(MYSQL_PORT) \
        --innodb_file_per_table=1 \
-       --innodb_file_format=Barracuda \
        --innodb_log_file_size=256M \
        --ssl \
        --ssl-ca=$(MYSQL_SSL_CA) \
@@ -61,7 +59,7 @@ done
 if [ -e ~/.mysql_secret ]; \
 then \
     mysqladmin -h127.0.0.1 \
-	           --port=$(MYSQL_PORT) \
+               --port=$(MYSQL_PORT) \
 			   -u root \
 			   -p"`cat ~/.mysql_secret | grep -v Password`" password 'password'; \
 else \

@@ -151,38 +151,38 @@ impl Opts {
     }
 
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
-    pub fn get_ip_or_hostname(&self) -> &Option<String> {
-        &self.ip_or_hostname
+    pub fn get_ip_or_hostname(&self) -> Option<&str> {
+        self.ip_or_hostname.as_ref().map(|x| &**x)
     }
     /// TCP port of mysql server (defaults to `3306`).
     pub fn get_tcp_port(&self) -> u16 {
         self.tcp_port
     }
     /// Socket path on unix or pipe name on windows (defaults to `None`).
-    pub fn get_socket(&self) -> &Option<String> {
-        &self.socket
+    pub fn get_socket(&self) -> Option<&str> {
+        self.socket.as_ref().map(|x| &**x)
     }
     /// User (defaults to `None`).
-    pub fn get_user(&self) -> &Option<String> {
-        &self.user
+    pub fn get_user(&self) -> Option<&str> {
+        self.user.as_ref().map(|x| &**x)
     }
     /// Password (defaults to `None`).
-    pub fn get_pass(&self) -> &Option<String> {
-        &self.pass
+    pub fn get_pass(&self) -> Option<&str> {
+        self.pass.as_ref().map(|x| &**x)
     }
     /// Database name (defaults to `None`).
-    pub fn get_db_name(&self) -> &Option<String> {
-        &self.db_name
+    pub fn get_db_name(&self) -> Option<&str> {
+        self.db_name.as_ref().map(|x| &**x)
     }
 
     /// The timeout for each attempt to write to the server.
-    pub fn get_read_timeout(&self) -> &Option<Duration> {
-        &self.read_timeout
+    pub fn get_read_timeout(&self) -> Option<&Duration> {
+        self.read_timeout.as_ref()
     }
 
     /// The timeout for each attempt to write to the server.
-    pub fn get_write_timeout(&self) -> &Option<Duration> {
-        &self.write_timeout
+    pub fn get_write_timeout(&self) -> Option<&Duration> {
+        self.write_timeout.as_ref()
     }
 
     /// Prefer socket connection (defaults to `true`).
@@ -194,8 +194,8 @@ impl Opts {
     }
     // XXX: Wait for keepalive_timeout stabilization
     /// Commands to execute on each new database connection.
-    pub fn get_init(&self) -> &Vec<String> {
-        &self.init
+    pub fn get_init(&self) -> Vec<String> {
+        self.init.clone()
     }
 
     /// #### Only available if `ssl` feature enabled.
@@ -229,8 +229,8 @@ impl Opts {
     }
 
     /// Callback to handle requests for local files.
-    pub fn get_local_infile_handler(&self) -> &Option<LocalInfileHandler> {
-        &self.local_infile_handler
+    pub fn get_local_infile_handler(&self) -> Option<&LocalInfileHandler> {
+        self.local_infile_handler.as_ref()
     }
 
     /// Tcp connect timeout (defaults to `None`).
