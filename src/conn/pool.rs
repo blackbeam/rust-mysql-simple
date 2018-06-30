@@ -815,19 +815,19 @@ mod test {
         #[allow(unused_variables)]
         fn should_start_transaction_on_Pool() {
             let pool = Pool::new_manual(1, 10, get_opts()).unwrap();
-            pool.prepare("CREATE TEMPORARY TABLE x.tbl(a INT)")
+            pool.prepare("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
                 .ok()
                 .map(|mut stmt| {
                     assert!(stmt.execute(()).is_ok());
                 });
             pool.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
-                    t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
+                    t.query("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.commit()
                 })
                 .unwrap();
-            pool.prepare("SELECT COUNT(a) FROM x.tbl")
+            pool.prepare("SELECT COUNT(a) FROM mysql.tbl")
                 .ok()
                 .map(|mut stmt| {
                     for x in stmt.execute(()).unwrap() {
@@ -837,12 +837,12 @@ mod test {
                 });
             pool.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
-                    t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
+                    t.query("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.rollback()
                 })
                 .unwrap();
-            pool.prepare("SELECT COUNT(a) FROM x.tbl")
+            pool.prepare("SELECT COUNT(a) FROM mysql.tbl")
                 .ok()
                 .map(|mut stmt| {
                     for x in stmt.execute(()).unwrap() {
@@ -852,12 +852,12 @@ mod test {
                 });
             pool.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query("INSERT INTO x.tbl(a) VALUES(1)").unwrap();
-                    t.query("INSERT INTO x.tbl(a) VALUES(2)").unwrap();
+                    t.query("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     Ok(())
                 })
                 .unwrap();
-            pool.prepare("SELECT COUNT(a) FROM x.tbl")
+            pool.prepare("SELECT COUNT(a) FROM mysql.tbl")
                 .ok()
                 .map(|mut stmt| {
                     for x in stmt.execute(()).unwrap() {
@@ -873,43 +873,46 @@ mod test {
         fn should_start_transaction_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
-            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
+            assert!(
+                conn.query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
+                    .is_ok()
+            );
             assert!(
                 conn.start_transaction(false, None, None)
                     .and_then(|mut t| {
-                        assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                        assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
+                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
                         t.commit()
                     })
                     .is_ok()
             );
-            for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
+            for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
             assert!(
                 conn.start_transaction(false, None, None)
                     .and_then(|mut t| {
-                        assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                        assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
+                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
                         t.rollback()
                     })
                     .is_ok()
             );
-            for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
+            for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
             assert!(
                 conn.start_transaction(false, None, None)
                     .and_then(|mut t| {
-                        assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                        assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
+                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
                         Ok(())
                     })
                     .is_ok()
             );
-            for x in conn.query("SELECT COUNT(a) FROM x.tbl").unwrap() {
+            for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }

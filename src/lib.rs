@@ -47,22 +47,22 @@
 //! #                              .unwrap_or(3307);
 //! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 //! #   let pool = if port == 3307 && pwd == "password" {
-//!     let pool = my::Pool::new("mysql://root:password@localhost:3307").unwrap();
+//!     let pool = my::Pool::new("mysql://root:password@localhost:3307/mysql").unwrap();
 //! #       drop(pool);
-//! #       my::Pool::new_manual(1, 1, "mysql://root:password@localhost:3307").unwrap()
+//! #       my::Pool::new_manual(1, 1, "mysql://root:password@localhost:3307/mysql").unwrap()
 //! #   } else {
 //! #       let mut builder = my::OptsBuilder::default();
 //! #       builder.user(Some(user))
 //! #              .pass(Some(pwd))
 //! #              .ip_or_hostname(Some(addr))
+//! #              .db_name("mysql".into())
 //! #              .tcp_port(port);
 //! #       my::Pool::new_manual(1, 1, builder).unwrap()
 //! #   };
 //!
 //!     // Let's create payment table.
-//!     // It is temporary so we do not need `tmp` database to exist.
-//!     // Unwap just to make sure no error happened.
-//!     pool.prep_exec(r"CREATE TEMPORARY TABLE tmp.payment (
+//!     // Unwrap just to make sure no error happened.
+//!     pool.prep_exec(r"CREATE TEMPORARY TABLE payment (
 //!                          customer_id int not null,
 //!                          amount int not null,
 //!                          account_name text
@@ -79,7 +79,7 @@
 //!     // Let's insert payments to the database
 //!     // We will use into_iter() because we do not need to map Stmt to anything else.
 //!     // Also we assume that no error happened in `prepare`.
-//!     for mut stmt in pool.prepare(r"INSERT INTO tmp.payment
+//!     for mut stmt in pool.prepare(r"INSERT INTO payment
 //!                                        (customer_id, amount, account_name)
 //!                                    VALUES
 //!                                        (:customer_id, :amount, :account_name)").into_iter() {
@@ -96,12 +96,13 @@
 //!
 //!     // Let's select payments from database
 //!     let selected_payments: Vec<Payment> =
-//!     pool.prep_exec("SELECT customer_id, amount, account_name from tmp.payment", ())
+//!     pool.prep_exec("SELECT customer_id, amount, account_name from payment", ())
 //!     .map(|result| { // In this closure we will map `QueryResult` to `Vec<Payment>`
 //!         // `QueryResult` is iterator over `MyResult<row, err>` so first call to `map`
 //!         // will map each `MyResult` to contained `row` (no proper error handling)
 //!         // and second call to `map` will map each `row` to `Payment`
 //!         result.map(|x| x.unwrap()).map(|row| {
+//!             // ⚠️ Note that from_row will panic if you don't follow your schema
 //!             let (customer_id, amount, account_name) = my::from_row(row);
 //!             Payment {
 //!                 customer_id: customer_id,
@@ -232,7 +233,6 @@ mod conn;
 pub mod error;
 mod io;
 mod packet;
-mod scramble;
 
 #[doc(inline)]
 pub use myc::constants as consts;

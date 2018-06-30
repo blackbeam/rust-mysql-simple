@@ -38,11 +38,6 @@ opt-level = 3
 debug = false
 lto = true
 
-[profile.doc]
-
-opt-level = 0
-debug = true
-
 [features]
 default = ['mysql_common']
 nightly = ['mysql_common']
@@ -64,7 +59,7 @@ net2 = "~0.2"
 smallvec = "0.6"
 serde = "1"
 serde_json = "1"
-mysql_common = { version = "0.7", optional = true }
+mysql_common = { version = "0.8", optional = true }
 
 [dependencies.rustc-serialize]
 version = "0.3"

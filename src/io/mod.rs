@@ -483,6 +483,14 @@ impl Compressed {
         // Syncronize seq_id with comp_seq_id if compression is used.
         Ok(if compress { comp_seq_id } else { seq_id })
     }
+
+    pub fn is_insecure(&self) -> bool {
+        self.stream.is_insecure()
+    }
+
+    pub fn is_socket(&self) -> bool {
+        self.stream.is_socket()
+    }
 }
 
 impl io::Read for Compressed {
@@ -643,6 +651,13 @@ impl Stream {
             _ => false,
         }
     }
+
+    pub fn is_socket(&self) -> bool {
+        match self {
+            Stream::SocketStream(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[cfg(all(feature = "ssl", target_os = "macos"))]
@@ -650,7 +665,7 @@ impl Stream {
     pub fn make_secure(
         mut self,
         verify_peer: bool,
-        ip_or_hostname: &Option<String>,
+        ip_or_hostname: Option<&str>,
         ssl_opts: &SslOpts,
     ) -> MyResult<Stream> {
         use std::path::Path;
@@ -751,7 +766,7 @@ impl Stream {
     pub fn make_secure(
         mut self,
         verify_peer: bool,
-        _: &Option<String>,
+        _: Option<&str>,
         ssl_opts: &SslOpts,
     ) -> MyResult<Stream> {
         if self.is_insecure() {

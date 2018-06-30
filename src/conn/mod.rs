@@ -30,10 +30,11 @@ use super::error::Result as MyResult;
 use super::io::Read as MyRead;
 use super::io::Write;
 use super::io::{Compressed, Stream};
-use super::scramble::scramble;
 use from_value;
 use from_value_opt;
+use myc::crypto;
 use myc::named_params::parse_named_params;
+use myc::scramble::{scramble_native, scramble_sha256};
 use Params;
 use Value::{self, Bytes, Date, Float, Int, Time, UInt, NULL};
 
@@ -41,8 +42,8 @@ use byteorder::LittleEndian as LE;
 use byteorder::WriteBytesExt;
 use fnv::FnvHasher;
 use myc::packets::{
-    column_from_payload, parse_err_packet, parse_handshake_packet, parse_ok_packet, Column,
-    HandshakePacket, OkPacket,
+    column_from_payload, parse_err_packet, parse_handshake_packet, parse_ok_packet, AuthPlugin,
+    Column, HandshakePacket, OkPacket,
 };
 use myc::row::convert::{from_row, FromRow};
 use myc::row::new_row;
@@ -446,9 +447,20 @@ impl<'a> Drop for Stmt<'a> {
 /// Consult [Mysql documentation](https://dev.mysql.com/doc/refman/5.7/en/load-data.html) for the
 /// format of local infile data.
 ///
+/// # Support
+///
+/// Note that older versions of Mysql server may not support this functionality.
+///
 /// ```rust
 /// # use std::io::Write;
-/// # use mysql::{Pool, Opts, OptsBuilder, LocalInfileHandler, from_row};
+/// # use mysql::{
+/// #     Pool,
+/// #     Opts,
+/// #     OptsBuilder,
+/// #     LocalInfileHandler,
+/// #     from_row,
+/// #     error::Error
+/// # };
 /// # fn get_opts() -> Opts {
 /// #     let user = "root";
 /// #     let addr = "127.0.0.1";
@@ -461,16 +473,17 @@ impl<'a> Drop for Stmt<'a> {
 /// #            .pass(Some(pwd))
 /// #            .ip_or_hostname(Some(addr))
 /// #            .tcp_port(port)
+/// #            .db_name("mysql".into())
 /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
 /// #     builder.into()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = Pool::new_manual(1, 1, opts).unwrap();
-/// # pool.prep_exec("CREATE TEMPORARY TABLE tmp.Users (id INT, name TEXT, age INT, email TEXT)", ()).unwrap();
-/// # pool.prep_exec("INSERT INTO tmp.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
+/// # pool.prep_exec("CREATE TEMPORARY TABLE mysql.Users (id INT, name TEXT, age INT, email TEXT)", ()).unwrap();
+/// # pool.prep_exec("INSERT INTO mysql.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
 /// #                (1, "John", 17, "foo@bar.baz")).unwrap();
 /// # let mut conn = pool.get_conn().unwrap();
-/// conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").unwrap();
+/// conn.query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)").unwrap();
 ///
 /// conn.set_local_infile_handler(Some(
 ///     LocalInfileHandler::new(|file_name, writer| {
@@ -482,10 +495,19 @@ impl<'a> Drop for Stmt<'a> {
 ///     })
 /// ));
 ///
-/// conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE x.tbl").unwrap();
+/// match conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE mysql.tbl") {
+///     Ok(_) => (),
+///     Err(Error::MySqlError(ref e)) if e.code == 1148 => {
+///         // functionality is not supported by the server
+///         return;
+///     },
+///     err => {
+///         err.unwrap();
+///     },
+/// }
 ///
 /// let mut row_num = 0;
-/// for (row_idx, row) in conn.query("SELECT * FROM x.tbl").unwrap().enumerate() {
+/// for (row_idx, row) in conn.query("SELECT * FROM mysql.tbl").unwrap().enumerate() {
 ///     row_num = row_idx + 1;
 ///     let row: (String,) = from_row(row.unwrap());
 ///     match row_num {
@@ -566,6 +588,22 @@ enum ConnStream {
     Compressed(Compressed),
 }
 
+impl ConnStream {
+    fn is_insecure(&self) -> bool {
+        match self {
+            ConnStream::Plain(ref stream) => stream.is_insecure(),
+            ConnStream::Compressed(ref stream) => stream.is_insecure(),
+        }
+    }
+
+    fn is_socket(&self) -> bool {
+        match self {
+            ConnStream::Plain(ref stream) => stream.is_socket(),
+            ConnStream::Compressed(ref stream) => stream.is_socket(),
+        }
+    }
+}
+
 /***
  *     .d8888b.
  *    d88P  Y88b
@@ -628,6 +666,20 @@ impl Conn {
         }
     }
 
+    fn is_insecure(&self) -> bool {
+        self.stream
+            .as_ref()
+            .map(|stream| stream.is_insecure())
+            .unwrap_or(false)
+    }
+
+    fn is_socket(&self) -> bool {
+        self.stream
+            .as_ref()
+            .map(|stream| stream.is_socket())
+            .unwrap_or(false)
+    }
+
     /// Check the connection can be improved.
     fn can_improved(&mut self) -> Option<Opts> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
@@ -661,7 +713,7 @@ impl Conn {
                 conn
             }
         };
-        for cmd in conn.opts.get_init().clone() {
+        for cmd in conn.opts.get_init() {
             conn.query(cmd)?;
         }
         return Ok(conn);
@@ -742,15 +794,15 @@ impl Conn {
     }
 
     fn connect_stream(&mut self) -> MyResult<()> {
-        let read_timeout = self.opts.get_read_timeout().clone();
-        let write_timeout = self.opts.get_write_timeout().clone();
+        let read_timeout = self.opts.get_read_timeout().cloned();
+        let write_timeout = self.opts.get_write_timeout().cloned();
         let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms().clone();
         let tcp_nodelay = self.opts.get_tcp_nodelay();
         let tcp_connect_timeout = self.opts.get_tcp_connect_timeout();
         let bind_address = self.opts.bind_address().cloned();
-        let stream = if let Some(ref socket) = *self.opts.get_socket() {
+        let stream = if let Some(socket) = self.opts.get_socket() {
             Stream::connect_socket(&*socket, read_timeout, write_timeout)?
-        } else if let Some(ref ip_or_hostname) = *self.opts.get_ip_or_hostname() {
+        } else if let Some(ip_or_hostname) = self.opts.get_ip_or_hostname() {
             let port = self.opts.get_tcp_port();
             Stream::connect_tcp(
                 &*ip_or_hostname,
@@ -824,72 +876,76 @@ impl Conn {
     }
 
     fn do_handshake(&mut self) -> MyResult<()> {
-        self.read_packet()
-            .and_then(|pld| match pld[0] {
-                0xFF => {
-                    let error_packet = parse_err_packet(pld.as_ref(), self.capability_flags)?;
-                    Err(MySqlError(error_packet.into()))
+        let payload = self.read_packet()?;
+
+        if payload[0] == 0xff {
+            let error_packet = parse_err_packet(&*payload, self.capability_flags)?;
+            return Err(MySqlError(error_packet.into()));
+        }
+
+        let handshake = parse_handshake_packet(payload.as_ref())?;
+
+        if handshake.protocol_version() != 10u8 {
+            return Err(DriverError(UnsupportedProtocol(
+                handshake.protocol_version(),
+            )));
+        }
+
+        if !handshake
+            .capabilities()
+            .contains(CapabilityFlags::CLIENT_PROTOCOL_41)
+        {
+            return Err(DriverError(Protocol41NotSet));
+        }
+
+        self.handle_handshake(&handshake);
+
+        if self.opts.get_ssl_opts().is_some() && self.stream.is_some() {
+            if self.is_insecure() {
+                if !handshake
+                    .capabilities()
+                    .contains(CapabilityFlags::CLIENT_SSL)
+                {
+                    return Err(DriverError(SslNotSupported));
+                } else {
+                    self.do_ssl_request()?;
+                    self.switch_to_ssl()?;
                 }
-                _ => {
-                    let handshake = parse_handshake_packet(pld.as_ref())?;
-                    if handshake.protocol_version() != 10u8 {
-                        return Err(DriverError(UnsupportedProtocol(
-                            handshake.protocol_version(),
-                        )));
-                    }
-                    if !handshake
-                        .capabilities()
-                        .contains(CapabilityFlags::CLIENT_PROTOCOL_41)
-                    {
-                        return Err(DriverError(Protocol41NotSet));
-                    }
-                    self.handle_handshake(&handshake);
-                    if self.opts.get_ssl_opts().is_some() && self.stream.is_some() {
-                        let is_insecure = if let Some(ConnStream::Plain(ref stream)) = self.stream {
-                            stream.is_insecure()
-                        } else {
-                            false
-                        };
-                        if is_insecure {
-                            if !handshake
-                                .capabilities()
-                                .contains(CapabilityFlags::CLIENT_SSL)
-                            {
-                                return Err(DriverError(SslNotSupported));
-                            } else {
-                                self.do_ssl_request()?;
-                                self.switch_to_ssl()?;
-                            }
-                        }
-                    }
-                    self.do_handshake_response(&handshake)
-                }
-            })
-            .and_then(|_| self.read_packet())
-            .and_then(|pld| match pld[0] {
-                0u8 => {
-                    let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
-                    self.handle_ok(&ok);
-                    if self
-                        .capability_flags
-                        .contains(CapabilityFlags::CLIENT_COMPRESS)
-                    {
-                        let stream = self.stream.take().unwrap();
-                        self.stream = match stream {
-                            ConnStream::Plain(stream) => {
-                                Some(ConnStream::Compressed(Compressed::new(stream)))
-                            }
-                            stream => Some(stream),
-                        };
-                    }
-                    Ok(())
-                }
-                0xffu8 => {
-                    let err = parse_err_packet(pld.as_ref(), self.capability_flags)?;
-                    Err(MySqlError(err.into()))
-                }
-                _ => Err(DriverError(UnexpectedPacket)),
-            })
+            }
+        }
+
+        self.do_handshake_response(&handshake)?;
+
+        let payload = self.read_packet()?;
+
+        if payload[0] == 0xff {
+            let error_packet = parse_err_packet(&*payload, self.capability_flags)?;
+            return Err(MySqlError(error_packet.into()));
+        }
+
+        if payload[0] != 0x00 {
+            return Err(DriverError(UnexpectedPacket));
+        }
+
+        let ok = parse_ok_packet(&*payload, self.capability_flags)?;
+        self.handle_ok(&ok);
+
+        if self
+            .capability_flags
+            .contains(CapabilityFlags::CLIENT_COMPRESS)
+        {
+            self.switch_to_compressed();
+        }
+
+        Ok(())
+    }
+
+    fn switch_to_compressed(&mut self) {
+        let stream = self.stream.take().unwrap();
+        self.stream = match stream {
+            ConnStream::Plain(stream) => Some(ConnStream::Compressed(Compressed::new(stream))),
+            stream => Some(stream),
+        };
     }
 
     fn get_client_flags(&self) -> CapabilityFlags {
@@ -901,21 +957,17 @@ impl Conn {
             | CapabilityFlags::CLIENT_MULTI_STATEMENTS
             | CapabilityFlags::CLIENT_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
+            | CapabilityFlags::CLIENT_PLUGIN_AUTH
             | (self.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
         if let true = self.opts.get_compress() {
             client_flags.insert(CapabilityFlags::CLIENT_COMPRESS);
         }
-        if let &Some(ref db_name) = self.opts.get_db_name() {
+        if let Some(db_name) = self.opts.get_db_name() {
             if db_name.len() > 0 {
                 client_flags.insert(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
             }
         }
-        let is_insecure = if let Some(ConnStream::Plain(ref stream)) = self.stream {
-            stream.is_insecure()
-        } else {
-            false
-        };
-        if is_insecure {
+        if self.is_insecure() {
             if self.opts.get_ssl_opts().is_some() {
                 client_flags.insert(CapabilityFlags::CLIENT_SSL);
             }
@@ -943,54 +995,134 @@ impl Conn {
         self.write_packet(&buf[..])
     }
 
-    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
-        let client_flags = self.get_client_flags();
-        let scramble_buf = if let &Some(ref pass) = self.opts.get_pass() {
-            let mut scramble_data = Vec::from(hp.scramble_1_ref());
-            scramble_data.extend_from_slice(hp.scramble_2_ref().unwrap_or(&[][..]));
-            scramble(&*scramble_data, pass.as_bytes())
-        } else {
-            None
-        };
-        let user_len = self
-            .opts
-            .get_user()
-            .as_ref()
-            .map(|x| x.as_bytes().len())
-            .unwrap_or(0);
-        let db_name_len = self
-            .opts
-            .get_db_name()
-            .as_ref()
-            .map(|x| x.as_bytes().len())
-            .unwrap_or(0);
-        let scramble_buf_len = if scramble_buf.is_some() { 20 } else { 0 };
+    fn write_handshake_response(
+        &mut self,
+        auth_plugin: &AuthPlugin,
+        scramble_buf: Option<&[u8]>,
+    ) -> MyResult<()> {
+        let plugin_auth = self
+            .capability_flags
+            .contains(CapabilityFlags::CLIENT_PLUGIN_AUTH);
+        let user_len = self.opts.get_user().map(|x| x.len()).unwrap_or(0);
+        let db_name_len = self.opts.get_db_name().map(|x| x.len()).unwrap_or(0);
+        let scramble_buf_len = scramble_buf.as_ref().map(|x| x.len()).unwrap_or(0);
         let mut payload_len = 4 + 4 + 1 + 23 + user_len + 1 + 1 + scramble_buf_len;
         if db_name_len > 0 {
             payload_len += db_name_len + 1;
         }
+        if plugin_auth {
+            payload_len += auth_plugin.as_bytes().len() + 1;
+        }
         let mut buf = vec![0u8; payload_len];
         {
             let mut writer = &mut *buf;
-            writer.write_u32::<LE>(client_flags.bits())?;
-            writer.write_all(&[0u8; 4])?;
-            writer.write_u8(self.get_default_collation())?;
-            writer.write_all(&[0u8; 23])?;
-            if let &Some(ref user) = self.opts.get_user() {
-                writer.write_all(user.as_bytes())?;
+            writer
+                .write_u32::<LE>(self.get_client_flags().bits())
+                .expect("should not fail");
+            writer.write_all(&[0; 4]).expect("should not fail");
+            writer
+                .write_u8(self.get_default_collation())
+                .expect("should not fail");
+            writer.write_all(&[0; 23]).expect("should not fail");
+            if let Some(user) = self.opts.get_user() {
+                writer.write_all(user.as_bytes()).expect("should not fail");
             }
-            writer.write_u8(0u8)?;
-            writer.write_u8(scramble_buf_len as u8)?;
+            writer.write_u8(0).expect("should not fail");
+            writer
+                .write_u8(scramble_buf_len as u8)
+                .expect("should not fail");
             if let Some(scr) = scramble_buf {
-                writer.write_all(scr.as_ref())?;
+                writer.write_all(scr.as_ref()).expect("should not fail");
             }
             if db_name_len > 0 {
-                let db_name = self.opts.get_db_name().as_ref().unwrap();
-                writer.write_all(db_name.as_bytes())?;
-                writer.write_u8(0u8)?;
+                let db_name = self.opts.get_db_name().unwrap();
+                writer
+                    .write_all(db_name.as_bytes())
+                    .expect("should not fail");
+                writer.write_u8(0).expect("should not fail");
+            }
+            if plugin_auth {
+                writer
+                    .write_all(auth_plugin.as_bytes())
+                    .expect("should not fail");
+                writer.write_u8(0).expect("should not fail");
             }
         }
         self.write_packet(&*buf)
+    }
+
+    fn perform_mysql_native_password_auth(&mut self, nonce: Vec<u8>) -> MyResult<()> {
+        let scramble = self
+            .opts
+            .get_pass()
+            .and_then(|pass| scramble_native(&*nonce, pass.as_bytes()));
+        self.write_handshake_response(
+            &AuthPlugin::MysqlNativePassword,
+            scramble.as_ref().map(AsRef::as_ref),
+        )
+    }
+
+    fn perform_caching_sha2_password_auth(&mut self, nonce: Vec<u8>) -> MyResult<()> {
+        let scramble = self
+            .opts
+            .get_pass()
+            .and_then(|pass| scramble_sha256(&*nonce, pass.as_bytes()));
+        self.write_handshake_response(
+            &AuthPlugin::CachingSha2Password,
+            scramble.as_ref().map(AsRef::as_ref),
+        )?;
+        let payload = self.read_packet()?;
+        match payload[0] {
+            0xff => {
+                let err = parse_err_packet(payload.as_ref(), self.capability_flags)?;
+                Err(MySqlError(err.into()))
+            }
+            0xfe => unimplemented!("auth switch is not implemented"),
+            0x01 => match payload[1] {
+                0x03 => Ok(()),
+                0x04 => if !self.is_insecure() || self.is_socket() {
+                    let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or(vec![]);
+                    pass.push(0);
+                    self.write_packet(&*pass)
+                } else {
+                    self.write_packet(&[0x02][..])?;
+                    let payload = self.read_packet()?;
+                    if payload[0] == 0xff {
+                        let err = parse_err_packet(payload.as_ref(), self.capability_flags)?;
+                        return Err(MySqlError(err.into()));
+                    }
+                    let key = &payload[1..];
+                    let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or(vec![]);
+                    pass.push(0);
+                    for i in 0..pass.len() {
+                        pass[i] ^= nonce[i % nonce.len()];
+                    }
+                    let encrypted_pass = crypto::encrypt(&*pass, key);
+                    self.write_packet(&*encrypted_pass)
+                },
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
+        use error::DriverError::UnknownAuthPlugin;
+
+        let nonce = {
+            let mut nonce = Vec::from(hp.scramble_1_ref());
+            nonce.extend_from_slice(hp.scramble_2_ref().unwrap_or(&[][..]));
+            nonce
+        };
+
+        match hp.auth_plugin() {
+            Some(AuthPlugin::MysqlNativePassword) => self.perform_mysql_native_password_auth(nonce),
+            Some(AuthPlugin::CachingSha2Password) => self.perform_caching_sha2_password_auth(nonce),
+            Some(&AuthPlugin::Other(ref name)) => Err(DriverError(UnknownAuthPlugin(
+                String::from_utf8_lossy(name).into(),
+            ))),
+            None => unreachable!(),
+        }
     }
 
     fn write_command(&mut self, cmd: Command) -> MyResult<()> {
@@ -1194,7 +1326,7 @@ impl Conn {
             let maybe_handler = self
                 .local_infile_handler
                 .clone()
-                .or_else(|| self.opts.get_local_infile_handler().clone());
+                .or_else(|| self.opts.get_local_infile_handler().cloned());
             let mut local_infile = LocalInfile {
                 buffer: io::Cursor::new(chunk),
                 conn: self,
@@ -2047,7 +2179,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             assert!(
                 conn.query(
-                    "CREATE TEMPORARY TABLE x.tbl(\
+                    "CREATE TEMPORARY TABLE mysql.tbl(\
                                     a TEXT,\
                                     b INT,\
                                     c INT UNSIGNED,\
@@ -2058,7 +2190,7 @@ mod test {
             );
             assert!(
                 conn.query(
-                    "INSERT INTO x.tbl(a, b, c, d, e) VALUES (\
+                    "INSERT INTO mysql.tbl(a, b, c, d, e) VALUES (\
                      'hello',\
                      -123,\
                      123,\
@@ -2069,7 +2201,7 @@ mod test {
             );
             assert!(
                 conn.query(
-                    "INSERT INTO x.tbl(a, b, c, d, e) VALUES (\
+                    "INSERT INTO mysql.tbl(a, b, c, d, e) VALUES (\
                      'world',\
                      -321,\
                      321,\
@@ -2079,17 +2211,17 @@ mod test {
                 ).is_ok()
             );
             assert!(conn.query("SELECT * FROM unexisted").is_err());
-            assert!(conn.query("SELECT * FROM x.tbl").is_ok());
+            assert!(conn.query("SELECT * FROM mysql.tbl").is_ok());
             // Drop
-            assert!(conn.query("UPDATE x.tbl SET a = 'foo'").is_ok());
+            assert!(conn.query("UPDATE mysql.tbl SET a = 'foo'").is_ok());
             assert_eq!(conn.affected_rows, 2);
             assert!(
-                conn.query("SELECT * FROM x.tbl WHERE a = 'bar'")
+                conn.query("SELECT * FROM mysql.tbl WHERE a = 'bar'")
                     .unwrap()
                     .next()
                     .is_none()
             );
-            for (i, row) in conn.query("SELECT * FROM x.tbl").unwrap().enumerate() {
+            for (i, row) in conn.query("SELECT * FROM mysql.tbl").unwrap().enumerate() {
                 let row = row.unwrap();
                 if i == 0 {
                     assert_eq!(row[0], Bytes(b"foo".to_vec()));
@@ -2126,7 +2258,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             assert!(
                 conn.query(
-                    "CREATE TEMPORARY TABLE x.tbl(\
+                    "CREATE TEMPORARY TABLE mysql.tbl(\
                      a TEXT,\
                      b INT,\
                      c INT UNSIGNED,\
@@ -2137,7 +2269,7 @@ mod test {
             );
             let _ =
                 conn.prepare(
-                    "INSERT INTO x.tbl(a, b, c, d, e)\
+                    "INSERT INTO mysql.tbl(a, b, c, d, e)\
                      VALUES (?, ?, ?, ?, ?)",
                 ).and_then(|mut stmt| {
                         let tm = Tm {
@@ -2168,7 +2300,7 @@ mod test {
                     })
                     .unwrap();
             let _ = conn
-                .prepare("SELECT * from x.tbl")
+                .prepare("SELECT * from mysql.tbl")
                 .and_then(|mut stmt| {
                     for (i, row) in stmt.execute(()).unwrap().enumerate() {
                         let mut row = row.unwrap();
@@ -2210,18 +2342,21 @@ mod test {
         #[test]
         fn should_start_commit_and_rollback_transactions() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a INT)").is_ok());
+            assert!(
+                conn.query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
+                    .is_ok()
+            );
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                    assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
                     assert!(t.commit().is_ok());
                     Ok(())
                 })
                 .unwrap();
             assert_eq!(
-                conn.query("SELECT COUNT(a) from x.tbl")
+                conn.query("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -2238,7 +2373,7 @@ mod test {
                 })
                 .unwrap();
             assert_eq!(
-                conn.query("SELECT COUNT(a) from x.tbl")
+                conn.query("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -2249,14 +2384,14 @@ mod test {
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    assert!(t.query("INSERT INTO x.tbl(a) VALUES(1)").is_ok());
-                    assert!(t.query("INSERT INTO x.tbl(a) VALUES(2)").is_ok());
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
                     assert!(t.rollback().is_ok());
                     Ok(())
                 })
                 .unwrap();
             assert_eq!(
-                conn.query("SELECT COUNT(a) from x.tbl")
+                conn.query("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -2268,7 +2403,7 @@ mod test {
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
                     let _ = t
-                        .prepare("INSERT INTO x.tbl(a) VALUES(?)")
+                        .prepare("INSERT INTO mysql.tbl(a) VALUES(?)")
                         .and_then(|mut stmt| {
                             assert!(stmt.execute((3,)).is_ok());
                             assert!(stmt.execute((4,)).is_ok());
@@ -2280,7 +2415,7 @@ mod test {
                 })
                 .unwrap();
             assert_eq!(
-                conn.query("SELECT COUNT(a) from x.tbl")
+                conn.query("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -2291,8 +2426,10 @@ mod test {
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", (5,)).unwrap();
-                    t.prep_exec("INSERT INTO x.tbl(a) VALUES(?)", (6,)).unwrap();
+                    t.prep_exec("INSERT INTO mysql.tbl(a) VALUES(?)", (5,))
+                        .unwrap();
+                    t.prep_exec("INSERT INTO mysql.tbl(a) VALUES(?)", (6,))
+                        .unwrap();
                     Ok(())
                 })
                 .unwrap();
@@ -2300,7 +2437,10 @@ mod test {
         #[test]
         fn should_handle_LOCAL_INFILE() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").is_ok());
+            assert!(
+                conn.query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
+                    .is_ok()
+            );
             let path = ::std::path::PathBuf::from("local_infile.txt");
             {
                 let mut file = fs::File::create(&path).unwrap();
@@ -2309,11 +2449,20 @@ mod test {
                 let _ = file.write(b"CCCCCC\n");
             }
             let query = format!(
-                "LOAD DATA LOCAL INFILE '{}' INTO TABLE x.tbl",
+                "LOAD DATA LOCAL INFILE '{}' INTO TABLE mysql.tbl",
                 path.to_str().unwrap().to_owned()
             );
-            conn.query(query).unwrap();
-            for (i, row) in conn.query("SELECT * FROM x.tbl").unwrap().enumerate() {
+
+            match conn.query(query) {
+                Ok(_) => {}
+                Err(ref err) if format!("{}", err).find("not allowed").is_some() => {
+                    let _ = fs::remove_file(&path);
+                    return;
+                }
+                Err(err) => panic!("ERROR {}", err),
+            }
+
+            for (i, row) in conn.query("SELECT * FROM mysql.tbl").unwrap().enumerate() {
                 let row = row.unwrap();
                 match i {
                     0 => assert_eq!(row.unwrap(), vec![Bytes(b"AAAAAA".to_vec())]),
@@ -2327,7 +2476,8 @@ mod test {
         #[test]
         fn should_handle_LOCAL_INFILE_with_custom_handler() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query("CREATE TEMPORARY TABLE x.tbl(a TEXT)").unwrap();
+            conn.query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
+                .unwrap();
             conn.set_local_infile_handler(Some(LocalInfileHandler::new(|_, stream| {
                 let mut cell_data = vec![b'Z'; 65535];
                 cell_data.push(b'\n');
@@ -2336,10 +2486,15 @@ mod test {
                 }
                 Ok(())
             })));
-            conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE x.tbl")
-                .unwrap();
+            match conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE mysql.tbl") {
+                Ok(_) => {}
+                Err(ref err) if format!("{}", err).find("not allowed").is_some() => {
+                    return;
+                }
+                Err(err) => panic!("ERROR {}", err),
+            }
             let count = conn
-                .query("SELECT * FROM x.tbl")
+                .query("SELECT * FROM mysql.tbl")
                 .unwrap()
                 .map(|row| {
                     assert_eq!(from_row::<(Vec<u8>,)>(row.unwrap()).0.len(), 65535);
@@ -2354,35 +2509,29 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             assert!(
                 conn.query(
-                    "CREATE TEMPORARY TABLE `db`.`test` \
+                    "CREATE TEMPORARY TABLE `mysql`.`test` \
                      (`test` VARCHAR(255) NULL);"
                 ).is_ok()
             );
-            assert!(conn.query("SELECT * FROM `db`.`test`;").is_ok());
+            assert!(conn.query("SELECT * FROM `mysql`.`test`;").is_ok());
             assert!(conn.reset().is_ok());
-            assert!(conn.query("SELECT * FROM `db`.`test`;").is_err());
+            assert!(conn.query("SELECT * FROM `mysql`.`test`;").is_err());
         }
 
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
             #[allow(unused_mut)]
             let mut opts = OptsBuilder::from_opts(get_opts());
-            #[cfg(all(feature = "ssl", not(target_os = "windows")))]
-            opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
-            let debug_format = format!("{:#?}", conn);
-            assert!(debug_format.contains("SocketStream"));
+            assert!(conn.is_socket());
         }
 
         #[test]
         fn should_connect_via_socket_localhost() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ip_or_hostname(Some("localhost"));
-            #[cfg(all(feature = "ssl", not(target_os = "windows")))]
-            opts.ssl_opts::<String, String, String>(None);
             let conn = Conn::new(opts).unwrap();
-            let debug_format = format!("{:?}", conn);
-            assert!(debug_format.contains("SocketStream"));
+            assert!(conn.is_socket());
         }
 
         #[test]
@@ -2391,8 +2540,7 @@ mod test {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
             let conn = Conn::new(opts).unwrap();
-            let debug_format = format!("{:#?}", conn);
-            assert!(debug_format.contains("Secure stream"));
+            assert!(!conn.is_insecure());
         }
 
         #[test]
@@ -2521,12 +2669,12 @@ mod test {
             opts.additional_capabilities(CapabilityFlags::CLIENT_FOUND_ROWS);
 
             let mut conn = Conn::new(opts).unwrap();
-            conn.query("CREATE TEMPORARY TABLE x.tbl (a INT, b TEXT)")
+            conn.query("CREATE TEMPORARY TABLE mysql.tbl (a INT, b TEXT)")
                 .unwrap();
-            conn.query("INSERT INTO x.tbl (a, b) VALUES (1, 'foo')")
+            conn.query("INSERT INTO mysql.tbl (a, b) VALUES (1, 'foo')")
                 .unwrap();
             let result = conn
-                .query("UPDATE x.tbl SET b = 'foo' WHERE a = 1")
+                .query("UPDATE mysql.tbl SET b = 'foo' WHERE a = 1")
                 .unwrap();
             assert_eq!(result.affected_rows(), 1);
         }
@@ -2631,18 +2779,18 @@ mod test {
 
             let mut conn = Conn::new(get_opts()).unwrap();
             if conn
-                .query("CREATE TEMPORARY TABLE x.tbl(a VARCHAR(32), b JSON)")
+                .query("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b JSON)")
                 .is_err()
             {
-                conn.query("CREATE TEMPORARY TABLE x.tbl(a VARCHAR(32), b TEXT)")
+                conn.query("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b TEXT)")
                     .unwrap();
             }
             conn.prep_exec(
-                r#"INSERT INTO x.tbl VALUES ('hello', ?)"#,
+                r#"INSERT INTO mysql.tbl VALUES ('hello', ?)"#,
                 (Serialized(&decodable),),
             ).unwrap();
 
-            let row = conn.first("SELECT a, b FROM x.tbl").unwrap().unwrap();
+            let row = conn.first("SELECT a, b FROM mysql.tbl").unwrap().unwrap();
             let (a, b): (String, Json) = from_row(row);
             assert_eq!(
                 (a, b),
@@ -2653,7 +2801,7 @@ mod test {
             );
 
             let row = conn
-                .first_exec("SELECT a, b FROM x.tbl WHERE a = ?", ("hello",))
+                .first_exec("SELECT a, b FROM mysql.tbl WHERE a = ?", ("hello",))
                 .unwrap()
                 .unwrap();
             let (a, Deserialized(b)) = from_row(row);
