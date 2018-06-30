@@ -25,7 +25,7 @@ fi
 
 mkdir -p $(MYSQL_DATA_DIR)/data
 
-if ((mysql --version | grep 5.7 >>/dev/null) || (mysql --version | grep Maria >>/dev/null));\
+if ((mysql --version | grep -P '5\.(6|7)' >>/dev/null) || (mysql --version | grep Maria >>/dev/null));\
 then \
 	mysql_install_db --no-defaults \
                      --basedir=$(BASEDIR) \
