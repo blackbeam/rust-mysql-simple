@@ -84,4 +84,4 @@ winapi = "~0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-nix = "0.10"
+nix = "0.11"
