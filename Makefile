@@ -23,7 +23,7 @@ then \
 	rm -rf $(MYSQL_DATA_DIR) || true; \
 fi
 
-mkdir -p $(MYSQL_DATA_DIR)
+mkdir -p $(MYSQL_DATA_DIR)/data
 
 if ((mysql --version | grep 5.7 >>/dev/null) || (mysql --version | grep Maria >>/dev/null));\
 then \
