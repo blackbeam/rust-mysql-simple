@@ -64,6 +64,8 @@ pub struct Opts {
     ///
     /// Will reconnect via socket (or named pipe on windows) after TCP
     /// connection to `127.0.0.1` if `true`.
+    ///
+    /// Will fall back to TCP on error. Use `socket` option to enforce socket connection.
     prefer_socket: bool,
 
     /// Whether to enable `TCP_NODELAY` (defaults to `true`).
@@ -193,6 +195,8 @@ impl Opts {
     ///
     /// Will reconnect via socket (or named pipe on windows) after TCP connection
     /// to `127.0.0.1` if `true`.
+    ///
+    /// Will fall back to TCP on error. Use `socket` option to enforce socket connection.
     pub fn get_prefer_socket(&self) -> bool {
         self.prefer_socket
     }
@@ -406,6 +410,8 @@ impl OptsBuilder {
     ///
     /// Will reconnect via socket (on named pipe on windows) after TCP connection
     /// to `127.0.0.1` if `true`.
+    ///
+    /// Will fall back to TCP on error. Use `socket` option to enforce socket connection.
     pub fn prefer_socket(&mut self, prefer_socket: bool) -> &mut Self {
         self.opts.prefer_socket = prefer_socket;
         self
