@@ -122,6 +122,10 @@ pub struct Opts {
     /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
     /// pointless or may broke the connection, so this option should be used with caution.
     additional_capabilities: CapabilityFlags,
+
+    /// For tests only
+    #[cfg(test)]
+    pub injected_socket: Option<String>,
 }
 
 impl Opts {
@@ -294,6 +298,8 @@ impl Default for Opts {
             stmt_cache_size: 10,
             compress: false,
             additional_capabilities: CapabilityFlags::empty(),
+            #[cfg(test)]
+            injected_socket: None,
         }
     }
 }

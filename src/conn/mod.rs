@@ -683,10 +683,14 @@ impl Conn {
     /// Check the connection can be improved.
     fn can_improved(&mut self) -> Option<Opts> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
-            if let Some(socket) = self.get_system_var("socket") {
+            let mut socket = None;
+            #[cfg(test)] { socket = self.opts.injected_socket.clone(); }
+            if socket.is_none() {
+                socket = self.get_system_var("socket").map(from_value::<String>);
+            }
+            if let Some(socket) = socket {
                 if self.opts.get_socket().is_none() {
                     let mut socket_opts = OptsBuilder::from_opts(self.opts.clone());
-                    let socket = from_value::<String>(socket);
                     if socket.len() > 0 {
                         socket_opts.socket(Some(socket));
                         return Some(socket_opts.into());
@@ -704,11 +708,14 @@ impl Conn {
         conn.connect()?;
         let mut conn = {
             if let Some(new_opts) = conn.can_improved() {
-                drop(conn);
                 let mut improved_conn = Conn::empty(new_opts);
-                improved_conn.connect_stream()?;
-                improved_conn.connect()?;
                 improved_conn
+                    .connect_stream()
+                    .and_then(|_| {
+                        improved_conn.connect()?;
+                        Ok(improved_conn)
+                    })
+                    .unwrap_or(conn)
             } else {
                 conn
             }
@@ -2142,6 +2149,19 @@ mod test {
             let mode = from_value::<String>(mode);
             assert!(mode.contains("TRADITIONAL"));
             assert!(conn.ping());
+        }
+        #[test]
+        #[should_panic(expected = "Could not connect to address")]
+        fn should_fail_on_wrong_socket_path() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.socket(Some("/foo/bar/baz"));
+            let _ = Conn::new(opts).unwrap();
+        }
+        #[test]
+        fn should_fallback_to_tcp_if_cant_switch_to_socket() {
+            let mut opts = get_opts();
+            opts.injected_socket = Some("/foo/bar/baz".into());
+            let _ = Conn::new(opts).unwrap();
         }
         #[test]
         fn should_connect_with_database() {
