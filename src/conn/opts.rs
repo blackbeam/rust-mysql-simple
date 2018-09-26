@@ -322,6 +322,18 @@ impl Default for Opts {
 /// builder.ip_or_hostname(Some("foo"))
 ///        .db_name(Some("bar"));
 /// ```
+///
+/// ## Connection URL
+///
+/// `Opts` also could be constructed using connection URL. See docs on `OptsBuilder`'s methods for
+/// the list of options available via URL.
+///
+/// Example:
+///
+/// ```ignore
+/// let connection_url = "mysql://root:password@localhost:3307/mysql?prefer_socket=false";
+/// let pool = my::Pool::new(connection_url).unwrap();
+/// ```
 pub struct OptsBuilder {
     opts: Opts,
 }
@@ -519,6 +531,8 @@ impl OptsBuilder {
 
     /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
     ///
+    /// Available as `stmt_cache_size` url parameter.
+    ///
     /// Call with `None` to reset to default.
     pub fn stmt_cache_size<T>(&mut self, cache_size: T) -> &mut Self
     where
@@ -529,6 +543,8 @@ impl OptsBuilder {
     }
 
     /// If `true`, then client will ask for compression if server supports it (defaults to `false`).
+    ///
+    /// Available as `compress` url parameter with value `true` or `false`.
     pub fn compress(&mut self, compress: bool) -> &mut Self {
         self.opts.compress = compress;
         self

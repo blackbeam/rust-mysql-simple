@@ -47,6 +47,7 @@
 //! #                              .unwrap_or(3307);
 //! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
 //! #   let pool = if port == 3307 && pwd == "password" {
+//!     // See docs on the `OptsBuilder`'s methods for the list of options available via URL.
 //!     let pool = my::Pool::new("mysql://root:password@localhost:3307/mysql").unwrap();
 //! #       drop(pool);
 //! #       my::Pool::new_manual(1, 1, "mysql://root:password@localhost:3307/mysql").unwrap()
