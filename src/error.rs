@@ -7,6 +7,8 @@ use std::sync;
 use myc::named_params::MixedParamsError;
 use myc::packets::ErrPacket;
 use myc::params::MissingNamedParameterError;
+use myc::row::convert::FromRowError;
+use myc::value::convert::FromValueError;
 
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 use openssl::{
@@ -105,6 +107,18 @@ impl error::Error for Error {
             Error::SslError(ref err) => Some(err),
             _ => None,
         }
+    }
+}
+
+impl From<FromValueError> for Error {
+    fn from(FromValueError(value): FromValueError) -> Error {
+        Error::FromValueError(value)
+    }
+}
+
+impl From<FromRowError> for Error {
+    fn from(FromRowError(row): FromRowError) -> Error {
+        Error::FromRowError(row)
     }
 }
 
