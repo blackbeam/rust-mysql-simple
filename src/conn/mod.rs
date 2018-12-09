@@ -1124,10 +1124,6 @@ impl Conn {
                     } else {
                         self.write_packet(&[0x02][..])?;
                         let payload = self.read_packet()?;
-                        if payload[0] == 0xff {
-                            let err = parse_err_packet(payload.as_ref(), self.capability_flags)?;
-                            return Err(MySqlError(err.into()));
-                        }
                         let key = &payload[1..];
                         let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or(vec![]);
                         pass.push(0);
@@ -1400,10 +1396,6 @@ impl Conn {
                     Err(err) => Err(err),
                 }
             }
-            0xff => {
-                let err = parse_err_packet(pld.as_ref(), self.capability_flags)?;
-                Err(MySqlError(err.into()))
-            }
             _ => {
                 let mut reader = &pld[..];
                 let column_count = reader.read_lenenc_int()?;
@@ -1478,34 +1470,26 @@ impl Conn {
     ) -> MyResult<InnerStmt> {
         self.write_command_data(Command::COM_STMT_PREPARE, query.as_bytes())?;
         let pld = self.read_packet()?;
-        match pld[0] {
-            0xff => {
-                let err = parse_err_packet(pld.as_ref(), self.capability_flags)?;
-                Err(MySqlError(err.into()))
+        let mut stmt = InnerStmt::from_payload(pld.as_ref(), named_params)?;
+        if stmt.num_params() > 0 {
+            let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
+            for _ in 0..stmt.num_params() {
+                let pld = self.read_packet()?;
+                params.push(column_from_payload(pld)?);
             }
-            _ => {
-                let mut stmt = InnerStmt::from_payload(pld.as_ref(), named_params)?;
-                if stmt.num_params() > 0 {
-                    let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
-                    for _ in 0..stmt.num_params() {
-                        let pld = self.read_packet()?;
-                        params.push(column_from_payload(pld)?);
-                    }
-                    stmt.set_params(Some(params));
-                    self.read_packet()?;
-                }
-                if stmt.num_columns() > 0 {
-                    let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns() as usize);
-                    for _ in 0..stmt.num_columns() {
-                        let pld = self.read_packet()?;
-                        columns.push(column_from_payload(pld)?);
-                    }
-                    stmt.set_columns(Some(columns));
-                    self.read_packet()?;
-                }
-                Ok(stmt)
-            }
+            stmt.set_params(Some(params));
+            self.read_packet()?;
         }
+        if stmt.num_columns() > 0 {
+            let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns() as usize);
+            for _ in 0..stmt.num_columns() {
+                let pld = self.read_packet()?;
+                columns.push(column_from_payload(pld)?);
+            }
+            stmt.set_columns(Some(columns));
+            self.read_packet()?;
+        }
+        Ok(stmt)
     }
 
     fn _prepare(&mut self, query: &str, named_params: Option<Vec<String>>) -> MyResult<InnerStmt> {
@@ -1731,21 +1715,11 @@ impl Conn {
             }
         };
         let x = pld[0];
-        if (x == 0xfe || x == 0xff) && pld.len() < 0xfe {
+        if x == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
-            if x == 0xfe {
-                let p = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
-                self.handle_ok(&p);
-                return Ok(None);
-            } else
-            /* x == 0xff */
-            {
-                let p = parse_err_packet(pld.as_ref(), self.capability_flags);
-                match p {
-                    Ok(p) => return Err(MySqlError(p.into())),
-                    Err(err) => return Err(IoError(err)),
-                }
-            }
+            let p = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+            self.handle_ok(&p);
+            return Ok(None);
         }
         let res = read_text_values(&*pld, col_count);
         match res {
