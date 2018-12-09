@@ -20,7 +20,7 @@ use super::consts::{
     CapabilityFlags, ColumnType, Command, StatusFlags, UTF8MB4_GENERAL_CI, UTF8_GENERAL_CI,
     MAX_PAYLOAD_LEN,
 };
-use super::error::DriverError::SslNotSupported;
+use super::error::DriverError::{SslNotSupported, UnknownAuthPlugin};
 use super::error::DriverError::{
     CouldNotConnect, MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
     ReadOnlyTransNotSupported, SetupError, UnexpectedPacket, UnsupportedProtocol,
@@ -34,7 +34,6 @@ use from_value;
 use from_value_opt;
 use myc::crypto;
 use myc::named_params::parse_named_params;
-use myc::scramble::{scramble_native, scramble_sha256};
 use Params;
 use Value::{self, Bytes, Date, Float, Int, Time, UInt, NULL};
 
@@ -42,8 +41,8 @@ use byteorder::LittleEndian as LE;
 use byteorder::WriteBytesExt;
 use fnv::FnvHasher;
 use myc::packets::{
-    column_from_payload, parse_err_packet, parse_handshake_packet, parse_ok_packet, AuthPlugin,
-    Column, HandshakePacket, OkPacket,
+    column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
+    parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, HandshakePacket, OkPacket,
 };
 use myc::row::convert::{from_row, FromRow};
 use myc::row::new_row;
@@ -681,6 +680,7 @@ impl Conn {
     }
 
     /// Check the connection can be improved.
+    #[allow(unused_assignments)]
     fn can_improved(&mut self) -> Option<Opts> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
             let mut socket = None;
@@ -841,7 +841,13 @@ impl Conn {
             }
         };
         self.seq_id = seq_id;
-        Ok(data)
+        match data[0] {
+            0xff => {
+                let error_packet = parse_err_packet(&*data, self.capability_flags)?;
+                Err(MySqlError(error_packet.into()))
+            }
+            _ => Ok(data)
+        }
     }
 
     fn drop_packet(&mut self) -> MyResult<()> {
@@ -882,14 +888,19 @@ impl Conn {
         self.info = op.info_ref().map(Into::into);
     }
 
+    fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest) -> MyResult<()> {
+        let nonce = auth_switch_request.plugin_data();
+        let plugin_data = auth_switch_request.auth_plugin().gen_data(self.opts.get_pass(), nonce);
+        let plugin_data = plugin_data
+            .as_ref()
+            .map(|plugin_data| &**plugin_data)
+            .unwrap_or(&[][..]);
+        self.write_packet(plugin_data)?;
+        self.continue_auth(auth_switch_request.auth_plugin(), nonce,true)
+    }
+
     fn do_handshake(&mut self) -> MyResult<()> {
         let payload = self.read_packet()?;
-
-        if payload[0] == 0xff {
-            let error_packet = parse_err_packet(&*payload, self.capability_flags)?;
-            return Err(MySqlError(error_packet.into()));
-        }
-
         let handshake = parse_handshake_packet(payload.as_ref())?;
 
         if handshake.protocol_version() != 10u8 {
@@ -921,28 +932,25 @@ impl Conn {
             }
         }
 
-        self.do_handshake_response(&handshake)?;
+        let nonce = handshake.nonce();
 
-        let payload = self.read_packet()?;
-
-        if payload[0] == 0xff {
-            let error_packet = parse_err_packet(&*payload, self.capability_flags)?;
-            return Err(MySqlError(error_packet.into()));
+        let auth_plugin = handshake.auth_plugin().unwrap_or(&AuthPlugin::MysqlNativePassword);
+        if let AuthPlugin::Other(ref name) = auth_plugin {
+            let plugin_name = String::from_utf8_lossy(name).into();
+            Err(DriverError(UnknownAuthPlugin(plugin_name)))?
         }
 
-        if payload[0] != 0x00 {
-            return Err(DriverError(UnexpectedPacket));
-        }
+        let auth_data = auth_plugin.gen_data(self.opts.get_pass(), &*nonce);
+        self.write_handshake_response(auth_plugin, auth_data.as_ref().map(AsRef::as_ref))?;
 
-        let ok = parse_ok_packet(&*payload, self.capability_flags)?;
-        self.handle_ok(&ok);
+        self.continue_auth(auth_plugin, &*nonce, false)?;
 
         if self
             .capability_flags
             .contains(CapabilityFlags::CLIENT_COMPRESS)
-        {
-            self.switch_to_compressed();
-        }
+            {
+                self.switch_to_compressed();
+            }
 
         Ok(())
     }
@@ -1058,77 +1066,90 @@ impl Conn {
         self.write_packet(&*buf)
     }
 
-    fn perform_mysql_native_password_auth(&mut self, nonce: Vec<u8>) -> MyResult<()> {
-        let scramble = self
-            .opts
-            .get_pass()
-            .and_then(|pass| scramble_native(&*nonce, pass.as_bytes()));
-        self.write_handshake_response(
-            &AuthPlugin::MysqlNativePassword,
-            scramble.as_ref().map(AsRef::as_ref),
-        )
-    }
-
-    fn perform_caching_sha2_password_auth(&mut self, nonce: Vec<u8>) -> MyResult<()> {
-        let scramble = self
-            .opts
-            .get_pass()
-            .and_then(|pass| scramble_sha256(&*nonce, pass.as_bytes()));
-        self.write_handshake_response(
-            &AuthPlugin::CachingSha2Password,
-            scramble.as_ref().map(AsRef::as_ref),
-        )?;
-        let payload = self.read_packet()?;
-        match payload[0] {
-            0xff => {
-                let err = parse_err_packet(payload.as_ref(), self.capability_flags)?;
-                Err(MySqlError(err.into()))
-            }
-            0xfe => unimplemented!("auth switch is not implemented"),
-            0x01 => match payload[1] {
-                0x03 => Ok(()),
-                0x04 => if !self.is_insecure() || self.is_socket() {
-                    let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or(vec![]);
-                    pass.push(0);
-                    self.write_packet(&*pass)
-                } else {
-                    self.write_packet(&[0x02][..])?;
-                    let payload = self.read_packet()?;
-                    if payload[0] == 0xff {
-                        let err = parse_err_packet(payload.as_ref(), self.capability_flags)?;
-                        return Err(MySqlError(err.into()));
-                    }
-                    let key = &payload[1..];
-                    let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or(vec![]);
-                    pass.push(0);
-                    for i in 0..pass.len() {
-                        pass[i] ^= nonce[i % nonce.len()];
-                    }
-                    let encrypted_pass = crypto::encrypt(&*pass, key);
-                    self.write_packet(&*encrypted_pass)
-                },
-                _ => unreachable!(),
+    fn continue_auth(
+        &mut self,
+        auth_plugin: &AuthPlugin,
+        nonce: &[u8],
+        auth_switched: bool,
+    ) -> MyResult<()> {
+        match auth_plugin {
+            AuthPlugin::MysqlNativePassword => {
+                self.continue_mysql_native_password_auth(auth_switched)
             },
-            _ => unreachable!(),
+            AuthPlugin::CachingSha2Password => {
+                self.continue_caching_sha2_password_auth(nonce, auth_switched)
+            },
+            AuthPlugin::Other(ref name) => {
+                let plugin_name = String::from_utf8_lossy(name).into();
+                Err(DriverError(UnknownAuthPlugin(plugin_name)))?
+            }
         }
     }
 
-    fn do_handshake_response(&mut self, hp: &HandshakePacket) -> MyResult<()> {
-        use error::DriverError::UnknownAuthPlugin;
+    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> MyResult<()> {
+        let payload = self.read_packet()?;
 
-        let nonce = {
-            let mut nonce = Vec::from(hp.scramble_1_ref());
-            nonce.extend_from_slice(hp.scramble_2_ref().unwrap_or(&[][..]));
-            nonce
-        };
+        match payload[0] {
+            // auth ok
+            0x00 => {
+                let ok = parse_ok_packet(&*payload, self.capability_flags)?;
+                self.handle_ok(&ok);
+                Ok(())
+            }
+            // auth switch
+            0xfe if !auth_switched => {
+                let auth_switch_request = parse_auth_switch_request(&*payload)?;
+                self.perform_auth_switch(auth_switch_request)
+            }
+            _ => Err(DriverError(UnexpectedPacket)),
+        }
+    }
 
-        match hp.auth_plugin() {
-            Some(AuthPlugin::MysqlNativePassword) => self.perform_mysql_native_password_auth(nonce),
-            Some(AuthPlugin::CachingSha2Password) => self.perform_caching_sha2_password_auth(nonce),
-            Some(&AuthPlugin::Other(ref name)) => Err(DriverError(UnknownAuthPlugin(
-                String::from_utf8_lossy(name).into(),
-            ))),
-            None => unreachable!(),
+    fn continue_caching_sha2_password_auth(&mut self, nonce: &[u8], auth_switched: bool) -> MyResult<()> {
+        let payload = self.read_packet()?;
+
+        match payload[0] {
+            0x01 => match payload[1] {
+                0x03 => {
+                    let payload = self.read_packet()?;
+                    let ok = parse_ok_packet(&*payload, self.capability_flags)?;
+                    self.handle_ok(&ok);
+                    Ok(())
+                },
+                0x04 => {
+                    if !self.is_insecure() || self.is_socket() {
+                        let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or(vec![]);
+                        pass.push(0);
+                        self.write_packet(&*pass)?;
+                    } else {
+                        self.write_packet(&[0x02][..])?;
+                        let payload = self.read_packet()?;
+                        if payload[0] == 0xff {
+                            let err = parse_err_packet(payload.as_ref(), self.capability_flags)?;
+                            return Err(MySqlError(err.into()));
+                        }
+                        let key = &payload[1..];
+                        let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or(vec![]);
+                        pass.push(0);
+                        for i in 0..pass.len() {
+                            pass[i] ^= nonce[i % nonce.len()];
+                        }
+                        let encrypted_pass = crypto::encrypt(&*pass, key);
+                        self.write_packet(&*encrypted_pass)?;
+                    }
+
+                    let payload = self.read_packet()?;
+                    let ok = parse_ok_packet(&*payload, self.capability_flags)?;
+                    self.handle_ok(&ok);
+                    Ok(())
+                },
+                _ => Err(DriverError(UnexpectedPacket)),
+            },
+            0xfe if !auth_switched => {
+                let auth_switch_request = parse_auth_switch_request(&*payload)?;
+                self.perform_auth_switch(auth_switch_request)
+            }
+            _ => Err(DriverError(UnexpectedPacket)),
         }
     }
 
