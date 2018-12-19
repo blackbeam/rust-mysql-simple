@@ -59,7 +59,7 @@ net2 = "~0.2"
 smallvec = "0.6"
 serde = "1"
 serde_json = "1"
-mysql_common = { version = "0.12", optional = true }
+mysql_common = { version = "0.13", optional = true }
 
 [dependencies.rustc-serialize]
 version = "0.3"
