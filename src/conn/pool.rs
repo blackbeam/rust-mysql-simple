@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration as StdDuration;
 
-use time::{Duration, SteadyTime};
+use crate::time::{Duration, SteadyTime};
 
 use super::super::error::Result as MyResult;
 use super::super::error::{DriverError, Error};
@@ -14,10 +14,10 @@ use super::IsolationLevel;
 use super::LocalInfileHandler;
 use super::Transaction;
 use super::{Conn, Opts, QueryResult, Stmt};
-use myc::named_params::parse_named_params;
-use myc::row::convert::{from_row, FromRow};
-use Params;
-use Row;
+use crate::myc::named_params::parse_named_params;
+use crate::myc::row::convert::{from_row, FromRow};
+use crate::Params;
+use crate::Row;
 
 #[derive(Debug)]
 struct InnerPool {
@@ -313,7 +313,7 @@ impl Pool {
 }
 
 impl fmt::Debug for Pool {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "Pool {{ min: {}, max: {}, count: {} }}",
@@ -393,7 +393,7 @@ impl Drop for PooledConn {
 impl PooledConn {
     /// Redirects to
     /// [`Conn#query`](struct.Conn.html#method.query).
-    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
         self.conn.as_mut().unwrap().query(query)
     }
 
@@ -408,12 +408,12 @@ impl PooledConn {
     }
 
     /// See [`Conn::prepare`](struct.Conn.html#method.prepare).
-    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
         self.conn.as_mut().unwrap().prepare(query)
     }
 
     /// See [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
-    pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
     where
         A: AsRef<str>,
         T: Into<Params>,
@@ -512,7 +512,7 @@ impl PooledConn {
 }
 
 impl GenericConnection for PooledConn {
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
         self.query(query)
     }
 
@@ -520,11 +520,11 @@ impl GenericConnection for PooledConn {
         self.first(query)
     }
 
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
         self.prepare(query)
     }
 
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
     where
         A: AsRef<str>,
         T: Into<Params>,
@@ -545,8 +545,8 @@ impl GenericConnection for PooledConn {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    use Opts;
-    use OptsBuilder;
+    use crate::Opts;
+    use crate::OptsBuilder;
 
     pub static USER: &'static str = "root";
     pub static PASS: &'static str = "password";
@@ -613,13 +613,13 @@ mod test {
     mod pool {
         use std::thread;
         use std::time::Duration;
-        use OptsBuilder;
+        use crate::OptsBuilder;
 
         use super::super::super::super::error::{DriverError, Error};
         use super::super::Pool;
         use super::get_opts;
-        use from_row;
-        use from_value;
+        use crate::from_row;
+        use crate::from_value;
 
         #[test]
         fn multiple_pools_should_work() {

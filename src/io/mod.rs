@@ -10,7 +10,7 @@ use std::slice::Chunks;
 use std::time::Duration;
 
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
-use conn::SslOpts;
+use crate::conn::SslOpts;
 
 use super::consts;
 use super::consts::ColumnType;
@@ -21,7 +21,7 @@ use super::error::DriverError::PacketOutOfSync;
 use super::error::DriverError::PacketTooLarge;
 use super::error::Error::DriverError;
 use super::error::Result as MyResult;
-use Value::{self, Bytes, Date, Float, Int, Time, UInt, NULL};
+use crate::Value::{self, Bytes, Date, Float, Int, Time, UInt, NULL};
 
 use bufstream::BufStream;
 use byteorder::LittleEndian as LE;
@@ -391,7 +391,7 @@ impl Compressed {
 
     fn with_buf_and_stream<F>(&mut self, mut fun: F) -> io::Result<()>
     where
-        F: FnMut(&mut Vec<u8>, &mut IoPack) -> io::Result<()>,
+        F: FnMut(&mut Vec<u8>, &mut dyn IoPack) -> io::Result<()>,
     {
         let mut buf = mem::replace(&mut self.buf, Vec::new());
         let ret = fun(&mut buf, self.stream.as_mut());
@@ -550,8 +550,8 @@ pub trait IoPack: io::Read + io::Write + io::BufRead + 'static {}
 
 impl<T: io::Read + io::Write + 'static> IoPack for BufStream<T> {}
 
-impl AsMut<IoPack> for Stream {
-    fn as_mut(&mut self) -> &mut IoPack {
+impl AsMut<dyn IoPack> for Stream {
+    fn as_mut(&mut self) -> &mut dyn IoPack {
         match *self {
             #[cfg(unix)]
             Stream::SocketStream(ref mut stream) => stream,
@@ -803,7 +803,7 @@ impl Stream {
                                     ssl::HandshakeError::Failure(mid_stream) => {
                                         return Err(mid_stream.into_error().into())
                                     }
-                                    ssl::HandshakeError::WouldBlock(mid_stream) => unreachable!(),
+                                    ssl::HandshakeError::WouldBlock(_mid_stream) => unreachable!(),
                                 },
                             };
                             Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(
@@ -839,8 +839,8 @@ pub enum TcpStream {
     Insecure(BufStream<net::TcpStream>),
 }
 
-impl AsMut<IoPack> for TcpStream {
-    fn as_mut(&mut self) -> &mut IoPack {
+impl AsMut<dyn IoPack> for TcpStream {
+    fn as_mut(&mut self) -> &mut dyn IoPack {
         match *self {
             #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
             TcpStream::Secure(ref mut stream) => stream,
@@ -850,7 +850,7 @@ impl AsMut<IoPack> for TcpStream {
 }
 
 impl fmt::Debug for TcpStream {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
             TcpStream::Secure(_) => write!(f, "Secure stream"),

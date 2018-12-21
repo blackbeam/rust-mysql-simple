@@ -1,5 +1,5 @@
 use bit_vec::BitVec;
-use packet::InnerStmt;
+use crate::packet::InnerStmt;
 use smallvec::SmallVec;
 use std::borrow::Borrow;
 use std::cmp;
@@ -14,7 +14,7 @@ use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::path;
 use std::sync::{Arc, Mutex};
-use Row;
+use crate::Row;
 
 use super::consts::{
     CapabilityFlags, ColumnType, Command, StatusFlags, UTF8MB4_GENERAL_CI, UTF8_GENERAL_CI,
@@ -30,23 +30,23 @@ use super::error::Result as MyResult;
 use super::io::Read as MyRead;
 use super::io::Write;
 use super::io::{Compressed, Stream};
-use from_value;
-use from_value_opt;
-use myc::crypto;
-use myc::named_params::parse_named_params;
-use Params;
-use Value::{self, Bytes, Date, Float, Int, Time, UInt, NULL};
+use crate::from_value;
+use crate::from_value_opt;
+use crate::myc::crypto;
+use crate::myc::named_params::parse_named_params;
+use crate::Params;
+use crate::Value::{self, Bytes, Date, Float, Int, Time, UInt, NULL};
 
 use byteorder::LittleEndian as LE;
 use byteorder::WriteBytesExt;
 use fnv::FnvHasher;
-use myc::packets::{
+use crate::myc::packets::{
     column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
     parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, HandshakePacket, OkPacket,
 };
-use myc::row::convert::{from_row, FromRow};
-use myc::row::new_row;
-use myc::value::{read_bin_values, read_text_values, serialize_bin_many};
+use crate::myc::row::convert::{from_row, FromRow};
+use crate::myc::row::new_row;
+use crate::myc::value::{read_bin_values, read_text_values, serialize_bin_many};
 
 mod opts;
 pub mod pool;
@@ -61,7 +61,7 @@ use self::stmt_cache::StmtCache;
 pub trait GenericConnection {
     /// See
     /// [`Conn#query`](struct.Conn.html#method.query).
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult>;
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>>;
 
     /// See
     /// [`Conn#first`](struct.Conn.html#method.first).
@@ -69,11 +69,11 @@ pub trait GenericConnection {
 
     /// See
     /// [`Conn#prepare`](struct.Conn.html#method.prepare).
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt>;
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>>;
 
     /// See
     /// [`Conn#prep_exec`](struct.Conn.html#method.prep_exec).
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
     where
         A: AsRef<str>,
         T: Into<Params>;
@@ -96,7 +96,7 @@ pub enum IsolationLevel {
 }
 
 impl fmt::Display for IsolationLevel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             IsolationLevel::ReadUncommitted => write!(f, "READ UNCOMMITTED"),
             IsolationLevel::ReadCommitted => write!(f, "READ COMMITTED"),
@@ -136,7 +136,7 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`Conn::query`](struct.Conn.html#method.query).
-    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
         self.conn.query(query)
     }
 
@@ -151,7 +151,7 @@ impl<'a> Transaction<'a> {
     }
 
     /// See [`Conn::prepare`](struct.Conn.html#method.prepare).
-    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
         self.conn.prepare(query)
     }
 
@@ -160,7 +160,7 @@ impl<'a> Transaction<'a> {
         &mut self,
         query: A,
         params: T,
-    ) -> MyResult<QueryResult> {
+    ) -> MyResult<QueryResult<'_>> {
         self.conn.prep_exec(query, params)
     }
 
@@ -202,7 +202,7 @@ impl<'a> Transaction<'a> {
 }
 
 impl<'a> GenericConnection for Transaction<'a> {
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
         self.query(query)
     }
 
@@ -210,11 +210,11 @@ impl<'a> GenericConnection for Transaction<'a> {
         self.first(query)
     }
 
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
         self.prepare(query)
     }
 
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
     where
         A: AsRef<str>,
         T: Into<Params>,
@@ -520,13 +520,13 @@ impl<'a> Drop for Stmt<'a> {
 /// ```
 #[derive(Clone)]
 pub struct LocalInfileHandler(
-    Arc<Mutex<for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send>>,
+    Arc<Mutex<dyn for<'a> FnMut(&'a [u8], &'a mut LocalInfile<'_>) -> io::Result<()> + Send>>,
 );
 
 impl LocalInfileHandler {
     pub fn new<F>(f: F) -> Self
     where
-        F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile) -> io::Result<()> + Send + 'static,
+        F: for<'a> FnMut(&'a [u8], &'a mut LocalInfile<'_>) -> io::Result<()> + Send + 'static,
     {
         LocalInfileHandler(Arc::new(Mutex::new(f)))
     }
@@ -541,7 +541,7 @@ impl PartialEq for LocalInfileHandler {
 impl Eq for LocalInfileHandler {}
 
 impl fmt::Debug for LocalInfileHandler {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "LocalInfileHandler(...)")
     }
 }
@@ -871,7 +871,7 @@ impl Conn {
         Ok(())
     }
 
-    fn handle_handshake(&mut self, hp: &HandshakePacket) {
+    fn handle_handshake(&mut self, hp: &HandshakePacket<'_>) {
         self.capability_flags = hp.capabilities() & self.get_client_flags();
         self.status_flags = hp.status_flags();
         self.connection_id = hp.connection_id();
@@ -880,7 +880,7 @@ impl Conn {
         self.mariadb_server_version = hp.maria_db_server_version_parsed();
     }
 
-    fn handle_ok(&mut self, op: &OkPacket) {
+    fn handle_ok(&mut self, op: &OkPacket<'_>) {
         self.affected_rows = op.affected_rows();
         self.last_insert_id = op.last_insert_id().unwrap_or(0);
         self.status_flags = op.status_flags();
@@ -888,7 +888,7 @@ impl Conn {
         self.info = op.info_ref().map(Into::into);
     }
 
-    fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest) -> MyResult<()> {
+    fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> MyResult<()> {
         let nonce = auth_switch_request.plugin_data();
         let plugin_data = auth_switch_request.auth_plugin().gen_data(self.opts.get_pass(), nonce);
         let plugin_data = plugin_data
@@ -1012,7 +1012,7 @@ impl Conn {
 
     fn write_handshake_response(
         &mut self,
-        auth_plugin: &AuthPlugin,
+        auth_plugin: &AuthPlugin<'_>,
         scramble_buf: Option<&[u8]>,
     ) -> MyResult<()> {
         let plugin_auth = self
@@ -1068,7 +1068,7 @@ impl Conn {
 
     fn continue_auth(
         &mut self,
-        auth_plugin: &AuthPlugin,
+        auth_plugin: &AuthPlugin<'_>,
         nonce: &[u8],
         auth_switched: bool,
     ) -> MyResult<()> {
@@ -1442,7 +1442,7 @@ impl Conn {
     ///
     /// Executes mysql query on `Conn`. [`QueryResult`](struct.QueryResult.html)
     /// will borrow `Conn` until the end of its scope.
-    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
         match self._query(query.as_ref()) {
             Ok(columns) => Ok(QueryResult::new(
                 ResultConnRef::ViaConnRef(self),
@@ -1601,7 +1601,7 @@ impl Conn {
     /// }
     /// # }
     /// ```
-    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
         let query = query.as_ref();
         let (named_params, real_query) = parse_named_params(query)?;
         match self._prepare(real_query.borrow(), named_params) {
@@ -1614,7 +1614,7 @@ impl Conn {
     /// ['Conn::prepare'](struct.Conn.html#method.prepare)
     ///
     /// This call will take statement from cache if has been prepared on this connection.
-    pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
     where
         A: AsRef<str>,
         T: Into<Params>,
@@ -1752,7 +1752,7 @@ impl Conn {
 }
 
 impl GenericConnection for Conn {
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult> {
+    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
         self.query(query)
     }
 
@@ -1760,11 +1760,11 @@ impl GenericConnection for Conn {
         self.first(query)
     }
 
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt> {
+    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
         self.prepare(query)
     }
 
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult>
+    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
     where
         A: AsRef<str>,
         T: Into<Params>,
@@ -2030,8 +2030,8 @@ impl<'a> Drop for QueryResult<'a> {
 #[allow(non_snake_case)]
 mod test {
     use std::env;
-    use Opts;
-    use OptsBuilder;
+    use crate::Opts;
+    use crate::OptsBuilder;
 
     static USER: &'static str = "root";
     static PASS: &'static str = "password";
@@ -2114,21 +2114,21 @@ mod test {
 
     mod my_conn {
         use super::get_opts;
-        use from_row;
-        use from_value;
-        use prelude::ToValue;
+        use crate::from_row;
+        use crate::from_value;
+        use crate::prelude::ToValue;
         use std::borrow::ToOwned;
         use std::fs;
         use std::io::Write;
         use std::iter;
-        use time::{now, Tm};
-        use Conn;
-        use DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery};
-        use Error::DriverError;
-        use LocalInfileHandler;
-        use OptsBuilder;
-        use Params;
-        use Value::{Bytes, Date, Int, NULL};
+        use crate::time::{now, Tm};
+        use crate::Conn;
+        use crate::DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery};
+        use crate::Error::DriverError;
+        use crate::LocalInfileHandler;
+        use crate::OptsBuilder;
+        use crate::Params;
+        use crate::Value::{Bytes, Date, Int, NULL};
 
         #[test]
         fn should_connect() {
@@ -2304,11 +2304,11 @@ mod test {
                         );
                         stmt.execute(
                             &[
-                                &b"".to_vec() as &ToValue,
-                                &NULL as &ToValue,
-                                &NULL as &ToValue,
-                                &NULL as &ToValue,
-                                &321.321f64 as &ToValue,
+                                &b"".to_vec() as &dyn ToValue,
+                                &NULL as &dyn ToValue,
+                                &NULL as &dyn ToValue,
+                                &NULL as &dyn ToValue,
+                                &321.321f64 as &dyn ToValue,
                             ][..],
                         ).unwrap();
                         Ok(())
@@ -2578,13 +2578,13 @@ mod test {
                 let result_set = query_result
                     .by_ref()
                     .map(|row| row.unwrap().unwrap().pop().unwrap())
-                    .collect::<Vec<::Value>>();
+                    .collect::<Vec<crate::Value>>();
                 assert_eq!(result_set, vec![Bytes(b"1".to_vec()), Bytes(b"2".to_vec())]);
                 assert!(query_result.more_results_exists());
                 let result_set = query_result
                     .by_ref()
                     .map(|row| row.unwrap().unwrap().pop().unwrap())
-                    .collect::<Vec<::Value>>();
+                    .collect::<Vec<crate::Value>>();
                 assert_eq!(result_set, vec![Bytes(b"3".to_vec()), Bytes(b"4".to_vec())]);
             }
             let mut result = conn.query("SELECT 1; SELECT 2; SELECT 3;").unwrap();
@@ -2658,8 +2658,8 @@ mod test {
 
         #[test]
         fn should_handle_tcp_connect_timeout() {
-            use error::DriverError::ConnectTimeout;
-            use error::Error::DriverError;
+            use crate::error::DriverError::ConnectTimeout;
+            use crate::error::Error::DriverError;
 
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
@@ -2678,7 +2678,7 @@ mod test {
 
         #[test]
         fn should_set_additional_capabilities() {
-            use consts::CapabilityFlags;
+            use crate::consts::CapabilityFlags;
 
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.additional_capabilities(CapabilityFlags::CLIENT_FOUND_ROWS);
@@ -2770,8 +2770,8 @@ mod test {
             use serde_json::Value as Json;
             #[cfg(not(feature = "rustc_serialize"))]
             use std::str::FromStr;
-            use Deserialized;
-            use Serialized;
+            use crate::Deserialized;
+            use crate::Serialized;
 
             #[cfg(feature = "rustc_serialize")]
             #[derive(RustcDecodable, RustcEncodable, Debug, Eq, PartialEq)]

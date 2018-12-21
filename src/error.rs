@@ -4,11 +4,11 @@ use std::io;
 use std::result;
 use std::sync;
 
-use myc::named_params::MixedParamsError;
-use myc::packets::ErrPacket;
-use myc::params::MissingNamedParameterError;
-use myc::row::convert::FromRowError;
-use myc::value::convert::FromValueError;
+use crate::myc::named_params::MixedParamsError;
+use crate::myc::packets::ErrPacket;
+use crate::myc::params::MissingNamedParameterError;
+use crate::myc::row::convert::FromRowError;
+use crate::myc::value::convert::FromValueError;
 
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 use openssl::{
@@ -17,8 +17,8 @@ use openssl::{
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::base::Error as SslError;
 
-use Row;
-use Value;
+use crate::Row;
+use crate::Value;
 
 use url::ParseError;
 
@@ -40,13 +40,13 @@ pub struct MySqlError {
 }
 
 impl fmt::Display for MySqlError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ERROR {} ({}): {}", self.code, self.state, self.message)
     }
 }
 
 impl fmt::Debug for MySqlError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
 }
@@ -97,7 +97,7 @@ impl error::Error for Error {
         }
     }
 
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&dyn error::Error> {
         match *self {
             Error::IoError(ref err) => Some(err),
             Error::DriverError(ref err) => Some(err),
@@ -204,7 +204,7 @@ impl<T> From<sync::PoisonError<T>> for Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Error::IoError(ref err) => write!(f, "IoError {{ {} }}", err),
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
@@ -219,7 +219,7 @@ impl fmt::Display for Error {
 }
 
 impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
 }
@@ -255,7 +255,7 @@ impl error::Error for DriverError {
 }
 
 impl fmt::Display for DriverError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             DriverError::ConnectTimeout => write!(f, "Could not connect: connection timeout"),
             DriverError::CouldNotConnect(None) => {
@@ -308,7 +308,7 @@ impl fmt::Display for DriverError {
 }
 
 impl fmt::Debug for DriverError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
 }
@@ -332,7 +332,7 @@ impl error::Error for UrlError {
 }
 
 impl fmt::Display for UrlError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             UrlError::ParseError(ref err) => write!(f, "URL ParseError {{ {} }}", err),
             UrlError::UnsupportedScheme(ref s) => write!(f, "URL scheme `{}' is not supported", s),
@@ -355,7 +355,7 @@ impl fmt::Display for UrlError {
 }
 
 impl fmt::Debug for UrlError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
 }

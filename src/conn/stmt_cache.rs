@@ -1,4 +1,4 @@
-use packet::InnerStmt;
+use crate::packet::InnerStmt;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hash};
@@ -72,11 +72,11 @@ impl StmtCache {
     }
 
     #[cfg(test)]
-    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (&'a String, u64)> + 'a> {
+    pub fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = (&'a String, u64)> + 'a> {
         Box::new(self.map.iter().map(|(stmt, &(i, _))| (stmt, i)))
     }
 
-    pub fn into_iter(self) -> Box<Iterator<Item = (String, InnerStmt)>> {
+    pub fn into_iter(self) -> Box<dyn Iterator<Item = (String, InnerStmt)>> {
         Box::new(self.map.into_iter().map(|(k, (_, v))| (k, v)))
     }
 

@@ -1,4 +1,4 @@
-use consts::CapabilityFlags;
+use crate::consts::CapabilityFlags;
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]

@@ -1,6 +1,6 @@
 use byteorder::LittleEndian as LE;
 use byteorder::ReadBytesExt;
-use myc::packets::Column;
+use crate::myc::packets::Column;
 use std::io;
 
 #[derive(Eq, PartialEq, Clone, Debug)]

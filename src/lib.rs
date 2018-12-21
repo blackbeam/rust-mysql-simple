@@ -130,27 +130,24 @@
 #[cfg(feature = "nightly")]
 extern crate test;
 
-extern crate bit_vec;
-extern crate bufstream;
-extern crate byteorder;
-extern crate flate2;
-extern crate fnv;
-#[cfg(unix)]
-extern crate libc;
-extern crate mysql_common as myc;
+
+
+
+
+
+
+use mysql_common as myc;
 #[cfg(windows)]
 extern crate named_pipe;
-extern crate net2;
-#[cfg(unix)]
-extern crate nix;
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-extern crate openssl;
-extern crate regex;
+
+
+
+
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 extern crate security_framework;
-extern crate smallvec;
-extern crate twox_hash;
-extern crate url;
+
+
+
 #[cfg(target_os = "windows")]
 extern crate winapi;
 
@@ -165,11 +162,11 @@ pub extern crate serde_json;
 extern crate serde_derive;
 
 /// Reexport of `chrono` crate.
-pub use myc::chrono;
+pub use crate::myc::chrono;
 /// Reexport of `time` crate.
-pub use myc::time;
+pub use crate::myc::time;
 /// Reexport of `uuid` crate.
-pub use myc::uuid;
+pub use crate::myc::uuid;
 
 // Until `macro_reexport` stabilisation.
 /// This macro is a convenient way to pass named parameters to a statement.
@@ -236,66 +233,66 @@ mod io;
 mod packet;
 
 #[doc(inline)]
-pub use myc::constants as consts;
+pub use crate::myc::constants as consts;
 
 #[doc(inline)]
-pub use conn::pool::Pool;
+pub use crate::conn::pool::Pool;
 #[doc(inline)]
-pub use conn::pool::PooledConn;
+pub use crate::conn::pool::PooledConn;
 #[doc(inline)]
-pub use conn::Conn;
+pub use crate::conn::Conn;
 #[doc(inline)]
-pub use conn::IsolationLevel;
+pub use crate::conn::IsolationLevel;
 #[doc(inline)]
-pub use conn::LocalInfile;
+pub use crate::conn::LocalInfile;
 #[doc(inline)]
-pub use conn::LocalInfileHandler;
+pub use crate::conn::LocalInfileHandler;
 #[doc(inline)]
-pub use conn::Opts;
+pub use crate::conn::Opts;
 #[doc(inline)]
-pub use conn::OptsBuilder;
+pub use crate::conn::OptsBuilder;
 #[doc(inline)]
-pub use conn::QueryResult;
+pub use crate::conn::QueryResult;
 #[doc(inline)]
-pub use conn::Stmt;
+pub use crate::conn::Stmt;
 #[doc(inline)]
-pub use conn::Transaction;
+pub use crate::conn::Transaction;
 #[doc(inline)]
-pub use error::DriverError;
+pub use crate::error::DriverError;
 #[doc(inline)]
-pub use error::Error;
+pub use crate::error::Error;
 #[doc(inline)]
-pub use error::MySqlError;
+pub use crate::error::MySqlError;
 #[doc(inline)]
-pub use error::Result;
+pub use crate::error::Result;
 #[doc(inline)]
-pub use error::ServerError;
+pub use crate::error::ServerError;
 #[doc(inline)]
-pub use error::UrlError;
+pub use crate::error::UrlError;
 #[doc(inline)]
-pub use myc::packets::Column;
+pub use crate::myc::packets::Column;
 #[doc(inline)]
-pub use myc::params::Params;
+pub use crate::myc::params::Params;
 #[doc(inline)]
-pub use myc::row::convert::{from_row, from_row_opt, FromRowError};
+pub use crate::myc::row::convert::{from_row, from_row_opt, FromRowError};
 #[doc(inline)]
-pub use myc::row::Row;
+pub use crate::myc::row::Row;
 #[doc(inline)]
-pub use myc::value::convert::{from_value, from_value_opt, FromValueError};
+pub use crate::myc::value::convert::{from_value, from_value_opt, FromValueError};
 #[doc(inline)]
-pub use myc::value::json::Deserialized;
+pub use crate::myc::value::json::Deserialized;
 #[doc(inline)]
-pub use myc::value::json::Serialized;
+pub use crate::myc::value::json::Serialized;
 #[doc(inline)]
-pub use myc::value::Value;
+pub use crate::myc::value::Value;
 
 pub mod prelude {
     #[doc(inline)]
-    pub use conn::GenericConnection;
+    pub use crate::conn::GenericConnection;
     #[doc(inline)]
-    pub use myc::row::convert::FromRow;
+    pub use crate::myc::row::convert::FromRow;
     #[doc(inline)]
-    pub use myc::value::convert::{ConvIr, FromValue, ToValue};
+    pub use crate::myc::value::convert::{ConvIr, FromValue, ToValue};
 }
 
 #[cfg(test)]
