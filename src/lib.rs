@@ -130,26 +130,7 @@
 #[cfg(feature = "nightly")]
 extern crate test;
 
-
-
-
-
-
-
 use mysql_common as myc;
-#[cfg(windows)]
-extern crate named_pipe;
-
-
-
-
-
-
-
-
-#[cfg(target_os = "windows")]
-extern crate winapi;
-
 #[cfg(feature = "rustc_serialize")]
 pub extern crate rustc_serialize;
 #[cfg(not(feature = "rustc_serialize"))]
@@ -181,10 +162,10 @@ pub use crate::myc::uuid;
 macro_rules! params {
     () => {};
     (@to_pair $name:expr => $value:expr) => (
-        (::std::string::String::from($name), $crate::Value::from($value))
+        (std::string::String::from($name), $crate::Value::from($value))
     );
     (@to_pair $name:ident) => (
-        (::std::string::String::from(stringify!($name)), $crate::Value::from($name))
+        (std::string::String::from(stringify!($name)), $crate::Value::from($name))
     );
     (@expand $vec:expr;) => {};
     (@expand $vec:expr; $name:expr => $value:expr, $($tail:tt)*) => {
@@ -205,21 +186,21 @@ macro_rules! params {
     };
     ($i:ident, $($tail:tt)*) => {
         {
-            let mut output = ::std::vec::Vec::new();
+            let mut output = std::vec::Vec::new();
             params!(@expand output; $i, $($tail)*);
             output
         }
     };
     ($i:expr => $($tail:tt)*) => {
         {
-            let mut output = ::std::vec::Vec::new();
+            let mut output = std::vec::Vec::new();
             params!(@expand output; $i => $($tail)*);
             output
         }
     };
     ($i:ident) => {
         {
-            let mut output = ::std::vec::Vec::new();
+            let mut output = std::vec::Vec::new();
             params!(@expand output; $i);
             output
         }
