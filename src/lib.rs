@@ -143,8 +143,7 @@ extern crate named_pipe;
 
 
 
-#[cfg(all(feature = "ssl", target_os = "macos"))]
-extern crate security_framework;
+
 
 
 
