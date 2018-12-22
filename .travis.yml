@@ -14,6 +14,9 @@ env:
 before_install:
   - sudo bash -c "echo '[mysqld]' >> /usr/share/mysql/my-default.cnf"
   - sudo bash -c "echo 'sql_mode=NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES' >> /usr/share/mysql/my-default.cnf"
+before_script:
+  - export PATH="$PATH:$HOME/.cargo/bin"
+  - rustup component add rustfmt
 script:
   - make test
   - cargo fmt -- --check
