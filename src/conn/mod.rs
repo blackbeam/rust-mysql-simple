@@ -2114,8 +2114,7 @@ mod test {
 
     mod my_conn {
         use super::get_opts;
-        use crate::from_row;
-        use crate::from_value;
+        use crate::{from_row, from_value, params};
         use crate::prelude::ToValue;
         use std::borrow::ToOwned;
         use std::fs;
@@ -2826,6 +2825,7 @@ mod test {
 
     #[cfg(feature = "nightly")]
     mod bench {
+        use crate::params;
         use super::get_opts;
         use test;
         use Conn;

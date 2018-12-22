@@ -611,6 +611,7 @@ mod test {
     }
 
     mod pool {
+        use crate::params;
         use std::thread;
         use std::time::Duration;
         use crate::OptsBuilder;
