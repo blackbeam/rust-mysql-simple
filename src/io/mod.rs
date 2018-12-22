@@ -800,10 +800,10 @@ impl Stream {
                                 Ok(s_stream) => s_stream,
                                 Err(handshake_err) => match handshake_err {
                                     ssl::HandshakeError::SetupFailure(err) => {
-                                        return Err(err.into())
+                                        return Err(err.into());
                                     }
                                     ssl::HandshakeError::Failure(mid_stream) => {
-                                        return Err(mid_stream.into_error().into())
+                                        return Err(mid_stream.into_error().into());
                                     }
                                     ssl::HandshakeError::WouldBlock(_mid_stream) => unreachable!(),
                                 },
