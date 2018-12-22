@@ -82,16 +82,18 @@ impl<'a> Iterator for PacketIterator<'a> {
                     Err(_) => unreachable!("3 bytes for chunk len should be available"),
                 }
             }
-            None => if self.last_was_max {
-                let header = [0, 0, 0, *self.seq_id];
+            None => {
+                if self.last_was_max {
+                    let header = [0, 0, 0, *self.seq_id];
 
-                *self.seq_id = self.seq_id.wrapping_add(1);
-                self.last_was_max = false;
+                    *self.seq_id = self.seq_id.wrapping_add(1);
+                    self.last_was_max = false;
 
-                Some((header, &[][..]))
-            } else {
-                None
-            },
+                    Some((header, &[][..]))
+                } else {
+                    None
+                }
+            }
         }
     }
 }

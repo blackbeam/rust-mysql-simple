@@ -1,5 +1,6 @@
-use bit_vec::BitVec;
 use crate::packet::InnerStmt;
+use crate::Row;
+use bit_vec::BitVec;
 use smallvec::SmallVec;
 use std::borrow::Borrow;
 use std::cmp;
@@ -14,17 +15,16 @@ use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::path;
 use std::sync::{Arc, Mutex};
-use crate::Row;
 
 use super::consts::{
-    CapabilityFlags, ColumnType, Command, StatusFlags, UTF8MB4_GENERAL_CI, UTF8_GENERAL_CI,
-    MAX_PAYLOAD_LEN,
+    CapabilityFlags, ColumnType, Command, StatusFlags, MAX_PAYLOAD_LEN, UTF8MB4_GENERAL_CI,
+    UTF8_GENERAL_CI,
 };
-use super::error::DriverError::{SslNotSupported, UnknownAuthPlugin};
 use super::error::DriverError::{
     CouldNotConnect, MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
     ReadOnlyTransNotSupported, SetupError, UnexpectedPacket, UnsupportedProtocol,
 };
+use super::error::DriverError::{SslNotSupported, UnknownAuthPlugin};
 use super::error::Error::{DriverError, IoError, MySqlError};
 use super::error::Result as MyResult;
 use super::io::Read as MyRead;
@@ -37,9 +37,6 @@ use crate::myc::named_params::parse_named_params;
 use crate::Params;
 use crate::Value::{self, Bytes, Date, Float, Int, Time, UInt, NULL};
 
-use byteorder::LittleEndian as LE;
-use byteorder::WriteBytesExt;
-use fnv::FnvHasher;
 use crate::myc::packets::{
     column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
     parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, HandshakePacket, OkPacket,
@@ -47,6 +44,9 @@ use crate::myc::packets::{
 use crate::myc::row::convert::{from_row, FromRow};
 use crate::myc::row::new_row;
 use crate::myc::value::{read_bin_values, read_text_values, serialize_bin_many};
+use byteorder::LittleEndian as LE;
+use byteorder::WriteBytesExt;
+use fnv::FnvHasher;
 
 mod opts;
 pub mod pool;
@@ -684,7 +684,10 @@ impl Conn {
     fn can_improved(&mut self) -> Option<Opts> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
             let mut socket = None;
-            #[cfg(test)] { socket = self.opts.injected_socket.clone(); }
+            #[cfg(test)]
+            {
+                socket = self.opts.injected_socket.clone();
+            }
             if socket.is_none() {
                 socket = self.get_system_var("socket").map(from_value::<String>);
             }
@@ -846,7 +849,7 @@ impl Conn {
                 let error_packet = parse_err_packet(&*data, self.capability_flags)?;
                 Err(MySqlError(error_packet.into()))
             }
-            _ => Ok(data)
+            _ => Ok(data),
         }
     }
 
@@ -890,13 +893,15 @@ impl Conn {
 
     fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> MyResult<()> {
         let nonce = auth_switch_request.plugin_data();
-        let plugin_data = auth_switch_request.auth_plugin().gen_data(self.opts.get_pass(), nonce);
+        let plugin_data = auth_switch_request
+            .auth_plugin()
+            .gen_data(self.opts.get_pass(), nonce);
         let plugin_data = plugin_data
             .as_ref()
             .map(|plugin_data| &**plugin_data)
             .unwrap_or(&[][..]);
         self.write_packet(plugin_data)?;
-        self.continue_auth(auth_switch_request.auth_plugin(), nonce,true)
+        self.continue_auth(auth_switch_request.auth_plugin(), nonce, true)
     }
 
     fn do_handshake(&mut self) -> MyResult<()> {
@@ -934,7 +939,9 @@ impl Conn {
 
         let nonce = handshake.nonce();
 
-        let auth_plugin = handshake.auth_plugin().unwrap_or(&AuthPlugin::MysqlNativePassword);
+        let auth_plugin = handshake
+            .auth_plugin()
+            .unwrap_or(&AuthPlugin::MysqlNativePassword);
         if let AuthPlugin::Other(ref name) = auth_plugin {
             let plugin_name = String::from_utf8_lossy(name).into();
             Err(DriverError(UnknownAuthPlugin(plugin_name)))?
@@ -948,9 +955,9 @@ impl Conn {
         if self
             .capability_flags
             .contains(CapabilityFlags::CLIENT_COMPRESS)
-            {
-                self.switch_to_compressed();
-            }
+        {
+            self.switch_to_compressed();
+        }
 
         Ok(())
     }
@@ -1075,10 +1082,10 @@ impl Conn {
         match auth_plugin {
             AuthPlugin::MysqlNativePassword => {
                 self.continue_mysql_native_password_auth(auth_switched)
-            },
+            }
             AuthPlugin::CachingSha2Password => {
                 self.continue_caching_sha2_password_auth(nonce, auth_switched)
-            },
+            }
             AuthPlugin::Other(ref name) => {
                 let plugin_name = String::from_utf8_lossy(name).into();
                 Err(DriverError(UnknownAuthPlugin(plugin_name)))?
@@ -1105,7 +1112,11 @@ impl Conn {
         }
     }
 
-    fn continue_caching_sha2_password_auth(&mut self, nonce: &[u8], auth_switched: bool) -> MyResult<()> {
+    fn continue_caching_sha2_password_auth(
+        &mut self,
+        nonce: &[u8],
+        auth_switched: bool,
+    ) -> MyResult<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
@@ -1115,7 +1126,7 @@ impl Conn {
                     let ok = parse_ok_packet(&*payload, self.capability_flags)?;
                     self.handle_ok(&ok);
                     Ok(())
-                },
+                }
                 0x04 => {
                     if !self.is_insecure() || self.is_socket() {
                         let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or(vec![]);
@@ -1138,7 +1149,7 @@ impl Conn {
                     let ok = parse_ok_packet(&*payload, self.capability_flags)?;
                     self.handle_ok(&ok);
                     Ok(())
-                },
+                }
                 _ => Err(DriverError(UnexpectedPacket)),
             },
             0xfe if !auth_switched => {
@@ -1240,8 +1251,7 @@ impl Conn {
 
                     data = vec![
                         0u8;
-                        9
-                            + null_bitmap.storage().len()
+                        9 + null_bitmap.storage().len()
                             + 1
                             + params.len() * 2
                             + serialized.len()
@@ -1256,15 +1266,13 @@ impl Conn {
                         for (value, column) in params.iter().zip(sparams.iter()) {
                             match *value {
                                 NULL => writer.write_all(&[column.column_type() as u8, 0])?,
-                                Bytes(..) => {
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0])?
-                                }
+                                Bytes(..) => writer
+                                    .write_all(&[ColumnType::MYSQL_TYPE_VAR_STRING as u8, 0])?,
                                 Int(..) => {
                                     writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 0])?
                                 }
-                                UInt(..) => {
-                                    writer.write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128])?
-                                }
+                                UInt(..) => writer
+                                    .write_all(&[ColumnType::MYSQL_TYPE_LONGLONG as u8, 128])?,
                                 Float(..) => {
                                     writer.write_all(&[ColumnType::MYSQL_TYPE_DOUBLE as u8, 0])?
                                 }
@@ -1649,7 +1657,8 @@ impl Conn {
             .and_then(|_| {
                 Ok(from_value_opt::<usize>(
                     self.get_system_var("max_allowed_packet").unwrap_or(NULL),
-                ).unwrap_or(0))
+                )
+                .unwrap_or(0))
             })
             .and_then(|max_allowed_packet| {
                 if max_allowed_packet == 0 {
@@ -2029,9 +2038,9 @@ impl<'a> Drop for QueryResult<'a> {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    use std::env;
     use crate::Opts;
     use crate::OptsBuilder;
+    use std::env;
 
     static USER: &'static str = "root";
     static PASS: &'static str = "password";
@@ -2114,12 +2123,7 @@ mod test {
 
     mod my_conn {
         use super::get_opts;
-        use crate::{from_row, from_value, params};
         use crate::prelude::ToValue;
-        use std::borrow::ToOwned;
-        use std::fs;
-        use std::io::Write;
-        use std::iter;
         use crate::time::{now, Tm};
         use crate::Conn;
         use crate::DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery};
@@ -2128,6 +2132,11 @@ mod test {
         use crate::OptsBuilder;
         use crate::Params;
         use crate::Value::{Bytes, Date, Int, NULL};
+        use crate::{from_row, from_value, params};
+        use std::borrow::ToOwned;
+        use std::fs;
+        use std::io::Write;
+        use std::iter;
 
         #[test]
         fn should_connect() {
@@ -2191,8 +2200,8 @@ mod test {
         #[test]
         fn should_execute_queryes_and_parse_results() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(
-                conn.query(
+            assert!(conn
+                .query(
                     "CREATE TEMPORARY TABLE mysql.tbl(\
                                     a TEXT,\
                                     b INT,\
@@ -2200,10 +2209,10 @@ mod test {
                                     d DATE,\
                                     e FLOAT
                                 )"
-                ).is_ok()
-            );
-            assert!(
-                conn.query(
+                )
+                .is_ok());
+            assert!(conn
+                .query(
                     "INSERT INTO mysql.tbl(a, b, c, d, e) VALUES (\
                      'hello',\
                      -123,\
@@ -2211,10 +2220,10 @@ mod test {
                      '2014-05-05',\
                      123.123\
                      )"
-                ).is_ok()
-            );
-            assert!(
-                conn.query(
+                )
+                .is_ok());
+            assert!(conn
+                .query(
                     "INSERT INTO mysql.tbl(a, b, c, d, e) VALUES (\
                      'world',\
                      -321,\
@@ -2222,19 +2231,18 @@ mod test {
                      '2014-06-06',\
                      321.321\
                      )"
-                ).is_ok()
-            );
+                )
+                .is_ok());
             assert!(conn.query("SELECT * FROM unexisted").is_err());
             assert!(conn.query("SELECT * FROM mysql.tbl").is_ok());
             // Drop
             assert!(conn.query("UPDATE mysql.tbl SET a = 'foo'").is_ok());
             assert_eq!(conn.affected_rows, 2);
-            assert!(
-                conn.query("SELECT * FROM mysql.tbl WHERE a = 'bar'")
-                    .unwrap()
-                    .next()
-                    .is_none()
-            );
+            assert!(conn
+                .query("SELECT * FROM mysql.tbl WHERE a = 'bar'")
+                .unwrap()
+                .next()
+                .is_none());
             for (i, row) in conn.query("SELECT * FROM mysql.tbl").unwrap().enumerate() {
                 let row = row.unwrap();
                 if i == 0 {
@@ -2270,8 +2278,8 @@ mod test {
         #[test]
         fn should_execute_statements_and_parse_results() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(
-                conn.query(
+            assert!(conn
+                .query(
                     "CREATE TEMPORARY TABLE mysql.tbl(\
                      a TEXT,\
                      b INT,\
@@ -2279,40 +2287,41 @@ mod test {
                      d DATE,\
                      e DOUBLE\
                      )"
-                ).is_ok()
-            );
-            let _ =
-                conn.prepare(
+                )
+                .is_ok());
+            let _ = conn
+                .prepare(
                     "INSERT INTO mysql.tbl(a, b, c, d, e)\
                      VALUES (?, ?, ?, ?, ?)",
-                ).and_then(|mut stmt| {
-                        let tm = Tm {
-                            tm_year: 114,
-                            tm_mon: 4,
-                            tm_mday: 5,
-                            tm_hour: 0,
-                            tm_min: 0,
-                            tm_sec: 0,
-                            tm_nsec: 0,
-                            ..now()
-                        };
-                        let hello = b"hello".to_vec();
-                        assert!(
-                            stmt.execute((&hello, -123, 123, tm.to_timespec(), 123.123f64))
-                                .is_ok()
-                        );
-                        stmt.execute(
-                            &[
-                                &b"".to_vec() as &dyn ToValue,
-                                &NULL as &dyn ToValue,
-                                &NULL as &dyn ToValue,
-                                &NULL as &dyn ToValue,
-                                &321.321f64 as &dyn ToValue,
-                            ][..],
-                        ).unwrap();
-                        Ok(())
-                    })
+                )
+                .and_then(|mut stmt| {
+                    let tm = Tm {
+                        tm_year: 114,
+                        tm_mon: 4,
+                        tm_mday: 5,
+                        tm_hour: 0,
+                        tm_min: 0,
+                        tm_sec: 0,
+                        tm_nsec: 0,
+                        ..now()
+                    };
+                    let hello = b"hello".to_vec();
+                    assert!(stmt
+                        .execute((&hello, -123, 123, tm.to_timespec(), 123.123f64))
+                        .is_ok());
+                    stmt.execute(
+                        &[
+                            &b"".to_vec() as &dyn ToValue,
+                            &NULL as &dyn ToValue,
+                            &NULL as &dyn ToValue,
+                            &NULL as &dyn ToValue,
+                            &321.321f64 as &dyn ToValue,
+                        ][..],
+                    )
                     .unwrap();
+                    Ok(())
+                })
+                .unwrap();
             let _ = conn
                 .prepare("SELECT * from mysql.tbl")
                 .and_then(|mut stmt| {
@@ -2356,10 +2365,9 @@ mod test {
         #[test]
         fn should_start_commit_and_rollback_transactions() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(
-                conn.query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
-                    .is_ok()
-            );
+            assert!(conn
+                .query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
+                .is_ok());
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
@@ -2451,10 +2459,9 @@ mod test {
         #[test]
         fn should_handle_LOCAL_INFILE() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(
-                conn.query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
-                    .is_ok()
-            );
+            assert!(conn
+                .query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
+                .is_ok());
             let path = ::std::path::PathBuf::from("local_infile.txt");
             {
                 let mut file = fs::File::create(&path).unwrap();
@@ -2521,12 +2528,12 @@ mod test {
         #[test]
         fn should_reset_connection() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(
-                conn.query(
+            assert!(conn
+                .query(
                     "CREATE TEMPORARY TABLE `mysql`.`test` \
                      (`test` VARCHAR(255) NULL);"
-                ).is_ok()
-            );
+                )
+                .is_ok());
             assert!(conn.query("SELECT * FROM `mysql`.`test`;").is_ok());
             assert!(conn.reset().is_ok());
             assert!(conn.query("SELECT * FROM `mysql`.`test`;").is_err());
@@ -2564,14 +2571,14 @@ mod test {
             opts.db_name(Some("mysql"));
             let mut conn = Conn::new(opts).unwrap();
             assert!(conn.query("DROP PROCEDURE IF EXISTS multi").is_ok());
-            assert!(
-                conn.query(
+            assert!(conn
+                .query(
                     r#"CREATE PROCEDURE multi() BEGIN
                                       SELECT 1 UNION ALL SELECT 2;
                                       SELECT 3 UNION ALL SELECT 4;
                                   END"#
-                ).is_ok()
-            );
+                )
+                .is_ok());
             {
                 let mut query_result = conn.query("CALL multi()").unwrap();
                 let result_set = query_result
@@ -2609,20 +2616,23 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             {
                 let mut stmt = conn.prepare("SELECT :a, :b, :a, :c").unwrap();
-                let mut result = stmt.execute(params!{"a" => 1, "b" => 2, "c" => 3}).unwrap();
+                let mut result = stmt
+                    .execute(params! {"a" => 1, "b" => 2, "c" => 3})
+                    .unwrap();
                 let row = result.next().unwrap().unwrap();
                 assert_eq!((1, 2, 1, 3), from_row(row));
             }
 
-            let mut result =
-                conn.prep_exec(
+            let mut result = conn
+                .prep_exec(
                     "SELECT :a, :b, :a + :b, :c",
-                    params!{
+                    params! {
                         "a" => 1,
                         "b" => 2,
                         "c" => 3,
                     },
-                ).unwrap();
+                )
+                .unwrap();
             let row = result.next().unwrap().unwrap();
             assert_eq!((1, 2, 3, 3), from_row(row));
         }
@@ -2631,7 +2641,7 @@ mod test {
         fn should_return_error_on_missing_named_parameter() {
             let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT :a, :b, :a, :c, :d").unwrap();
-            let result = stmt.execute(params!{"a" => 1, "b" => 2, "c" => 3,});
+            let result = stmt.execute(params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
                 _ => assert!(false),
@@ -2642,7 +2652,7 @@ mod test {
         fn should_return_error_on_named_params_for_positional_statement() {
             let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-            let result = stmt.execute(params!{"a" => 1, "b" => 2, "c" => 3,});
+            let result = stmt.execute(params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(NamedParamsForPositionalQuery)) => (),
                 _ => assert!(false),
@@ -2652,7 +2662,7 @@ mod test {
         #[test]
         #[should_panic]
         fn should_panic_on_named_param_redefinition() {
-            let _: Params = params!{"a" => 1, "b" => 2, "a" => 3}.into();
+            let _: Params = params! {"a" => 1, "b" => 2, "a" => 3}.into();
         }
 
         #[test]
@@ -2763,14 +2773,14 @@ mod test {
 
         #[test]
         fn should_handle_json_columns() {
+            use crate::Deserialized;
+            use crate::Serialized;
             #[cfg(feature = "rustc_serialize")]
             use rustc_serialize::json::Json;
             #[cfg(not(feature = "rustc_serialize"))]
             use serde_json::Value as Json;
             #[cfg(not(feature = "rustc_serialize"))]
             use std::str::FromStr;
-            use crate::Deserialized;
-            use crate::Serialized;
 
             #[cfg(feature = "rustc_serialize")]
             #[derive(RustcDecodable, RustcEncodable, Debug, Eq, PartialEq)]
@@ -2802,7 +2812,8 @@ mod test {
             conn.prep_exec(
                 r#"INSERT INTO mysql.tbl VALUES ('hello', ?)"#,
                 (Serialized(&decodable),),
-            ).unwrap();
+            )
+            .unwrap();
 
             let row = conn.first("SELECT a, b FROM mysql.tbl").unwrap().unwrap();
             let (a, b): (String, Json) = from_row(row);
@@ -2825,8 +2836,8 @@ mod test {
 
     #[cfg(feature = "nightly")]
     mod bench {
-        use crate::params;
         use super::get_opts;
+        use crate::params;
         use test;
         use Conn;
         use Value::NULL;
@@ -2888,7 +2899,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             let mut stmt = conn.prepare("SELECT :a").unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute(params!{"a" => 0});
+                let _ = stmt.execute(params! {"a" => 0});
             })
         }
 
@@ -2909,7 +2920,7 @@ mod test {
                 .prepare("SELECT :one, :two, :three, :four, :five")
                 .unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute(params!{
+                let _ = stmt.execute(params! {
                     "one" => 42i8,
                     "two" => b"123456",
                     "three" => 1.618f64,

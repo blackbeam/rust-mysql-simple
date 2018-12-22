@@ -612,9 +612,9 @@ mod test {
 
     mod pool {
         use crate::params;
+        use crate::OptsBuilder;
         use std::thread;
         use std::time::Duration;
-        use crate::OptsBuilder;
 
         use super::super::super::super::error::{DriverError, Error};
         use super::super::Pool;
@@ -667,7 +667,8 @@ mod test {
                 pass,
                 super::ADDR,
                 port
-            )).unwrap();
+            ))
+            .unwrap();
         }
 
         #[test]
@@ -874,45 +875,41 @@ mod test {
         fn should_start_transaction_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
-            assert!(
-                conn.query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
-                    .is_ok()
-            );
-            assert!(
-                conn.start_transaction(false, None, None)
-                    .and_then(|mut t| {
-                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
-                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
-                        t.commit()
-                    })
-                    .is_ok()
-            );
+            assert!(conn
+                .query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
+                .is_ok());
+            assert!(conn
+                .start_transaction(false, None, None)
+                .and_then(|mut t| {
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
+                    t.commit()
+                })
+                .is_ok());
             for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
-            assert!(
-                conn.start_transaction(false, None, None)
-                    .and_then(|mut t| {
-                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
-                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
-                        t.rollback()
-                    })
-                    .is_ok()
-            );
+            assert!(conn
+                .start_transaction(false, None, None)
+                .and_then(|mut t| {
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
+                    t.rollback()
+                })
+                .is_ok());
             for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
-            assert!(
-                conn.start_transaction(false, None, None)
-                    .and_then(|mut t| {
-                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
-                        assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
-                        Ok(())
-                    })
-                    .is_ok()
-            );
+            assert!(conn
+                .start_transaction(false, None, None)
+                .and_then(|mut t| {
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
+                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
+                    Ok(())
+                })
+                .is_ok());
             for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
@@ -923,18 +920,19 @@ mod test {
             let pool = Pool::new(get_opts()).unwrap();
             pool.prepare("SELECT :a, :b, :a + :b, :abc")
                 .map(|mut stmt| {
-                    let mut result =
-                        stmt.execute(params!{
+                    let mut result = stmt
+                        .execute(params! {
                             "a" => 1,
                             "b" => 2,
                             "abc" => 4,
-                        }).unwrap();
+                        })
+                        .unwrap();
                     let row = result.next().unwrap().unwrap();
                     assert_eq!((1, 2, 3, 4), from_row(row));
                 })
                 .unwrap();
 
-            let params = params!{"a" => 1, "b" => 2, "abc" => 4};
+            let params = params! {"a" => 1, "b" => 2, "abc" => 4};
             pool.prep_exec("SELECT :a, :b, :a+:b, :abc", params)
                 .map(|mut result| {
                     let row = result.next().unwrap().unwrap();
@@ -979,7 +977,8 @@ mod test {
                                     pool.prep_exec(
                                         "SELECT 1, 'hello world', 123.321, ?, ?, ?",
                                         ("hello", "world", 65536),
-                                    ).unwrap(),
+                                    )
+                                    .unwrap(),
                                 );
                             }
                         }));
@@ -1004,7 +1003,8 @@ mod test {
                                     pool.prep_exec(
                                         "SELECT 1, 'hello world', 123.321, ?, ?, ?",
                                         ("hello", "world", 65536),
-                                    ).unwrap(),
+                                    )
+                                    .unwrap(),
                                 );
                             }
                         }));

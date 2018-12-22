@@ -1,7 +1,10 @@
 use net2::{TcpBuilder, TcpStreamExt};
 #[cfg(unix)]
 use nix::{
-    errno::Errno, sys::select, sys::socket, sys::time::{TimeVal, TimeValLike},
+    errno::Errno,
+    sys::select,
+    sys::socket,
+    sys::time::{TimeVal, TimeValLike},
 };
 use std::io;
 use std::mem;
