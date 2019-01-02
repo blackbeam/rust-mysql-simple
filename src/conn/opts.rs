@@ -1,5 +1,7 @@
 use crate::consts::CapabilityFlags;
 
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 #[cfg(all(feature = "ssl", not(target_os = "windows")))]
 use std::path;
@@ -124,6 +126,9 @@ pub struct Opts {
     /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
     /// pointless or may broke the connection, so this option should be used with caution.
     additional_capabilities: CapabilityFlags,
+
+    /// Connect attributes
+    connect_attrs: HashMap<String, String>,
 
     /// For tests only
     #[cfg(test)]
@@ -277,6 +282,35 @@ impl Opts {
     pub fn get_additional_capabilities(&self) -> CapabilityFlags {
         self.additional_capabilities
     }
+
+    /// Connect attributes
+    ///
+    /// This value is sent to the server as custom name-value attributes.
+    /// You can see them from performance_schema tables: [`session_account_connect_attrs`
+    /// and `session_connect_attrs`][attr_tables] when the server is MySQL 5.6 or later,
+    /// or MariaDB 10.0 or later.
+    ///
+    /// ### Note
+    ///
+    /// Attribute names that begin with an underscore (`_`) are not set by
+    /// application programs because they are reserved for internal use.
+    ///
+    /// The following attributes are sent in addition to ones set by programs.
+    ///
+    /// name            | value
+    /// ----------------|--------------------------
+    /// _client_name    | The client library name (`rust-mysql-simple`)
+    /// _client_version | The client library version
+    /// _os             | The operation system (`target_os` cfg feature)
+    /// _pid            | The client proces ID
+    /// _platform       | The machine platform (`target_arch` cfg feature)
+    /// program_name    | The first element of `std::env::args` if program_name isn't set by programs.
+    ///
+    /// [attr_tables]: https://dev.mysql.com/doc/refman/en/performance-schema-connection-attribute-tables.html
+    ///
+    pub fn get_connect_attrs(&self) -> &HashMap<String, String> {
+        &self.connect_attrs
+    }
 }
 
 impl Default for Opts {
@@ -302,6 +336,7 @@ impl Default for Opts {
             stmt_cache_size: 10,
             compress: false,
             additional_capabilities: CapabilityFlags::empty(),
+            connect_attrs: HashMap::new(),
             #[cfg(test)]
             injected_socket: None,
         }
@@ -576,6 +611,45 @@ impl OptsBuilder {
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS;
 
         self.opts.additional_capabilities = additional_capabilities & !forbidden_flags;
+        self
+    }
+
+    /// Connect attributes
+    ///
+    /// This value is sent to the server as custom name-value attributes.
+    /// You can see them from performance_schema tables: [`session_account_connect_attrs`
+    /// and `session_connect_attrs`][attr_tables] when the server is MySQL 5.6 or later,
+    /// or MariaDB 10.0 or later.
+    ///
+    /// ### Note
+    ///
+    /// Attribute names that begin with an underscore (`_`) are not set by
+    /// application programs because they are reserved for internal use.
+    ///
+    /// The following attributes are sent in addition to ones set by programs.
+    ///
+    /// name            | value
+    /// ----------------|--------------------------
+    /// _client_name    | The client library name (`rust-mysql-simple`)
+    /// _client_version | The client library version
+    /// _os             | The operation system (`target_os` cfg feature)
+    /// _pid            | The client proces ID
+    /// _platform       | The machine platform (`target_arch` cfg feature)
+    /// program_name    | The first element of `std::env::args` if program_name isn't set by programs.
+    ///
+    /// [attr_tables]: https://dev.mysql.com/doc/refman/en/performance-schema-connection-attribute-tables.html
+    ///
+    pub fn connect_attrs<T1: Into<String> + Eq + Hash, T2: Into<String>>(
+        &mut self,
+        connect_attrs: HashMap<T1, T2>,
+    ) -> &mut Self {
+        self.opts.connect_attrs = HashMap::with_capacity(connect_attrs.len());
+        for (name, value) in connect_attrs {
+            let name = name.into();
+            if !name.starts_with("_") {
+                self.opts.connect_attrs.insert(name, value.into());
+            }
+        }
         self
     }
 }

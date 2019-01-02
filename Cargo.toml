@@ -11,6 +11,7 @@ keywords = ["database", "sql"]
 exclude = ["tests/*", ".*", "Makefile"]
 categories = ["database"]
 edition = "2018"
+build = "build.rs"
 
 [lib]
 
