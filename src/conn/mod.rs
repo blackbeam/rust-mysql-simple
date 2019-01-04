@@ -1074,12 +1074,12 @@ impl Conn {
             connect_attrs.push(("_pid", &pid));
             connect_attrs.push(("_platform", env!("CARGO_CFG_TARGET_ARCH")));
             if !opt_attrs.contains_key("program_name") {
-                progname = std::env::args_os()
-                    .next()
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned();
-                connect_attrs.push(("program_name", &progname));
+                if let Some(arg0) = std::env::args_os().next() {
+                    progname = arg0.to_string_lossy().into_owned();
+                    connect_attrs.push(("program_name", &progname));
+                } else {
+                    connect_attrs.push(("program_name", ""));
+                }
             }
             for (name, value) in opt_attrs {
                 connect_attrs.push((name, value));
