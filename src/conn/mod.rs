@@ -14,6 +14,7 @@ use std::io::Write as NewWrite;
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::path;
+use std::process;
 use std::sync::{Arc, Mutex};
 
 use super::consts::{
@@ -240,6 +241,25 @@ impl<'a> Drop for Transaction<'a> {
         }
         self.conn.local_infile_handler = self.restore_local_infile_handler.take();
     }
+}
+
+// length of length encoded integer
+fn lenenc_int_len(x: usize) -> usize {
+    if x < 251 {
+        1
+    } else if x < 65_536 {
+        3
+    } else if x < 16_777_216 {
+        4
+    } else {
+        9
+    }
+}
+
+// length of length encoded string
+fn lenenc_str_len(s: &str) -> usize {
+    let len = s.len();
+    lenenc_int_len(len) + len
 }
 
 /***
@@ -980,6 +1000,7 @@ impl Conn {
             | CapabilityFlags::CLIENT_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PLUGIN_AUTH
+            | CapabilityFlags::CLIENT_CONNECT_ATTRS
             | (self.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
         if let true = self.opts.get_compress() {
             client_flags.insert(CapabilityFlags::CLIENT_COMPRESS);
@@ -1025,15 +1046,50 @@ impl Conn {
         let plugin_auth = self
             .capability_flags
             .contains(CapabilityFlags::CLIENT_PLUGIN_AUTH);
+        let has_connect_attrs_capability = self
+            .capability_flags
+            .contains(CapabilityFlags::CLIENT_CONNECT_ATTRS);
         let user_len = self.opts.get_user().map(|x| x.len()).unwrap_or(0);
         let db_name_len = self.opts.get_db_name().map(|x| x.len()).unwrap_or(0);
         let scramble_buf_len = scramble_buf.as_ref().map(|x| x.len()).unwrap_or(0);
+        let pid;
+        let progname;
+        let mut connect_attrs = Vec::new();
+        let mut connect_attrs_byte_len = 0;
         let mut payload_len = 4 + 4 + 1 + 23 + user_len + 1 + 1 + scramble_buf_len;
         if db_name_len > 0 {
             payload_len += db_name_len + 1;
         }
         if plugin_auth {
             payload_len += auth_plugin.as_bytes().len() + 1;
+        }
+        if has_connect_attrs_capability {
+            let opt_attrs = self.opts.get_connect_attrs();
+            connect_attrs = Vec::with_capacity(6 + opt_attrs.len());
+            pid = process::id().to_string();
+
+            connect_attrs.push(("_client_name", "rust-mysql-simple"));
+            connect_attrs.push(("_client_version", env!("CARGO_PKG_VERSION")));
+            connect_attrs.push(("_os", env!("CARGO_CFG_TARGET_OS")));
+            connect_attrs.push(("_pid", &pid));
+            connect_attrs.push(("_platform", env!("CARGO_CFG_TARGET_ARCH")));
+            if !opt_attrs.contains_key("program_name") {
+                if let Some(arg0) = std::env::args_os().next() {
+                    progname = arg0.to_string_lossy().into_owned();
+                    connect_attrs.push(("program_name", &progname));
+                } else {
+                    connect_attrs.push(("program_name", ""));
+                }
+            }
+            for (name, value) in opt_attrs {
+                connect_attrs.push((name, value));
+            }
+
+            for (name, value) in &connect_attrs {
+                connect_attrs_byte_len += lenenc_str_len(name);
+                connect_attrs_byte_len += lenenc_str_len(value);
+            }
+            payload_len += lenenc_int_len(connect_attrs_byte_len) + connect_attrs_byte_len;
         }
         let mut buf = vec![0u8; payload_len];
         {
@@ -1068,6 +1124,19 @@ impl Conn {
                     .write_all(auth_plugin.as_bytes())
                     .expect("should not fail");
                 writer.write_u8(0).expect("should not fail");
+            }
+            if has_connect_attrs_capability {
+                writer
+                    .write_lenenc_int(connect_attrs_byte_len as u64)
+                    .expect("should not fail");
+                for (name, value) in &connect_attrs {
+                    writer
+                        .write_lenenc_bytes(name.as_bytes())
+                        .expect("should not fail");
+                    writer
+                        .write_lenenc_bytes(value.as_bytes())
+                        .expect("should not fail");
+                }
             }
         }
         self.write_packet(&*buf)
@@ -2134,9 +2203,11 @@ mod test {
         use crate::Value::{Bytes, Date, Int, NULL};
         use crate::{from_row, from_value, params};
         use std::borrow::ToOwned;
+        use std::collections::HashMap;
         use std::fs;
         use std::io::Write;
         use std::iter;
+        use std::process;
 
         #[test]
         fn should_connect() {
@@ -2832,6 +2903,70 @@ mod test {
             let (a, Deserialized(b)) = from_row(row);
             assert_eq!((a, b), (String::from("hello"), decodable));
         }
+
+        #[test]
+        fn should_set_connect_attrs() {
+            let opts = OptsBuilder::from_opts(get_opts());
+            let mut conn = Conn::new(opts).unwrap();
+
+            let support_connect_attrs = match (conn.server_version, conn.mariadb_server_version) {
+                (Some(ref version), _) if *version >= (5, 6, 0) => true,
+                (_, Some(ref version)) if *version >= (10, 0, 0) => true,
+                _ => false,
+            };
+
+            if support_connect_attrs {
+                // MySQL >= 5.6 or MariaDB >= 10.0
+
+                fn assert_connect_attrs(conn: &mut Conn, expected_values: &[(&str, &str)]) {
+                    let mut actual_values = HashMap::new();
+                    for row in conn.query("SELECT attr_name, attr_value FROM performance_schema.session_account_connect_attrs WHERE processlist_id = connection_id()").unwrap() {
+                        let (name, value) = from_row::<(String, String)>(row.unwrap());
+                        actual_values.insert(name, value);
+                    }
+
+                    for (name, value) in expected_values {
+                        assert_eq!(
+                            actual_values.get(&name.to_string()),
+                            Some(&value.to_string())
+                        );
+                    }
+                }
+
+                let pid = process::id().to_string();
+                let progname = std::env::args_os()
+                    .next()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                let mut expected_values = vec![
+                    ("_client_name", "rust-mysql-simple"),
+                    ("_client_version", env!("CARGO_PKG_VERSION")),
+                    ("_os", env!("CARGO_CFG_TARGET_OS")),
+                    ("_pid", &pid),
+                    ("_platform", env!("CARGO_CFG_TARGET_ARCH")),
+                    ("program_name", &progname),
+                ];
+
+                // No connect attributes are added.
+                assert_connect_attrs(&mut conn, &expected_values);
+
+                // Connect attributes are added.
+                let mut opts = OptsBuilder::from_opts(get_opts());
+                let mut connect_attrs = HashMap::with_capacity(3);
+                connect_attrs.insert("foo", "foo val");
+                connect_attrs.insert("bar", "bar val");
+                connect_attrs.insert("program_name", "my program name");
+                opts.connect_attrs(connect_attrs);
+                let mut conn = Conn::new(opts).unwrap();
+                expected_values.pop(); // remove program_name at the last
+                expected_values.push(("foo", "foo val"));
+                expected_values.push(("bar", "bar val"));
+                expected_values.push(("program_name", "my program name"));
+                assert_connect_attrs(&mut conn, &expected_values);
+            }
+        }
+
     }
 
     #[cfg(feature = "nightly")]
