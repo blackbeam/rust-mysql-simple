@@ -2192,6 +2192,7 @@ mod test {
 
     mod my_conn {
         use super::get_opts;
+        use crate::prelude::FromValue;
         use crate::prelude::ToValue;
         use crate::time::{now, Tm};
         use crate::Conn;
@@ -2203,11 +2204,24 @@ mod test {
         use crate::Value::{Bytes, Date, Int, NULL};
         use crate::{from_row, from_value, params};
         use std::borrow::ToOwned;
+        use std::cmp;
         use std::collections::HashMap;
         use std::fs;
         use std::io::Write;
         use std::iter;
         use std::process;
+
+        fn get_system_variable<T>(conn: &mut Conn, name: &str) -> T
+        where
+            T: FromValue,
+        {
+            let row = conn
+                .first(format!("show variables like '{}'", name))
+                .unwrap()
+                .unwrap();
+            let (_, value): (String, T) = from_row(row);
+            value
+        }
 
         #[test]
         fn should_connect() {
@@ -2336,14 +2350,18 @@ mod test {
         #[test]
         fn should_parse_large_text_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
+            let data_size: usize = cmp::min(
+                get_system_variable(&mut conn, "max_allowed_packet"),
+                20_000_000,
+            );
             assert_eq!(
-                conn.query("SELECT REPEAT('A', 20000000)")
+                conn.query(format!("SELECT REPEAT('A', {})", data_size))
                     .unwrap()
                     .next()
                     .unwrap()
                     .unwrap()
                     .unwrap(),
-                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
+                vec![Bytes(iter::repeat(b'A').take(data_size).collect())]
             );
         }
         #[test]
@@ -2427,10 +2445,16 @@ mod test {
         #[test]
         fn should_parse_large_binary_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
+            let data_size: usize = cmp::min(
+                get_system_variable(&mut conn, "max_allowed_packet"),
+                20_000_000,
+            );
+            let mut stmt = conn
+                .prepare(format!("SELECT REPEAT('A', {});", data_size))
+                .unwrap();
             assert_eq!(
                 stmt.execute(()).unwrap().next().unwrap().unwrap().unwrap(),
-                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
+                vec![Bytes(iter::repeat(b'A').take(data_size).collect())]
             );
         }
         #[test]
