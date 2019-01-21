@@ -244,6 +244,7 @@ impl<'a> Drop for Transaction<'a> {
 }
 
 // length of length encoded integer
+// TODO: Move to mysql_common
 fn lenenc_int_len(x: usize) -> usize {
     if x < 251 {
         1
@@ -257,6 +258,7 @@ fn lenenc_int_len(x: usize) -> usize {
 }
 
 // length of length encoded string
+// TODO: Move to mysql_common
 fn lenenc_str_len(s: &str) -> usize {
     let len = s.len();
     lenenc_int_len(len) + len
