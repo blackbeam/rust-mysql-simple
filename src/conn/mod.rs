@@ -1503,6 +1503,15 @@ impl Conn {
         }
     }
 
+    /// Executes [`COM_INIT_DB`](https://dev.mysql.com/doc/internals/en/com-init-db.html) 
+    /// on `Conn`. 
+    pub fn select_db(&mut self, schema: &str) -> bool {
+        match self.write_command_data(Command::COM_INIT_DB, schema.as_bytes()) {
+            Ok(_) => self.drop_packet().is_ok(),
+            _ => false,
+        }
+    }
+
     /// Starts new transaction with provided options.
     /// `readonly` is only available since MySQL 5.6.5.
     pub fn start_transaction<'a>(
@@ -2267,6 +2276,25 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"mysql".to_vec())]
             );
+        }
+        #[test]
+        fn should_select_db() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.db_name(Some("mysql"));
+            opts.ip_or_hostname(Some("localhost"));
+            let mut conn = Conn::new(opts).unwrap();
+            assert!(conn.query("CREATE DATABASE IF NOT EXISTS t_select_db").is_ok());
+            assert!(conn.select_db("t_select_db"));
+            assert_eq!(
+                conn.query("SELECT DATABASE()")
+                    .unwrap()
+                    .next()
+                    .unwrap()
+                    .unwrap()
+                    .unwrap(),
+                vec![Bytes(b"t_select_db".to_vec())]
+            );
+            assert!(conn.query("DROP DATABASE t_select_db").is_ok());
         }
         #[test]
         fn should_execute_queryes_and_parse_results() {
