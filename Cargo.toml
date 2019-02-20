@@ -41,16 +41,19 @@ debug = false
 lto = true
 
 [features]
-default = ['mysql_common']
-nightly = ['mysql_common']
+default = ['mysql_common', 'flate2/default']
+nightly = ['mysql_common', 'flate2/default']
+flate2-zlib = ['mysql_common', 'flate2/zlib']
+flate2-rust_backend = ['mysql_common', 'flate2/rust_backend']
 rustc_serialize = ['mysql_common/rustc_serialize', 'rustc-serialize']
 ssl = ['mysql_common', "openssl", "security-framework"]
+
 
 [dev-dependencies]
 serde_derive = "1"
 
 [dependencies]
-flate2 = "1.0"
+flate2 = { version = "1.0", optional = true, default-features = false }
 bit-vec = "0.5"
 byteorder = "1"
 url = "1"
