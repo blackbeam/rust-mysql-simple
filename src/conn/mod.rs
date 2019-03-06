@@ -244,6 +244,7 @@ impl<'a> Drop for Transaction<'a> {
 }
 
 // length of length encoded integer
+// TODO: Move to mysql_common
 fn lenenc_int_len(x: usize) -> usize {
     if x < 251 {
         1
@@ -257,6 +258,7 @@ fn lenenc_int_len(x: usize) -> usize {
 }
 
 // length of length encoded string
+// TODO: Move to mysql_common
 fn lenenc_str_len(s: &str) -> usize {
     let len = s.len();
     lenenc_int_len(len) + len
@@ -2201,6 +2203,7 @@ mod test {
 
     mod my_conn {
         use super::get_opts;
+        use crate::prelude::FromValue;
         use crate::prelude::ToValue;
         use crate::time::{now, Tm};
         use crate::Conn;
@@ -2217,6 +2220,18 @@ mod test {
         use std::io::Write;
         use std::iter;
         use std::process;
+
+        fn get_system_variable<T>(conn: &mut Conn, name: &str) -> T
+        where
+            T: FromValue,
+        {
+            let row = conn
+                .first(format!("show variables like '{}'", name))
+                .unwrap()
+                .unwrap();
+            let (_, value): (String, T) = from_row(row);
+            value
+        }
 
         #[test]
         fn should_connect() {
@@ -2947,6 +2962,15 @@ mod test {
 
             if support_connect_attrs {
                 // MySQL >= 5.6 or MariaDB >= 10.0
+
+                if get_system_variable::<String>(&mut conn, "performance_schema") != "ON" {
+                    panic!("The system variable `performance_schema` is off. Restart the MySQL server with `--performance_schema=on` to pass the test.");
+                }
+                let attrs_size: i32 =
+                    get_system_variable(&mut conn, "performance_schema_session_connect_attrs_size");
+                if attrs_size >= 0 && attrs_size <= 128 {
+                    panic!("The system variable `performance_schema_session_connect_attrs_size` is {}. Restart the MySQL server with `--performance_schema_session_connect_attrs_size=-1` to pass the test.", attrs_size);
+                }
 
                 fn assert_connect_attrs(conn: &mut Conn, expected_values: &[(&str, &str)]) {
                     let mut actual_values = HashMap::new();

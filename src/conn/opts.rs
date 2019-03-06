@@ -287,8 +287,13 @@ impl Opts {
     ///
     /// This value is sent to the server as custom name-value attributes.
     /// You can see them from performance_schema tables: [`session_account_connect_attrs`
-    /// and `session_connect_attrs`][attr_tables] when the server is MySQL 5.6 or later,
-    /// or MariaDB 10.0 or later.
+    /// and `session_connect_attrs`][attr_tables] when all of the following conditions
+    /// are met.
+    ///
+    /// * The server is MySQL 5.6 or later, or MariaDB 10.0 or later.
+    /// * [`performance_schema`] is on.
+    /// * [`performance_schema_session_connect_attrs_size`] is -1 or big enough
+    ///   to store specified attributes.
     ///
     /// ### Note
     ///
@@ -307,6 +312,8 @@ impl Opts {
     /// program_name    | The first element of `std::env::args` if program_name isn't set by programs.
     ///
     /// [attr_tables]: https://dev.mysql.com/doc/refman/en/performance-schema-connection-attribute-tables.html
+    /// [`performance_schema`]: https://dev.mysql.com/doc/refman/8.0/en/performance-schema-system-variables.html#sysvar_performance_schema
+    /// [`performance_schema_session_connect_attrs_size`]: https://dev.mysql.com/doc/refman/en/performance-schema-system-variables.html#sysvar_performance_schema_session_connect_attrs_size
     ///
     pub fn get_connect_attrs(&self) -> &HashMap<String, String> {
         &self.connect_attrs
@@ -618,8 +625,13 @@ impl OptsBuilder {
     ///
     /// This value is sent to the server as custom name-value attributes.
     /// You can see them from performance_schema tables: [`session_account_connect_attrs`
-    /// and `session_connect_attrs`][attr_tables] when the server is MySQL 5.6 or later,
-    /// or MariaDB 10.0 or later.
+    /// and `session_connect_attrs`][attr_tables] when all of the following conditions
+    /// are met.
+    ///
+    /// * The server is MySQL 5.6 or later, or MariaDB 10.0 or later.
+    /// * [`performance_schema`] is on.
+    /// * [`performance_schema_session_connect_attrs_size`] is -1 or big enough
+    ///   to store specified attributes.
     ///
     /// ### Note
     ///
@@ -638,6 +650,8 @@ impl OptsBuilder {
     /// program_name    | The first element of `std::env::args` if program_name isn't set by programs.
     ///
     /// [attr_tables]: https://dev.mysql.com/doc/refman/en/performance-schema-connection-attribute-tables.html
+    /// [`performance_schema`]: https://dev.mysql.com/doc/refman/8.0/en/performance-schema-system-variables.html#sysvar_performance_schema
+    /// [`performance_schema_session_connect_attrs_size`]: https://dev.mysql.com/doc/refman/en/performance-schema-system-variables.html#sysvar_performance_schema_session_connect_attrs_size
     ///
     pub fn connect_attrs<T1: Into<String> + Eq + Hash, T2: Into<String>>(
         &mut self,
