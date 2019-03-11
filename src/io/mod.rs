@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use std::slice::Chunks;
 use std::time::Duration;
 
-#[cfg(all(feature = "ssl", not(target_os = "windows")))]
+#[cfg(all(feature = "ssl"))]
 use crate::conn::SslOpts;
 
 use super::consts;
@@ -32,6 +32,14 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use named_pipe as np;
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 use openssl::ssl::{self, SslContext, SslStream};
+#[cfg(all(feature = "ssl", target_os = "windows"))]
+use schannel::cert_context::CertContext;
+#[cfg(all(feature = "ssl", target_os = "windows"))]
+use schannel::cert_store;
+#[cfg(all(feature = "ssl", target_os = "windows"))]
+use schannel::schannel_cred;
+#[cfg(all(feature = "ssl", target_os = "windows"))]
+use schannel::tls_stream;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::certificate::SecCertificate;
 #[cfg(all(feature = "ssl", target_os = "macos"))]
@@ -763,6 +771,103 @@ impl Stream {
     }
 }
 
+#[cfg(all(feature = "ssl", target_os = "windows"))]
+impl Stream {
+    pub fn make_secure(
+        mut self,
+        verify_peer: bool,
+        ip_or_hostname: Option<&str>,
+        ssl_opts: &SslOpts,
+    ) -> MyResult<Stream> {
+        use std::path::Path;
+
+        fn load_cert_data(path: &Path) -> MyResult<String> {
+            let mut client_file = ::std::fs::File::open(path)?;
+            let mut client_data = String::new();
+            client_file.read_to_string(&mut client_data)?;
+            Ok(client_data)
+        }
+
+        fn load_client_cert(path: &Path) -> MyResult<CertContext> {
+            let cert_data = load_cert_data(path)?;
+            let cert = CertContext::from_pem(&cert_data)?;
+            Ok(cert)
+        }
+
+        fn load_client_cert_with_key(cert_path: &Path, key_path: &Path) -> MyResult<CertContext> {
+            let mut cert_data = load_cert_data(cert_path)?;
+            let cert = CertContext::from_pem(&cert_data)?;
+            let key_data = load_cert_data(key_path)?;
+            cert_data.push_str(&key_data);
+            Ok(cert)
+        }
+
+        fn load_ca_store(path: &Path) -> MyResult<cert_store::CertStore> {
+            let ca_cert = load_client_cert(path)?;
+            let mut cert_store = cert_store::Memory::new().unwrap().into_store();
+            cert_store.add_cert(&ca_cert, cert_store::CertAdd::Always)?;
+            Ok(cert_store)
+        }
+
+        if self.is_insecure() {
+            let mut stream_builder = tls_stream::Builder::new();
+            let mut cred_builder = schannel_cred::Builder::default();
+            cred_builder.enabled_protocols(&[
+                schannel_cred::Protocol::Tls10,
+                schannel_cred::Protocol::Tls11,
+            ]);
+            cred_builder.supported_algorithms(&[
+                schannel_cred::Algorithm::DhEphem,
+                schannel_cred::Algorithm::RsaSign,
+                schannel_cred::Algorithm::Aes256,
+                schannel_cred::Algorithm::Sha1,
+            ]);
+            if verify_peer {
+                stream_builder.domain(ip_or_hostname.as_ref().unwrap_or(&("localhost".into())));
+            }
+
+            match *ssl_opts {
+                Some((ref ca_cert, None)) => {
+                    stream_builder.cert_store(load_ca_store(&ca_cert)?);
+                }
+                Some((ref ca_cert, Some((ref client_cert, ref client_key)))) => {
+                    cred_builder.cert(load_client_cert_with_key(&client_cert, &client_key)?);
+                    stream_builder.cert_store(load_ca_store(&ca_cert)?);
+                }
+                _ => unreachable!(),
+            }
+
+            let cred = cred_builder.acquire(schannel_cred::Direction::Outbound)?;
+            match self {
+                Stream::TcpStream(ref mut opt_stream) if opt_stream.is_some() => {
+                    let stream = opt_stream.take().unwrap();
+                    match stream {
+                        TcpStream::Insecure(mut stream) => {
+                            stream.flush()?;
+                            let s_stream = match stream_builder
+                                .connect(cred, stream.into_inner().unwrap())
+                            {
+                                Ok(s_stream) => s_stream,
+                                Err(tls_stream::HandshakeError::Failure(err)) => {
+                                    return Err(err.into());
+                                }
+                                Err(tls_stream::HandshakeError::Interrupted(_)) => unreachable!(),
+                            };
+                            Ok(Stream::TcpStream(Some(TcpStream::Secure(BufStream::new(
+                                s_stream,
+                            )))))
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            Ok(self)
+        }
+    }
+}
+
 #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
 impl Stream {
     pub fn make_secure(
@@ -838,13 +943,15 @@ impl Drop for Stream {
 pub enum TcpStream {
     #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
     Secure(BufStream<SslStream<net::TcpStream>>),
+    #[cfg(all(feature = "ssl", target_os = "windows"))]
+    Secure(BufStream<tls_stream::TlsStream<net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
 }
 
 impl AsMut<dyn IoPack> for TcpStream {
     fn as_mut(&mut self) -> &mut dyn IoPack {
         match *self {
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+            #[cfg(all(feature = "ssl", any(unix, target_os = "macos", target_os = "windows")))]
             TcpStream::Secure(ref mut stream) => stream,
             TcpStream::Insecure(ref mut stream) => stream,
         }
@@ -854,7 +961,7 @@ impl AsMut<dyn IoPack> for TcpStream {
 impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
+            #[cfg(all(feature = "ssl", any(unix, target_os = "macos", target_os = "windows")))]
             TcpStream::Secure(_) => write!(f, "Secure stream"),
             TcpStream::Insecure(ref s) => write!(f, "Insecure stream {:?}", s),
         }

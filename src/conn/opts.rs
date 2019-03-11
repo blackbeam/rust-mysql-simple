@@ -3,7 +3,7 @@ use crate::consts::CapabilityFlags;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-#[cfg(all(feature = "ssl", not(target_os = "windows")))]
+#[cfg(all(feature = "ssl"))]
 use std::path;
 use std::str::FromStr;
 
@@ -31,8 +31,8 @@ pub type SslOpts = Option<Option<(path::PathBuf, String, Vec<path::PathBuf>)>>;
 pub type SslOpts = Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>;
 
 #[cfg(all(feature = "ssl", target_os = "windows"))]
-/// Not implemented on Windows
-pub type SslOpts = Option<()>;
+/// Ssl options: Option<(pem_ca_cert, Option<(pem_client_cert, pem_client_key)>)>.`
+pub type SslOpts = Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>;
 
 #[cfg(not(feature = "ssl"))]
 /// Requires `ssl` feature
@@ -487,7 +487,11 @@ impl OptsBuilder {
         self
     }
 
-    #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
+    #[cfg(all(
+        feature = "ssl",
+        not(target_os = "macos"),
+        any(unix, target_os = "windows")
+    ))]
     /// SSL certificates and keys in pem format.
     ///
     /// If not None, then ssl connection implied.
@@ -527,12 +531,6 @@ impl OptsBuilder {
             })
         });
         self
-    }
-
-    /// Not implemented on windows
-    #[cfg(all(feature = "ssl", target_os = "windows"))]
-    pub fn ssl_opts<A, B, C>(&mut self, _: Option<SslOpts>) -> &mut Self {
-        panic!("OptsBuilder::ssl_opts is not implemented on Windows");
     }
 
     /// Requires `ssl` feature
