@@ -271,11 +271,27 @@ impl Conn {
         Ok(())
     }
 
+<<<<<<< HEAD
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let data = self.stream_mut().next().transpose()?.ok_or(io::Error::new(
             io::ErrorKind::BrokenPipe,
             "server disconnected",
         ))?;
+=======
+    pub fn read_packet(&mut self) -> MyResult<Vec<u8>> {
+        let mut old_seq_id = self.seq_id;
+        let (data, seq_id) = match *self.stream.as_mut().unwrap() {
+            ConnStream::Plain(ref mut stream) => stream.as_mut().read_packet(old_seq_id)?,
+            ConnStream::Compressed(ref mut compressed) => {
+                // Synchronize seq_id on compressed packet boundary
+                if compressed.is_empty() {
+                    old_seq_id = compressed.get_comp_seq_id();
+                }
+                compressed.read_packet(old_seq_id)?
+            }
+        };
+        self.seq_id = seq_id;
+>>>>>>> binlog sync WIP
         match data[0] {
             0xff => {
                 let error_packet = parse_err_packet(&*data, self.capability_flags)?;
@@ -770,6 +786,74 @@ impl Conn {
     pub fn select_db(&mut self, schema: &str) -> bool {
         match self.write_command(Command::COM_INIT_DB, schema.as_bytes()) {
             Ok(_) => self.drop_packet().is_ok(),
+            _ => false,
+        }
+    }
+
+    pub fn get_is_connected(&self) -> bool {
+        self.connected
+    }
+
+    pub fn register_as_slave(&mut self) -> bool {
+        self.query("SET @master_binlog_checksum='NONE'").unwrap();
+        let mut buf = vec![0u8; 4+1+1+1+2+4+4];
+        {
+            let mut writer = &mut *buf;
+
+            // 4 byte server ID
+            writer.write_u32::<LE>(1).expect("should not fail"); // hard-coding server ID to 1
+
+            // 1 byte slave hostname length (usually empty)
+            writer.write_u8(0).expect("should not fail");
+
+            // slave hostname
+
+            // 1 byte slave username length (usually empty)
+            writer.write_u8(0).expect("should not fail");
+
+            // slave username
+
+            // 1 byte slave password length (usually empty)
+            writer.write_u8(0).expect("should not fail");
+
+            // slave password
+
+            // 2 byte slave port (usually empty)
+            writer.write_u16::<LE>(0).expect("should not fail");
+
+            // 4 byte replication rank (ignored)
+            writer.write_u32::<LE>(0).expect("should not fail");
+
+            // 4 byte master ID (usually 0)
+            writer.write_u32::<LE>(0).expect("should not fail");
+        }
+        match self.write_command_data(Command::COM_REGISTER_SLAVE, &*buf) {
+            Ok(_) => self.drop_packet().is_ok(),
+            _ => false,
+        }
+    }
+
+    pub fn request_binlog_stream(&mut self, position: u32) -> bool {
+        let mut buf = vec![0u8; 4+2+4];
+        {
+            let mut writer = &mut *buf;
+
+            // 4 byte binlog position
+            writer.write_u32::<LE>(position).expect("should not fail");
+
+            // 2 byte flags
+            writer.write_u16::<LE>(0).expect("should not fail");
+
+            // 4 byte server ID
+            writer.write_u32::<LE>(1).expect("should not fail"); // hard-coding server ID to 1
+        }
+        match self.write_command_data(Command::COM_BINLOG_DUMP, &*buf) {
+            Ok(_) => {
+                match self.read_packet() {
+                    Ok(_) => true,
+                    _ => false,
+                }
+            },
             _ => false,
         }
     }
