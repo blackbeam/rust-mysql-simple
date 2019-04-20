@@ -1,7 +1,6 @@
 use crate::packet::InnerStmt;
 use crate::Row;
 use bit_vec::BitVec;
-use smallvec::SmallVec;
 use std::borrow::Borrow;
 use std::cmp;
 use std::collections::HashMap;
@@ -1762,7 +1761,7 @@ impl Conn {
         return None;
     }
 
-    fn next_bin(&mut self, columns: &Vec<Column>) -> MyResult<Option<SmallVec<[Value; 12]>>> {
+    fn next_bin(&mut self, columns: &Vec<Column>) -> MyResult<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
@@ -1790,7 +1789,7 @@ impl Conn {
         }
     }
 
-    fn next_text(&mut self, col_count: usize) -> MyResult<Option<SmallVec<[Value; 12]>>> {
+    fn next_text(&mut self, col_count: usize) -> MyResult<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
