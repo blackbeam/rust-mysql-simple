@@ -1613,11 +1613,10 @@ impl Conn {
     /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (false,));
     /// ```
     ///
-    /// You should wrap such parameters to a proper json value. For example if you are using
-    /// *rustc_serialize* for Json support:
+    /// You should wrap such parameters to a proper json value. For example:
     ///
     /// ```ignore
-    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (Json::Boolean(false),));
+    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (Value::Bool(false),));
     /// ```
     ///
     /// ### Named parameters support
@@ -2875,21 +2874,9 @@ mod test {
         fn should_handle_json_columns() {
             use crate::Deserialized;
             use crate::Serialized;
-            #[cfg(feature = "rustc_serialize")]
-            use rustc_serialize::json::Json;
-            #[cfg(not(feature = "rustc_serialize"))]
             use serde_json::Value as Json;
-            #[cfg(not(feature = "rustc_serialize"))]
             use std::str::FromStr;
 
-            #[cfg(feature = "rustc_serialize")]
-            #[derive(RustcDecodable, RustcEncodable, Debug, Eq, PartialEq)]
-            pub struct DecTest {
-                foo: String,
-                quux: (u64, String),
-            }
-
-            #[cfg(not(feature = "rustc_serialize"))]
             #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
             pub struct DecTest {
                 foo: String,

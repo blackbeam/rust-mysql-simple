@@ -43,7 +43,6 @@ lto = true
 [features]
 default = ['mysql_common']
 nightly = ['mysql_common']
-rustc_serialize = ['mysql_common/rustc_serialize', 'rustc-serialize']
 ssl = ['mysql_common', "openssl", "security-framework"]
 
 [dev-dependencies]
