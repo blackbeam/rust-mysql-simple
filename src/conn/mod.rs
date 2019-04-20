@@ -1,7 +1,6 @@
 use crate::packet::InnerStmt;
 use crate::Row;
 use bit_vec::BitVec;
-use smallvec::SmallVec;
 use std::borrow::Borrow;
 use std::cmp;
 use std::collections::HashMap;
@@ -265,18 +264,18 @@ fn lenenc_str_len(s: &str) -> usize {
 }
 
 /***
- *     .d8888b.  888                  888
- *    d88P  Y88b 888                  888
- *    Y88b.      888                  888
- *     "Y888b.   888888 88888b.d88b.  888888
- *        "Y88b. 888    888 "888 "88b 888
- *          "888 888    888  888  888 888
- *    Y88b  d88P Y88b.  888  888  888 Y88b.
- *     "Y8888P"   "Y888 888  888  888  "Y888
- *
- *
- *
- */
+*     .d8888b.  888                  888
+*    d88P  Y88b 888                  888
+*    Y88b.      888                  888
+*     "Y888b.   888888 88888b.d88b.  888888
+*        "Y88b. 888    888 "888 "88b 888
+*          "888 888    888  888  888 888
+*    Y88b  d88P Y88b.  888  888  888 Y88b.
+*     "Y8888P"   "Y888 888  888  888  "Y888
+*
+*
+*
+*/
 
 /// Possible ways to pass conn to a statement or transaction
 #[derive(Debug)]
@@ -1616,11 +1615,10 @@ impl Conn {
     /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (false,));
     /// ```
     ///
-    /// You should wrap such parameters to a proper json value. For example if you are using
-    /// *rustc_serialize* for Json support:
+    /// You should wrap such parameters to a proper json value. For example:
     ///
     /// ```ignore
-    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (Json::Boolean(false),));
+    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (Value::Bool(false),));
     /// ```
     ///
     /// ### Named parameters support
@@ -1764,7 +1762,7 @@ impl Conn {
         return None;
     }
 
-    fn next_bin(&mut self, columns: &Vec<Column>) -> MyResult<Option<SmallVec<[Value; 12]>>> {
+    fn next_bin(&mut self, columns: &Vec<Column>) -> MyResult<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
@@ -1792,7 +1790,7 @@ impl Conn {
         }
     }
 
-    fn next_text(&mut self, col_count: usize) -> MyResult<Option<SmallVec<[Value; 12]>>> {
+    fn next_text(&mut self, col_count: usize) -> MyResult<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
@@ -1883,18 +1881,18 @@ impl Drop for Conn {
 }
 
 /***
- *    888b     d888          8888888b.                             888 888
- *    8888b   d8888          888   Y88b                            888 888
- *    88888b.d88888          888    888                            888 888
- *    888Y88888P888 888  888 888   d88P  .d88b.  .d8888b  888  888 888 888888
- *    888 Y888P 888 888  888 8888888P"  d8P  Y8b 88K      888  888 888 888
- *    888  Y8P  888 888  888 888 T88b   88888888 "Y8888b. 888  888 888 888
- *    888   "   888 Y88b 888 888  T88b  Y8b.          X88 Y88b 888 888 Y88b.
- *    888       888  "Y88888 888   T88b  "Y8888   88888P'  "Y88888 888  "Y888
- *                       888
- *                  Y8b d88P
- *                   "Y88P"
- */
+*    888b     d888          8888888b.                             888 888
+*    8888b   d8888          888   Y88b                            888 888
+*    88888b.d88888          888    888                            888 888
+*    888Y88888P888 888  888 888   d88P  .d88b.  .d8888b  888  888 888 888888
+*    888 Y888P 888 888  888 8888888P"  d8P  Y8b 88K      888  888 888 888
+*    888  Y8P  888 888  888 888 T88b   88888888 "Y8888b. 888  888 888 888
+*    888   "   888 Y88b 888 888  T88b  Y8b.          X88 Y88b 888 888 Y88b.
+*    888       888  "Y88888 888   T88b  "Y8888   88888P'  "Y88888 888  "Y888
+*                       888
+*                  Y8b d88P
+*                   "Y88P"
+*/
 
 /// Possible ways to pass conn to a query result
 #[derive(Debug)]
@@ -2891,21 +2889,9 @@ mod test {
         fn should_handle_json_columns() {
             use crate::Deserialized;
             use crate::Serialized;
-            #[cfg(feature = "rustc_serialize")]
-            use rustc_serialize::json::Json;
-            #[cfg(not(feature = "rustc_serialize"))]
             use serde_json::Value as Json;
-            #[cfg(not(feature = "rustc_serialize"))]
             use std::str::FromStr;
 
-            #[cfg(feature = "rustc_serialize")]
-            #[derive(RustcDecodable, RustcEncodable, Debug, Eq, PartialEq)]
-            pub struct DecTest {
-                foo: String,
-                quux: (u64, String),
-            }
-
-            #[cfg(not(feature = "rustc_serialize"))]
             #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
             pub struct DecTest {
                 foo: String,

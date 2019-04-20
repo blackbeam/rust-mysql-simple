@@ -131,13 +131,9 @@
 extern crate test;
 
 use mysql_common as myc;
-#[cfg(feature = "rustc_serialize")]
-pub extern crate rustc_serialize;
-#[cfg(not(feature = "rustc_serialize"))]
 pub extern crate serde;
-#[cfg(not(feature = "rustc_serialize"))]
 pub extern crate serde_json;
-#[cfg(all(test, not(feature = "rustc_serialize")))]
+#[cfg(test)]
 #[macro_use]
 extern crate serde_derive;
 
