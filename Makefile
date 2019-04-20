@@ -93,7 +93,7 @@ test:
 		cargo clean; \
 		sleep 15; \
 		echo TESTING FEATURS: $$var; \
-		if ! (cargo test --no-default-features --features "$$var"); \
+		if ! (cargo test --no-default-features --features "default $$var"); \
 		then \
 			kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \
 			rm -rf $(MYSQL_DATA_DIR) || true; \
