@@ -25,7 +25,7 @@ use super::error::DriverError::{
     ReadOnlyTransNotSupported, SetupError, UnexpectedPacket, UnsupportedProtocol,
 };
 use super::error::DriverError::{SslNotSupported, UnknownAuthPlugin};
-use super::error::Error::{DriverError, IoError, MySqlError};
+use super::error::Error::{DriverError, MySqlError};
 use super::error::Result as MyResult;
 use super::io::Read as MyRead;
 use super::io::Write;
@@ -868,6 +868,7 @@ impl Conn {
         match data[0] {
             0xff => {
                 let error_packet = parse_err_packet(&*data, self.capability_flags)?;
+                self.handle_err();
                 Err(MySqlError(error_packet.into()))
             }
             _ => Ok(data),
@@ -910,6 +911,18 @@ impl Conn {
         self.status_flags = op.status_flags();
         self.warnings = op.warnings();
         self.info = op.info_ref().map(Into::into);
+    }
+
+    fn handle_err(&mut self) {
+        self.has_results = false;
+        self.last_insert_id = 0;
+        self.affected_rows = 0;
+        self.warnings = 0;
+    }
+
+    fn more_results_exists(&self) -> bool {
+        self.status_flags
+            .contains(StatusFlags::SERVER_MORE_RESULTS_EXISTS)
     }
 
     fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> MyResult<()> {
@@ -1484,7 +1497,7 @@ impl Conn {
                 }
                 // skip eof packet
                 self.read_packet()?;
-                self.has_results = true;
+                self.has_results = column_count > 0;
                 Ok(columns)
             }
         }
@@ -1723,10 +1736,6 @@ impl Conn {
         })
     }
 
-    fn more_results_exists(&self) -> bool {
-        self.has_results
-    }
-
     fn connect(&mut self) -> MyResult<()> {
         if self.connected {
             return Ok(());
@@ -1766,56 +1775,30 @@ impl Conn {
         if !self.has_results {
             return Ok(None);
         }
-        let pld = match self.read_packet() {
-            Ok(pld) => pld,
-            Err(e) => {
-                self.has_results = false;
-                return Err(e);
-            }
-        };
-        let x = pld[0];
-        if x == 0xfe && pld.len() < 0xfe {
+        let pld = self.read_packet()?;
+        if pld[0] == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
             let p = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
             self.handle_ok(&p);
             return Ok(None);
         }
-        let res = read_bin_values(&*pld, columns.as_ref());
-        match res {
-            Ok(p) => Ok(Some(p)),
-            Err(e) => {
-                self.has_results = false;
-                Err(IoError(e))
-            }
-        }
+        let values = read_bin_values(&*pld, columns.as_ref())?;
+        Ok(Some(values))
     }
 
     fn next_text(&mut self, col_count: usize) -> MyResult<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
-        let pld = match self.read_packet() {
-            Ok(pld) => pld,
-            Err(e) => {
-                self.has_results = false;
-                return Err(e);
-            }
-        };
-        let x = pld[0];
-        if x == 0xfe && pld.len() < 0xfe {
+        let pld = self.read_packet()?;
+        if pld[0] == 0xfe && pld.len() < 0xfe {
             self.has_results = false;
             let p = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
             self.handle_ok(&p);
             return Ok(None);
         }
-        let res = read_text_values(&*pld, col_count);
-        match res {
-            Ok(p) => Ok(Some(p)),
-            Err(err) => {
-                self.has_results = false;
-                Err(IoError(err))
-            }
-        }
+        let values = read_text_values(&*pld, col_count)?;
+        Ok(Some(values))
     }
 
     fn has_stmt(&self, query: &str) -> bool {
@@ -1977,11 +1960,7 @@ impl<'a> QueryResult<'a> {
     }
 
     fn handle_if_more_results(&mut self) -> Option<MyResult<Row>> {
-        if self
-            .conn
-            .status_flags
-            .contains(StatusFlags::SERVER_MORE_RESULTS_EXISTS)
-        {
+        if self.conn.more_results_exists() {
             match self.conn.handle_result_set() {
                 Ok(cols) => {
                     self.columns = Arc::new(cols);
@@ -2048,9 +2027,13 @@ impl<'a> QueryResult<'a> {
         self.columns.as_ref()
     }
 
-    /// This predicate will help you if you are expecting multiple result sets.
+    /// This predicate will help you to consume multiple result sets.
     ///
-    /// For example:
+    /// # Note
+    ///
+    /// Note that it'll also return `true` for unconsumed singe-result set.
+    ///
+    /// # Example
     ///
     /// ```ignore
     /// conn.query(r#"
@@ -2068,7 +2051,14 @@ impl<'a> QueryResult<'a> {
     /// }
     /// ```
     pub fn more_results_exists(&self) -> bool {
-        self.conn.has_results
+        self.conn.more_results_exists() || !self.consumed()
+    }
+
+    /// Returns true if current result set is consumed.
+    ///
+    /// See also [`QueryResult::more_results_exists`].
+    pub fn consumed(&self) -> bool {
+        !self.conn.has_results
     }
 }
 
@@ -2076,10 +2066,14 @@ impl<'a> Iterator for QueryResult<'a> {
     type Item = MyResult<Row>;
 
     fn next(&mut self) -> Option<MyResult<Row>> {
-        let values = if self.is_bin {
-            self.conn.next_bin(&self.columns)
+        let values = if self.columns.len() > 0 {
+            if self.is_bin {
+                self.conn.next_bin(&self.columns)
+            } else {
+                self.conn.next_text(self.columns.len())
+            }
         } else {
-            self.conn.next_text(self.columns.len())
+            Ok(None)
         };
         match values {
             Ok(values) => match values {
@@ -2093,7 +2087,7 @@ impl<'a> Iterator for QueryResult<'a> {
 
 impl<'a> Drop for QueryResult<'a> {
     fn drop(&mut self) {
-        while self.conn.more_results_exists() {
+        while self.more_results_exists() {
             while let Some(_) = self.next() {}
         }
     }
@@ -2676,6 +2670,24 @@ mod test {
             opts.prefer_socket(false);
             let conn = Conn::new(opts).unwrap();
             assert!(!conn.is_insecure());
+        }
+
+        #[test]
+        fn should_drop_multi_result_set() {
+            let mut opts = OptsBuilder::from_opts(get_opts());
+            opts.db_name(Some("mysql"));
+            let mut conn = Conn::new(opts).unwrap();
+            conn.query("CREATE TEMPORARY TABLE TEST_TABLE ( name varchar(255) )")
+                .unwrap();
+            conn.prep_exec("SELECT * FROM TEST_TABLE", ()).unwrap();
+            conn.query(
+                r"
+                INSERT INTO TEST_TABLE (name) VALUES ('one');
+                INSERT INTO TEST_TABLE (name) VALUES ('two');
+                INSERT INTO TEST_TABLE (name) VALUES ('three');",
+            )
+            .unwrap();
+            conn.prep_exec("SELECT * FROM TEST_TABLE", ()).unwrap();
         }
 
         #[test]
