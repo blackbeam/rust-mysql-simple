@@ -853,16 +853,9 @@ impl Conn {
     }
 
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
-        let mut old_seq_id = self.seq_id;
         let (data, seq_id) = match *self.stream.as_mut().unwrap() {
-            ConnStream::Plain(ref mut stream) => stream.as_mut().read_packet(old_seq_id)?,
-            ConnStream::Compressed(ref mut compressed) => {
-                // Synchronize seq_id on compressed packet boundary
-                if compressed.is_empty() {
-                    old_seq_id = compressed.get_comp_seq_id();
-                }
-                compressed.read_packet(old_seq_id)?
-            }
+            ConnStream::Plain(ref mut stream) => stream.as_mut().read_packet(self.seq_id)?,
+            ConnStream::Compressed(ref mut compressed) => compressed.read_packet(self.seq_id)?,
         };
         self.seq_id = seq_id;
         match data[0] {
@@ -1471,6 +1464,11 @@ impl Conn {
     }
 
     fn handle_result_set(&mut self) -> MyResult<Vec<Column>> {
+        if let ConnStream::Compressed(ref mut compressed) = self.stream.as_mut().unwrap() {
+            // Synchronize seq_id on result set boundary if compression is used
+            self.seq_id = compressed.get_comp_seq_id();
+        }
+
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
@@ -2700,9 +2698,11 @@ mod test {
             assert!(conn
                 .query(
                     r#"CREATE PROCEDURE multi() BEGIN
-                                      SELECT 1 UNION ALL SELECT 2;
-                                      SELECT 3 UNION ALL SELECT 4;
-                                  END"#
+                        SELECT 1 UNION ALL SELECT 2;
+                        SELECT 3 UNION ALL SELECT 4;
+                        SELECT REPEAT('A', 17000000);
+                        SELECT REPEAT('A', 17000000);
+                    END"#
                 )
                 .is_ok());
             {
