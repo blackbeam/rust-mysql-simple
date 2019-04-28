@@ -383,10 +383,6 @@ impl Compressed {
         self.comp_seq_id
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.available() == 0
-    }
-
     fn available(&self) -> usize {
         self.buf.len() - self.pos
     }
