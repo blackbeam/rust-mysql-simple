@@ -2,9 +2,8 @@ use net2::{TcpBuilder, TcpStreamExt};
 #[cfg(unix)]
 use nix::{
     errno::Errno,
-    sys::select,
+    poll::{self, PollFlags},
     sys::socket,
-    sys::time::{TimeVal, TimeValLike},
 };
 use std::io;
 use std::mem;
@@ -155,29 +154,22 @@ fn connect_fd_timeout(fd: RawFd, sock_addr: &SocketAddr, timeout: Duration) -> i
         },
     }
 
-    let mut fd_set = select::FdSet::new();
     let socket_fd = fd;
-    fd_set.insert(socket_fd);
-    let mut timeout_timeval = TimeVal::microseconds(timeout.as_secs() as i64 * 1000 * 1000);
+    let mut poll_fds = [poll::PollFd::new(socket_fd, PollFlags::POLLIN)];
+    let timeout_millis = timeout.as_secs() as i32 * 1000;
 
-    let select_res = select::select(
-        socket_fd + 1,
-        None,
-        Some(&mut fd_set),
-        None,
-        Some(&mut timeout_timeval),
-    );
+    let poll_res = poll::poll(&mut poll_fds, timeout_millis);
 
-    let select_res = select_res.map_err(|err| match err {
+    let poll_res = poll_res.map_err(|err| match err {
         ::nix::Error::Sys(errno) => io::Error::from_raw_os_error(errno as i32),
         _ => io::Error::new(io::ErrorKind::Other, err),
     })?;
 
-    if select_res == -1 {
+    if poll_res == -1 {
         return Err(io::Error::last_os_error());
     }
 
-    if select_res != 1 {
+    if poll_res != 1 {
         return Err(io::ErrorKind::TimedOut.into());
     }
 
