@@ -709,11 +709,14 @@ fn get_opts_pass_from_url(url: &Url) -> Option<String> {
 
 fn get_opts_db_name_from_url(url: &Url) -> Option<String> {
     if let Some(mut segments) = url.path_segments() {
-        segments.next().map(|db_name| {
-            percent_decode(db_name.as_ref())
-                .decode_utf8_lossy()
-                .into_owned()
-        })
+        segments
+            .next()
+            .filter(|&db_name| !db_name.is_empty())
+            .map(|db_name| {
+                percent_decode(db_name.as_ref())
+                    .decode_utf8_lossy()
+                    .into_owned()
+            })
     } else {
         None
     }
@@ -851,6 +854,12 @@ mod test {
             },
             opts.into()
         );
+    }
+
+    #[test]
+    fn should_report_empty_url_database_as_none() {
+        let opt = Opts::from("mysql://localhost/");
+        assert_eq!(opt.get_db_name(), None);
     }
 
     #[test]
