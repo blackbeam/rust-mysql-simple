@@ -12,7 +12,7 @@ use std::time::Duration;
 use super::super::error::UrlError;
 use super::LocalInfileHandler;
 
-use percent_encoding::percent_decode;
+use percent_encoding::{percent_decode, percent_decode_str};
 use url::Url;
 
 /// Ssl options.
@@ -48,6 +48,8 @@ pub struct Opts {
     /// TCP port of mysql server (defaults to `3306`).
     tcp_port: u16,
     /// Path to unix socket on unix or pipe name on windows (defaults to `None`).
+    ///
+    /// Can be defined using `socket` connection url parameter.
     socket: Option<String>,
     /// User (defaults to `None`).
     user: Option<String>,
@@ -68,6 +70,8 @@ pub struct Opts {
     /// connection to `127.0.0.1` if `true`.
     ///
     /// Will fall back to TCP on error. Use `socket` option to enforce socket connection.
+    ///
+    /// Can be defined using `prefer_socket` connection url parameter.
     prefer_socket: bool,
 
     /// Whether to enable `TCP_NODELAY` (defaults to `true`).
@@ -77,6 +81,8 @@ pub struct Opts {
     tcp_nodelay: bool,
 
     /// TCP keep alive time for mysql connection.
+    ///
+    /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     tcp_keepalive_time: Option<u32>,
 
     /// Commands to execute on each new database connection.
@@ -85,6 +91,8 @@ pub struct Opts {
     /// #### Only available if `ssl` feature enabled.
     /// Perform or not ssl peer verification (defaults to `false`).
     /// Only make sense if ssl_opts is not None.
+    ///
+    /// Can be defined using `verify_peer` connection url parameter.
     verify_peer: bool,
 
     /// Only available if `ssl` feature enabled.
@@ -101,6 +109,8 @@ pub struct Opts {
     local_infile_handler: Option<LocalInfileHandler>,
 
     /// Tcp connect timeout (defaults to `None`).
+    ///
+    /// Can be defined using `tcp_connect_timeout_ms` connection url parameter.
     tcp_connect_timeout: Option<Duration>,
 
     /// Bind address for a client (defaults to `None`).
@@ -110,9 +120,13 @@ pub struct Opts {
     bind_address: Option<SocketAddr>,
 
     /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
+    ///
+    /// Can be defined using `stmt_cache_size` connection url parameter.
     stmt_cache_size: usize,
 
     /// If `true`, then client will ask for compression if server supports it (defaults to `false`).
+    ///
+    /// Can be defined using `compress` connection url parameter.
     compress: bool,
 
     /// Additional client capabilities to set (defaults to empty).
@@ -402,6 +416,8 @@ impl OptsBuilder {
     }
 
     /// Socket path on unix or pipe name on windows (defaults to `None`).
+    ///
+    /// Can be defined using `socket` connection url parameter.
     pub fn socket<T: Into<String>>(&mut self, socket: Option<T>) -> &mut Self {
         self.opts.socket = socket.map(Into::into);
         self
@@ -445,6 +461,8 @@ impl OptsBuilder {
 
     /// TCP keep alive time for mysql connection (defaults to `None`). Available as
     /// `tcp_keepalive_time_ms` url parameter.
+    ///
+    /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     pub fn tcp_keepalive_time_ms(&mut self, tcp_keepalive_time_ms: Option<u32>) -> &mut Self {
         self.opts.tcp_keepalive_time = tcp_keepalive_time_ms;
         self
@@ -466,6 +484,8 @@ impl OptsBuilder {
     /// to `127.0.0.1` if `true`.
     ///
     /// Will fall back to TCP on error. Use `socket` option to enforce socket connection.
+    ///
+    /// Can be defined using `prefer_socket` connection url parameter.
     pub fn prefer_socket(&mut self, prefer_socket: bool) -> &mut Self {
         self.opts.prefer_socket = prefer_socket;
         self
@@ -482,6 +502,8 @@ impl OptsBuilder {
     /// parameter with value `true` or `false`.
     ///
     /// Only make sense if ssl_opts is not None.
+    ///
+    /// Can be defined using `verify_peer` connection url parameter.
     pub fn verify_peer(&mut self, verify_peer: bool) -> &mut Self {
         self.opts.verify_peer = verify_peer;
         self
@@ -554,6 +576,8 @@ impl OptsBuilder {
 
     /// Tcp connect timeout (defaults to `None`). Available as `tcp_connect_timeout_ms`
     /// url parameter.
+    ///
+    /// Can be defined using `tcp_connect_timeout_ms` connection url parameter.
     pub fn tcp_connect_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.opts.tcp_connect_timeout = timeout;
         self
@@ -576,6 +600,8 @@ impl OptsBuilder {
     /// Available as `stmt_cache_size` url parameter.
     ///
     /// Call with `None` to reset to default.
+    ///
+    /// Can be defined using `stmt_cache_size` connection url parameter.
     pub fn stmt_cache_size<T>(&mut self, cache_size: T) -> &mut Self
     where
         T: Into<Option<usize>>,
@@ -816,6 +842,13 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
             } else {
                 return Err(UrlError::InvalidValue("compress".into(), value));
             }
+        } else if key == "socket" {
+            let socket = percent_decode_str(&*value)
+                .decode_utf8_lossy()
+                .into_owned();
+            if !socket.is_empty() {
+                opts.socket = Some(socket);
+            }
         } else {
             return Err(UrlError::UnknownParameter(key));
         }
@@ -839,7 +872,7 @@ mod test {
     #[test]
     #[cfg(feature = "ssl")]
     fn should_convert_url_into_opts() {
-        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true&tcp_keepalive_time_ms=5000";
+        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true&tcp_keepalive_time_ms=5000&socket=%2Ftmp%2Fmysql.sock";
         assert_eq!(
             Opts {
                 user: Some("us r".to_string()),
@@ -850,6 +883,7 @@ mod test {
                 prefer_socket: false,
                 verify_peer: true,
                 tcp_keepalive_time: Some(5000),
+                socket: Some("/tmp/mysql.sock"),
                 ..Opts::default()
             },
             opts.into()
@@ -865,14 +899,17 @@ mod test {
     #[test]
     #[cfg(not(feature = "ssl"))]
     fn should_convert_url_into_opts() {
-        let opts = "mysql://usr:pw@192.168.1.1:3309/dbname";
+        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000&socket=%2Ftmp%2Fmysql.sock";
         assert_eq!(
             Opts {
-                user: Some("usr".to_string()),
-                pass: Some("pw".to_string()),
-                ip_or_hostname: Some("192.168.1.1".to_string()),
-                tcp_port: 3309,
-                db_name: Some("dbname".to_string()),
+                user: Some("us r".to_string()),
+                pass: Some("p w".to_string()),
+                ip_or_hostname: Some("localhost".to_string()),
+                tcp_port: 3308,
+                db_name: Some("db-name".to_string()),
+                prefer_socket: false,
+                tcp_keepalive_time: Some(5000),
+                socket: Some("/tmp/mysql.sock".into()),
                 ..Opts::default()
             },
             opts.into()
