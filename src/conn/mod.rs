@@ -3018,7 +3018,6 @@ mod test {
                 assert_connect_attrs(&mut conn, &expected_values);
             }
         }
-
     }
 
     #[cfg(feature = "nightly")]
