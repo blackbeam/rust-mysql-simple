@@ -12,7 +12,7 @@ use std::time::Duration;
 use super::super::error::UrlError;
 use super::LocalInfileHandler;
 
-use url::percent_encoding::percent_decode;
+use percent_encoding::percent_decode;
 use url::Url;
 
 /// Ssl options.
