@@ -843,9 +843,7 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
                 return Err(UrlError::InvalidValue("compress".into(), value));
             }
         } else if key == "socket" {
-            let socket = percent_decode_str(&*value)
-                .decode_utf8_lossy()
-                .into_owned();
+            let socket = percent_decode_str(&*value).decode_utf8_lossy().into_owned();
             if !socket.is_empty() {
                 opts.socket = Some(socket);
             }
