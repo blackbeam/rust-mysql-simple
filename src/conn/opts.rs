@@ -881,7 +881,7 @@ mod test {
                 prefer_socket: false,
                 verify_peer: true,
                 tcp_keepalive_time: Some(5000),
-                socket: Some("/tmp/mysql.sock"),
+                socket: Some(String::from("/tmp/mysql.sock")),
                 ..Opts::default()
             },
             opts.into()
