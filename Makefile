@@ -45,6 +45,7 @@ mysqld --no-defaults \
        --port=$(MYSQL_PORT) \
        --innodb_file_per_table=1 \
        --innodb_log_file_size=256M \
+       --local-infile=ON \
        --ssl \
        --ssl-ca=$(MYSQL_SSL_CA) \
        --ssl-cert=$(MYSQL_SSL_CERT) \
