@@ -5,16 +5,16 @@ use nix::{
     poll::{self, PollFlags},
     sys::socket,
 };
-use std::io;
-use std::mem;
+#[cfg(target_os = "windows")]
+use winapi::um::winsock2::*;
+
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 #[cfg(unix)]
 use std::os::unix::prelude::*;
 use std::time::Duration;
+use std::{io, mem};
 #[cfg(target_os = "windows")]
 use std::{os::raw::*, os::windows::prelude::*, ptr};
-#[cfg(target_os = "windows")]
-use winapi::um::winsock2::*;
 
 pub struct MyTcpBuilder<T> {
     address: T,

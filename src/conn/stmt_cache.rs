@@ -1,8 +1,10 @@
-use crate::packet::InnerStmt;
+use twox_hash::XxHash;
+
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hash};
-use twox_hash::XxHash;
+
+use crate::conn::stmt::InnerStmt;
 
 #[derive(Debug)]
 pub struct StmtCache {

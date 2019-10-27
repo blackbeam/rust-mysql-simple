@@ -1,5 +1,6 @@
 doc/
 target/
+tests/rust-mysql-simple-test
 *.racertmp
 Cargo.lock
 .idea

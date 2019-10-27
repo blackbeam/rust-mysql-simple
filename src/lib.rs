@@ -9,19 +9,6 @@
 //! mysql = "*"
 //! ```
 //!
-//! rust-mysql-simple offers support of SSL via `ssl` cargo feature which is disabled by default.
-//! Add `ssl` feature to enable:
-//!
-//! ```toml
-//! [dependencies.mysql]
-//! version = "*"
-//! features = ["ssl"]
-//! ```
-//!
-//! #### Windows support (since 0.18.0)
-//!
-//! Windows is supported but currently rust-mysql-simple has no support of SSL on Windows.
-//!
 //! #### Example
 //!
 //! ```rust
@@ -39,27 +26,26 @@
 //!     account_name: Option<String>,
 //! }
 //!
+//! # fn get_opts() -> my::Opts {
+//! #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+//! #         let opts = my::Opts::from_url(&url).expect("DATABASE_URL invalid");
+//! #         if opts.get_db_name().expect("a database name is required").is_empty() {
+//! #             panic!("database name is empty");
+//! #         }
+//! #         url
+//! #     } else {
+//! #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
+//! #     };
+//! #     my::Opts::from_url(&*url).unwrap()
+//! # }
+//!
 //! fn main() {
-//! #   let user = "root";
-//! #   let addr = "127.0.0.1";
-//! #   let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-//! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
-//! #                              .unwrap_or(3307);
-//! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-//! #   let pool = if port == 3307 && pwd == "password" {
+//! #   let opts = get_opts();
+//! #   if opts.get_tcp_port() == 3307 && opts.get_pass() == Some("password") {
 //!     // See docs on the `OptsBuilder`'s methods for the list of options available via URL.
 //!     let pool = my::Pool::new("mysql://root:password@localhost:3307/mysql").unwrap();
-//! #       drop(pool);
-//! #       my::Pool::new_manual(1, 1, "mysql://root:password@localhost:3307/mysql").unwrap()
-//! #   } else {
-//! #       let mut builder = my::OptsBuilder::default();
-//! #       builder.user(Some(user))
-//! #              .pass(Some(pwd))
-//! #              .ip_or_hostname(Some(addr))
-//! #              .db_name("mysql".into())
-//! #              .tcp_port(port);
-//! #       my::Pool::new_manual(1, 1, builder).unwrap()
-//! #   };
+//! #   }
+//! #   let pool = my::Pool::new_manual(1, 1, opts).unwrap();
 //!
 //!     // Let's create payment table.
 //!     // Unwrap just to make sure no error happened.
@@ -126,7 +112,7 @@
 #![crate_name = "mysql"]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
-#![cfg_attr(feature = "nightly", feature(test, const_fn, drop_types_in_const))]
+#![cfg_attr(feature = "nightly", feature(test, const_fn))]
 #[cfg(feature = "nightly")]
 extern crate test;
 
@@ -149,49 +135,34 @@ pub use crate::myc::uuid;
 mod conn;
 pub mod error;
 mod io;
-mod packet;
 
 #[doc(inline)]
 pub use crate::myc::constants as consts;
 
 #[doc(inline)]
-pub use crate::conn::pool::Pool;
+pub use crate::conn::local_infile::{LocalInfile, LocalInfileHandler};
 #[doc(inline)]
-pub use crate::conn::pool::PooledConn;
+pub use crate::conn::opts::SslOpts;
+#[doc(inline)]
+pub use crate::conn::opts::{Opts, OptsBuilder};
+#[doc(inline)]
+pub use crate::conn::pool::{Pool, PooledConn};
+#[doc(inline)]
+pub use crate::conn::query_result::QueryResult;
+#[doc(inline)]
+pub use crate::conn::stmt::Stmt;
+#[doc(inline)]
+pub use crate::conn::transaction::{IsolationLevel, Transaction};
 #[doc(inline)]
 pub use crate::conn::Conn;
 #[doc(inline)]
-pub use crate::conn::IsolationLevel;
-#[doc(inline)]
-pub use crate::conn::LocalInfile;
-#[doc(inline)]
-pub use crate::conn::LocalInfileHandler;
-#[doc(inline)]
-pub use crate::conn::Opts;
-#[doc(inline)]
-pub use crate::conn::OptsBuilder;
-#[doc(inline)]
-pub use crate::conn::QueryResult;
-#[doc(inline)]
-pub use crate::conn::Stmt;
-#[doc(inline)]
-pub use crate::conn::Transaction;
-#[doc(inline)]
-pub use crate::error::DriverError;
-#[doc(inline)]
-pub use crate::error::Error;
-#[doc(inline)]
-pub use crate::error::MySqlError;
-#[doc(inline)]
-pub use crate::error::Result;
-#[doc(inline)]
-pub use crate::error::ServerError;
-#[doc(inline)]
-pub use crate::error::UrlError;
+pub use crate::error::{DriverError, Error, MySqlError, Result, ServerError, UrlError};
 #[doc(inline)]
 pub use crate::myc::packets::Column;
 #[doc(inline)]
 pub use crate::myc::params::Params;
+#[doc(inline)]
+pub use crate::myc::proto::codec::Compression;
 #[doc(inline)]
 pub use crate::myc::row::convert::{from_row, from_row_opt, FromRowError};
 #[doc(inline)]
@@ -199,9 +170,7 @@ pub use crate::myc::row::Row;
 #[doc(inline)]
 pub use crate::myc::value::convert::{from_value, from_value_opt, FromValueError};
 #[doc(inline)]
-pub use crate::myc::value::json::Deserialized;
-#[doc(inline)]
-pub use crate::myc::value::json::Serialized;
+pub use crate::myc::value::json::{Deserialized, Serialized};
 #[doc(inline)]
 pub use crate::myc::value::Value;
 
@@ -216,3 +185,63 @@ pub mod prelude {
 
 #[doc(inline)]
 pub use crate::myc::params;
+
+#[cfg(test)]
+mod test_misc {
+    use lazy_static::lazy_static;
+
+    use std::env;
+
+    use crate::conn::opts::{Opts, OptsBuilder};
+    use crate::SslOpts;
+
+    #[allow(dead_code)]
+    fn error_should_implement_send_and_sync() {
+        fn _dummy<T: Send + Sync>(_: T) {}
+        _dummy(crate::error::Error::FromValueError(crate::Value::NULL));
+    }
+
+    lazy_static! {
+        pub static ref DATABASE_URL: String = {
+            if let Ok(url) = env::var("DATABASE_URL") {
+                let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
+                if opts
+                    .get_db_name()
+                    .expect("a database name is required")
+                    .is_empty()
+                {
+                    panic!("database name is empty");
+                }
+                url
+            } else {
+                "mysql://root:password@127.0.0.1:3307/mysql".into()
+            }
+        };
+    }
+
+    pub fn get_opts() -> OptsBuilder {
+        let mut builder = OptsBuilder::from_opts(&**DATABASE_URL);
+        builder.init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+        if test_compression() {
+            builder.compress(Some(Default::default()));
+        }
+        if test_ssl() {
+            builder.prefer_socket(false);
+            let mut ssl_opts = SslOpts::default();
+            ssl_opts.set_danger_skip_domain_validation(true);
+            ssl_opts.set_danger_accept_invalid_certs(true);
+            builder.ssl_opts(ssl_opts);
+        }
+        builder
+    }
+
+    pub fn test_ssl() -> bool {
+        let ssl = env::var("SSL").ok().unwrap_or("false".into());
+        ssl == "true" || ssl == "1"
+    }
+
+    pub fn test_compression() -> bool {
+        let compress = env::var("COMPRESS").ok().unwrap_or("false".into());
+        compress == "true" || compress == "1"
+    }
+}

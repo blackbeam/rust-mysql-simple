@@ -1,3 +1,6 @@
+use mysql_common::named_params::parse_named_params;
+use mysql_common::row::convert::from_row;
+
 use std::borrow::Borrow;
 use std::collections::VecDeque;
 use std::fmt;
@@ -5,19 +8,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration as StdDuration;
 
+use crate::prelude::{FromRow, GenericConnection};
 use crate::time::{Duration, SteadyTime};
-
-use super::super::error::Result as MyResult;
-use super::super::error::{DriverError, Error};
-use super::GenericConnection;
-use super::IsolationLevel;
-use super::LocalInfileHandler;
-use super::Transaction;
-use super::{Conn, Opts, QueryResult, Stmt};
-use crate::myc::named_params::parse_named_params;
-use crate::myc::row::convert::{from_row, FromRow};
-use crate::Params;
-use crate::Row;
+use crate::{
+    Conn, DriverError, Error, IsolationLevel, LocalInfileHandler, Opts, Params, QueryResult,
+    Result as MyResult, Row, Stmt, Transaction,
+};
 
 #[derive(Debug)]
 struct InnerPool {
@@ -31,7 +27,7 @@ impl InnerPool {
             return Err(Error::DriverError(DriverError::InvalidPoolConstraints));
         }
         let mut pool = InnerPool {
-            opts: opts,
+            opts,
             pool: VecDeque::with_capacity(max),
         };
         for _ in 0..min {
@@ -66,18 +62,16 @@ impl InnerPool {
 ///
 /// fn get_opts() -> Opts {
 ///       // ...
-/// #     let user = "root";
-/// #     let addr = "127.0.0.1";
-/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
-/// #                                .unwrap_or(3307);
-/// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(user))
-/// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(addr))
-/// #            .tcp_port(port);
-/// #     builder.into()
+/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
+/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
+/// #             panic!("database name is empty");
+/// #         }
+/// #         url
+/// #     } else {
+/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
+/// #     };
+/// #     Opts::from_url(&*url).unwrap()
 /// }
 ///
 /// let opts = get_opts();
@@ -122,8 +116,8 @@ impl Pool {
         let times = if let Some(timeout_ms) = timeout_ms {
             Some((
                 SteadyTime::now(),
-                Duration::milliseconds(timeout_ms as i64),
-                StdDuration::from_millis(timeout_ms as u64),
+                Duration::milliseconds(timeout_ms.into()),
+                StdDuration::from_millis(timeout_ms.into()),
             ))
         } else {
             None
@@ -159,29 +153,25 @@ impl Pool {
                     drop(pool);
                     out_conn = Some(conn);
                     break;
+                } else if self.count.load(Ordering::Relaxed) < self.max.load(Ordering::Relaxed) {
+                    pool.new_conn()?;
+                    self.count.fetch_add(1, Ordering::SeqCst);
                 } else {
-                    if self.count.load(Ordering::Relaxed) < self.max.load(Ordering::Relaxed) {
-                        pool.new_conn()?;
-                        self.count.fetch_add(1, Ordering::SeqCst);
-                    } else {
-                        pool = if let Some((start, timeout, std_timeout)) = times {
-                            if SteadyTime::now() - start > timeout {
-                                return Err(DriverError::Timeout.into());
-                            }
-                            condvar.wait_timeout(pool, std_timeout)?.0
-                        } else {
-                            condvar.wait(pool)?
+                    pool = if let Some((start, timeout, std_timeout)) = times {
+                        if SteadyTime::now() - start > timeout {
+                            return Err(DriverError::Timeout.into());
                         }
+                        condvar.wait_timeout(pool, std_timeout)?.0
+                    } else {
+                        condvar.wait(pool)?
                     }
                 }
             }
             out_conn.unwrap()
         };
 
-        if call_ping && self.check_health {
-            if !conn.ping() {
-                conn.reset()?;
-            }
+        if call_ping && self.check_health && !conn.ping() {
+            conn.reset()?;
         }
 
         Ok(PooledConn {
@@ -284,11 +274,12 @@ impl Pool {
         Q: AsRef<str>,
         P: Into<Params>,
     {
-        self.prep_exec(query, params).and_then(|result| {
-            for row in result {
-                return row.map(Some);
+        self.prep_exec(query, params).and_then(|mut result| {
+            if let Some(row) = result.next() {
+                row.map(Some)
+            } else {
+                Ok(None)
             }
-            return Ok(None);
         })
     }
 
@@ -336,19 +327,16 @@ impl fmt::Debug for Pool {
 /// ```rust
 /// # use mysql::{Pool, Opts, OptsBuilder, from_value, Value};
 /// # fn get_opts() -> Opts {
-/// #     let user = "root";
-/// #     let addr = "127.0.0.1";
-/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
-/// #                                .unwrap_or(3307);
-/// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(user))
-/// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(addr))
-/// #            .tcp_port(port)
-/// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
-/// #     builder.into()
+/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
+/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
+/// #             panic!("database name is empty");
+/// #         }
+/// #         url
+/// #     } else {
+/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
+/// #     };
+/// #     Opts::from_url(&*url).unwrap()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = Pool::new(opts).unwrap();
@@ -399,11 +387,12 @@ impl PooledConn {
 
     /// See [`Conn::first`](struct.Conn.html#method.first).
     pub fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
-        self.query(query).and_then(|result| {
-            for row in result {
-                return row.map(|x| Some(from_row(x)));
+        self.query(query).and_then(|mut result| {
+            if let Some(row) = result.next() {
+                row.map(|x| Some(from_row(x)))
+            } else {
+                Ok(None)
             }
-            return Ok(None);
         })
     }
 
@@ -428,22 +417,23 @@ impl PooledConn {
         P: Into<Params>,
         T: FromRow,
     {
-        self.prep_exec(query, params).and_then(|result| {
-            for row in result {
-                return row.map(|x| Some(from_row(x)));
+        self.prep_exec(query, params).and_then(|mut result| {
+            if let Some(row) = result.next() {
+                row.map(|x| Some(from_row(x)))
+            } else {
+                Ok(None)
             }
-            return Ok(None);
         })
     }
 
     /// Redirects to
     /// [`Conn#start_transaction`](struct.Conn.html#method.start_transaction)
-    pub fn start_transaction<'a>(
-        &'a mut self,
+    pub fn start_transaction(
+        &mut self,
         consistent_snapshot: bool,
         isolation_level: Option<IsolationLevel>,
         readonly: Option<bool>,
-    ) -> MyResult<Transaction<'a>> {
+    ) -> MyResult<Transaction> {
         self.conn.as_mut().unwrap().start_transaction(
             consistent_snapshot,
             isolation_level,
@@ -453,13 +443,13 @@ impl PooledConn {
 
     /// Gives mutable reference to the wrapped
     /// [`Conn`](struct.Conn.html).
-    pub fn as_mut<'a>(&'a mut self) -> &'a mut Conn {
+    pub fn as_mut(&mut self) -> &mut Conn {
         self.conn.as_mut().unwrap()
     }
 
     /// Gives reference to the wrapped
     /// [`Conn`](struct.Conn.html).
-    pub fn as_ref<'a>(&'a self) -> &'a Conn {
+    pub fn as_ref(&self) -> &Conn {
         self.conn.as_ref().unwrap()
     }
 
@@ -494,8 +484,7 @@ impl PooledConn {
         isolation_level: Option<IsolationLevel>,
         readonly: Option<bool>,
     ) -> MyResult<Transaction<'a>> {
-        let _ = self
-            .as_mut()
+        self.as_mut()
             ._start_transaction(consistent_snapshot, isolation_level, readonly)?;
         Ok(Transaction::new_pooled(self))
     }
@@ -545,82 +534,11 @@ impl GenericConnection for PooledConn {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    use crate::Opts;
-    use crate::OptsBuilder;
-
-    pub static USER: &'static str = "root";
-    pub static PASS: &'static str = "password";
-    pub static ADDR: &'static str = "127.0.0.1";
-    pub static PORT: u16 = 3307;
-
-    #[cfg(all(feature = "ssl", target_os = "macos"))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
-            .ssl_opts(Some(Some((
-                "tests/client.p12",
-                "pass",
-                vec!["tests/ca-cert.cer"],
-            ))));
-        builder.into()
-    }
-
-    #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
-            .ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
-        builder.into()
-    }
-
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
-        builder.into()
-    }
-
     mod pool {
-        use crate::params;
-        use crate::OptsBuilder;
-        use std::thread;
-        use std::time::Duration;
+        use std::{thread, time::Duration};
 
-        use super::super::super::super::error::{DriverError, Error};
-        use super::super::Pool;
-        use super::get_opts;
-        use crate::from_row;
-        use crate::from_value;
+        use crate::test_misc::get_opts;
+        use crate::{from_row, from_value, params, DriverError, Error, OptsBuilder, Pool};
 
         #[test]
         fn multiple_pools_should_work() {
@@ -651,24 +569,6 @@ mod test {
             fn add(&mut self) {
                 self.x += 1;
             }
-        }
-
-        #[test]
-        fn get_opts_from_string() {
-            let pass: String =
-                ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(super::PASS.to_string());
-            let port: u16 = ::std::env::var("MYSQL_SERVER_PORT")
-                .ok()
-                .map(|my_port| my_port.parse().ok().unwrap_or(super::PORT))
-                .unwrap_or(super::PORT);
-            Pool::new(format!(
-                "mysql://{}:{}@{}:{}",
-                super::USER,
-                pass,
-                super::ADDR,
-                port
-            ))
-            .unwrap();
         }
 
         #[test]
@@ -867,10 +767,11 @@ mod test {
                         assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
                     }
                 });
-            let mut a = A { pool: pool, x: 0 };
+            let mut a = A { pool, x: 0 };
             let transaction = a.pool.start_transaction(false, None, None).unwrap();
             a.add();
         }
+
         #[test]
         fn should_start_transaction_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
@@ -943,10 +844,12 @@ mod test {
 
         #[cfg(feature = "nightly")]
         mod bench {
-            use super::super::get_opts;
-            use std::thread;
             use test;
-            use Pool;
+
+            use std::thread;
+
+            use super::super::get_opts;
+            use crate::Pool;
 
             #[bench]
             fn many_prepares(bencher: &mut test::Bencher) {

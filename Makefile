@@ -45,6 +45,7 @@ mysqld --no-defaults \
        --port=$(MYSQL_PORT) \
        --innodb_file_per_table=1 \
        --innodb_log_file_size=256M \
+       --local-infile=ON \
        --ssl \
        --ssl-ca=$(MYSQL_SSL_CA) \
        --ssl-cert=$(MYSQL_SSL_CERT) \
@@ -81,25 +82,30 @@ doc:
 
 test:
 	$(run-mysql)
-	if ! (cargo test); \
+	if ! (COMPRESS=0 SSL=0 cargo test); \
 	then \
-		echo TESTING WITHOUT FEATURES; \
 		kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \
 		rm -rf $(MYSQL_DATA_DIR) || true; \
 		exit 1; \
 	fi
-	for var in $(FEATURES); \
-	do \
-		cargo clean; \
-		sleep 15; \
-		echo TESTING FEATURS: $$var; \
-		if ! (cargo test --no-default-features --features "default $$var"); \
-		then \
-			kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \
-			rm -rf $(MYSQL_DATA_DIR) || true; \
-			exit 1; \
-		fi \
-	done
+	if ! (COMPRESS=1 SSL=0 cargo test); \
+	then \
+		kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \
+		rm -rf $(MYSQL_DATA_DIR) || true; \
+		exit 1; \
+	fi
+	if ! (COMPRESS=0 SSL=1 cargo test); \
+	then \
+		kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \
+		rm -rf $(MYSQL_DATA_DIR) || true; \
+		exit 1; \
+	fi
+	if ! (COMPRESS=1 SSL=1 cargo test); \
+	then \
+		kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \
+		rm -rf $(MYSQL_DATA_DIR) || true; \
+		exit 1; \
+	fi
 
 	@kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`
 	@rm -rf $(MYSQL_DATA_DIR) || true
