@@ -13,7 +13,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::io::{self, Read, Write as _};
 use std::ops::{Deref, DerefMut};
-use std::{cmp, fs, mem, path, process};
+use std::{cmp, mem, process};
 
 use crate::conn::local_infile::LocalInfile;
 use crate::conn::query_result::ResultConnRef;
@@ -686,8 +686,8 @@ impl Conn {
     fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()> {
         {
             let buffer_size = cmp::min(
-                MAX_PAYLOAD_LEN - 1,
-                self.stream_ref().codec().max_allowed_packet - 1,
+                MAX_PAYLOAD_LEN - 4,
+                self.stream_ref().codec().max_allowed_packet - 4,
             );
             let chunk = vec![0u8; buffer_size].into_boxed_slice();
             let maybe_handler = self
@@ -701,13 +701,7 @@ impl Conn {
                 // connection.
                 let handler_fn = &mut *handler.0.lock().unwrap();
                 handler_fn(file_name, &mut local_infile)?;
-            } else {
-                let path = String::from_utf8_lossy(file_name);
-                let path = path.into_owned();
-                let path: path::PathBuf = path.into();
-                let mut file = fs::File::open(&path)?;
-                io::copy(&mut file, &mut local_infile)?;
-            };
+            }
             local_infile.flush()?;
         }
         self.write_packet(Vec::new())?;
@@ -1144,10 +1138,9 @@ impl<'a> DerefMut for ConnRef<'a> {
 #[allow(non_snake_case)]
 mod test {
     mod my_conn {
-        use std::borrow::ToOwned;
         use std::collections::HashMap;
         use std::io::Write;
-        use std::{fs, iter, process};
+        use std::{iter, process};
 
         use crate::prelude::{FromValue, ToValue};
         use crate::test_misc::get_opts;
@@ -1518,44 +1511,6 @@ mod test {
                     Ok(())
                 })
                 .unwrap();
-        }
-        #[test]
-        fn should_handle_LOCAL_INFILE() {
-            let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(conn
-                .query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
-                .is_ok());
-            let path = ::std::path::PathBuf::from("local_infile.txt");
-            {
-                let mut file = fs::File::create(&path).unwrap();
-                let _ = file.write(b"AAAAAA\n");
-                let _ = file.write(b"BBBBBB\n");
-                let _ = file.write(b"CCCCCC\n");
-            }
-            let query = format!(
-                "LOAD DATA LOCAL INFILE '{}' INTO TABLE mysql.tbl",
-                path.to_str().unwrap().to_owned()
-            );
-
-            match conn.query(query) {
-                Ok(_) => {}
-                Err(ref err) if format!("{}", err).find("not allowed").is_some() => {
-                    let _ = fs::remove_file(&path);
-                    return;
-                }
-                Err(err) => panic!("ERROR {}", err),
-            }
-
-            for (i, row) in conn.query("SELECT * FROM mysql.tbl").unwrap().enumerate() {
-                let row = row.unwrap();
-                match i {
-                    0 => assert_eq!(row.unwrap(), vec![Bytes(b"AAAAAA".to_vec())]),
-                    1 => assert_eq!(row.unwrap(), vec![Bytes(b"BBBBBB".to_vec())]),
-                    2 => assert_eq!(row.unwrap(), vec![Bytes(b"CCCCCC".to_vec())]),
-                    _ => unreachable!(),
-                }
-            }
-            let _ = fs::remove_file(&path);
         }
         #[test]
         fn should_handle_LOCAL_INFILE_with_custom_handler() {
