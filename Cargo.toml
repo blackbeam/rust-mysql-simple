@@ -35,7 +35,6 @@ debug = false
 lto = true
 
 [features]
-default = []
 nightly = []
 
 [dev-dependencies]
