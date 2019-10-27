@@ -848,7 +848,7 @@ mod test {
 
             use std::thread;
 
-            use super::super::get_opts;
+            use crate::test_misc::get_opts;
             use crate::Pool;
 
             #[bench]
