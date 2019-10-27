@@ -4,9 +4,7 @@ branches:
   - master
 clone_folder: c:\clone
 environment:
-  MYSQL_SERVER_PORT: 3306
-  MYSQL_SERVER_PASS: Password12!
-  MYSQL_PWD: Password12!
+  DATABASE_URL: mysql://root:Password12%21@127.0.0.1:3307/mysql
   matrix:
   - TARGET: nightly-x86_64-pc-windows-msvc
     PATH: C:\msys64\mingw64\bin\;c:\rust\bin;%PATH%
@@ -56,4 +54,4 @@ test_script:
 
     SET RUST_BACKTRACE=1
 
-    cargo test && cargo test --features ssl
+    cargo test

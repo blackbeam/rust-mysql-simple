@@ -38,8 +38,9 @@ lto = true
 nightly = []
 
 [dev-dependencies]
-serde_derive = "1"
 lazy_static = "1.4.0"
+rand = "0.7.2"
+serde_derive = "1"
 
 [dependencies]
 bit-vec = "0.6"

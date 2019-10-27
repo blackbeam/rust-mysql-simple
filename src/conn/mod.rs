@@ -1784,26 +1784,28 @@ mod test {
 
         #[test]
         fn should_bind_before_connect() {
+            let port = 27200 + (rand::random::<u16>() % 100);
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
             opts.ip_or_hostname(Some("127.0.0.1"));
-            opts.bind_address(Some(([127, 0, 0, 1], 27272)));
+            opts.bind_address(Some(([127, 0, 0, 1], port)));
             let conn = Conn::new(opts).unwrap();
-            let debug_format: String = dbg!(format!("{:?}", conn));
-            assert!(debug_format.contains("addr: V4(127.0.0.1:27272)"));
+            let debug_format: String = format!("{:?}", conn);
+            assert!(debug_format.contains(&*format!("addr: V4(127.0.0.1:{})", port)));
         }
 
         #[test]
         fn should_bind_before_connect_with_timeout() {
+            let port = 27300 + (rand::random::<u16>() % 100);
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
             opts.ip_or_hostname(Some("127.0.0.1"));
-            opts.bind_address(Some(([127, 0, 0, 1], 27273)));
+            opts.bind_address(Some(([127, 0, 0, 1], port)));
             opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
             let mut conn = Conn::new(opts).unwrap();
             assert!(conn.ping());
             let debug_format: String = format!("{:?}", conn);
-            assert!(debug_format.contains("addr: V4(127.0.0.1:27273)"));
+            assert!(debug_format.contains(&*format!("addr: V4(127.0.0.1:{})", port)));
         }
 
         #[test]

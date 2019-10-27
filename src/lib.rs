@@ -223,7 +223,7 @@ mod test_misc {
         let mut builder = OptsBuilder::from_opts(&**DATABASE_URL);
         builder.init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
         if test_compression() {
-            builder.compress(Default::default());
+            builder.compress(Some(Default::default()));
         }
         if test_ssl() {
             builder.prefer_socket(false);
