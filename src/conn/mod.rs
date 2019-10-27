@@ -914,19 +914,16 @@ impl Conn {
     /// # use mysql::DriverError::MissingNamedParameter;
     /// # use mysql::DriverError::NamedParamsForPositionalQuery;
     /// # fn get_opts() -> Opts {
-    /// #     let user = "root";
-    /// #     let addr = "127.0.0.1";
-    /// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-    /// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-    /// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
-    /// #                                .unwrap_or(3307);
-    /// #     let mut builder = OptsBuilder::default();
-    /// #     builder.user(Some(user.to_string()))
-    /// #            .pass(Some(pwd))
-    /// #            .ip_or_hostname(Some(addr.to_string()))
-    /// #            .tcp_port(port)
-    /// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'".to_owned()]);
-    /// #     builder.into()
+    /// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+    /// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
+    /// #         if opts.get_db_name().expect("a database name is required").is_empty() {
+    /// #             panic!("database name is empty");
+    /// #         }
+    /// #         url
+    /// #     } else {
+    /// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
+    /// #     };
+    /// #     Opts::from_url(&*url).unwrap()
     /// # }
     /// # let opts = get_opts();
     /// # let pool = Pool::new(opts).unwrap();
@@ -1156,108 +1153,21 @@ impl<'a> DerefMut for ConnRef<'a> {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    use crate::{Opts, OptsBuilder};
-    use mysql_common::proto::codec::Compression;
-    use std::env;
-
-    static USER: &'static str = "root";
-    static PASS: &'static str = "password";
-    static ADDR: &'static str = "localhost";
-    static PORT: u16 = 3307;
-
-    #[cfg(all(feature = "ssl", target_os = "macos"))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
-            .verify_peer(true)
-            .ssl_opts(Some(Some((
-                "tests/client.p12",
-                "pass",
-                vec!["tests/ca-cert.cer"],
-            ))));
-        builder.compress(
-            env::var("COMPRESS")
-                .map(|x| x == "true" || x == "1")
-                .unwrap_or(false),
-        );
-        builder.into()
-    }
-
-    #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
-            .verify_peer(true)
-            .ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
-        builder.compress(
-            env::var("COMPRESS")
-                .map(|x| x == "true" || x == "1")
-                .unwrap_or(false),
-        );
-        builder.into()
-    }
-
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
-        builder.compress(
-            env::var("COMPRESS")
-                .map(|x| {
-                    if x == "true" || x == "1" {
-                        Some(Compression::default())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(None),
-        );
-        builder.into()
-    }
-
     mod my_conn {
-        use super::get_opts;
+        use std::borrow::ToOwned;
+        use std::collections::HashMap;
+        use std::io::Write;
+        use std::{fs, iter, process};
+
+        use crate::prelude::{FromValue, ToValue};
+        use crate::test_misc::get_opts;
+        use crate::time::{now, Tm};
+        use crate::DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery};
+        use crate::Error::DriverError;
+        use crate::Value::{Bytes, Date, Int, NULL};
         use crate::{
-            from_row, from_value, params,
-            prelude::{FromValue, ToValue},
-            time::{now, Tm},
-            Conn,
-            DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
-            Error::DriverError,
-            LocalInfileHandler, OptsBuilder, Params,
-            Value::{Bytes, Date, Int, NULL},
+            from_row, from_value, params, Conn, LocalInfileHandler, Opts, OptsBuilder, Params,
         };
-        use std::{borrow::ToOwned, collections::HashMap, fs, io::Write, iter, process};
 
         fn get_system_variable<T>(conn: &mut Conn, name: &str) -> T
         where
@@ -1295,7 +1205,7 @@ mod test {
         }
         #[test]
         fn should_fallback_to_tcp_if_cant_switch_to_socket() {
-            let mut opts = get_opts();
+            let mut opts = Opts::from(get_opts());
             opts.0.injected_socket = Some("/foo/bar/baz".into());
             let _ = Conn::new(opts).unwrap();
         }
@@ -1543,7 +1453,7 @@ mod test {
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    assert!(t.query("INSERT INTO tbl(a) VALUES(1)").is_err());
+                    t.query("INSERT INTO tbl2(a) VALUES(1)").unwrap_err();
                     Ok(())
                     // implicit rollback
                 })
@@ -2072,7 +1982,7 @@ mod test {
     mod bench {
         use test;
 
-        use super::get_opts;
+        use crate::test_misc::get_opts;
         use crate::{params, Conn, Value::NULL};
 
         #[bench]

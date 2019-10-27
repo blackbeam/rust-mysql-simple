@@ -39,27 +39,26 @@
 //!     account_name: Option<String>,
 //! }
 //!
+//! # fn get_opts() -> my::Opts {
+//! #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+//! #         let opts = my::Opts::from_url(&url).expect("DATABASE_URL invalid");
+//! #         if opts.get_db_name().expect("a database name is required").is_empty() {
+//! #             panic!("database name is empty");
+//! #         }
+//! #         url
+//! #     } else {
+//! #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
+//! #     };
+//! #     my::Opts::from_url(&*url).unwrap()
+//! # }
+//!
 //! fn main() {
-//! #   let user = "root";
-//! #   let addr = "127.0.0.1";
-//! #   let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-//! #                              .map(|my_port| my_port.parse::<u16>().ok().unwrap_or(3307))
-//! #                              .unwrap_or(3307);
-//! #   let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-//! #   let pool = if port == 3307 && pwd == "password" {
+//! #   let opts = get_opts();
+//! #   if opts.get_tcp_port() == 3307 && opts.get_pass() == Some("password") {
 //!     // See docs on the `OptsBuilder`'s methods for the list of options available via URL.
 //!     let pool = my::Pool::new("mysql://root:password@localhost:3307/mysql").unwrap();
-//! #       drop(pool);
-//! #       my::Pool::new_manual(1, 1, "mysql://root:password@localhost:3307/mysql").unwrap()
-//! #   } else {
-//! #       let mut builder = my::OptsBuilder::default();
-//! #       builder.user(Some(user))
-//! #              .pass(Some(pwd))
-//! #              .ip_or_hostname(Some(addr))
-//! #              .db_name("mysql".into())
-//! #              .tcp_port(port);
-//! #       my::Pool::new_manual(1, 1, builder).unwrap()
-//! #   };
+//! #   }
+//! #   let pool = my::Pool::new_manual(1, 1, opts).unwrap();
 //!
 //!     // Let's create payment table.
 //!     // Unwrap just to make sure no error happened.
@@ -200,3 +199,65 @@ pub mod prelude {
 
 #[doc(inline)]
 pub use crate::myc::params;
+
+#[cfg(test)]
+mod test_misc {
+    use lazy_static::lazy_static;
+
+    use std::env;
+
+    use crate::conn::opts::{Opts, OptsBuilder};
+
+    #[allow(dead_code)]
+    fn error_should_implement_send_and_sync() {
+        fn _dummy<T: Send + Sync>(_: T) {}
+        _dummy(crate::error::Error::FromValueError(crate::Value::NULL));
+    }
+
+    lazy_static! {
+        pub static ref DATABASE_URL: String = {
+            if let Ok(url) = env::var("DATABASE_URL") {
+                let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
+                if opts
+                    .get_db_name()
+                    .expect("a database name is required")
+                    .is_empty()
+                {
+                    panic!("database name is empty");
+                }
+                url
+            } else {
+                "mysql://root:password@127.0.0.1:3307/mysql".into()
+            }
+        };
+    }
+
+    pub fn get_opts() -> OptsBuilder {
+        let mut builder = OptsBuilder::from_opts(&**DATABASE_URL);
+        builder.init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+        builder.compress(env::var("COMPRESS").ok().and_then(|x| {
+            if x == "true" || x == "1" {
+                Some(Default::default())
+            } else {
+                None
+            }
+        }));
+        if cfg!(feature = "ssl") {
+            builder.prefer_socket(false);
+            builder.verify_peer(true);
+            #[cfg(all(feature = "ssl", target_os = "macos"))]
+            {
+                builder.ssl_opts(Some(Some((
+                    "tests/client.p12",
+                    "pass",
+                    vec!["tests/ca-cert.cer"],
+                ))));
+            }
+            #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
+            {
+                builder.ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
+            }
+        }
+        builder
+    }
+}

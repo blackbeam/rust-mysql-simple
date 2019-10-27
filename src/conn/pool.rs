@@ -62,18 +62,16 @@ impl InnerPool {
 ///
 /// fn get_opts() -> Opts {
 ///       // ...
-/// #     let user = "root";
-/// #     let addr = "127.0.0.1";
-/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
-/// #                                .unwrap_or(3307);
-/// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(user))
-/// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(addr))
-/// #            .tcp_port(port);
-/// #     builder.into()
+/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
+/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
+/// #             panic!("database name is empty");
+/// #         }
+/// #         url
+/// #     } else {
+/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
+/// #     };
+/// #     Opts::from_url(&*url).unwrap()
 /// }
 ///
 /// let opts = get_opts();
@@ -329,19 +327,16 @@ impl fmt::Debug for Pool {
 /// ```rust
 /// # use mysql::{Pool, Opts, OptsBuilder, from_value, Value};
 /// # fn get_opts() -> Opts {
-/// #     let user = "root";
-/// #     let addr = "127.0.0.1";
-/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
-/// #                                .unwrap_or(3307);
-/// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(user))
-/// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(addr))
-/// #            .tcp_port(port)
-/// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
-/// #     builder.into()
+/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
+/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
+/// #             panic!("database name is empty");
+/// #         }
+/// #         url
+/// #     } else {
+/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
+/// #     };
+/// #     Opts::from_url(&*url).unwrap()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = Pool::new(opts).unwrap();
@@ -539,82 +534,11 @@ impl GenericConnection for PooledConn {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test {
-    use crate::{Opts, OptsBuilder};
-
-    pub static USER: &'static str = "root";
-    pub static PASS: &'static str = "password";
-    pub static ADDR: &'static str = "127.0.0.1";
-    pub static PORT: u16 = 3307;
-
-    #[cfg(all(feature = "ssl", target_os = "macos"))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
-            .ssl_opts(Some(Some((
-                "tests/client.p12",
-                "pass",
-                vec!["tests/ca-cert.cer"],
-            ))));
-        builder.into()
-    }
-
-    #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"])
-            .ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
-        builder.into()
-    }
-
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
-    pub fn get_opts() -> Opts {
-        let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(PASS.to_string());
-        let port: u16 = ::std::env::var("MYSQL_SERVER_PORT")
-            .ok()
-            .map(|my_port| my_port.parse().ok().unwrap_or(PORT))
-            .unwrap_or(PORT);
-        let mut builder = OptsBuilder::default();
-        builder
-            .user(Some(USER))
-            .pass(Some(pwd))
-            .ip_or_hostname(Some(ADDR))
-            .tcp_port(port)
-            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
-        builder.into()
-    }
-
     mod pool {
-        use crate::{params, OptsBuilder};
         use std::{thread, time::Duration};
 
-        use super::{
-            super::{
-                super::super::error::{DriverError, Error},
-                Pool,
-            },
-            get_opts,
-        };
-        use crate::{from_row, from_value};
+        use crate::test_misc::get_opts;
+        use crate::{from_row, from_value, params, DriverError, Error, OptsBuilder, Pool};
 
         #[test]
         fn multiple_pools_should_work() {
@@ -645,24 +569,6 @@ mod test {
             fn add(&mut self) {
                 self.x += 1;
             }
-        }
-
-        #[test]
-        fn get_opts_from_string() {
-            let pass: String =
-                ::std::env::var("MYSQL_SERVER_PASS").unwrap_or(super::PASS.to_string());
-            let port: u16 = ::std::env::var("MYSQL_SERVER_PORT")
-                .ok()
-                .map(|my_port| my_port.parse().ok().unwrap_or(super::PORT))
-                .unwrap_or(super::PORT);
-            Pool::new(format!(
-                "mysql://{}:{}@{}:{}",
-                super::USER,
-                pass,
-                super::ADDR,
-                port
-            ))
-            .unwrap();
         }
 
         #[test]

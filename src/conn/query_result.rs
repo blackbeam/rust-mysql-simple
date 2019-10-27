@@ -48,19 +48,16 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// # use mysql::Pool;
 /// # use mysql::{Opts, OptsBuilder, from_row};
 /// # fn get_opts() -> Opts {
-/// #     let user = "root";
-/// #     let addr = "127.0.0.1";
-/// #     let pwd: String = ::std::env::var("MYSQL_SERVER_PASS").unwrap_or("password".to_string());
-/// #     let port: u16 = ::std::env::var("MYSQL_SERVER_PORT").ok()
-/// #                                .map(|my_port| my_port.parse().ok().unwrap_or(3307))
-/// #                                .unwrap_or(3307);
-/// #     let mut builder = OptsBuilder::default();
-/// #     builder.user(Some(user))
-/// #            .pass(Some(pwd))
-/// #            .ip_or_hostname(Some(addr))
-/// #            .tcp_port(port)
-/// #            .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
-/// #     builder.into()
+/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
+/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
+/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
+/// #             panic!("database name is empty");
+/// #         }
+/// #         url
+/// #     } else {
+/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
+/// #     };
+/// #     Opts::from_url(&*url).unwrap()
 /// # }
 /// # let opts = get_opts();
 /// # let pool = Pool::new(opts).unwrap();
