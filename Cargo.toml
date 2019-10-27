@@ -37,7 +37,6 @@ lto = true
 [features]
 default = []
 nightly = []
-ssl = ["openssl", "security-framework"]
 
 [dev-dependencies]
 serde_derive = "1"
@@ -50,25 +49,14 @@ byteorder = "1"
 fnv = "1"
 io-enum = "0.2.1"
 mysql_common = "0.19.1"
+native-tls = "0.2.3"
 net2 = "~0.2"
 percent-encoding = "2.1.0"
+regex = { version = "1", default-features = false }
 serde = "1"
 serde_json = "1"
 twox-hash = "1"
 url = "2.1"
-
-[dependencies.regex]
-version = "1"
-default-features = false
-
-[target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies.openssl]
-version = "~0.10"
-optional = true
-
-[target.'cfg(target_os = "macos")'.dependencies.security-framework]
-version = "~0.3"
-optional = true
-features = ["OSX_10_9"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 named_pipe = "~0.4"

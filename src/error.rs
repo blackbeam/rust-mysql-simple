@@ -4,12 +4,6 @@ use mysql_common::params::MissingNamedParameterError;
 use mysql_common::proto::codec::error::PacketCodecError;
 use mysql_common::row::convert::FromRowError;
 use mysql_common::value::convert::FromValueError;
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-use openssl::{
-    error::Error as SslError, error::ErrorStack as SslErrorStack, ssl::Error as OpensslError,
-};
-#[cfg(all(feature = "ssl", target_os = "macos"))]
-use security_framework::base::Error as SslError;
 use url::ParseError;
 
 use std::{error, fmt, io, result, sync};
@@ -57,8 +51,8 @@ pub enum Error {
     MySqlError(MySqlError),
     DriverError(DriverError),
     UrlError(UrlError),
-    #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
-    SslError(SslError),
+    TlsError(native_tls::Error),
+    TlsHandshakeError(native_tls::HandshakeError<std::net::TcpStream>),
     FromValueError(Value),
     FromRowError(Row),
 }
@@ -67,9 +61,11 @@ impl Error {
     #[doc(hidden)]
     pub fn is_connectivity_error(&self) -> bool {
         match self {
-            Error::IoError(_) | Error::DriverError(_) | Error::CodecError(_) => true,
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
-            Error::SslError(_) => true,
+            Error::IoError(_)
+            | Error::DriverError(_)
+            | Error::CodecError(_)
+            | Error::TlsHandshakeError(_)
+            | Error::TlsError(_) => true,
             Error::MySqlError(_)
             | Error::UrlError(_)
             | Error::FromValueError(_)
@@ -86,8 +82,8 @@ impl error::Error for Error {
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
             Error::UrlError(_) => "url error",
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
-            Error::SslError(_) => "ssl error",
+            Error::TlsError(_) => "tls error",
+            Error::TlsHandshakeError(_) => "tls handshake error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
         }
@@ -99,8 +95,8 @@ impl error::Error for Error {
             Error::DriverError(ref err) => Some(err),
             Error::MySqlError(ref err) => Some(err),
             Error::UrlError(ref err) => Some(err),
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
-            Error::SslError(ref err) => Some(err),
+            Error::TlsError(ref err) => Some(err),
+            Error::TlsHandshakeError(ref err) => Some(err),
             _ => None,
         }
     }
@@ -164,32 +160,15 @@ impl From<::nix::Error> for Error {
     }
 }
 
-#[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
-impl From<SslError> for Error {
-    fn from(err: SslError) -> Error {
-        Error::SslError(err)
+impl From<native_tls::Error> for Error {
+    fn from(err: native_tls::Error) -> Error {
+        Error::TlsError(err)
     }
 }
 
-#[cfg(all(feature = "ssl", unix, not(target_os = "macos")))]
-impl From<SslErrorStack> for Error {
-    fn from(err: SslErrorStack) -> Error {
-        Error::SslError(err.errors()[0].clone())
-    }
-}
-
-#[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
-impl From<OpensslError> for Error {
-    fn from(err: OpensslError) -> Error {
-        match err.into_io_error() {
-            Ok(err) => err.into(),
-            Err(err) => match err.ssl_error() {
-                Some(err_stack) => {
-                    io::Error::new(io::ErrorKind::Other, err_stack.to_string()).into()
-                }
-                None => unreachable!(),
-            },
-        }
+impl From<native_tls::HandshakeError<std::net::TcpStream>> for Error {
+    fn from(err: native_tls::HandshakeError<std::net::TcpStream>) -> Error {
+        Error::TlsHandshakeError(err)
     }
 }
 
@@ -213,8 +192,8 @@ impl fmt::Display for Error {
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
             Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
-            #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
-            Error::SslError(ref err) => write!(f, "SslError {{ {} }}", err),
+            Error::TlsError(ref err) => write!(f, "TlsError {{ {} }}", err),
+            Error::TlsHandshakeError(ref err) => write!(f, "TlsHandshakeError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
@@ -240,7 +219,7 @@ pub enum DriverError {
     MismatchedStmtParams(u16, usize),
     InvalidPoolConstraints,
     SetupError,
-    SslNotSupported,
+    TlsNotSupported,
     CouldNotParseVersion,
     ReadOnlyTransNotSupported,
     PoisonedPoolMutex,
@@ -281,7 +260,7 @@ impl fmt::Display for DriverError {
             ),
             DriverError::InvalidPoolConstraints => write!(f, "Invalid pool constraints"),
             DriverError::SetupError => write!(f, "Could not setup connection"),
-            DriverError::SslNotSupported => write!(
+            DriverError::TlsNotSupported => write!(
                 f,
                 "Client requires secure connection but server \
                  does not have this capability"

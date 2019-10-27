@@ -9,19 +9,6 @@
 //! mysql = "*"
 //! ```
 //!
-//! rust-mysql-simple offers support of SSL via `ssl` cargo feature which is disabled by default.
-//! Add `ssl` feature to enable:
-//!
-//! ```toml
-//! [dependencies.mysql]
-//! version = "*"
-//! features = ["ssl"]
-//! ```
-//!
-//! #### Windows support (since 0.18.0)
-//!
-//! Windows is supported but currently rust-mysql-simple has no support of SSL on Windows.
-//!
 //! #### Example
 //!
 //! ```rust
@@ -155,7 +142,6 @@ pub use crate::myc::constants as consts;
 #[doc(inline)]
 pub use crate::conn::local_infile::{LocalInfile, LocalInfileHandler};
 #[doc(inline)]
-#[cfg(feature = "ssl")]
 pub use crate::conn::opts::SslOpts;
 #[doc(inline)]
 pub use crate::conn::opts::{Opts, OptsBuilder};
@@ -207,6 +193,7 @@ mod test_misc {
     use std::env;
 
     use crate::conn::opts::{Opts, OptsBuilder};
+    use crate::SslOpts;
 
     #[allow(dead_code)]
     fn error_should_implement_send_and_sync() {
@@ -235,29 +222,26 @@ mod test_misc {
     pub fn get_opts() -> OptsBuilder {
         let mut builder = OptsBuilder::from_opts(&**DATABASE_URL);
         builder.init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
-        builder.compress(env::var("COMPRESS").ok().and_then(|x| {
-            if x == "true" || x == "1" {
-                Some(Default::default())
-            } else {
-                None
-            }
-        }));
-        if cfg!(feature = "ssl") {
+        if test_compression() {
+            builder.compress(Default::default());
+        }
+        if test_ssl() {
             builder.prefer_socket(false);
-            builder.verify_peer(true);
-            #[cfg(all(feature = "ssl", target_os = "macos"))]
-            {
-                builder.ssl_opts(Some(Some((
-                    "tests/client.p12",
-                    "pass",
-                    vec!["tests/ca-cert.cer"],
-                ))));
-            }
-            #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
-            {
-                builder.ssl_opts(Some(("tests/ca-cert.pem", None::<(String, String)>)));
-            }
+            let mut ssl_opts = SslOpts::default();
+            ssl_opts.set_danger_skip_domain_validation(true);
+            ssl_opts.set_danger_accept_invalid_certs(true);
+            builder.ssl_opts(ssl_opts);
         }
         builder
+    }
+
+    pub fn test_ssl() -> bool {
+        let ssl = env::var("SSL").ok().unwrap_or("false".into());
+        ssl == "true" || ssl == "1"
+    }
+
+    pub fn test_compression() -> bool {
+        let compress = env::var("COMPRESS").ok().unwrap_or("false".into());
+        compress == "true" || compress == "1"
     }
 }

@@ -1,39 +1,86 @@
 use percent_encoding::{percent_decode, percent_decode_str};
 use url::Url;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-#[cfg(all(feature = "ssl", not(target_os = "windows")))]
-use std::path;
+use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
 use crate::consts::CapabilityFlags;
 use crate::{LocalInfileHandler, UrlError};
 
-/// Ssl options.
-///
-/// Option<Option<(CERT, PASS, EXTRA)>> where
-/// CERT - client certificate path (pkcs12)
-/// PASS - pkcs12 password
-/// EXTRA - vector of extra certificates in the chain
-///
-/// This parameters could be omitted using `Some(None)` value.
-#[cfg(all(feature = "ssl", target_os = "macos"))]
-pub type SslOpts = Option<Option<(path::PathBuf, String, Vec<path::PathBuf>)>>;
+/// Ssl Options.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
+pub struct SslOpts {
+    pkcs12_path: Option<Cow<'static, Path>>,
+    password: Option<Cow<'static, str>>,
+    root_cert_path: Option<Cow<'static, Path>>,
+    skip_domain_validation: bool,
+    accept_invalid_certs: bool,
+}
 
-#[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
-/// Ssl options: Option<(pem_ca_cert, Option<(pem_client_cert, pem_client_key)>)>.`
-pub type SslOpts = Option<(path::PathBuf, Option<(path::PathBuf, path::PathBuf)>)>;
+impl SslOpts {
+    /// Sets path to the pkcs12 archive.
+    pub fn set_pkcs12_path<T: Into<Cow<'static, Path>>>(
+        &mut self,
+        pkcs12_path: Option<T>,
+    ) -> &mut Self {
+        self.pkcs12_path = pkcs12_path.map(Into::into);
+        self
+    }
 
-#[cfg(all(feature = "ssl", target_os = "windows"))]
-/// Not implemented on Windows
-pub type SslOpts = Option<()>;
+    /// Sets the password for a pkcs12 archive (defaults to `None`).
+    pub fn set_password<T: Into<Cow<'static, str>>>(&mut self, password: Option<T>) -> &mut Self {
+        self.password = password.map(Into::into);
+        self
+    }
 
-#[cfg(not(feature = "ssl"))]
-/// Requires `ssl` feature
-pub type SslOpts = Option<()>;
+    /// Sets path to a der certificate of the root that connector will trust.
+    pub fn set_root_cert_path<T: Into<Cow<'static, Path>>>(
+        &mut self,
+        root_cert_path: Option<T>,
+    ) -> &mut Self {
+        self.root_cert_path = root_cert_path.map(Into::into);
+        self
+    }
+
+    /// The way to not validate the server's domain
+    /// name against its certificate (defaults to `false`).
+    pub fn set_danger_skip_domain_validation(&mut self, value: bool) -> &mut Self {
+        self.skip_domain_validation = value;
+        self
+    }
+
+    /// If `true` then client will accept invalid certificate (expired, not trusted, ..)
+    /// (defaults to `false`).
+    pub fn set_danger_accept_invalid_certs(&mut self, value: bool) -> &mut Self {
+        self.accept_invalid_certs = value;
+        self
+    }
+
+    pub fn pkcs12_path(&self) -> Option<&Path> {
+        self.pkcs12_path.as_ref().map(|x| x.as_ref())
+    }
+
+    pub fn password(&self) -> Option<&str> {
+        self.password.as_ref().map(AsRef::as_ref)
+    }
+
+    pub fn root_cert_path(&self) -> Option<&Path> {
+        self.root_cert_path.as_ref().map(AsRef::as_ref)
+    }
+
+    pub fn skip_domain_validation(&self) -> bool {
+        self.skip_domain_validation
+    }
+
+    pub fn accept_invalid_certs(&self) -> bool {
+        self.accept_invalid_certs
+    }
+}
 
 /// Options structure is quite large so we'll store it separately.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -83,15 +130,8 @@ pub(crate) struct InnerOpts {
     /// Commands to execute on each new database connection.
     init: Vec<String>,
 
-    /// #### Only available if `ssl` feature enabled.
-    /// Perform or not ssl peer verification (defaults to `false`).
-    /// Only make sense if ssl_opts is not None.
-    ///
-    /// Can be defined using `verify_peer` connection url parameter.
-    verify_peer: bool,
-
-    /// Only available if `ssl` feature enabled.
-    ssl_opts: SslOpts,
+    /// Driver will require SSL connection if this option isn't `None` (default to `None`).
+    ssl_opts: Option<SslOpts>,
 
     /// Callback to handle requests for local files.
     ///
@@ -161,7 +201,6 @@ impl Default for InnerOpts {
             write_timeout: None,
             prefer_socket: true,
             init: vec![],
-            verify_peer: false,
             ssl_opts: None,
             tcp_keepalive_time: None,
             tcp_nodelay: true,
@@ -258,24 +297,13 @@ impl Opts {
         self.0.init.clone()
     }
 
-    /// #### Only available if `ssl` feature enabled.
-    /// Perform or not ssl peer verification (defaults to `false`).
-    /// Only make sense if ssl_opts is not None.
-    pub fn get_verify_peer(&self) -> bool {
-        self.0.verify_peer
-    }
-
-    /// #### Only available if `ssl` feature enabled.
-    pub fn get_ssl_opts(&self) -> &SslOpts {
-        &self.0.ssl_opts
+    /// Driver will require SSL connection if this option isn't `None` (default to `None`).
+    pub fn get_ssl_opts(&self) -> Option<&SslOpts> {
+        self.0.ssl_opts.as_ref()
     }
 
     fn set_prefer_socket(&mut self, val: bool) {
         self.0.prefer_socket = val;
-    }
-
-    fn set_verify_peer(&mut self, val: bool) {
-        self.0.verify_peer = val;
     }
 
     /// Whether `TCP_NODELAY` will be set for mysql connection.
@@ -510,70 +538,10 @@ impl OptsBuilder {
         self
     }
 
-    /// #### Only available if `ssl` feature enabled.
-    /// Perform or not ssl peer verification (defaults to `false`). Available as `verify_peer` url
-    /// parameter with value `true` or `false`.
-    ///
-    /// Only make sense if ssl_opts is not None.
-    ///
-    /// Can be defined using `verify_peer` connection url parameter.
-    pub fn verify_peer(&mut self, verify_peer: bool) -> &mut Self {
-        self.opts.0.verify_peer = verify_peer;
+    /// Driver will require SSL connection if this option isn't `None` (default to `None`).
+    pub fn ssl_opts<T: Into<Option<SslOpts>>>(&mut self, ssl_opts: T) -> &mut Self {
+        self.opts.0.ssl_opts = ssl_opts.into();
         self
-    }
-
-    #[cfg(all(feature = "ssl", not(target_os = "macos"), unix))]
-    /// SSL certificates and keys in pem format.
-    ///
-    /// If not None, then ssl connection implied.
-    /// `Option<(ca_cert, Option<(client_cert, client_key)>)>.`
-    pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<(A, Option<(B, C)>)>) -> &mut Self
-    where
-        A: Into<path::PathBuf>,
-        B: Into<path::PathBuf>,
-        C: Into<path::PathBuf>,
-    {
-        self.opts.0.ssl_opts = ssl_opts.map(|(ca_cert, rest)| {
-            (
-                ca_cert.into(),
-                rest.map(|(client_cert, client_key)| (client_cert.into(), client_key.into())),
-            )
-        });
-        self
-    }
-
-    /// SSL certificates and keys. If not None, then ssl connection implied.
-    ///
-    /// See `SslOpts`.
-    #[cfg(all(feature = "ssl", target_os = "macos"))]
-    pub fn ssl_opts<A, B, C>(&mut self, ssl_opts: Option<Option<(A, C, Vec<B>)>>) -> &mut Self
-    where
-        A: Into<path::PathBuf>,
-        B: Into<path::PathBuf>,
-        C: Into<String>,
-    {
-        self.opts.0.ssl_opts = ssl_opts.map(|opts| {
-            opts.map(|(pkcs12_path, pass, certs)| {
-                (
-                    pkcs12_path.into(),
-                    pass.into(),
-                    certs.into_iter().map(Into::into).collect(),
-                )
-            })
-        });
-        self
-    }
-
-    /// Not implemented on windows
-    #[cfg(all(feature = "ssl", target_os = "windows"))]
-    pub fn ssl_opts<A, B, C>(&mut self, _: Option<SslOpts>) -> &mut Self {
-        panic!("OptsBuilder::ssl_opts is not implemented on Windows");
-    }
-
-    /// Requires `ssl` feature
-    #[cfg(not(feature = "ssl"))]
-    pub fn ssl_opts<A, B, C>(&mut self, _: Option<SslOpts>) -> &mut Self {
-        panic!("OptsBuilder::ssl_opts requires `ssl` feature");
     }
 
     /// Callback to handle requests for local files. These are
@@ -807,19 +775,6 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
             } else {
                 return Err(UrlError::InvalidValue("prefer_socket".into(), value));
             }
-        } else if key == "verify_peer" {
-            if cfg!(not(feature = "ssl")) {
-                return Err(UrlError::FeatureRequired(
-                    "`ssl'".into(),
-                    "verify_peer".into(),
-                ));
-            } else if value == "true" {
-                opts.set_verify_peer(true);
-            } else if value == "false" {
-                opts.set_verify_peer(false);
-            } else {
-                return Err(UrlError::InvalidValue("verify_peer".into(), value));
-            }
         } else if key == "tcp_keepalive_time_ms" {
             match u32::from_str(&*value) {
                 Ok(tcp_keepalive_time_ms) => {
@@ -891,28 +846,9 @@ impl<S: AsRef<str>> From<S> for Opts {
 
 #[cfg(test)]
 mod test {
-    use super::{InnerOpts, Opts};
+    use mysql_common::proto::codec::Compression;
 
-    #[test]
-    #[cfg(feature = "ssl")]
-    fn should_convert_url_into_opts() {
-        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&verify_peer=true&tcp_keepalive_time_ms=5000&socket=%2Ftmp%2Fmysql.sock";
-        assert_eq!(
-            Opts {
-                user: Some("us r".to_string()),
-                pass: Some("p w".to_string()),
-                ip_or_hostname: Some("localhost".to_string()),
-                tcp_port: 3308,
-                db_name: Some("db-name".to_string()),
-                prefer_socket: false,
-                verify_peer: true,
-                tcp_keepalive_time: Some(5000),
-                socket: Some(String::from("/tmp/mysql.sock")),
-                ..Opts::default()
-            },
-            opts.into()
-        );
-    }
+    use super::{InnerOpts, Opts};
 
     #[test]
     fn should_report_empty_url_database_as_none() {
@@ -921,9 +857,8 @@ mod test {
     }
 
     #[test]
-    #[cfg(not(feature = "ssl"))]
     fn should_convert_url_into_opts() {
-        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000&socket=%2Ftmp%2Fmysql.sock";
+        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000&socket=%2Ftmp%2Fmysql.sock&compress=8";
         assert_eq!(
             Opts(Box::new(InnerOpts {
                 user: Some("us r".to_string()),
@@ -934,6 +869,7 @@ mod test {
                 prefer_socket: false,
                 tcp_keepalive_time: Some(5000),
                 socket: Some("/tmp/mysql.sock".into()),
+                compress: Some(Compression::new(8)),
                 ..InnerOpts::default()
             })),
             opts.into()
@@ -958,22 +894,6 @@ mod test {
     #[should_panic]
     fn should_panic_on_unknown_query_param() {
         let opts = "mysql://localhost/foo?bar=baz";
-        let _: Opts = opts.into();
-    }
-
-    #[test]
-    #[should_panic]
-    #[cfg(not(feature = "ssl"))]
-    fn should_panic_if_verify_peer_query_param_requires_feature() {
-        let opts = "mysql://usr:pw@localhost:3308/dbname?verify_peer=false";
-        let _: Opts = opts.into();
-    }
-
-    #[test]
-    #[should_panic]
-    #[cfg(feature = "ssl")]
-    fn should_panic_on_invalid_verify_peer_param_value() {
-        let opts = "mysql://usr:pw@localhost:3308/dbname?verify_peer=invalid";
         let _: Opts = opts.into();
     }
 }

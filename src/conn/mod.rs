@@ -25,14 +25,14 @@ use crate::io::{Read as MyRead, Stream};
 use crate::prelude::FromRow;
 use crate::DriverError::{
     CouldNotConnect, MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
-    ReadOnlyTransNotSupported, SetupError, SslNotSupported, UnexpectedPacket, UnknownAuthPlugin,
+    ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket, UnknownAuthPlugin,
     UnsupportedProtocol,
 };
 use crate::Error::{DriverError, MySqlError};
 use crate::Value::{self, Bytes, NULL};
 use crate::{
     from_row, from_value, from_value_opt, LocalInfileHandler, Opts, OptsBuilder, Params,
-    QueryResult, Result as MyResult, Stmt, Transaction,
+    QueryResult, Result as MyResult, SslOpts, Stmt, Transaction,
 };
 
 pub mod local_infile;
@@ -233,28 +233,13 @@ impl Conn {
         }
     }
 
-    #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
-    fn switch_to_ssl(&mut self) -> MyResult<()> {
-        match self.stream.take() {
-            Some(ConnStream::Plain(stream)) => {
-                let stream = stream.make_secure(
-                    self.opts.get_verify_peer(),
-                    self.opts.get_ip_or_hostname(),
-                    self.opts.get_ssl_opts(),
-                )?;
-                self.stream = Some(ConnStream::Plain(stream));
-            }
-            Some(ConnStream::Compressed(_)) => {
-                unreachable!("Connection should be switched to SSL before compression is applied")
-            }
-            None => (),
-        }
+    fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> MyResult<()> {
+        let stream = self.stream.take().expect("incomplete conn");
+        let (in_buf, out_buf, codec, stream) = stream.destruct();
+        let stream = stream.make_secure(self.opts.get_ip_or_hostname(), ssl_opts)?;
+        let stream = MySyncFramed::construct(in_buf, out_buf, codec, stream);
+        self.stream = Some(stream);
         Ok(())
-    }
-
-    #[cfg(any(not(feature = "ssl"), target_os = "windows"))]
-    fn switch_to_ssl(&mut self) -> MyResult<()> {
-        unimplemented!();
     }
 
     fn connect_stream(&mut self) -> MyResult<()> {
@@ -366,15 +351,17 @@ impl Conn {
 
         self.handle_handshake(&handshake);
 
-        if self.opts.get_ssl_opts().is_some() && self.stream.is_some() && self.is_insecure() {
-            if !handshake
-                .capabilities()
-                .contains(CapabilityFlags::CLIENT_SSL)
-            {
-                return Err(DriverError(SslNotSupported));
-            } else {
-                self.do_ssl_request()?;
-                self.switch_to_ssl()?;
+        if self.is_insecure() {
+            if let Some(ssl_opts) = self.opts.get_ssl_opts().cloned() {
+                if !handshake
+                    .capabilities()
+                    .contains(CapabilityFlags::CLIENT_SSL)
+                {
+                    return Err(DriverError(TlsNotSupported));
+                } else {
+                    self.do_ssl_request()?;
+                    self.switch_to_ssl(ssl_opts)?;
+                }
             }
         }
 
@@ -1120,6 +1107,9 @@ impl Drop for Conn {
         for (_, inner_st) in stmt_cache.into_iter() {
             let _ = self.write_command_raw(ComStmtClose::new(inner_st.id()));
         }
+        if self.stream.is_some() {
+            let _ = self.write_command(Command::COM_QUIT, &[]);
+        }
     }
 }
 
@@ -1195,7 +1185,16 @@ mod test {
             let mode = from_value::<String>(mode);
             assert!(mode.contains("TRADITIONAL"));
             assert!(conn.ping());
+
+            if crate::test_misc::test_compression() {
+                assert!(format!("{:?}", conn.stream).contains("Compression"));
+            }
+
+            if crate::test_misc::test_ssl() {
+                assert!(!conn.is_insecure());
+            }
         }
+
         #[test]
         #[should_panic(expected = "Could not connect to address")]
         fn should_fail_on_wrong_socket_path() {
@@ -1608,7 +1607,9 @@ mod test {
             #[allow(unused_mut)]
             let mut opts = OptsBuilder::from_opts(get_opts());
             let conn = Conn::new(opts).unwrap();
-            assert!(conn.is_socket());
+            if conn.is_insecure() {
+                assert!(conn.is_socket());
+            }
         }
 
         #[test]
@@ -1616,16 +1617,9 @@ mod test {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.ip_or_hostname(Some("localhost"));
             let conn = Conn::new(opts).unwrap();
-            assert!(conn.is_socket());
-        }
-
-        #[test]
-        #[cfg(all(feature = "ssl", any(target_os = "macos", unix)))]
-        fn should_connect_via_ssl() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            let conn = Conn::new(opts).unwrap();
-            assert!(!conn.is_insecure());
+            if conn.is_insecure() {
+                assert!(conn.is_socket());
+            }
         }
 
         #[test]
@@ -1789,19 +1783,17 @@ mod test {
         }
 
         #[test]
-        #[cfg(not(feature = "ssl"))]
         fn should_bind_before_connect() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
             opts.ip_or_hostname(Some("127.0.0.1"));
             opts.bind_address(Some(([127, 0, 0, 1], 27272)));
             let conn = Conn::new(opts).unwrap();
-            let debug_format: String = format!("{:?}", conn);
+            let debug_format: String = dbg!(format!("{:?}", conn));
             assert!(debug_format.contains("addr: V4(127.0.0.1:27272)"));
         }
 
         #[test]
-        #[cfg(not(feature = "ssl"))]
         fn should_bind_before_connect_with_timeout() {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.prefer_socket(false);
