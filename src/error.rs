@@ -1,26 +1,20 @@
-use std::error;
-use std::fmt;
-use std::io;
-use std::result;
-use std::sync;
-
-use crate::myc::named_params::MixedParamsError;
-use crate::myc::packets::ErrPacket;
-use crate::myc::params::MissingNamedParameterError;
-use crate::myc::row::convert::FromRowError;
-use crate::myc::value::convert::FromValueError;
-
+use mysql_common::named_params::MixedParamsError;
+use mysql_common::packets::ErrPacket;
+use mysql_common::params::MissingNamedParameterError;
+use mysql_common::proto::codec::error::PacketCodecError;
+use mysql_common::row::convert::FromRowError;
+use mysql_common::value::convert::FromValueError;
 #[cfg(all(feature = "ssl", all(unix, not(target_os = "macos"))))]
 use openssl::{
     error::Error as SslError, error::ErrorStack as SslErrorStack, ssl::Error as OpensslError,
 };
 #[cfg(all(feature = "ssl", target_os = "macos"))]
 use security_framework::base::Error as SslError;
-
-use crate::Row;
-use crate::Value;
-
 use url::ParseError;
+
+use std::{error, fmt, io, result, sync};
+
+use crate::{Row, Value};
 
 impl<'a> From<ErrPacket<'a>> for MySqlError {
     fn from(x: ErrPacket<'a>) -> MySqlError {
@@ -59,6 +53,7 @@ impl error::Error for MySqlError {
 
 pub enum Error {
     IoError(io::Error),
+    CodecError(mysql_common::proto::codec::error::PacketCodecError),
     MySqlError(MySqlError),
     DriverError(DriverError),
     UrlError(UrlError),
@@ -72,13 +67,13 @@ impl Error {
     #[doc(hidden)]
     pub fn is_connectivity_error(&self) -> bool {
         match self {
-            &Error::IoError(_) | &Error::DriverError(_) => true,
+            Error::IoError(_) | Error::DriverError(_) | Error::CodecError(_) => true,
             #[cfg(all(feature = "ssl", any(unix, target_os = "macos")))]
-            &Error::SslError(_) => true,
-            &Error::MySqlError(_)
-            | &Error::UrlError(_)
-            | &Error::FromValueError(_)
-            | &Error::FromRowError(_) => false,
+            Error::SslError(_) => true,
+            Error::MySqlError(_)
+            | Error::UrlError(_)
+            | Error::FromValueError(_)
+            | Error::FromRowError(_) => false,
         }
     }
 }
@@ -87,6 +82,7 @@ impl error::Error for Error {
     fn description(&self) -> &str {
         match *self {
             Error::IoError(_) => "I/O Error",
+            Error::CodecError(_) => "protocol codec error",
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
             Error::UrlError(_) => "url error",
@@ -152,6 +148,12 @@ impl From<MySqlError> for Error {
     }
 }
 
+impl From<PacketCodecError> for Error {
+    fn from(err: PacketCodecError) -> Self {
+        Error::CodecError(err)
+    }
+}
+
 #[cfg(unix)]
 impl From<::nix::Error> for Error {
     fn from(x: ::nix::Error) -> Error {
@@ -207,6 +209,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Error::IoError(ref err) => write!(f, "IoError {{ {} }}", err),
+            Error::CodecError(ref err) => write!(f, "CodecError {{ {} }}", err),
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
             Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),

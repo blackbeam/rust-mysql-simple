@@ -1,5 +1,4 @@
 [package]
-
 name = "mysql"
 version = "16.1.0"
 authors = ["blackbeam"]
@@ -14,56 +13,48 @@ edition = "2018"
 build = "build.rs"
 
 [lib]
-
 name = "mysql"
 path = "src/lib.rs"
 
 [profile.dev]
-
 opt-level = 0
 debug = true
 
 [profile.release]
-
 opt-level = 3
 debug = false
 lto = true
 
 [profile.test]
-
 opt-level = 0
 debug = true
 
 [profile.bench]
-
 opt-level = 3
 debug = false
 lto = true
 
 [features]
-default = ['mysql_common', 'flate2/default']
-nightly = ['mysql_common', 'flate2/default']
-flate2-zlib = ['mysql_common', 'flate2/zlib']
-flate2-rust_backend = ['mysql_common', 'flate2/rust_backend']
-ssl = ['mysql_common', "openssl", "security-framework"]
-
+default = []
+nightly = []
+ssl = ["openssl", "security-framework"]
 
 [dev-dependencies]
 serde_derive = "1"
 
 [dependencies]
-flate2 = { version = "1.0", optional = true, default-features = false }
 bit-vec = "0.6"
-byteorder = "1"
-url = "2.1"
 bufstream = "~0.1"
+byteorder = "1"
 fnv = "1"
-twox-hash = "1"
+io-enum = "0.2.1"
+mysql_common = "0.19.1"
 net2 = "~0.2"
 percent-encoding = "2.1.0"
 serde = "1"
 serde_json = "1"
-mysql_common = { version = "0.18", optional = true }
+twox-hash = "1"
+url = "2.1"
 
 [dependencies.regex]
 version = "1"

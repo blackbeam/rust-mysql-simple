@@ -126,7 +126,7 @@
 #![crate_name = "mysql"]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
-#![cfg_attr(feature = "nightly", feature(test, const_fn, drop_types_in_const))]
+#![cfg_attr(feature = "nightly", feature(test, const_fn))]
 #[cfg(feature = "nightly")]
 extern crate test;
 
@@ -149,49 +149,35 @@ pub use crate::myc::uuid;
 mod conn;
 pub mod error;
 mod io;
-mod packet;
 
 #[doc(inline)]
 pub use crate::myc::constants as consts;
 
 #[doc(inline)]
-pub use crate::conn::pool::Pool;
+pub use crate::conn::local_infile::{LocalInfile, LocalInfileHandler};
 #[doc(inline)]
-pub use crate::conn::pool::PooledConn;
+#[cfg(feature = "ssl")]
+pub use crate::conn::opts::SslOpts;
+#[doc(inline)]
+pub use crate::conn::opts::{Opts, OptsBuilder};
+#[doc(inline)]
+pub use crate::conn::pool::{Pool, PooledConn};
+#[doc(inline)]
+pub use crate::conn::query_result::QueryResult;
+#[doc(inline)]
+pub use crate::conn::stmt::Stmt;
+#[doc(inline)]
+pub use crate::conn::transaction::{IsolationLevel, Transaction};
 #[doc(inline)]
 pub use crate::conn::Conn;
 #[doc(inline)]
-pub use crate::conn::IsolationLevel;
-#[doc(inline)]
-pub use crate::conn::LocalInfile;
-#[doc(inline)]
-pub use crate::conn::LocalInfileHandler;
-#[doc(inline)]
-pub use crate::conn::Opts;
-#[doc(inline)]
-pub use crate::conn::OptsBuilder;
-#[doc(inline)]
-pub use crate::conn::QueryResult;
-#[doc(inline)]
-pub use crate::conn::Stmt;
-#[doc(inline)]
-pub use crate::conn::Transaction;
-#[doc(inline)]
-pub use crate::error::DriverError;
-#[doc(inline)]
-pub use crate::error::Error;
-#[doc(inline)]
-pub use crate::error::MySqlError;
-#[doc(inline)]
-pub use crate::error::Result;
-#[doc(inline)]
-pub use crate::error::ServerError;
-#[doc(inline)]
-pub use crate::error::UrlError;
+pub use crate::error::{DriverError, Error, MySqlError, Result, ServerError, UrlError};
 #[doc(inline)]
 pub use crate::myc::packets::Column;
 #[doc(inline)]
 pub use crate::myc::params::Params;
+#[doc(inline)]
+pub use crate::myc::proto::codec::Compression;
 #[doc(inline)]
 pub use crate::myc::row::convert::{from_row, from_row_opt, FromRowError};
 #[doc(inline)]
@@ -199,9 +185,7 @@ pub use crate::myc::row::Row;
 #[doc(inline)]
 pub use crate::myc::value::convert::{from_value, from_value_opt, FromValueError};
 #[doc(inline)]
-pub use crate::myc::value::json::Deserialized;
-#[doc(inline)]
-pub use crate::myc::value::json::Serialized;
+pub use crate::myc::value::json::{Deserialized, Serialized};
 #[doc(inline)]
 pub use crate::myc::value::Value;
 
