@@ -1,4 +1,5 @@
 use mysql_common::crypto;
+use mysql_common::io::ReadMysqlExt;
 use mysql_common::named_params::parse_named_params;
 use mysql_common::packets::{
     column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
@@ -21,7 +22,7 @@ use crate::conn::stmt::InnerStmt;
 use crate::conn::stmt_cache::StmtCache;
 use crate::conn::transaction::IsolationLevel;
 use crate::consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN};
-use crate::io::{Read as MyRead, Stream};
+use crate::io::Stream;
 use crate::prelude::FromRow;
 use crate::DriverError::{
     CouldNotConnect, MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,

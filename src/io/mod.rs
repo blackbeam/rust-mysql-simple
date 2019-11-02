@@ -1,5 +1,4 @@
 use bufstream::BufStream;
-use byteorder::{LittleEndian as LE, ReadBytesExt, WriteBytesExt};
 use io_enum::*;
 #[cfg(windows)]
 use named_pipe as np;
@@ -19,87 +18,6 @@ use crate::error::Result as MyResult;
 use crate::SslOpts;
 
 mod tcp;
-
-pub trait Read: ReadBytesExt + io::BufRead {
-    fn read_lenenc_int(&mut self) -> io::Result<u64> {
-        let head_byte = self.read_u8()?;
-        let length = match head_byte {
-            0xfc => 2,
-            0xfd => 3,
-            0xfe => 8,
-            x => return Ok(u64::from(x)),
-        };
-        let out = self.read_uint::<LE>(length)?;
-        Ok(out)
-    }
-
-    fn read_lenenc_bytes(&mut self) -> io::Result<Vec<u8>> {
-        let len = self.read_lenenc_int()?;
-        let mut out = Vec::with_capacity(len as usize);
-        let count = if len > 0 {
-            self.take(len).read_to_end(&mut out)?
-        } else {
-            0
-        };
-        if count as u64 == len {
-            Ok(out)
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Unexpected EOF while reading length encoded string",
-            ))
-        }
-    }
-
-    fn read_to_null(&mut self) -> io::Result<Vec<u8>> {
-        let mut out = Vec::new();
-        for c in self.bytes() {
-            let c = c?;
-            if c == 0 {
-                break;
-            }
-            out.push(c);
-        }
-        Ok(out)
-    }
-}
-
-impl<T: ReadBytesExt + io::BufRead> Read for T {}
-
-pub trait Write: WriteBytesExt {
-    fn write_le_uint_n(&mut self, x: u64, len: usize) -> io::Result<()> {
-        let mut buf = [0u8; 8];
-        let mut offset = 0;
-        while offset < len {
-            buf[offset] = (((0xFF << (offset * 8)) & x) >> (offset * 8)) as u8;
-            offset += 1;
-        }
-        self.write_all(&buf[..len])
-    }
-
-    fn write_lenenc_int(&mut self, x: u64) -> io::Result<()> {
-        if x < 251 {
-            self.write_u8(x as u8)?;
-            Ok(())
-        } else if x < 65_536 {
-            self.write_u8(0xFC)?;
-            self.write_le_uint_n(x, 2)
-        } else if x < 16_777_216 {
-            self.write_u8(0xFD)?;
-            self.write_le_uint_n(x, 3)
-        } else {
-            self.write_u8(0xFE)?;
-            self.write_le_uint_n(x, 8)
-        }
-    }
-
-    fn write_lenenc_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.write_lenenc_int(bytes.len() as u64)?;
-        self.write_all(bytes)
-    }
-}
-
-impl<T: WriteBytesExt> Write for T {}
 
 #[derive(Debug, Read, Write)]
 pub enum Stream {
