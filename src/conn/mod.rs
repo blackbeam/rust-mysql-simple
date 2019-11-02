@@ -137,7 +137,7 @@ impl Conn {
 
     /// Check the connection can be improved.
     #[allow(unused_assignments)]
-    fn can_improved(&mut self) -> Option<Opts> {
+    fn can_improved(&mut self) -> MyResult<Option<Opts>> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
             let mut socket = None;
             #[cfg(test)]
@@ -145,19 +145,19 @@ impl Conn {
                 socket = self.opts.0.injected_socket.clone();
             }
             if socket.is_none() {
-                socket = self.get_system_var("socket").map(from_value::<String>);
+                socket = self.get_system_var("socket")?.map(from_value::<String>);
             }
             if let Some(socket) = socket {
                 if self.opts.get_socket().is_none() {
                     let mut socket_opts = OptsBuilder::from_opts(self.opts.clone());
                     if !socket.is_empty() {
                         socket_opts.socket(Some(socket));
-                        return Some(socket_opts.into());
+                        return Ok(Some(socket_opts.into()));
                     }
                 }
             }
         }
-        None
+        Ok(None)
     }
 
     /// Creates new `Conn`.
@@ -166,7 +166,7 @@ impl Conn {
         conn.connect_stream()?;
         conn.connect()?;
         let mut conn = {
-            if let Some(new_opts) = conn.can_improved() {
+            if let Some(new_opts) = conn.can_improved()? {
                 let mut improved_conn = Conn::empty(new_opts);
                 improved_conn
                     .connect_stream()
@@ -988,7 +988,7 @@ impl Conn {
         self.do_handshake()
             .and_then(|_| {
                 Ok(from_value_opt::<usize>(
-                    self.get_system_var("max_allowed_packet").unwrap_or(NULL),
+                    self.get_system_var("max_allowed_packet")?.unwrap_or(NULL),
                 )
                 .unwrap_or(0))
             })
@@ -1003,15 +1003,15 @@ impl Conn {
             })
     }
 
-    fn get_system_var(&mut self, name: &str) -> Option<Value> {
-        for row in self.query(format!("SELECT @@{}", name)).unwrap() {
+    fn get_system_var(&mut self, name: &str) -> MyResult<Option<Value>> {
+        for row in self.query(format!("SELECT @@{}", name))? {
             if let Ok(mut r) = row {
                 if r.len() > 0 {
-                    return r.take(0);
+                    return Ok(r.take(0));
                 }
             }
         }
-        None
+        Ok(None)
     }
 
     fn next_bin(&mut self, columns: &[Column]) -> MyResult<Option<Vec<Value>>> {
