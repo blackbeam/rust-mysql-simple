@@ -178,6 +178,8 @@ pub mod prelude {
     #[doc(inline)]
     pub use crate::conn::GenericConnection;
     #[doc(inline)]
+    pub use crate::myc::row::ColumnIndex;
+    #[doc(inline)]
     pub use crate::myc::row::convert::FromRow;
     #[doc(inline)]
     pub use crate::myc::value::convert::{ConvIr, FromValue, ToValue};
