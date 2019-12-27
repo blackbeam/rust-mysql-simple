@@ -24,6 +24,13 @@ pub struct SslOpts {
 
 impl SslOpts {
     /// Sets path to the pkcs12 archive.
+    ///
+    /// If you have the client's private key and certificate in PEM format, you
+    /// can translate them to pkcs12 using `openssl`:
+    ///
+    /// ```text
+    /// openssl pkcs12 -password pass: -export -out path.p12 -inkey privatekey.pem -in cert.pem -no-CAfile
+    /// ```
     pub fn set_pkcs12_path<T: Into<Cow<'static, Path>>>(
         &mut self,
         pkcs12_path: Option<T>,
@@ -39,6 +46,13 @@ impl SslOpts {
     }
 
     /// Sets path to a der certificate of the root that connector will trust.
+    ///
+    /// If you have a certificate in PEM format, you can translate it to der
+    /// using `openssl`:
+    ///
+    /// ```text
+    /// openssl x509 -outform der -in rootca.pem -out rootca.der
+    /// ```
     pub fn set_root_cert_path<T: Into<Cow<'static, Path>>>(
         &mut self,
         root_cert_path: Option<T>,
@@ -408,11 +422,15 @@ impl Opts {
 /// Provides a way to build [`Opts`](struct.Opts.html).
 ///
 /// ```ignore
+/// let mut ssl_opts = SslOpts::new();
+/// ssl_opts.set_pkcs12_path("/foo/cert.p12")
+///         .set_root_ca_path("/foo/root_ca.der");
+///
 /// // You can create new default builder
 /// let mut builder = OptsBuilder::new();
 /// builder.ip_or_hostname(Some("foo"))
 ///        .db_name(Some("bar"))
-///        .ssl_opts(Some(("/foo/cert.pem", None::<(String, String)>)));
+///        .ssl_opts(Some(ssl_opts));
 ///
 /// // Or use existing T: Into<Opts>
 /// let mut builder = OptsBuilder::from_opts(existing_opts);
