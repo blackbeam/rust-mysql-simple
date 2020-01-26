@@ -44,9 +44,9 @@ serde_derive = "1"
 
 [dependencies]
 bufstream = "~0.1"
-fnv = "1"
 io-enum = "0.2.1"
-mysql_common = "0.19.2"
+lru = "0.4.3"
+mysql_common = "0.20.1"
 native-tls = "0.2.3"
 net2 = "~0.2"
 percent-encoding = "2.1.0"

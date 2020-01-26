@@ -12,6 +12,9 @@ use std::time::Duration;
 use crate::consts::CapabilityFlags;
 use crate::{LocalInfileHandler, UrlError};
 
+/// Default value for client side per-connection statement cache.
+pub const DEFAULT_STMT_CACHE_SIZE: usize = 128;
+
 /// Ssl Options.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
 pub struct SslOpts {
@@ -168,7 +171,8 @@ pub(crate) struct InnerOpts {
     /// errors.
     bind_address: Option<SocketAddr>,
 
-    /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
+    /// Number of prepared statements cached on the client side (per connection).
+    /// Defaults to [`DEFAULT_STMT_CACHE_SIZE`].
     ///
     /// Can be defined using `stmt_cache_size` connection url parameter.
     stmt_cache_size: usize,
@@ -221,7 +225,7 @@ impl Default for InnerOpts {
             local_infile_handler: None,
             tcp_connect_timeout: None,
             bind_address: None,
-            stmt_cache_size: 10,
+            stmt_cache_size: DEFAULT_STMT_CACHE_SIZE,
             compress: None,
             additional_capabilities: CapabilityFlags::empty(),
             connect_attrs: HashMap::new(),
@@ -348,7 +352,10 @@ impl Opts {
         self.0.bind_address.as_ref()
     }
 
-    /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
+    /// Number of prepared statements cached on the client side (per connection).
+    /// Defaults to [`DEFAULT_STMT_CACHE_SIZE`].
+    ///
+    /// Can be defined using `stmt_cache_size` connection url parameter.
     pub fn get_stmt_cache_size(&self) -> usize {
         self.0.stmt_cache_size
     }
@@ -594,18 +601,17 @@ impl OptsBuilder {
         self
     }
 
-    /// Number of prepared statements cached on the client side (per connection). Defaults to `10`.
-    ///
-    /// Available as `stmt_cache_size` url parameter.
-    ///
-    /// Call with `None` to reset to default.
+    /// Number of prepared statements cached on the client side (per connection).
+    /// Defaults to [`DEFAULT_STMT_CACHE_SIZE`].
     ///
     /// Can be defined using `stmt_cache_size` connection url parameter.
+    ///
+    /// Call with `None` to reset to default.
     pub fn stmt_cache_size<T>(&mut self, cache_size: T) -> &mut Self
     where
         T: Into<Option<usize>>,
     {
-        self.opts.0.stmt_cache_size = cache_size.into().unwrap_or(10);
+        self.opts.0.stmt_cache_size = cache_size.into().unwrap_or(128);
         self
     }
 
