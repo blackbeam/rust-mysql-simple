@@ -271,27 +271,11 @@ impl Conn {
         Ok(())
     }
 
-<<<<<<< HEAD
     fn read_packet(&mut self) -> MyResult<Vec<u8>> {
         let data = self.stream_mut().next().transpose()?.ok_or(io::Error::new(
             io::ErrorKind::BrokenPipe,
             "server disconnected",
         ))?;
-=======
-    pub fn read_packet(&mut self) -> MyResult<Vec<u8>> {
-        let mut old_seq_id = self.seq_id;
-        let (data, seq_id) = match *self.stream.as_mut().unwrap() {
-            ConnStream::Plain(ref mut stream) => stream.as_mut().read_packet(old_seq_id)?,
-            ConnStream::Compressed(ref mut compressed) => {
-                // Synchronize seq_id on compressed packet boundary
-                if compressed.is_empty() {
-                    old_seq_id = compressed.get_comp_seq_id();
-                }
-                compressed.read_packet(old_seq_id)?
-            }
-        };
-        self.seq_id = seq_id;
->>>>>>> binlog sync WIP
         match data[0] {
             0xff => {
                 let error_packet = parse_err_packet(&*data, self.capability_flags)?;
@@ -796,7 +780,11 @@ impl Conn {
 
     pub fn register_as_slave(&mut self) -> bool {
         self.query("SET @master_binlog_checksum='NONE'").unwrap();
-        let mut buf = vec![0u8; 4+1+1+1+2+4+4];
+
+        let user = "replication";
+        let password = "replication";
+        let mut buf = vec!(0u8; 4+1+1+1+2+4+4+user.len() + password.len());
+
         {
             let mut writer = &mut *buf;
 
@@ -809,14 +797,19 @@ impl Conn {
             // slave hostname
 
             // 1 byte slave username length (usually empty)
-            writer.write_u8(0).expect("should not fail");
+            writer.write_u8(user.len() as u8).expect("should not fail");
 
             // slave username
+            user.as_bytes()
+                .iter()
+                .for_each(|data| writer.write_u8(*data).expect("should not fail"));
 
             // 1 byte slave password length (usually empty)
-            writer.write_u8(0).expect("should not fail");
+            writer.write_u8(password.len() as u8).expect("should not fail");
 
-            // slave password
+            password.as_bytes()
+                .iter()
+                .for_each(|data| writer.write_u8(*data).expect("should not fail"));
 
             // 2 byte slave port (usually empty)
             writer.write_u16::<LE>(0).expect("should not fail");
