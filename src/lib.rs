@@ -137,6 +137,19 @@ pub mod error;
 mod io;
 
 #[doc(inline)]
+pub use crate::conn::replication::{
+    SlaveConnectionOptionsBuilder,
+    SlaveConnectionOptions,
+    EventHeader,
+    UnknownEvent,
+    IntvarEventType,
+    IntvarEvent,
+    BinLogEvent,
+    BinLogEventType,
+    BinLogEventIterator,
+};
+
+#[doc(inline)]
 pub use crate::myc::constants as consts;
 
 #[doc(inline)]

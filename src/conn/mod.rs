@@ -35,6 +35,7 @@ use crate::{
     from_row, from_value, from_value_opt, LocalInfileHandler, Opts, OptsBuilder, Params,
     QueryResult, Result as MyResult, SslOpts, Stmt, Transaction,
 };
+use crate::conn::replication::*;
 
 pub mod local_infile;
 pub mod opts;
@@ -43,6 +44,7 @@ pub mod query_result;
 pub mod stmt;
 mod stmt_cache;
 pub mod transaction;
+pub mod replication;
 
 /// A trait allowing abstraction over connections and transactions
 pub trait GenericConnection {
@@ -276,6 +278,7 @@ impl Conn {
             io::ErrorKind::BrokenPipe,
             "server disconnected",
         ))?;
+
         match data[0] {
             0xff => {
                 let error_packet = parse_err_packet(&*data, self.capability_flags)?;
@@ -774,81 +777,20 @@ impl Conn {
         }
     }
 
-    pub fn get_is_connected(&self) -> bool {
-        self.connected
-    }
-
-    pub fn register_as_slave(&mut self) -> bool {
+    pub fn register_as_slave(&mut self, slave_connection_options: SlaveConnectionOptions) -> bool {
         self.query("SET @master_binlog_checksum='NONE'").unwrap();
-
-        let user = "replication";
-        let password = "replication";
-        let mut buf = vec!(0u8; 4+1+1+1+2+4+4+user.len() + password.len());
-
-        {
-            let mut writer = &mut *buf;
-
-            // 4 byte server ID
-            writer.write_u32::<LE>(1).expect("should not fail"); // hard-coding server ID to 1
-
-            // 1 byte slave hostname length (usually empty)
-            writer.write_u8(0).expect("should not fail");
-
-            // slave hostname
-
-            // 1 byte slave username length (usually empty)
-            writer.write_u8(user.len() as u8).expect("should not fail");
-
-            // slave username
-            user.as_bytes()
-                .iter()
-                .for_each(|data| writer.write_u8(*data).expect("should not fail"));
-
-            // 1 byte slave password length (usually empty)
-            writer.write_u8(password.len() as u8).expect("should not fail");
-
-            password.as_bytes()
-                .iter()
-                .for_each(|data| writer.write_u8(*data).expect("should not fail"));
-
-            // 2 byte slave port (usually empty)
-            writer.write_u16::<LE>(0).expect("should not fail");
-
-            // 4 byte replication rank (ignored)
-            writer.write_u32::<LE>(0).expect("should not fail");
-
-            // 4 byte master ID (usually 0)
-            writer.write_u32::<LE>(0).expect("should not fail");
-        }
-        match self.write_command_data(Command::COM_REGISTER_SLAVE, &*buf) {
+        let packet = RegisterSlavePacket::new(slave_connection_options);
+        match self.write_command(Command::COM_REGISTER_SLAVE, packet.as_bytes()) {
             Ok(_) => self.drop_packet().is_ok(),
             _ => false,
         }
     }
 
-    pub fn request_binlog_stream(&mut self, position: u32) -> bool {
-        let mut buf = vec![0u8; 4+2+4];
-        {
-            let mut writer = &mut *buf;
-
-            // 4 byte binlog position
-            writer.write_u32::<LE>(position).expect("should not fail");
-
-            // 2 byte flags
-            writer.write_u16::<LE>(0).expect("should not fail");
-
-            // 4 byte server ID
-            writer.write_u32::<LE>(1).expect("should not fail"); // hard-coding server ID to 1
-        }
-        match self.write_command_data(Command::COM_BINLOG_DUMP, &*buf) {
-            Ok(_) => {
-                match self.read_packet() {
-                    Ok(_) => true,
-                    _ => false,
-                }
-            },
-            _ => false,
-        }
+    pub fn get_binlog_stream(mut self, position: u32, server_id: u32) -> MyResult<BinLogEventIterator> {
+        let packet = BinlogDumpPacket::new(position, server_id);
+        self.write_command(Command::COM_BINLOG_DUMP, packet.as_bytes())?;
+        self.drop_packet()?;
+        Ok(BinLogEventIterator::new(self))
     }
 
     /// Starts new transaction with provided options.
