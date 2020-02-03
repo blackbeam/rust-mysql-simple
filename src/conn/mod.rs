@@ -767,7 +767,7 @@ impl Conn {
     fn _true_prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
         self.write_command(Command::COM_STMT_PREPARE, query.as_bytes())?;
         let pld = self.read_packet()?;
-        let mut stmt = InnerStmt::from_payload(pld.as_ref())?;
+        let mut stmt = InnerStmt::from_payload(pld.as_ref(), self.connection_id())?;
         if stmt.num_params() > 0 {
             let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
             for _ in 0..stmt.num_params() {
@@ -898,6 +898,7 @@ impl crate::prelude::Queryable for Conn {
     }
 
     fn close(&mut self, stmt: Statement) -> MyResult<()> {
+        self.stmt_cache.remove(stmt.id());
         let com_stmt_close = ComStmtClose::new(stmt.id());
         self.write_command_raw(com_stmt_close)?;
         Ok(())
@@ -1151,6 +1152,7 @@ mod test {
             conn.query_drop(CREATE_QUERY).unwrap();
 
             let insert_stmt = conn.prep(INSERT_SMTM).unwrap();
+            assert_eq!(insert_stmt.connection_id(), conn.connection_id());
             conn.exec_drop(
                 &insert_stmt,
                 (
@@ -1186,6 +1188,21 @@ mod test {
             let stmt = conn.prep("SELECT REPEAT('A', 20000000)").unwrap();
             let value: Value = conn.exec_first(&stmt, ()).unwrap().unwrap();
             assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
+        }
+
+        #[test]
+        fn manually_closed_stmt() {
+            let mut opts = OptsBuilder::from(get_opts());
+            opts.stmt_cache_size(1);
+            let mut conn = Conn::new(opts).unwrap();
+            let stmt = conn.prep("SELECT 1").unwrap();
+            conn.exec_drop(&stmt, ()).unwrap();
+            conn.close(stmt).unwrap();
+            let stmt = conn.prep("SELECT 1").unwrap();
+            conn.exec_drop(&stmt, ()).unwrap();
+            conn.close(stmt).unwrap();
+            let stmt = conn.prep("SELECT 2").unwrap();
+            conn.exec_drop(&stmt, ()).unwrap();
         }
 
         #[test]

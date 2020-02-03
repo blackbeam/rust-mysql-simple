@@ -9,16 +9,18 @@ pub struct InnerStmt {
     columns: Option<Vec<Column>>,
     params: Option<Vec<Column>>,
     stmt_packet: StmtPacket,
+    connection_id: u32,
 }
 
 impl InnerStmt {
-    pub fn from_payload(pld: &[u8]) -> io::Result<InnerStmt> {
+    pub fn from_payload(pld: &[u8], connection_id: u32) -> io::Result<InnerStmt> {
         let stmt_packet = parse_stmt_packet(pld)?;
 
         Ok(InnerStmt {
             columns: None,
             params: None,
             stmt_packet,
+            connection_id,
         })
     }
 
@@ -42,6 +44,10 @@ impl InnerStmt {
 
     pub fn id(&self) -> u32 {
         self.stmt_packet.statement_id()
+    }
+
+    pub const fn connection_id(&self) -> u32 {
+        self.connection_id
     }
 
     pub fn num_params(&self) -> u16 {
@@ -77,6 +83,10 @@ impl Statement {
 
     pub fn id(&self) -> u32 {
         self.inner.id()
+    }
+
+    pub fn connection_id(&self) -> u32 {
+        self.inner.connection_id()
     }
 
     pub fn num_params(&self) -> u16 {

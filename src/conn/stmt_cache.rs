@@ -94,6 +94,12 @@ impl StmtCache {
         self.cache.clear();
     }
 
+    pub fn remove(&mut self, id: u32) {
+        if let Some(entry) = self.cache.pop(&id) {
+            self.query_map.remove::<str>(entry.query.borrow());
+        }
+    }
+
     #[cfg(test)]
     pub fn iter(&self) -> impl Iterator<Item = (&u32, &Entry)> {
         self.cache.iter()
