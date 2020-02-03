@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::fmt;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration as StdDuration;
@@ -286,6 +287,14 @@ impl fmt::Debug for Pool {
 pub struct PooledConn {
     pool: Pool,
     conn: Option<Conn>,
+}
+
+impl Deref for PooledConn {
+    type Target = Conn;
+
+    fn deref(&self) -> &Self::Target {
+        self.conn.as_ref().expect("deref after drop")
+    }
 }
 
 impl Drop for PooledConn {
