@@ -47,11 +47,14 @@
 //!     account_name: Option<String>,
 //! }
 //!
-//! let pool = Pool::new(get_opts())?;
+//! let url = "mysql://root:password@localhost:3307/db_name";
+//! # let url = get_opts();
+//!
+//! let pool = Pool::new(url)?;
 //!
 //! let mut conn = pool.get_conn()?;
-//! // Let's create payment table.
-//! // Unwrap just to make sure no error happened.
+//!
+//! // Let's create a table for payments.
 //! conn.query_drop(r"CREATE TEMPORARY TABLE payment (
 //!                      customer_id int not null,
 //!                      amount int not null,
@@ -66,8 +69,10 @@
 //!     Payment { customer_id: 9, amount: 10, account_name: Some("bar".into()) },
 //! ];
 //!
-//! // Let's insert payments to the database
-//! // We also assume that no error happened in `prep`.
+//! // Now let's insert payments to the database
+//!
+//! // First of all we'll prepare the statement to avoid
+//! // statement cache lookup (see the "statement cache" section)
 //! let stmt = conn.prep(r"INSERT INTO
 //!                        payment (customer_id, amount, account_name)
 //!                        VALUES (:customer_id, :amount, :account_name)")?;
