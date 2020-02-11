@@ -40,6 +40,8 @@ use crate::{
     Result as MyResult, SslOpts, Transaction,
 };
 
+use self::query_result::Or;
+
 pub mod local_infile;
 pub mod opts;
 pub mod pool;
@@ -56,10 +58,7 @@ pub struct Conn {
     stmt_cache: StmtCache,
     server_version: Option<(u16, u16, u16)>,
     mariadb_server_version: Option<(u16, u16, u16)>,
-    affected_rows: u64,
-    last_insert_id: u64,
-    warnings: u16,
-    info: Option<Vec<u8>>,
+    last_ok_packet: Option<OkPacket<'static>>,
     capability_flags: CapabilityFlags,
     connection_id: u32,
     status_flags: StatusFlags,
@@ -78,12 +77,18 @@ impl Conn {
 
     /// Returns number of rows affected by the last query.
     pub fn affected_rows(&self) -> u64 {
-        self.affected_rows
+        self.last_ok_packet
+            .as_ref()
+            .map(|ok| ok.affected_rows())
+            .unwrap_or_default()
     }
 
     /// Returns last insert id of the last query.
     pub fn last_insert_id(&self) -> u64 {
-        self.last_insert_id
+        self.last_ok_packet
+            .as_ref()
+            .and_then(|ok| ok.last_insert_id())
+            .unwrap_or_default()
     }
 
     fn stream_ref(&self) -> &MySyncFramed<Stream> {
@@ -104,10 +109,7 @@ impl Conn {
             status_flags: StatusFlags::empty(),
             connection_id: 0u32,
             character_set: 0u8,
-            affected_rows: 0u64,
-            last_insert_id: 0u64,
-            warnings: 0,
-            info: None,
+            last_ok_packet: None,
             last_command: 0u8,
             connected: false,
             has_results: false,
@@ -199,10 +201,7 @@ impl Conn {
         self.status_flags = StatusFlags::empty();
         self.connection_id = 0;
         self.character_set = 0;
-        self.affected_rows = 0;
-        self.last_insert_id = 0;
-        self.warnings = 0;
-        self.info = None;
+        self.last_ok_packet = None;
         self.last_command = 0;
         self.connected = false;
         self.has_results = false;
@@ -294,18 +293,13 @@ impl Conn {
     }
 
     fn handle_ok(&mut self, op: &OkPacket<'_>) {
-        self.affected_rows = op.affected_rows();
-        self.last_insert_id = op.last_insert_id().unwrap_or(0);
         self.status_flags = op.status_flags();
-        self.warnings = op.warnings();
-        self.info = op.info_ref().map(Into::into);
+        self.last_ok_packet = Some(op.clone().into_owned());
     }
 
     fn handle_err(&mut self) {
         self.has_results = false;
-        self.last_insert_id = 0;
-        self.affected_rows = 0;
-        self.warnings = 0;
+        self.last_ok_packet = None;
     }
 
     fn more_results_exists(&self) -> bool {
@@ -627,7 +621,10 @@ impl Conn {
             }
         };
         self.write_command_raw(exec_request)?;
-        self.handle_result_set()
+        self.handle_result_set().map(|or| match or {
+            Or::A(cols) => cols,
+            Or::B(_) => Vec::new(),
+        })
     }
 
     fn _start_transaction(
@@ -662,7 +659,7 @@ impl Conn {
         Ok(())
     }
 
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()> {
+    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<OkPacket<'static>> {
         {
             let buffer_size = cmp::min(
                 MAX_PAYLOAD_LEN - 4,
@@ -685,14 +682,12 @@ impl Conn {
         }
         self.write_packet(Vec::new())?;
         let pld = self.read_packet()?;
-        if pld[0] == 0u8 {
-            let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
-            self.handle_ok(&ok);
-        }
-        Ok(())
+        let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+        self.handle_ok(&ok);
+        Ok(ok.into_owned())
     }
 
-    fn handle_result_set(&mut self) -> MyResult<Vec<Column>> {
+    fn handle_result_set(&mut self) -> MyResult<Or<Vec<Column>, OkPacket<'static>>> {
         if self.more_results_exists() {
             self.sync_seq_id();
         }
@@ -702,14 +697,14 @@ impl Conn {
             0x00 => {
                 let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
                 self.handle_ok(&ok);
-                Ok(Vec::new())
+                Ok(Or::B(ok.into_owned()))
             }
             0xfb => {
                 let mut reader = &pld[1..];
                 let mut file_name = Vec::with_capacity(reader.len());
                 reader.read_to_end(&mut file_name)?;
                 match self.send_local_infile(file_name.as_ref()) {
-                    Ok(_) => Ok(Vec::new()),
+                    Ok(ok) => Ok(Or::B(ok)),
                     Err(err) => Err(err),
                 }
             }
@@ -724,12 +719,12 @@ impl Conn {
                 // skip eof packet
                 self.read_packet()?;
                 self.has_results = column_count > 0;
-                Ok(columns)
+                Ok(Or::A(columns))
             }
         }
     }
 
-    fn _query(&mut self, query: &str) -> MyResult<Vec<Column>> {
+    fn _query(&mut self, query: &str) -> MyResult<Or<Vec<Column>, OkPacket<'static>>> {
         self.write_command(Command::COM_QUERY, query.as_bytes())?;
         self.handle_result_set()
     }
@@ -885,7 +880,8 @@ impl Conn {
 impl crate::prelude::Queryable for Conn {
     fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
         match self._query(query.as_ref()) {
-            Ok(columns) => Ok(QueryResult::new(self, columns, false)),
+            Ok(Or::A(cols)) => Ok(QueryResult::new(self, cols, false)),
+            Ok(Or::B(_)) => Ok(QueryResult::new(self, Vec::new(), false)),
             Err(err) => Err(err),
         }
     }
