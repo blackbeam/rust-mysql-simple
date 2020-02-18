@@ -2,7 +2,7 @@ use mysql_common::packets::{parse_stmt_packet, StmtPacket};
 
 use std::{borrow::Cow, io, sync::Arc};
 
-use crate::{prelude::*, Column, Result};
+use crate::{prelude::*, Column, Conn, Result};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct InnerStmt {
@@ -99,19 +99,19 @@ impl Statement {
 }
 
 impl AsStatement for Statement {
-    fn as_statement<Q: Queryable>(&self, _queryable: &mut Q) -> Result<Cow<'_, Statement>> {
+    fn as_statement(&self, _queryable: &mut Conn) -> Result<Cow<'_, Statement>> {
         Ok(Cow::Borrowed(self))
     }
 }
 
 impl<'a> AsStatement for &'a Statement {
-    fn as_statement<Q: Queryable>(&self, _queryable: &mut Q) -> Result<Cow<'_, Statement>> {
+    fn as_statement(&self, _queryable: &mut Conn) -> Result<Cow<'_, Statement>> {
         Ok(Cow::Borrowed(self))
     }
 }
 
 impl<T: AsRef<str>> AsStatement for T {
-    fn as_statement<Q: Queryable>(&self, queryable: &mut Q) -> Result<Cow<'static, Statement>> {
+    fn as_statement(&self, queryable: &mut Conn) -> Result<Cow<'static, Statement>> {
         let statement = queryable.prep(self.as_ref())?;
         Ok(Cow::Owned(statement))
     }

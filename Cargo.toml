@@ -44,6 +44,7 @@ serde_derive = "1"
 
 [dependencies]
 bufstream = "~0.1"
+fallible-iterator = "0.2.0"
 io-enum = "0.2.1"
 lru = "0.4.3"
 mysql_common = "0.20.1"

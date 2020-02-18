@@ -14,6 +14,7 @@ use std::{
     borrow::Borrow,
     cmp,
     collections::HashMap,
+    convert::TryInto,
     io::{self, Read, Write as _},
     mem,
     ops::{Deref, DerefMut},
@@ -28,16 +29,17 @@ use crate::conn::transaction::IsolationLevel;
 use crate::consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN};
 use crate::io::Stream;
 use crate::prelude::*;
+use crate::queryable::{ConnMut, Connection, Queryable};
 use crate::DriverError::{
     CouldNotConnect, MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
     ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket, UnknownAuthPlugin,
     UnsupportedProtocol,
 };
-use crate::Error::{DriverError, MySqlError};
+use crate::Error::{self, DriverError, MySqlError};
 use crate::Value::{self, Bytes, NULL};
 use crate::{
-    from_value, from_value_opt, LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult,
-    Result as MyResult, SslOpts, Transaction,
+    from_value, from_value_opt, Binary, LocalInfileHandler, Opts, OptsBuilder, Params,
+    QueryResponse, Result, SslOpts, Text, Transaction,
 };
 
 use self::query_result::Or;
@@ -55,7 +57,7 @@ pub mod transaction;
 pub struct Conn {
     opts: Opts,
     stream: Option<MySyncFramed<Stream>>,
-    stmt_cache: StmtCache,
+    pub(crate) stmt_cache: StmtCache,
     server_version: Option<(u16, u16, u16)>,
     mariadb_server_version: Option<(u16, u16, u16)>,
     last_ok_packet: Option<OkPacket<'static>>,
@@ -129,7 +131,7 @@ impl Conn {
 
     /// Check the connection can be improved.
     #[allow(unused_assignments)]
-    fn can_improved(&mut self) -> MyResult<Option<Opts>> {
+    fn can_improved(&mut self) -> Result<Option<Opts>> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
             let mut socket = None;
             #[cfg(test)]
@@ -153,7 +155,7 @@ impl Conn {
     }
 
     /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
+    pub fn new<T: Into<Opts>>(opts: T) -> Result<Conn> {
         let mut conn = Conn::empty(opts);
         conn.connect_stream()?;
         conn.connect()?;
@@ -172,12 +174,12 @@ impl Conn {
             }
         };
         for cmd in conn.opts.get_init() {
-            conn.query_drop(cmd)?;
+            (&mut conn).query(cmd)?;
         }
         Ok(conn)
     }
 
-    fn soft_reset(&mut self) -> MyResult<()> {
+    fn soft_reset(&mut self) -> Result<()> {
         self.write_command(Command::COM_RESET_CONNECTION, &[])?;
         self.read_packet().and_then(|pld| match pld[0] {
             0 => {
@@ -194,7 +196,7 @@ impl Conn {
         })
     }
 
-    fn hard_reset(&mut self) -> MyResult<()> {
+    fn hard_reset(&mut self) -> Result<()> {
         self.stream = None;
         self.stmt_cache.clear();
         self.capability_flags = CapabilityFlags::empty();
@@ -210,7 +212,7 @@ impl Conn {
     }
 
     /// Resets `MyConn` (drops state then reconnects).
-    pub fn reset(&mut self) -> MyResult<()> {
+    pub fn reset(&mut self) -> Result<()> {
         match (self.server_version, self.mariadb_server_version) {
             (Some(ref version), _) if *version > (5, 7, 3) => {
                 self.soft_reset().or_else(|_| self.hard_reset())
@@ -222,7 +224,7 @@ impl Conn {
         }
     }
 
-    fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> MyResult<()> {
+    fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
         let stream = self.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
         let stream = stream.make_secure(self.opts.get_ip_or_hostname(), ssl_opts)?;
@@ -231,7 +233,7 @@ impl Conn {
         Ok(())
     }
 
-    fn connect_stream(&mut self) -> MyResult<()> {
+    fn connect_stream(&mut self) -> Result<()> {
         let read_timeout = self.opts.get_read_timeout().cloned();
         let write_timeout = self.opts.get_write_timeout().cloned();
         let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms();
@@ -259,7 +261,7 @@ impl Conn {
         Ok(())
     }
 
-    fn read_packet(&mut self) -> MyResult<Vec<u8>> {
+    fn read_packet(&mut self) -> Result<Vec<u8>> {
         let data = self.stream_mut().next().transpose()?.ok_or(io::Error::new(
             io::ErrorKind::BrokenPipe,
             "server disconnected",
@@ -274,11 +276,11 @@ impl Conn {
         }
     }
 
-    fn drop_packet(&mut self) -> MyResult<()> {
+    fn drop_packet(&mut self) -> Result<()> {
         self.read_packet().map(|_| ())
     }
 
-    fn write_packet<T: Into<Vec<u8>>>(&mut self, data: T) -> MyResult<()> {
+    fn write_packet<T: Into<Vec<u8>>>(&mut self, data: T) -> Result<()> {
         self.stream_mut().send(data.into())?;
         Ok(())
     }
@@ -299,6 +301,7 @@ impl Conn {
 
     fn handle_err(&mut self) {
         self.has_results = false;
+        self.status_flags = StatusFlags::empty();
         self.last_ok_packet = None;
     }
 
@@ -307,7 +310,7 @@ impl Conn {
             .contains(StatusFlags::SERVER_MORE_RESULTS_EXISTS)
     }
 
-    fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> MyResult<()> {
+    fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> Result<()> {
         let nonce = auth_switch_request.plugin_data();
         let plugin_data = auth_switch_request
             .auth_plugin()
@@ -316,7 +319,7 @@ impl Conn {
         self.continue_auth(auth_switch_request.auth_plugin(), nonce, true)
     }
 
-    fn do_handshake(&mut self) -> MyResult<()> {
+    fn do_handshake(&mut self) -> Result<()> {
         let payload = self.read_packet()?;
         let handshake = parse_handshake_packet(payload.as_ref())?;
 
@@ -427,7 +430,7 @@ impl Conn {
         attrs
     }
 
-    fn do_ssl_request(&mut self) -> MyResult<()> {
+    fn do_ssl_request(&mut self) -> Result<()> {
         let ssl_request = SslRequest::new(self.get_client_flags());
         self.write_packet(ssl_request)
     }
@@ -436,7 +439,7 @@ impl Conn {
         &mut self,
         auth_plugin: &AuthPlugin<'_>,
         scramble_buf: Option<&[u8]>,
-    ) -> MyResult<()> {
+    ) -> Result<()> {
         let handshake_response = HandshakeResponse::new(
             &scramble_buf,
             self.server_version.unwrap_or((0, 0, 0)),
@@ -454,7 +457,7 @@ impl Conn {
         auth_plugin: &AuthPlugin<'_>,
         nonce: &[u8],
         auth_switched: bool,
-    ) -> MyResult<()> {
+    ) -> Result<()> {
         match auth_plugin {
             AuthPlugin::MysqlNativePassword => {
                 self.continue_mysql_native_password_auth(auth_switched)
@@ -469,7 +472,7 @@ impl Conn {
         }
     }
 
-    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> MyResult<()> {
+    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> Result<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
@@ -492,7 +495,7 @@ impl Conn {
         &mut self,
         nonce: &[u8],
         auth_switched: bool,
-    ) -> MyResult<()> {
+    ) -> Result<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
@@ -548,14 +551,14 @@ impl Conn {
         self.stream_mut().codec_mut().sync_seq_id();
     }
 
-    fn write_command_raw<T: Into<Vec<u8>>>(&mut self, body: T) -> MyResult<()> {
+    pub(crate) fn write_command_raw<T: Into<Vec<u8>>>(&mut self, body: T) -> Result<()> {
         let body = body.into();
         self.reset_seq_id();
         self.last_command = body[0];
         self.write_packet(body)
     }
 
-    fn write_command(&mut self, cmd: Command, data: &[u8]) -> MyResult<()> {
+    fn write_command(&mut self, cmd: Command, data: &[u8]) -> Result<()> {
         let mut body = Vec::with_capacity(1 + data.len());
         body.push(cmd as u8);
         body.extend_from_slice(data);
@@ -563,7 +566,7 @@ impl Conn {
         self.write_command_raw(body)
     }
 
-    fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> MyResult<()> {
+    fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> Result<()> {
         for (i, value) in params.into_iter().enumerate() {
             match value {
                 Bytes(bytes) => {
@@ -585,7 +588,11 @@ impl Conn {
         Ok(())
     }
 
-    fn _execute(&mut self, stmt: &Statement, params: Params) -> MyResult<Vec<Column>> {
+    pub(crate) fn _execute(
+        &mut self,
+        stmt: &Statement,
+        params: Params,
+    ) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         let exec_request = match params {
             Params::Empty => {
                 if stmt.num_params() != 0 {
@@ -621,10 +628,7 @@ impl Conn {
             }
         };
         self.write_command_raw(exec_request)?;
-        self.handle_result_set().map(|or| match or {
-            Or::A(cols) => cols,
-            Or::B(_) => Vec::new(),
-        })
+        self.handle_result_set()
     }
 
     fn _start_transaction(
@@ -632,9 +636,9 @@ impl Conn {
         consistent_snapshot: bool,
         isolation_level: Option<IsolationLevel>,
         readonly: Option<bool>,
-    ) -> MyResult<()> {
+    ) -> Result<()> {
         if let Some(i_level) = isolation_level {
-            self.query_drop(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
+            self.query(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
         }
         if let Some(readonly) = readonly {
             let supported = match (self.server_version, self.mariadb_server_version) {
@@ -646,20 +650,20 @@ impl Conn {
                 return Err(DriverError(ReadOnlyTransNotSupported));
             }
             if readonly {
-                self.query_drop("SET TRANSACTION READ ONLY")?;
+                self.query("SET TRANSACTION READ ONLY")?;
             } else {
-                self.query_drop("SET TRANSACTION READ WRITE")?;
+                self.query("SET TRANSACTION READ WRITE")?;
             }
         }
         if consistent_snapshot {
-            self.query_drop("START TRANSACTION WITH CONSISTENT SNAPSHOT")?;
+            self.query("START TRANSACTION WITH CONSISTENT SNAPSHOT")?;
         } else {
-            self.query_drop("START TRANSACTION")?;
+            self.query("START TRANSACTION")?;
         };
         Ok(())
     }
 
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<OkPacket<'static>> {
+    fn send_local_infile(&mut self, file_name: &[u8]) -> Result<OkPacket<'static>> {
         {
             let buffer_size = cmp::min(
                 MAX_PAYLOAD_LEN - 4,
@@ -687,7 +691,7 @@ impl Conn {
         Ok(ok.into_owned())
     }
 
-    fn handle_result_set(&mut self) -> MyResult<Or<Vec<Column>, OkPacket<'static>>> {
+    fn handle_result_set(&mut self) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         if self.more_results_exists() {
             self.sync_seq_id();
         }
@@ -724,7 +728,7 @@ impl Conn {
         }
     }
 
-    fn _query(&mut self, query: &str) -> MyResult<Or<Vec<Column>, OkPacket<'static>>> {
+    pub(crate) fn _query(&mut self, query: &str) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         self.write_command(Command::COM_QUERY, query.as_bytes())?;
         self.handle_result_set()
     }
@@ -754,12 +758,12 @@ impl Conn {
         consistent_snapshot: bool,
         isolation_level: Option<IsolationLevel>,
         readonly: Option<bool>,
-    ) -> MyResult<Transaction> {
+    ) -> Result<Transaction> {
         self._start_transaction(consistent_snapshot, isolation_level, readonly)?;
-        Ok(Transaction::new(self))
+        Ok(Transaction::new(self.into()))
     }
 
-    fn _true_prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
+    fn _true_prepare(&mut self, query: &str) -> Result<InnerStmt> {
         self.write_command(Command::COM_STMT_PREPARE, query.as_bytes())?;
         let pld = self.read_packet()?;
         let mut stmt = InnerStmt::from_payload(pld.as_ref(), self.connection_id())?;
@@ -784,7 +788,7 @@ impl Conn {
         Ok(stmt)
     }
 
-    fn _prepare(&mut self, query: &str) -> MyResult<Arc<InnerStmt>> {
+    pub(crate) fn _prepare(&mut self, query: &str) -> Result<Arc<InnerStmt>> {
         if let Some(entry) = self.stmt_cache.by_query(query) {
             return Ok(entry.stmt.clone());
         }
@@ -801,7 +805,7 @@ impl Conn {
         Ok(inner_st)
     }
 
-    fn connect(&mut self) -> MyResult<()> {
+    fn connect(&mut self) -> Result<()> {
         if self.connected {
             return Ok(());
         }
@@ -823,11 +827,13 @@ impl Conn {
             })
     }
 
-    fn get_system_var(&mut self, name: &str) -> MyResult<Option<Value>> {
-        self.query_first(format!("SELECT @@{}", name))
+    fn get_system_var(&mut self, name: &str) -> Result<Option<Value>> {
+        format!("SELECT @@{}", name)
+            .first(self)
+            .map_err(Error::from)
     }
 
-    fn next_bin(&mut self, columns: &[Column]) -> MyResult<Option<Vec<Value>>> {
+    fn next_bin(&mut self, columns: &[Column]) -> Result<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
@@ -842,7 +848,7 @@ impl Conn {
         Ok(Some(values))
     }
 
-    fn next_text(&mut self, col_count: usize) -> MyResult<Option<Vec<Value>>> {
+    fn next_text(&mut self, col_count: usize) -> Result<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
@@ -877,37 +883,59 @@ impl Conn {
     }
 }
 
-impl crate::prelude::Queryable for Conn {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
-        match self._query(query.as_ref()) {
-            Ok(Or::A(cols)) => Ok(QueryResult::new(self, cols, false)),
-            Ok(Or::B(_)) => Ok(QueryResult::new(self, Vec::new(), false)),
-            Err(err) => Err(err),
-        }
+impl Connection for Conn {
+    fn as_mut(&mut self) -> &mut Conn {
+        self
+    }
+}
+
+impl<C> Queryable for C {
+    fn query<'a, T>(self, query: T) -> Result<QueryResponse<'a, Text>>
+    where
+        T: AsRef<str>,
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+    {
+        let mut conn = self.try_into()?;
+        let meta = conn._query(query.as_ref())?;
+        Ok(QueryResponse::new(conn, meta))
     }
 
-    fn prep<T: AsRef<str>>(&mut self, query: T) -> MyResult<Statement> {
+    fn prep<'a, T: AsRef<str>>(self, query: T) -> Result<Statement>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+    {
+        let mut conn = self.try_into()?;
         let query = query.as_ref();
         let (named_params, real_query) = parse_named_params(query)?;
-        self._prepare(real_query.borrow())
+        conn._prepare(real_query.borrow())
             .map(|inner| Statement::new(inner, named_params))
     }
 
-    fn close(&mut self, stmt: Statement) -> MyResult<()> {
-        self.stmt_cache.remove(stmt.id());
+    fn close<'a>(self, stmt: Statement) -> Result<()>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+    {
+        let mut conn = self.try_into()?;
+        conn.stmt_cache.remove(stmt.id());
         let com_stmt_close = ComStmtClose::new(stmt.id());
-        self.write_command_raw(com_stmt_close)?;
+        conn.write_command_raw(com_stmt_close)?;
         Ok(())
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_>>
+    fn exec<'a, S, P>(self, stmt: S, params: P) -> Result<QueryResponse<'a, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
     {
-        let statement = stmt.as_statement(self)?;
-        let columns = self._execute(&*statement, params.into())?;
-        Ok(QueryResult::new(self, columns, true))
+        let mut conn = self.try_into()?;
+        let statement = stmt.as_statement(&mut *conn)?;
+        let meta = conn.as_mut()._execute(&*statement, params.into())?;
+        Ok(QueryResponse::new(conn, meta))
     }
 }
 
@@ -966,7 +994,7 @@ mod test {
             Conn,
             DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
-            LocalInfileHandler, Opts, OptsBuilder, Params,
+            LocalInfileHandler, Opts, OptsBuilder, Params, Result,
             Value::{self, Bytes, Date, Float, Int, NULL},
         };
 
@@ -974,7 +1002,8 @@ mod test {
         where
             T: FromValue,
         {
-            conn.query_first::<_, (String, T)>(format!("show variables like '{}'", name))
+            format!("show variables like '{}'", name)
+                .first::<(Value, T), _>(conn)
                 .unwrap()
                 .unwrap()
                 .1
@@ -984,8 +1013,8 @@ mod test {
         fn should_connect() {
             let mut conn = Conn::new(get_opts()).unwrap();
 
-            let mode: String = conn
-                .query_first("SELECT @@GLOBAL.sql_mode")
+            let mode: String = "SELECT @@GLOBAL.sql_mode"
+                .first(&mut conn)
                 .unwrap()
                 .unwrap();
             assert!(mode.contains("TRADITIONAL"));
@@ -1015,6 +1044,9 @@ mod test {
             let _ = Conn::new(opts).unwrap();
         }
 
+        // TODO: Expose columns via QueryResponse.
+        // TODO: Reset connection on drop to pool
+
         #[test]
         fn should_connect_with_database() {
             const DB_NAME: &str = "mysql";
@@ -1024,7 +1056,7 @@ mod test {
 
             let mut conn = Conn::new(opts).unwrap();
 
-            let db_name: String = conn.query_first("SELECT DATABASE()").unwrap().unwrap();
+            let db_name: String = "SELECT DATABASE()".first(&mut conn).unwrap().unwrap();
             assert_eq!(db_name, DB_NAME);
         }
 
@@ -1041,15 +1073,16 @@ mod test {
             const DB_NAME: &str = "t_select_db";
 
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS {}", DB_NAME))
+
+            format!("CREATE DATABASE IF NOT EXISTS {}", DB_NAME)
+                .run(&mut conn)
                 .unwrap();
             assert!(conn.select_db(DB_NAME));
 
-            let db_name: String = conn.query_first("SELECT DATABASE()").unwrap().unwrap();
+            let db_name: String = "SELECT DATABASE()".first(&mut conn).unwrap().unwrap();
             assert_eq!(db_name, DB_NAME);
 
-            conn.query_drop(format!("DROP DATABASE {}", DB_NAME))
-                .unwrap();
+            format!("DROP DATABASE {}", DB_NAME).run(&mut conn).unwrap();
         }
 
         #[test]
@@ -1067,31 +1100,31 @@ mod test {
 
             let mut conn = Conn::new(get_opts()).unwrap();
 
-            conn.query_drop(CREATE_QUERY).unwrap();
+            CREATE_QUERY.run(&mut conn).unwrap();
             assert_eq!(conn.affected_rows(), 0);
             assert_eq!(conn.last_insert_id(), 0);
 
-            conn.query_drop(INSERT_QUERY_1).unwrap();
+            INSERT_QUERY_1.run(&mut conn).unwrap();
             assert_eq!(conn.affected_rows(), 1);
             assert_eq!(conn.last_insert_id(), 1);
 
-            conn.query_drop(INSERT_QUERY_2).unwrap();
+            (&mut conn).query(INSERT_QUERY_2).unwrap();
             assert_eq!(conn.affected_rows(), 1);
             assert_eq!(conn.last_insert_id(), 2);
 
-            conn.query_drop("SELECT * FROM unexisted").unwrap_err();
-            conn.query_iter("SELECT * FROM mysql.tbl").unwrap(); // Drop::drop for QueryResult
+            (&mut conn).query("SELECT * FROM unexisted").unwrap_err();
+            (&mut conn).query("SELECT * FROM mysql.tbl").unwrap(); // Drop::drop for QueryResult
 
-            conn.query_drop("UPDATE mysql.tbl SET a = 'foo'").unwrap();
+            (&mut conn).query("UPDATE mysql.tbl SET a = 'foo'").unwrap();
             assert_eq!(conn.affected_rows(), 2);
             assert_eq!(conn.last_insert_id(), 0);
 
-            assert!(conn
-                .query_first::<_, TestRow>("SELECT * FROM mysql.tbl WHERE a = 'bar'")
+            assert!("SELECT * FROM mysql.tbl WHERE a = 'bar'"
+                .first::<Value, _>(&mut conn)
                 .unwrap()
                 .is_none());
 
-            let rows: Vec<TestRow> = conn.query("SELECT * FROM mysql.tbl").unwrap();
+            let rows: Vec<TestRow> = "SELECT * FROM mysql.tbl".fetch(&mut conn).unwrap();
             assert_eq!(
                 rows,
                 vec![
@@ -1118,8 +1151,8 @@ mod test {
         #[test]
         fn should_parse_large_text_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let value: Value = conn
-                .query_first("SELECT REPEAT('A', 20000000)")
+            let value: Value = "SELECT REPEAT('A', 20000000)"
+                .first(&mut conn)
                 .unwrap()
                 .unwrap();
             assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
@@ -1145,44 +1178,42 @@ mod test {
             let row2 = (Bytes(b"".to_vec()), NULL, NULL, NULL, Float(321.321_f64));
 
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query_drop(CREATE_QUERY).unwrap();
+            (&mut conn).query(CREATE_QUERY).unwrap();
 
-            let insert_stmt = conn.prep(INSERT_SMTM).unwrap();
+            let insert_stmt = (&mut conn).prep(INSERT_SMTM).unwrap();
             assert_eq!(insert_stmt.connection_id(), conn.connection_id());
-            conn.exec_drop(
-                &insert_stmt,
-                (
-                    from_value::<String>(row1.0.clone()),
-                    from_value::<i32>(row1.1.clone()),
-                    from_value::<u32>(row1.2.clone()),
-                    from_value::<Timespec>(row1.3.clone()),
-                    from_value::<f64>(row1.4.clone()),
-                ),
-            )
-            .unwrap();
-            conn.exec_drop(
-                &insert_stmt,
-                (
-                    from_value::<String>(row2.0.clone()),
-                    row2.1.clone(),
-                    row2.2.clone(),
-                    row2.3.clone(),
-                    from_value::<f64>(row2.4.clone()),
-                ),
-            )
-            .unwrap();
+            insert_stmt
+                .batch(
+                    &mut conn,
+                    vec![
+                        (
+                            from_value::<String>(row1.0.clone()),
+                            from_value::<Option<i32>>(row1.1.clone()),
+                            from_value::<Option<u32>>(row1.2.clone()),
+                            from_value::<Option<Timespec>>(row1.3.clone()),
+                            from_value::<f64>(row1.4.clone()),
+                        ),
+                        (
+                            from_value::<String>(row2.0.clone()),
+                            from_value::<Option<i32>>(row2.1.clone()),
+                            from_value::<Option<u32>>(row2.2.clone()),
+                            from_value::<Option<Timespec>>(row2.3.clone()),
+                            from_value::<f64>(row2.4.clone()),
+                        ),
+                    ],
+                )
+                .unwrap();
 
-            let select_stmt = conn.prep("SELECT * from mysql.tbl").unwrap();
-            let rows: Vec<RowType> = conn.exec(&select_stmt, ()).unwrap();
-
+            let select_stmt = (&mut conn).prep("SELECT * from mysql.tbl").unwrap();
+            let rows: Vec<RowType> = select_stmt.s_fetch(&mut conn, ()).unwrap();
             assert_eq!(rows, vec![row1, row2]);
         }
 
         #[test]
         fn should_parse_large_binary_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let stmt = conn.prep("SELECT REPEAT('A', 20000000)").unwrap();
-            let value: Value = conn.exec_first(&stmt, ()).unwrap().unwrap();
+            let stmt = (&mut conn).prep("SELECT REPEAT('A', 20000000)").unwrap();
+            let value: Value = stmt.s_first(&mut conn, ()).unwrap().unwrap();
             assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
         }
 
@@ -1191,32 +1222,38 @@ mod test {
             let mut opts = OptsBuilder::from(get_opts());
             opts.stmt_cache_size(1);
             let mut conn = Conn::new(opts).unwrap();
-            let stmt = conn.prep("SELECT 1").unwrap();
-            conn.exec_drop(&stmt, ()).unwrap();
-            conn.close(stmt).unwrap();
-            let stmt = conn.prep("SELECT 1").unwrap();
-            conn.exec_drop(&stmt, ()).unwrap();
-            conn.close(stmt).unwrap();
-            let stmt = conn.prep("SELECT 2").unwrap();
-            conn.exec_drop(&stmt, ()).unwrap();
+            let stmt = (&mut conn).prep("SELECT 1").unwrap();
+            (&mut conn).exec(&stmt, ()).unwrap();
+            (&mut conn).close(stmt).unwrap();
+            let stmt = (&mut conn).prep("SELECT 1").unwrap();
+            (&mut conn).exec(&stmt, ()).unwrap();
+            (&mut conn).close(stmt).unwrap();
+            let stmt = (&mut conn).prep("SELECT 2").unwrap();
+            (&mut conn).exec(&stmt, ()).unwrap();
         }
 
         #[test]
         fn should_start_commit_and_rollback_transactions() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
+            (&mut conn)
+                .query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
                 .unwrap();
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
-                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
+                    (&mut t)
+                        .query("INSERT INTO mysql.tbl(a) VALUES(1)")
+                        .unwrap();
+                    (&mut t)
+                        .query("INSERT INTO mysql.tbl(a) VALUES(2)")
+                        .unwrap();
                     t.commit().unwrap();
                     Ok(())
                 })
                 .unwrap();
             assert_eq!(
-                conn.query_iter("SELECT COUNT(a) from mysql.tbl")
+                (&mut conn)
+                    .query("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -1226,14 +1263,15 @@ mod test {
             );
             let _ = conn
                 .start_transaction(false, None, None)
-                .and_then(|mut t| {
-                    t.query_drop("INSERT INTO tbl2(a) VALUES(1)").unwrap_err();
+                .and_then(|ref mut t| {
+                    t.query("INSERT INTO tbl2(a) VALUES(1)").unwrap_err();
                     Ok(())
                     // implicit rollback
                 })
                 .unwrap();
             assert_eq!(
-                conn.query_iter("SELECT COUNT(a) from mysql.tbl")
+                (&mut conn)
+                    .query("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -1244,14 +1282,19 @@ mod test {
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
-                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
+                    (&mut t)
+                        .query("INSERT INTO mysql.tbl(a) VALUES(1)")
+                        .unwrap();
+                    (&mut t)
+                        .query("INSERT INTO mysql.tbl(a) VALUES(2)")
+                        .unwrap();
                     t.rollback().unwrap();
                     Ok(())
                 })
                 .unwrap();
             assert_eq!(
-                conn.query_iter("SELECT COUNT(a) from mysql.tbl")
+                (&mut conn)
+                    .query("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -1260,13 +1303,16 @@ mod test {
                 vec![Bytes(b"2".to_vec())]
             );
             let mut tx = conn.start_transaction(false, None, None).unwrap();
-            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (3,))
+            (&mut tx)
+                .exec("INSERT INTO mysql.tbl(a) VALUES(?)", (3,))
                 .unwrap();
-            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (4,))
+            (&mut tx)
+                .exec("INSERT INTO mysql.tbl(a) VALUES(?)", (4,))
                 .unwrap();
             tx.commit().unwrap();
             assert_eq!(
-                conn.query_iter("SELECT COUNT(a) from mysql.tbl")
+                "SELECT COUNT(a) from mysql.tbl"
+                    .run(&mut conn)
                     .unwrap()
                     .next()
                     .unwrap()
@@ -1275,20 +1321,23 @@ mod test {
                 vec![Bytes(b"4".to_vec())]
             );
             let mut tx = conn.start_transaction(false, None, None).unwrap();
-            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (5,))
+            (&mut tx)
+                .exec("INSERT INTO mysql.tbl(a) VALUES(?)", (5,))
                 .unwrap();
-            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (6,))
+            (&mut tx)
+                .exec("INSERT INTO mysql.tbl(a) VALUES(?)", (6,))
                 .unwrap();
             drop(tx);
             assert_eq!(
-                conn.query_first("SELECT COUNT(a) from mysql.tbl").unwrap(),
+                "SELECT COUNT(a) from mysql.tbl".first(&mut conn).unwrap(),
                 Some(4_usize),
             );
         }
         #[test]
         fn should_handle_LOCAL_INFILE_with_custom_handler() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
+            (&mut conn)
+                .query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
                 .unwrap();
             conn.set_local_infile_handler(Some(LocalInfileHandler::new(|_, stream| {
                 let mut cell_data = vec![b'Z'; 65535];
@@ -1298,35 +1347,39 @@ mod test {
                 }
                 Ok(())
             })));
-            match conn.query_drop("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE mysql.tbl") {
+            match (&mut conn).query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE mysql.tbl") {
                 Ok(_) => {}
                 Err(ref err) if format!("{}", err).find("not allowed").is_some() => {
                     return;
                 }
                 Err(err) => panic!("ERROR {}", err),
             }
-            let count = conn
-                .query_iter("SELECT * FROM mysql.tbl")
-                .unwrap()
-                .map(|row| {
-                    assert_eq!(from_row::<(Vec<u8>,)>(row.unwrap()).0.len(), 65535);
-                    1
-                })
-                .sum::<usize>();
+            let count = IntoFallibleIterator::into_fallible_iter(
+                "SELECT * FROM mysql.tbl".run(conn).unwrap(),
+            )
+            .map(|row| {
+                let row: Vec<u8> = from_row(row);
+                assert_eq!(row.len(), 65535);
+                Ok(1)
+            })
+            .fold(0_usize, |acc, x| Ok(acc + x))
+            .unwrap();
             assert_eq!(count, 1536);
         }
 
         #[test]
         fn should_reset_connection() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query_drop(
-                "CREATE TEMPORARY TABLE `mysql`.`test` \
-                 (`test` VARCHAR(255) NULL);",
-            )
-            .unwrap();
-            conn.query_drop("SELECT * FROM `mysql`.`test`;").unwrap();
+            (&mut conn)
+                .query(
+                    "CREATE TEMPORARY TABLE `mysql`.`test` \
+                     (`test` VARCHAR(255) NULL);",
+                )
+                .unwrap();
+            (&mut conn).query("SELECT * FROM `mysql`.`test`;").unwrap();
             conn.reset().unwrap();
-            conn.query_drop("SELECT * FROM `mysql`.`test`;")
+            (&mut conn)
+                .query("SELECT * FROM `mysql`.`test`;")
                 .unwrap_err();
         }
 
@@ -1334,15 +1387,17 @@ mod test {
         fn prep_exec() {
             let mut conn = Conn::new(get_opts()).unwrap();
 
-            let stmt1 = conn.prep("SELECT :foo").unwrap();
-            let stmt2 = conn.prep("SELECT :bar").unwrap();
+            let stmt1 = (&mut conn).prep("SELECT :foo").unwrap();
+            let stmt2 = (&mut conn).prep("SELECT :bar").unwrap();
             assert_eq!(
-                conn.exec::<_, _, String>(&stmt1, params! { "foo" => "foo" })
+                stmt1
+                    .s_fetch::<String, _, _>(&mut conn, params! { "foo" => "foo" })
                     .unwrap(),
                 vec!["foo".to_string()],
             );
             assert_eq!(
-                conn.exec::<_, _, String>(&stmt2, params! { "bar" => "bar" })
+                stmt2
+                    .s_fetch::<String, _, _>(&mut conn, params! { "bar" => "bar" })
                     .unwrap(),
                 vec!["bar".to_string()],
             );
@@ -1373,17 +1428,19 @@ mod test {
             let mut opts = OptsBuilder::from_opts(get_opts());
             opts.db_name(Some("mysql"));
             let mut conn = Conn::new(opts).unwrap();
-            conn.query_drop("CREATE TEMPORARY TABLE TEST_TABLE ( name varchar(255) )")
+            (&mut conn)
+                .query("CREATE TEMPORARY TABLE TEST_TABLE ( name varchar(255) )")
                 .unwrap();
-            conn.exec_drop("SELECT * FROM TEST_TABLE", ()).unwrap();
-            conn.query_drop(
-                r"
+            (&mut conn).exec("SELECT * FROM TEST_TABLE", ()).unwrap();
+            (&mut conn)
+                .query(
+                    r"
                 INSERT INTO TEST_TABLE (name) VALUES ('one');
                 INSERT INTO TEST_TABLE (name) VALUES ('two');
                 INSERT INTO TEST_TABLE (name) VALUES ('three');",
-            )
-            .unwrap();
-            conn.exec_drop("SELECT * FROM TEST_TABLE", ()).unwrap();
+                )
+                .unwrap();
+            (&mut conn).exec("SELECT * FROM TEST_TABLE", ()).unwrap();
         }
 
         #[test]
@@ -1392,9 +1449,10 @@ mod test {
             opts.prefer_socket(false);
             opts.db_name(Some("mysql"));
             let mut conn = Conn::new(opts).unwrap();
-            conn.query_drop("DROP PROCEDURE IF EXISTS multi").unwrap();
-            conn.query_drop(
-                r#"CREATE PROCEDURE multi() BEGIN
+            (&mut conn).query("DROP PROCEDURE IF EXISTS multi").unwrap();
+            (&mut conn)
+                .query(
+                    r#"CREATE PROCEDURE multi() BEGIN
                         SELECT 1 UNION ALL SELECT 2;
                         DO 1;
                         SELECT 3 UNION ALL SELECT 4;
@@ -1403,55 +1461,56 @@ mod test {
                         SELECT REPEAT('A', 17000000);
                         SELECT REPEAT('A', 17000000);
                     END"#,
-            )
-            .unwrap();
+                )
+                .unwrap();
             {
-                let mut query_result = conn.query_iter("CALL multi()").unwrap();
+                let mut query_result = (&mut conn).exec("CALL multi()", ()).unwrap();
                 let result_set = query_result
                     .by_ref()
-                    .map(|row| row.unwrap().unwrap().pop().unwrap())
-                    .collect::<Vec<crate::Value>>();
-                assert_eq!(result_set, vec![Bytes(b"1".to_vec()), Bytes(b"2".to_vec())]);
-                assert!(query_result.more_results_exists());
-                let result_set = query_result
-                    .by_ref()
-                    .map(|row| row.unwrap().unwrap().pop().unwrap())
-                    .collect::<Vec<crate::Value>>();
-                assert_eq!(result_set, vec![Bytes(b"3".to_vec()), Bytes(b"4".to_vec())]);
+                    .map(|row| row.map(from_row::<Value>))
+                    .collect::<Result<Vec<_>>>()
+                    .unwrap();
+                assert_eq!(result_set, vec![Int(1), Int(2)]);
+                let result_set = (&mut query_result)
+                    .map(|row| row.map(from_row::<Value>))
+                    .collect::<Result<Vec<_>>>()
+                    .unwrap();
+                assert_eq!(result_set, vec![Int(3), Int(4)]);
             }
-            let mut result = conn.query_iter("SELECT 1; SELECT 2; SELECT 3;").unwrap();
+
+            // second result set will emit error
+            let mut result = conn
+                .query("SELECT 1; SELECT foo; SELECT 2; SELECT 3;")
+                .unwrap();
             let mut i = 0;
-            while {
+            while let Some(result_set) = result.next_set() {
                 i += 1;
-                result.more_results_exists()
-            } {
-                for row in result.by_ref() {
+                for row in result_set.unwrap() {
                     match i {
                         1 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"1".to_vec())]),
-                        2 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"2".to_vec())]),
-                        3 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"3".to_vec())]),
+                        2 => assert!(row.is_err()),
                         _ => unreachable!(),
                     }
                 }
             }
-            assert_eq!(i, 4);
+            assert_eq!(i, 2);
         }
 
         #[test]
         fn should_work_with_named_params() {
             let mut conn = Conn::new(get_opts()).unwrap();
             {
-                let stmt = conn.prep("SELECT :a, :b, :a, :c").unwrap();
-                let result = conn
-                    .exec_first(&stmt, params! {"a" => 1, "b" => 2, "c" => 3})
+                let stmt = (&mut conn).prep("SELECT :a, :b, :a, :c").unwrap();
+                let result = stmt
+                    .s_first(&mut conn, params! {"a" => 1, "b" => 2, "c" => 3})
                     .unwrap()
                     .unwrap();
                 assert_eq!((1_u8, 2_u8, 1_u8, 3_u8), result);
             }
 
-            let result = conn
-                .exec_first(
-                    "SELECT :a, :b, :a + :b, :c",
+            let result = "SELECT :a, :b, :a + :b, :c"
+                .s_first(
+                    conn,
                     params! {
                         "a" => 1,
                         "b" => 2,
@@ -1466,9 +1525,8 @@ mod test {
         #[test]
         fn should_return_error_on_missing_named_parameter() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let stmt = conn.prep("SELECT :a, :b, :a, :c, :d").unwrap();
-            let result =
-                conn.exec_first::<_, _, crate::Row>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
+            let stmt = (&mut conn).prep("SELECT :a, :b, :a, :c, :d").unwrap();
+            let result = (&mut conn).exec(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
                 _ => assert!(false),
@@ -1478,8 +1536,8 @@ mod test {
         #[test]
         fn should_return_error_on_named_params_for_positional_statement() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let stmt = conn.prep("SELECT ?, ?, ?, ?, ?").unwrap();
-            let result = conn.exec_drop(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
+            let stmt = (&mut conn).prep("SELECT ?, ?, ?, ?, ?").unwrap();
+            let result = (&mut conn).exec(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(NamedParamsForPositionalQuery)) => (),
                 _ => assert!(false),
@@ -1519,12 +1577,14 @@ mod test {
             opts.additional_capabilities(CapabilityFlags::CLIENT_FOUND_ROWS);
 
             let mut conn = Conn::new(opts).unwrap();
-            conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl (a INT, b TEXT)")
+            (&mut conn)
+                .query("CREATE TEMPORARY TABLE mysql.tbl (a INT, b TEXT)")
                 .unwrap();
-            conn.query_drop("INSERT INTO mysql.tbl (a, b) VALUES (1, 'foo')")
+            (&mut conn)
+                .query("INSERT INTO mysql.tbl (a, b) VALUES (1, 'foo')")
                 .unwrap();
             let result = conn
-                .query_iter("UPDATE mysql.tbl SET b = 'foo' WHERE a = 1")
+                .query("UPDATE mysql.tbl SET b = 'foo' WHERE a = 1")
                 .unwrap();
             assert_eq!(result.affected_rows(), 1);
         }
@@ -1561,16 +1621,16 @@ mod test {
             opts.stmt_cache_size(0);
             let mut conn = Conn::new(opts).unwrap();
 
-            let stmt1 = conn.prep("DO 1").unwrap();
-            let stmt2 = conn.prep("DO 2").unwrap();
-            let stmt3 = conn.prep("DO 3").unwrap();
+            let stmt1 = (&mut conn).prep("DO 1").unwrap();
+            let stmt2 = (&mut conn).prep("DO 2").unwrap();
+            let stmt3 = (&mut conn).prep("DO 3").unwrap();
 
-            conn.close(stmt1).unwrap();
-            conn.close(stmt2).unwrap();
-            conn.close(stmt3).unwrap();
+            (&mut conn).close(stmt1).unwrap();
+            (&mut conn).close(stmt2).unwrap();
+            (&mut conn).close(stmt3).unwrap();
 
-            let status: (Value, u8) = conn
-                .query_first("SHOW SESSION STATUS LIKE 'Com_stmt_close';")
+            let status: (Value, u8) = "SHOW SESSION STATUS LIKE 'Com_stmt_close';"
+                .first(&mut conn)
                 .unwrap()
                 .unwrap();
             assert_eq!(status.1, 3);
@@ -1583,17 +1643,17 @@ mod test {
 
             let mut conn = Conn::new(opts).unwrap();
 
-            conn.prep("DO 1").unwrap();
-            conn.prep("DO 2").unwrap();
-            conn.prep("DO 3").unwrap();
-            conn.prep("DO 1").unwrap();
-            conn.prep("DO 4").unwrap();
-            conn.prep("DO 3").unwrap();
-            conn.prep("DO 5").unwrap();
-            conn.prep("DO 6").unwrap();
+            (&mut conn).prep("DO 1").unwrap();
+            (&mut conn).prep("DO 2").unwrap();
+            (&mut conn).prep("DO 3").unwrap();
+            (&mut conn).prep("DO 1").unwrap();
+            (&mut conn).prep("DO 4").unwrap();
+            (&mut conn).prep("DO 3").unwrap();
+            (&mut conn).prep("DO 5").unwrap();
+            (&mut conn).prep("DO 6").unwrap();
 
-            let status: (String, usize) = conn
-                .query_first("SHOW SESSION STATUS LIKE 'Com_stmt_close'")
+            let status: (String, usize) = "SHOW SESSION STATUS LIKE 'Com_stmt_close'"
+                .first(&mut conn)
                 .unwrap()
                 .unwrap();
 
@@ -1626,21 +1686,23 @@ mod test {
             };
 
             let mut conn = Conn::new(get_opts()).unwrap();
-            if conn
-                .query_drop("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b JSON)")
+            if (&mut conn)
+                .query("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b JSON)")
                 .is_err()
             {
-                conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b TEXT)")
+                (&mut conn)
+                    .query("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b TEXT)")
                     .unwrap();
             }
-            conn.exec_drop(
-                r#"INSERT INTO mysql.tbl VALUES ('hello', ?)"#,
-                (Serialized(&decodable),),
-            )
-            .unwrap();
+            (&mut conn)
+                .exec(
+                    r#"INSERT INTO mysql.tbl VALUES ('hello', ?)"#,
+                    (Serialized(&decodable),),
+                )
+                .unwrap();
 
-            let (a, b): (String, Json) = conn
-                .query_first("SELECT a, b FROM mysql.tbl")
+            let (a, b): (String, Json) = "SELECT a, b FROM mysql.tbl"
+                .first(&mut conn)
                 .unwrap()
                 .unwrap();
             assert_eq!(
@@ -1651,8 +1713,8 @@ mod test {
                 )
             );
 
-            let row = conn
-                .exec_first("SELECT a, b FROM mysql.tbl WHERE a = ?", ("hello",))
+            let row = "SELECT a, b FROM mysql.tbl WHERE a = ?"
+                .s_first(&mut conn, ("hello",))
                 .unwrap()
                 .unwrap();
             let (a, Deserialized(b)) = from_row(row);
@@ -1684,7 +1746,7 @@ mod test {
 
                 fn assert_connect_attrs(conn: &mut Conn, expected_values: &[(&str, &str)]) {
                     let mut actual_values = HashMap::new();
-                    for row in conn.query_iter("SELECT attr_name, attr_value FROM performance_schema.session_account_connect_attrs WHERE processlist_id = connection_id()").unwrap() {
+                    for row in (&mut *conn).query("SELECT attr_name, attr_value FROM performance_schema.session_account_connect_attrs WHERE processlist_id = connection_id()").unwrap() {
                         let (name, value) = from_row::<(String, String)>(row.unwrap());
                         actual_values.insert(name, value);
                     }
@@ -1743,7 +1805,7 @@ mod test {
         fn simple_exec(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
-                let _ = conn.query("DO 1");
+                let _ = (&mut conn).query("DO 1");
             })
         }
 
@@ -1769,7 +1831,7 @@ mod test {
         fn simple_query_row(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
-                let _ = conn.query("SELECT 1");
+                let _ = (&mut conn).query("SELECT 1");
             })
         }
 
@@ -1831,7 +1893,7 @@ mod test {
         fn select_large_string(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
-                let _ = conn.query("SELECT REPEAT('A', 10000)");
+                let _ = (&mut conn).query("SELECT REPEAT('A', 10000)");
             })
         }
 
@@ -1847,10 +1909,13 @@ mod test {
         #[bench]
         fn many_small_rows(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query("CREATE TEMPORARY TABLE mysql.x (id INT)")
+            (&mut conn)
+                .query("CREATE TEMPORARY TABLE mysql.x (id INT)")
                 .unwrap();
             for _ in 0..512 {
-                conn.query("INSERT INTO mysql.x VALUES (256)").unwrap();
+                (&mut conn)
+                    .query("INSERT INTO mysql.x VALUES (256)")
+                    .unwrap();
             }
             let mut stmt = conn.prepare("SELECT * FROM mysql.x").unwrap();
             bencher.iter(|| {

@@ -52,14 +52,12 @@
 //!
 //! let pool = Pool::new(url)?;
 //!
-//! let mut conn = pool.get_conn()?;
-//!
 //! // Let's create a table for payments.
-//! conn.query_drop(r"CREATE TEMPORARY TABLE payment (
-//!                      customer_id int not null,
-//!                      amount int not null,
-//!                      account_name text
-//!                  )")?;
+//! r"CREATE TEMPORARY TABLE payment (
+//!      customer_id int not null,
+//!      amount int not null,
+//!      account_name text
+//! )".run(&pool)?;
 //!
 //! let payments = vec![
 //!     Payment { customer_id: 1, amount: 2, account_name: None },
@@ -70,28 +68,20 @@
 //! ];
 //!
 //! // Now let's insert payments to the database
-//!
-//! // First of all we'll prepare the statement to avoid
-//! // statement cache lookup (see the "statement cache" section)
-//! let stmt = conn.prep(r"INSERT INTO
-//!                        payment (customer_id, amount, account_name)
-//!                        VALUES (:customer_id, :amount, :account_name)")?;
-//!
-//! for p in &payments {
-//!     // `execute` takes ownership of `params`, so we'll pass account name by reference.
-//!     conn.exec_drop(&stmt, params! {
+//! r"INSERT INTO
+//!   payment (customer_id, amount, account_name)
+//!   VALUES (:customer_id, :amount, :account_name)"
+//!     .s_batch(&pool, payments.iter().map(|p| params! {
 //!         "customer_id" => p.customer_id,
 //!         "amount" => p.amount,
 //!         "account_name" => &p.account_name,
-//!     })?;
-//! }
+//!     }))?;
 //!
 //! // Let's select payments from database
-//! let selected_payments: Vec<Payment> = conn
-//!     .query_map("SELECT customer_id, amount, account_name from payment", |row| {
-//!         let (customer_id, amount, account_name) = from_row(row);
-//!         Payment { customer_id, amount, account_name }
-//!     })?;
+//! let selected_payments =
+//!     "SELECT customer_id, amount, account_name from payment"
+//!     .map(&pool, |(customer_id, amount, account_name)| Payment { customer_id, amount,
+//!     account_name })?;
 //!
 //! // Let's make sure, that `payments` equals to `selected_payments`.
 //! // Mysql gives no guaranties on order of returned rows
@@ -417,7 +407,7 @@ pub use crate::conn::opts::{Opts, OptsBuilder, DEFAULT_STMT_CACHE_SIZE};
 #[doc(inline)]
 pub use crate::conn::pool::{Pool, PooledConn};
 #[doc(inline)]
-pub use crate::conn::query_result::QueryResult;
+pub use crate::conn::query_result::{Binary, QueryResponse, ResultSet, Text};
 #[doc(inline)]
 pub use crate::conn::stmt::Statement;
 #[doc(inline)]
@@ -451,7 +441,9 @@ pub mod prelude {
     #[doc(inline)]
     pub use crate::myc::value::convert::{ConvIr, FromValue, ToValue};
     #[doc(inline)]
-    pub use crate::queryable::{AsStatement, Queryable};
+    pub use crate::queryable::{AsStatement, BinQuery, Queryable, TextQuery};
+    #[doc(inline)]
+    pub use fallible_iterator::{FallibleIterator, IntoFallibleIterator};
 }
 
 #[doc(inline)]

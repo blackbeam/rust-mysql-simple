@@ -1,8 +1,8 @@
 use std::fmt;
 
 use crate::{
-    conn::ConnRef, prelude::*, Conn, LocalInfileHandler, Params, PooledConn, QueryResult, Result,
-    Statement,
+    conn::ConnRef, prelude::*, queryable::ConnMut, Binary, Conn, LocalInfileHandler, Params,
+    PooledConn, QueryResponse, Result, Statement, Text,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -26,27 +26,17 @@ impl fmt::Display for IsolationLevel {
 
 #[derive(Debug)]
 pub struct Transaction<'a> {
-    conn: ConnRef<'a>,
+    conn: ConnMut<'a>,
     committed: bool,
     rolled_back: bool,
     restore_local_infile_handler: Option<LocalInfileHandler>,
 }
 
 impl<'a> Transaction<'a> {
-    pub(crate) fn new(conn: &'a mut Conn) -> Transaction<'a> {
+    pub(crate) fn new(conn: ConnMut<'a>) -> Transaction<'a> {
         let handler = conn.local_infile_handler.clone();
         Transaction {
-            conn: ConnRef::ViaConnRef(conn),
-            committed: false,
-            rolled_back: false,
-            restore_local_infile_handler: handler,
-        }
-    }
-
-    pub(crate) fn new_pooled(conn: PooledConn) -> Transaction<'a> {
-        let handler = conn.as_ref().local_infile_handler.clone();
-        Transaction {
-            conn: ConnRef::ViaPooledConn(conn),
+            conn: conn,
             committed: false,
             rolled_back: false,
             restore_local_infile_handler: handler,
@@ -55,7 +45,7 @@ impl<'a> Transaction<'a> {
 
     /// Will consume and commit transaction.
     pub fn commit(mut self) -> Result<()> {
-        self.conn.query_drop("COMMIT")?;
+        (&mut *self.conn).query("COMMIT")?;
         self.committed = true;
         Ok(())
     }
@@ -63,7 +53,7 @@ impl<'a> Transaction<'a> {
     /// Will consume and rollback transaction. You also can rely on `Drop` implementation but it
     /// will swallow errors.
     pub fn rollback(mut self) -> Result<()> {
-        self.conn.query_drop("ROLLBACK")?;
+        (&mut *self.conn).query("ROLLBACK")?;
         self.rolled_back = true;
         Ok(())
     }
@@ -75,25 +65,9 @@ impl<'a> Transaction<'a> {
     }
 }
 
-impl<'a> Queryable for Transaction<'a> {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_>> {
-        self.conn.query_iter(query)
-    }
-
-    fn prep<T: AsRef<str>>(&mut self, query: T) -> Result<Statement> {
-        self.conn.prep(query)
-    }
-
-    fn close(&mut self, stmt: Statement) -> Result<()> {
-        self.conn.close(stmt)
-    }
-
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_>>
-    where
-        S: AsStatement,
-        P: Into<Params>,
-    {
-        self.conn.exec_iter(stmt, params)
+impl<'a> From<&'a mut Transaction<'_>> for ConnMut<'a> {
+    fn from(tx: &'a mut Transaction<'_>) -> Self {
+        ConnMut::Mut(&mut tx.conn)
     }
 }
 
@@ -101,7 +75,7 @@ impl<'a> Drop for Transaction<'a> {
     /// Will rollback transaction.
     fn drop(&mut self) {
         if !self.committed && !self.rolled_back {
-            let _ = self.conn.query_drop("ROLLBACK");
+            let _ = (&mut *self.conn).query("ROLLBACK");
         }
         self.conn.local_infile_handler = self.restore_local_infile_handler.take();
     }

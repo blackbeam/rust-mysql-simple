@@ -6,7 +6,7 @@ use mysql_common::row::convert::FromRowError;
 use mysql_common::value::convert::FromValueError;
 use url::ParseError;
 
-use std::{error, fmt, io, result, sync};
+use std::{convert::Infallible, error, fmt, io, result, sync};
 
 use crate::{Row, Value};
 
@@ -99,6 +99,12 @@ impl error::Error for Error {
             Error::TlsHandshakeError(ref err) => Some(err),
             _ => None,
         }
+    }
+}
+
+impl From<Infallible> for Error {
+    fn from(empty: Infallible) -> Self {
+        match empty {}
     }
 }
 

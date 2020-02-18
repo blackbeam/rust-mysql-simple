@@ -1,207 +1,339 @@
-use std::borrow::Cow;
+use mysql_common::{named_params::parse_named_params, packets::ComStmtClose};
 
-use crate::{prelude::FromRow, Params, QueryResult, Result, Statement};
+use std::{
+    borrow::{Borrow, Cow},
+    convert::{Infallible, TryFrom, TryInto},
+    marker::PhantomData,
+};
+
+use crate::{
+    from_row, prelude::FromRow, Binary, Conn, Error, Params, Pool, PooledConn, QueryResponse,
+    Result, Row, Statement, Text, Transaction,
+};
 
 pub trait AsStatement {
-    fn as_statement<Q: Queryable>(&self, queryable: &mut Q) -> Result<Cow<'_, Statement>>;
+    fn as_statement(&self, queryable: &mut Conn) -> Result<Cow<'_, Statement>>;
+}
+
+#[derive(Debug)]
+pub enum ConnMut<'a> {
+    Mut(&'a mut Conn),
+    Owned(Conn),
+    Pooled(PooledConn),
+}
+
+impl From<Conn> for ConnMut<'static> {
+    fn from(conn: Conn) -> Self {
+        ConnMut::Owned(conn)
+    }
+}
+
+impl From<PooledConn> for ConnMut<'static> {
+    fn from(conn: PooledConn) -> Self {
+        ConnMut::Pooled(conn)
+    }
+}
+
+impl<'a> From<&'a mut Conn> for ConnMut<'a> {
+    fn from(conn: &'a mut Conn) -> Self {
+        ConnMut::Mut(conn)
+    }
+}
+
+impl<'a> From<&'a mut PooledConn> for ConnMut<'a> {
+    fn from(conn: &'a mut PooledConn) -> Self {
+        ConnMut::Mut(conn.as_mut())
+    }
+}
+
+impl<'a> TryFrom<&Pool> for ConnMut<'static> {
+    type Error = Error;
+
+    fn try_from(pool: &Pool) -> Result<Self> {
+        pool.get_conn().map(From::from)
+    }
+}
+
+impl<'a> std::ops::Deref for ConnMut<'a> {
+    type Target = Conn;
+
+    fn deref(&self) -> &Conn {
+        match self {
+            ConnMut::Mut(conn) => &**conn,
+            ConnMut::Owned(conn) => &conn,
+            ConnMut::Pooled(conn) => conn.as_ref(),
+        }
+    }
+}
+
+impl<'a> std::ops::DerefMut for ConnMut<'a> {
+    fn deref_mut(&mut self) -> &mut Conn {
+        match self {
+            ConnMut::Mut(ref mut conn) => &mut **conn,
+            ConnMut::Owned(ref mut conn) => conn,
+            ConnMut::Pooled(ref mut conn) => conn.as_mut(),
+        }
+    }
+}
+
+pub trait Connection {
+    fn as_mut(&mut self) -> &mut Conn;
 }
 
 /// Queryable object.
 pub trait Queryable {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_>>;
-
-    fn query<T, U>(&mut self, query: T) -> Result<Vec<U>>
+    /// Performs the given query.
+    fn query<'a, T>(self, query: T) -> Result<QueryResponse<'a, Text>>
     where
         T: AsRef<str>,
-        U: FromRow,
+        Self: TryInto<ConnMut<'a>>,
+        Error: From<<Self as TryInto<ConnMut<'a>>>::Error>;
+
+    /// Prepares the given statement.
+    fn prep<'a, Q: AsRef<str>>(self, query: Q) -> Result<Statement>
+    where
+        Self: TryInto<ConnMut<'a>>,
+        Error: From<<Self as TryInto<ConnMut<'a>>>::Error>;
+
+    /// Closes the given statement.
+    fn close<'a>(self, stmt: Statement) -> Result<()>
+    where
+        Self: TryInto<ConnMut<'a>>,
+        Error: From<<Self as TryInto<ConnMut<'a>>>::Error>;
+
+    fn exec<'a, S, P>(self, stmt: S, params: P) -> Result<QueryResponse<'a, Binary>>
+    where
+        S: AsStatement,
+        P: Into<Params>,
+        Self: TryInto<ConnMut<'a>>,
+        Error: From<<Self as TryInto<ConnMut<'a>>>::Error>;
+}
+
+impl<Q: AsRef<str>> TextQuery for Q {
+    fn run<'b, C>(&self, conn: C) -> Result<QueryResponse<'b, Text>>
+    where
+        C: TryInto<ConnMut<'b>>,
+        Error: From<<C as TryInto<ConnMut<'b>>>::Error>,
     {
-        self.query_map(query, crate::from_row)
+        conn.try_into()?.query(self.as_ref())
     }
 
-    fn query_first<T, U>(&mut self, query: T) -> Result<Option<U>>
+    fn first<'b, T, C>(&self, conn: C) -> Result<Option<T>>
     where
-        T: AsRef<str>,
-        U: FromRow,
+        C: TryInto<ConnMut<'b>>,
+        Error: From<<C as TryInto<ConnMut<'b>>>::Error>,
+        T: FromRow,
     {
-        self.query_iter(query)?
-            .next()
-            .map(|row| row.map(crate::from_row))
-            .transpose()
+        Ok(self.run(conn)?.next().transpose()?.map(from_row))
     }
 
-    fn query_map<F, T, U>(&mut self, query: T, mut f: F) -> Result<Vec<U>>
+    fn fetch<'b, T, C>(&self, conn: C) -> Result<Vec<T>>
     where
-        T: AsRef<str>,
-        F: FnMut(crate::Row) -> U,
+        C: TryInto<ConnMut<'b>>,
+        Error: From<<C as TryInto<ConnMut<'b>>>::Error>,
+        T: FromRow,
     {
-        self.query_fold(query, Vec::new(), |mut acc, row| {
-            acc.push(f(row));
+        self.run(conn)?.map(|rrow| rrow.map(from_row)).collect()
+    }
+
+    fn fold<'b, T, U, F, C>(&self, conn: C, mut init: U, mut next: F) -> Result<U>
+    where
+        C: TryInto<ConnMut<'b>>,
+        Error: From<<C as TryInto<ConnMut<'b>>>::Error>,
+        T: FromRow,
+        F: FnMut(U, T) -> U,
+    {
+        for row in self.run(conn)? {
+            init = next(init, from_row(row?));
+        }
+
+        Ok(init)
+    }
+
+    fn map<'b, T, U, F, C>(&self, conn: C, mut map: F) -> Result<Vec<U>>
+    where
+        C: TryInto<ConnMut<'b>>,
+        Error: From<<C as TryInto<ConnMut<'b>>>::Error>,
+        T: FromRow,
+        F: FnMut(T) -> U,
+    {
+        self.fold(conn, Vec::new(), |mut acc, row: T| {
+            acc.push(map(row));
             acc
         })
     }
+}
 
-    fn query_fold<F, T, U>(&mut self, query: T, init: U, mut f: F) -> Result<U>
+pub trait TextQuery {
+    fn run<'a, C>(&self, conn: C) -> Result<QueryResponse<'a, Text>>
     where
-        T: AsRef<str>,
-        F: FnMut(U, crate::Row) -> U,
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>;
+
+    fn first<'a, T, C>(&self, conn: C) -> Result<Option<T>>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        T: FromRow;
+
+    fn fetch<'a, T, C>(&self, conn: C) -> Result<Vec<T>>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        T: FromRow,
     {
-        self.query_iter(query)?
-            .try_fold(init, |acc, row| row.map(|row| f(acc, row)))
+        self.run(conn)?.map(|rrow| rrow.map(from_row)).collect()
     }
 
-    fn query_drop<T>(&mut self, query: T) -> Result<()>
+    fn fold<'a, T, U, F, C>(&self, conn: C, mut init: U, mut next: F) -> Result<U>
     where
-        T: AsRef<str>,
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        T: FromRow,
+        F: FnMut(U, T) -> U,
     {
-        self.query_iter(query).map(drop)
+        for row in self.run(conn)? {
+            init = next(init, from_row(row?));
+        }
+
+        Ok(init)
     }
 
-    /// Implements binary protocol of mysql server.
-    ///
-    /// Prepares mysql statement on `Conn`. [`Stmt`](struct.Stmt.html) will
-    /// borrow `Conn` until the end of its scope.
-    ///
-    /// This call will take statement from cache if has been prepared on this connection.
-    ///
-    /// ### JSON caveats
-    ///
-    /// For the following statement you will get somewhat unexpected result `{"a": 0}`, because
-    /// booleans in mysql binary protocol is `TINYINT(1)` and will be interpreted as `0`:
-    ///
-    /// ```ignore
-    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (false,));
-    /// ```
-    ///
-    /// You should wrap such parameters to a proper json value. For example:
-    ///
-    /// ```ignore
-    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (Value::Bool(false),));
-    /// ```
-    ///
-    /// ### Named parameters support
-    ///
-    /// `prepare` supports named parameters in form of `:named_param_name`. Allowed characters for
-    /// parameter name are `[a-z_]`. Named parameters will be converted to positional before actual
-    /// call to prepare so `SELECT :a-:b, :a*:b` is actually `SELECT ?-?, ?*?`.
-    ///
-    /// ```
-    /// # #[macro_use] extern crate mysql; fn main() {
-    /// # use mysql::prelude::*;
-    /// # use mysql::{Pool, Opts, OptsBuilder, from_row};
-    /// # use mysql::Error::DriverError;
-    /// # use mysql::DriverError::MixedParams;
-    /// # use mysql::DriverError::MissingNamedParameter;
-    /// # use mysql::DriverError::NamedParamsForPositionalQuery;
-    /// # fn get_opts() -> Opts {
-    /// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
-    /// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
-    /// #         if opts.get_db_name().expect("a database name is required").is_empty() {
-    /// #             panic!("database name is empty");
-    /// #         }
-    /// #         url
-    /// #     } else {
-    /// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
-    /// #     };
-    /// #     Opts::from_url(&*url).unwrap()
-    /// # }
-    /// # let opts = get_opts();
-    /// # let pool = Pool::new(opts).unwrap();
-    /// # let mut conn = pool.get_conn().unwrap();
-    /// // Names could be repeated
-    /// conn.exec_iter("SELECT :a+:b, :a * :b, ':c'", params!{"a" => 2, "b" => 3}).map(|mut result| {
-    ///     let row = result.next().unwrap().unwrap();
-    ///     assert_eq!((5, 6, String::from(":c")), from_row(row));
-    /// }).unwrap();
-    ///
-    /// // You can call named statement with positional parameters
-    /// conn.exec_iter("SELECT :a+:b, :a*:b", (2, 3, 2, 3)).map(|mut result| {
-    ///     let row = result.next().unwrap().unwrap();
-    ///     assert_eq!((5, 6), from_row(row));
-    /// }).unwrap();
-    ///
-    /// // You must pass all named parameters for statement
-    /// let err = conn.exec_drop("SELECT :name", params!{"another_name" => 42}).unwrap_err();
-    /// match err {
-    ///     DriverError(e) => {
-    ///         assert_eq!(MissingNamedParameter("name".into()), e);
-    ///     }
-    ///     _ => unreachable!(),
-    /// }
-    ///
-    /// // You can't call positional statement with named parameters
-    /// let err = conn.exec_drop("SELECT ?", params!{"first" => 42}).unwrap_err();
-    /// match err {
-    ///     DriverError(e) => assert_eq!(NamedParamsForPositionalQuery, e),
-    ///     _ => unreachable!(),
-    /// }
-    ///
-    /// // You can't mix named and positional parameters
-    /// let err = conn.prep("SELECT :a, ?").unwrap_err();
-    /// match err {
-    ///     DriverError(e) => assert_eq!(MixedParams, e),
-    ///     _ => unreachable!(),
-    /// }
-    /// # }
-    /// ```
-    fn prep<Q: AsRef<str>>(&mut self, query: Q) -> Result<crate::Statement>;
-
-    /// This function will close the given statement on the server side.
-    fn close(&mut self, stmt: Statement) -> Result<()>;
-
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_>>
+    fn map<'a, T, U, F, C>(&self, conn: C, mut map: F) -> Result<Vec<U>>
     where
-        S: AsStatement,
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        T: FromRow,
+        F: FnMut(T) -> U,
+    {
+        self.fold(conn, Vec::new(), |mut acc, row: T| {
+            acc.push(map(row));
+            acc
+        })
+    }
+}
+
+impl<Q: AsStatement> BinQuery for Q {
+    fn s_run<'a, C, P>(&self, conn: C, params: P) -> Result<QueryResponse<'a, Binary>>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        P: Into<Params>,
+    {
+        let mut conn = conn.try_into()?;
+        let statement = self.as_statement(&mut *conn)?;
+        conn.exec(statement.as_ref(), params)
+    }
+
+    fn s_first<'a, T, C, P>(&self, conn: C, params: P) -> Result<Option<T>>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        P: Into<Params>,
+        T: FromRow,
+    {
+        Ok(self.s_run(conn, params)?.next().transpose()?.map(from_row))
+    }
+
+    fn s_fetch<'a, T, C, P>(&self, conn: C, params: P) -> Result<Vec<T>>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        P: Into<Params>,
+        T: FromRow,
+    {
+        self.s_run(conn, params)?
+            .map(|row| row.map(from_row))
+            .collect()
+    }
+
+    fn batch<'a, C, P, I>(&self, conn: C, params: I) -> Result<()>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        I: IntoIterator<Item = P>,
+        P: Into<Params>,
+    {
+        let mut conn = conn.try_into()?;
+        let statement = self.as_statement(&mut *conn)?;
+        for params in params {
+            (&mut *conn).exec(statement.as_ref(), params)?;
+        }
+
+        Ok(())
+    }
+
+    fn s_fold<'a, T, U, F, C, P>(&self, conn: C, params: P, mut init: U, mut next: F) -> Result<U>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        T: FromRow,
+        F: FnMut(U, T) -> U,
+        P: Into<Params>,
+    {
+        for row in self.s_run(conn, params)? {
+            init = next(init, from_row(row?));
+        }
+
+        Ok(init)
+    }
+
+    fn s_map<'a, T, U, F, C, P>(&self, conn: C, params: P, mut map: F) -> Result<Vec<U>>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        T: FromRow,
+        F: FnMut(T) -> U,
+        P: Into<Params>,
+    {
+        self.s_fold(conn, params, Vec::new(), |mut acc, row: T| {
+            acc.push(map(row));
+            acc
+        })
+    }
+}
+
+pub trait BinQuery {
+    fn s_run<'a, C, P>(&self, conn: C, params: P) -> Result<QueryResponse<'a, Binary>>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
         P: Into<Params>;
 
-    fn exec<S, P, T>(&mut self, stmt: S, params: P) -> Result<Vec<T>>
+    fn s_first<'a, T, C, P>(&self, conn: C, params: P) -> Result<Option<T>>
     where
-        S: AsStatement,
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
         P: Into<Params>,
+        T: FromRow;
+
+    fn s_fetch<'a, T, C, P>(&self, conn: C, params: P) -> Result<Vec<T>>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        P: Into<Params>,
+        T: FromRow;
+
+    fn batch<'a, C, P, I>(&self, conn: C, params: I) -> Result<()>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
+        I: IntoIterator<Item = P>,
+        P: Into<Params>;
+
+    fn s_fold<'a, T, U, F, C, P>(&self, conn: C, params: P, mut init: U, mut next: F) -> Result<U>
+    where
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
         T: FromRow,
-    {
-        self.exec_map(stmt, params, crate::from_row)
-    }
+        F: FnMut(U, T) -> U,
+        P: Into<Params>;
 
-    fn exec_first<S, P, T>(&mut self, stmt: S, params: P) -> Result<Option<T>>
+    fn s_map<'a, T, U, F, C, P>(&self, conn: C, params: P, mut map: F) -> Result<Vec<U>>
     where
-        S: AsStatement,
-        P: Into<Params>,
+        C: TryInto<ConnMut<'a>>,
+        Error: From<<C as TryInto<ConnMut<'a>>>::Error>,
         T: FromRow,
-    {
-        self.exec_iter(stmt, params)?
-            .next()
-            .map(|row| row.map(crate::from_row))
-            .transpose()
-    }
-
-    fn exec_map<S, P, F, T>(&mut self, stmt: S, params: P, mut f: F) -> Result<Vec<T>>
-    where
-        S: AsStatement,
-        P: Into<Params>,
-        F: FnMut(crate::Row) -> T,
-    {
-        self.exec_fold(stmt, params, Vec::new(), |mut acc, row| {
-            acc.push(f(row));
-            acc
-        })
-    }
-
-    fn exec_fold<S, P, T, F>(&mut self, stmt: S, params: P, init: T, mut f: F) -> Result<T>
-    where
-        S: AsStatement,
-        P: Into<Params>,
-        F: FnMut(T, crate::Row) -> T,
-    {
-        let mut result = self.exec_iter(stmt, params)?;
-        let output = result.try_fold(init, |init, row| row.map(|row| f(init, row)));
-        output
-    }
-
-    fn exec_drop<S, P>(&mut self, stmt: S, params: P) -> Result<()>
-    where
-        S: AsStatement,
-        P: Into<Params>,
-    {
-        self.exec_iter(stmt, params).map(drop)
-    }
+        F: FnMut(T) -> U,
+        P: Into<Params>;
 }

@@ -29,6 +29,7 @@ if ((mysql --version | grep -P '5\.(6|7)' >>/dev/null) || (mysql --version | gre
 then \
 	mysql_install_db --no-defaults \
                      --basedir=$(BASEDIR) \
+		     --auth-root-authentication-method=normal \
                      --datadir=$(MYSQL_DATA_DIR)/data; \
 else \
     mysqld --initialize-insecure \
@@ -50,6 +51,7 @@ mysqld --no-defaults \
        --ssl-ca=$(MYSQL_SSL_CA) \
        --ssl-cert=$(MYSQL_SSL_CERT) \
        --ssl-key=$(MYSQL_SSL_KEY) \
+       --performance_schema=on \
        --socket=$(MYSQL_DATA_DIR)/mysqld.sock &
 
 while ! nc -z 127.0.0.1 $(MYSQL_PORT); \
@@ -64,7 +66,7 @@ then \
 			   -u root \
 			   -p"`cat ~/.mysql_secret | grep -v Password`" password 'password'; \
 else \
-    mysqladmin -h127.0.0.1 --port=$(MYSQL_PORT) -u root password 'password'; \
+    mysqladmin --protocol=socket --socket=$(MYSQL_DATA_DIR)/mysqld.sock -u root password 'password'; \
 fi
 endef
 
