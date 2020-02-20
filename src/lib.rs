@@ -168,15 +168,83 @@
 //! It's a simple wrapper on top of a routine, that starts with `START TRANSACTION`
 //! and ends with `COMMIT` or `ROLBACK`.
 //!
+//! ```
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let pool = Pool::new(get_opts())?;
+//! let mut conn = pool.get_conn()?;
+//!
+//! let mut tx = conn.start_transaction(false, None, None)?;
+//! tx.query_drop("CREATE TEMPORARY TABLE tmp (TEXT a)")?;
+//! tx.exec_drop("INSERT INTO tmp (a) VALUES (?)", ("foo",))?;
+//! let val: Option<String> = tx.query_first("SELECT a from tmp")?;
+//! assert_eq!(val.unwrap(), "foo");
+//! // Note, that transaction will be rolled back implicitly on Drop, if not committed.
+//! tx.rollback();
+//!
+//! let val: Option<String> = conn.query_first("SELECT a from tmp")?;
+//! assert_eq!(val, None);
+//! # });
+//! ```
+//!
 //! ### `Pool`
 //!
 //! It's a reference to a connection pool, that can be cloned and shared between threads.
+//!
+//! ```
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! use std::thread::spawn;
+//!
+//! let pool = Pool::new(get_opts())?;
+//!
+//! let handles = (0..4).map(|i| {
+//!     spawn({
+//!         let pool = pool.clone();
+//!         move || {
+//!             let mut conn = pool.get_conn()?;
+//!             conn.exec_first::<u32, _, _>("SELECT ? * 10", (i,))
+//!                 .map(Option::unwrap)
+//!         }
+//!     })
+//! });
+//!
+//! let result: Result<Vec<u32>> = handles.map(|handle| handle.join().unwrap()).collect();
+//!
+//! assert_eq!(result.unwrap(), vec![0, 10, 20, 30]);
+//! # });
+//! ```
 //!
 //! ### `Statement`
 //!
 //! Statement, actually, is just an identifier coupled with statement metadata, i.e an information
 //! about its parameters and columns. Internally the `Statement` structure also holds additional
 //! data required to support named parameters (see bellow).
+//!
+//! ```
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let pool = Pool::new(get_opts())?;
+//! let mut conn = pool.get_conn()?;
+//!
+//! let stmt = conn.prep("DO ?")?;
+//!
+//! // The prepared statement will return no columns.
+//! assert!(stmt.columns().is_empty());
+//!
+//! // The prepared statement have one parameter.
+//! let param = stmt.params().get(0).unwrap();
+//! assert_eq!(param.schema_str(), "");
+//! assert_eq!(param.table_str(), "");
+//! assert_eq!(param.name_str(), "?");
+//! # });
+//! ```
 //!
 //! ### `Value`
 //!
@@ -202,6 +270,64 @@
 //!     This function is useful to probe conversion in cases, where source database schema
 //!     is unknown.
 //!
+//! ```
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let via_test_protocol: u32 = from_value(Value::Bytes(b"65536".to_vec()));
+//! let via_bin_protocol: u32 = from_value(Value::UInt(65536));
+//! assert_eq!(via_test_protocol, via_bin_protocol);
+//!
+//! let unknown_val = // ...
+//! # Value::Time(false, 10, 2, 30, 0, 0);
+//!
+//! // Maybe it is a float?
+//! let unknown_val = match from_value_opt::<f64>(unknown_val) {
+//!     Ok(float) => {
+//!         println!("A float value: {}", float);
+//!         return Ok(());
+//!     }
+//!     Err(FromValueError(unknown_val)) => unknown_val,
+//! };
+//!
+//! // Or a string?
+//! let unknown_val = match from_value_opt::<String>(unknown_val) {
+//!     Ok(string) => {
+//!         println!("A string value: {}", string);
+//!         return Ok(());
+//!     }
+//!     Err(FromValueError(unknown_val)) => unknown_val,
+//! };
+//!
+//! // Screw this, I'll simply match on it
+//! match unknown_val {
+//!     val @ Value::NULL => {
+//!         println!("An empty value: {:?}", from_value::<Option<u8>>(val))
+//!     },
+//!     val @ Value::Bytes(..) => {
+//!         // It's non-utf8 bytes, since we already tried to convert it to String
+//!         println!("Bytes: {:?}", from_value::<Vec<u8>>(val))
+//!     }
+//!     val @ Value::Int(..) => {
+//!         println!("A signed integer: {}", from_value::<i64>(val))
+//!     }
+//!     val @ Value::UInt(..) => {
+//!         println!("An unsigned integer: {}", from_value::<u64>(val))
+//!     }
+//!     Value::Float(..) => unreachable!("already tried"),
+//!     val @ Value::Date(..) => {
+//!         use mysql::chrono::NaiveDateTime;
+//!         println!("A date value: {}", from_value::<NaiveDateTime>(val))
+//!     }
+//!     val @ Value::Time(..) => {
+//!         use std::time::Duration;
+//!         println!("A time value: {:?}", from_value::<Duration>(val))
+//!     }
+//! }
+//! # });
+//! ```
+//!
 //! ### `Row`
 //!
 //! Internally `Row` is a vector of `Value`s, that also allows indexing by a column name/offset,
@@ -217,6 +343,37 @@
 //!
 //! *   `from_row(Row) -> T` - same as `from_value`, but for rows;
 //! *   `from_row_opt(Row) -> Option<T>` - same as `from_value_opt`, but for rows.
+//!
+//! [`Queryable`][#queryable] trait offers implicit conversion for rows of a query result,
+//! that is based on this trait.
+//!
+//! ```
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let mut conn = Conn::new(get_opts())?;
+//!
+//! // Single-column row can be converted to a singular value
+//! let val: Option<String> = conn.query_first("SELECT 'foo'")?;
+//! assert_eq!(val.unwrap(), "foo");
+//!
+//! // Example of a mutli-column row conversion to an inferred type.
+//! let row = conn.query_first("SELECT 255, 256")?;
+//! assert_eq!(row, Some((255u8, 256u16)));
+//!
+//! // Some unknown row
+//! let row: Row = conn.query_first(
+//!     // ...
+//!     # "SELECT 255, Null"
+//! )?.unwrap();
+//!
+//! for column in row.columns_ref() {
+//!     println!("Column {} of type {:?}", column.name_str(), column.column_type());
+//! }
+//! # });
+//! ```
+//!
 //!
 //! ### `Params`
 //!
@@ -281,6 +438,8 @@
 //! let pool = Pool::new(get_opts())?;
 //! let val = pool.get_conn()?.query_first("SELECT POW(2, 16)")?;
 //!
+//! // Text protocol returns bytes even though the result of POW
+//! // is actually a floating point number.
 //! assert_eq!(val, Some(Value::Bytes("65536".as_bytes().to_vec())));
 //! # });
 //! ```
@@ -298,7 +457,7 @@
 //! let pool = Pool::new(get_opts())?;
 //! let val = pool.get_conn()?.exec_first("SELECT POW(?, ?)", (2, 16))?;
 //!
-//! assert_eq!(val, Some(Value::UInt(65536)));
+//! assert_eq!(val, Some(Value::Float(65536.0)));
 //! # });
 //! ```
 //!
@@ -523,16 +682,18 @@ macro_rules! def_get_opts {
 #[macro_export]
 macro_rules! doctest_wrapper {
     ($body:block) => {
-        fn main() {
+        fn fun() {
             $crate::def_get_opts!();
             $body;
         }
+        fun()
     };
     (__result, $body:block) => {
-        fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        fn fun() -> std::result::Result<(), Box<dyn std::error::Error>> {
             $crate::def_get_opts!();
             Ok($body)
         }
+        fun()
     };
 }
 
