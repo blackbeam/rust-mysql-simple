@@ -34,12 +34,12 @@ impl InnerStmt {
         self
     }
 
-    pub fn columns(&self) -> Option<&[Column]> {
-        self.columns.as_ref().map(AsRef::as_ref)
+    pub fn columns(&self) -> &[Column] {
+        self.columns.as_ref().map(AsRef::as_ref).unwrap_or(&[])
     }
 
-    pub fn params(&self) -> Option<&[Column]> {
-        self.params.as_ref().map(AsRef::as_ref)
+    pub fn params(&self) -> &[Column] {
+        self.params.as_ref().map(AsRef::as_ref).unwrap_or(&[])
     }
 
     pub fn id(&self) -> u32 {
@@ -73,11 +73,11 @@ impl Statement {
         }
     }
 
-    pub fn columns(&self) -> Option<&[Column]> {
+    pub fn columns(&self) -> &[Column] {
         self.inner.columns()
     }
 
-    pub fn params(&self) -> Option<&[Column]> {
+    pub fn params(&self) -> &[Column] {
         self.inner.params()
     }
 
