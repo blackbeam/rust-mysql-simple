@@ -139,10 +139,9 @@ impl Conn {
             }
             if let Some(socket) = socket {
                 if self.opts.get_socket().is_none() {
-                    let mut socket_opts = OptsBuilder::from_opts(self.opts.clone());
+                    let socket_opts = OptsBuilder::from_opts(self.opts.clone());
                     if !socket.is_empty() {
-                        socket_opts.socket(Some(socket));
-                        return Ok(Some(socket_opts.into()));
+                        return Ok(Some(socket_opts.socket(Some(socket)).into()));
                     }
                 }
             }
@@ -1010,8 +1009,8 @@ mod test {
         #[test]
         #[should_panic(expected = "Could not connect to address")]
         fn should_fail_on_wrong_socket_path() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.socket(Some("/foo/bar/baz"));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .socket(Some("/foo/bar/baz"));
             let _ = Conn::new(opts).unwrap();
         }
 
@@ -1026,8 +1025,8 @@ mod test {
         fn should_connect_with_database() {
             const DB_NAME: &str = "mysql";
 
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.db_name(Some(DB_NAME));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .db_name(Some(DB_NAME));
 
             let mut conn = Conn::new(opts).unwrap();
 
@@ -1037,8 +1036,8 @@ mod test {
 
         #[test]
         fn should_connect_by_hostname() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.ip_or_hostname(Some("localhost"));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .ip_or_hostname(Some("localhost"));
             let mut conn = Conn::new(opts).unwrap();
             assert!(conn.ping());
         }
@@ -1195,8 +1194,8 @@ mod test {
 
         #[test]
         fn manually_closed_stmt() {
-            let mut opts = OptsBuilder::from(get_opts());
-            opts.stmt_cache_size(1);
+            let opts = OptsBuilder::from(get_opts())
+                .stmt_cache_size(1);
             let mut conn = Conn::new(opts).unwrap();
             let stmt = conn.prep("SELECT 1").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
@@ -1366,8 +1365,8 @@ mod test {
 
         #[test]
         fn should_connect_via_socket_localhost() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.ip_or_hostname(Some("localhost"));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .ip_or_hostname(Some("localhost"));
             let conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
                 assert!(conn.is_socket());
@@ -1376,8 +1375,8 @@ mod test {
 
         #[test]
         fn should_drop_multi_result_set() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.db_name(Some("mysql"));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .db_name(Some("mysql"));
             let mut conn = Conn::new(opts).unwrap();
             conn.query_drop("CREATE TEMPORARY TABLE TEST_TABLE ( name varchar(255) )")
                 .unwrap();
@@ -1394,9 +1393,9 @@ mod test {
 
         #[test]
         fn should_handle_multi_resultset() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.db_name(Some("mysql"));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .db_name(Some("mysql"));
             let mut conn = Conn::new(opts).unwrap();
             conn.query_drop("DROP PROCEDURE IF EXISTS multi").unwrap();
             conn.query_drop(
@@ -1502,15 +1501,15 @@ mod test {
         fn should_handle_tcp_connect_timeout() {
             use crate::error::{DriverError::ConnectTimeout, Error::DriverError};
 
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
             assert!(Conn::new(opts).unwrap().ping());
 
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
-            opts.ip_or_hostname(Some("192.168.255.255"));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)))
+                .ip_or_hostname(Some("192.168.255.255"));
             match Conn::new(opts).unwrap_err() {
                 DriverError(ConnectTimeout) => {}
                 err => panic!("Unexpected error: {}", err),
@@ -1521,8 +1520,8 @@ mod test {
         fn should_set_additional_capabilities() {
             use crate::consts::CapabilityFlags;
 
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.additional_capabilities(CapabilityFlags::CLIENT_FOUND_ROWS);
+            let opts = OptsBuilder::from_opts(get_opts())
+                .additional_capabilities(CapabilityFlags::CLIENT_FOUND_ROWS);
 
             let mut conn = Conn::new(opts).unwrap();
             conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl (a INT, b TEXT)")
@@ -1538,10 +1537,10 @@ mod test {
         #[test]
         fn should_bind_before_connect() {
             let port = 27200 + (rand::random::<u16>() % 100);
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.ip_or_hostname(Some("127.0.0.1"));
-            opts.bind_address(Some(([127, 0, 0, 1], port)));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .ip_or_hostname(Some("127.0.0.1"))
+                .bind_address(Some(([127, 0, 0, 1], port)));
             let conn = Conn::new(opts).unwrap();
             let debug_format: String = format!("{:?}", conn);
             assert!(debug_format.contains(&*format!("addr: V4(127.0.0.1:{})", port)));
@@ -1550,11 +1549,11 @@ mod test {
         #[test]
         fn should_bind_before_connect_with_timeout() {
             let port = 27300 + (rand::random::<u16>() % 100);
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.ip_or_hostname(Some("127.0.0.1"));
-            opts.bind_address(Some(([127, 0, 0, 1], port)));
-            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .ip_or_hostname(Some("127.0.0.1"))
+                .bind_address(Some(([127, 0, 0, 1], port)))
+                .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
             let mut conn = Conn::new(opts).unwrap();
             assert!(conn.ping());
             let debug_format: String = format!("{:?}", conn);
@@ -1563,8 +1562,8 @@ mod test {
 
         #[test]
         fn should_not_cache_statements_if_stmt_cache_size_is_zero() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.stmt_cache_size(0);
+            let opts = OptsBuilder::from_opts(get_opts())
+                .stmt_cache_size(0);
             let mut conn = Conn::new(opts).unwrap();
 
             let stmt1 = conn.prep("DO 1").unwrap();
@@ -1584,9 +1583,7 @@ mod test {
 
         #[test]
         fn should_hold_stmt_cache_size_bounds() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.stmt_cache_size(3);
-
+            let opts = OptsBuilder::from_opts(get_opts()).stmt_cache_size(3);
             let mut conn = Conn::new(opts).unwrap();
 
             conn.prep("DO 1").unwrap();
@@ -1722,13 +1719,12 @@ mod test {
                 assert_connect_attrs(&mut conn, &expected_values);
 
                 // Connect attributes are added.
-                let mut opts = OptsBuilder::from_opts(get_opts());
+                let opts = OptsBuilder::from_opts(get_opts());
                 let mut connect_attrs = HashMap::with_capacity(3);
                 connect_attrs.insert("foo", "foo val");
                 connect_attrs.insert("bar", "bar val");
                 connect_attrs.insert("program_name", "my program name");
-                opts.connect_attrs(connect_attrs);
-                let mut conn = Conn::new(opts).unwrap();
+                let mut conn = Conn::new(opts.connect_attrs(connect_attrs)).unwrap();
                 expected_values.pop(); // remove program_name at the last
                 expected_values.push(("foo", "foo val"));
                 expected_values.push(("bar", "bar val"));

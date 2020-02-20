@@ -121,7 +121,8 @@
 //! # mysql::doctest_wrapper!(__result, {
 //! # use mysql::Opts;
 //! let _ = Opts::from_url("mysql://localhost/some_db")?;
-//! let _ = Opts::from_url("mysql://user:pass%20word@some_host:3307/some_db?")?;
+//! let _ = Opts::from_url("mysql://[::1]/some_db")?;
+//! let _ = Opts::from_url("mysql://user:pass%20word@127.0.0.1:3307/some_db?")?;
 //! # });
 //! ```
 //!
@@ -146,6 +147,16 @@
 //!
 //! It's a convenient builder for the `Opts` structure. It defines setters for fields
 //! of the `Opts` structure.
+//!
+//! ```no_run
+//! # mysql::doctest_wrapper!(__result, {
+//! # use mysql::*;
+//! let opts = OptsBuilder::new()
+//!     .user(Some("foo"))
+//!     .db_name(Some("bar"));
+//! let _ = Conn::new(opts)?;
+//! # });
+//! ```
 //!
 //! ### `Conn`
 //!
@@ -490,17 +501,18 @@ macro_rules! def_get_opts {
 
         pub fn get_opts() -> $crate::OptsBuilder {
             let database_url = $crate::def_database_url!();
-            let mut builder = $crate::OptsBuilder::from_opts(&*database_url);
-            builder.init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+            let mut builder = $crate::OptsBuilder::from_opts(&*database_url)
+                .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
             if test_compression() {
-                builder.compress(Some(Default::default()));
+                builder = builder.compress(Some(Default::default()));
             }
             if test_ssl() {
-                builder.prefer_socket(false);
-                let mut ssl_opts = $crate::SslOpts::default();
-                ssl_opts.set_danger_skip_domain_validation(true);
-                ssl_opts.set_danger_accept_invalid_certs(true);
-                builder.ssl_opts(ssl_opts);
+                let ssl_opts = $crate::SslOpts::default()
+                    .with_danger_skip_domain_validation(true)
+                    .with_danger_accept_invalid_certs(true);
+                builder = builder
+                    .prefer_socket(false)
+                    .ssl_opts(ssl_opts);
             }
             builder
         }

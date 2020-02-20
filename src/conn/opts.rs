@@ -34,16 +34,16 @@ impl SslOpts {
     /// ```text
     /// openssl pkcs12 -password pass: -export -out path.p12 -inkey privatekey.pem -in cert.pem -no-CAfile
     /// ```
-    pub fn set_pkcs12_path<T: Into<Cow<'static, Path>>>(
-        &mut self,
+    pub fn with_pkcs12_path<T: Into<Cow<'static, Path>>>(
+        mut self,
         pkcs12_path: Option<T>,
-    ) -> &mut Self {
+    ) -> Self {
         self.pkcs12_path = pkcs12_path.map(Into::into);
         self
     }
 
     /// Sets the password for a pkcs12 archive (defaults to `None`).
-    pub fn set_password<T: Into<Cow<'static, str>>>(&mut self, password: Option<T>) -> &mut Self {
+    pub fn with_password<T: Into<Cow<'static, str>>>(mut self, password: Option<T>) -> Self {
         self.password = password.map(Into::into);
         self
     }
@@ -56,24 +56,24 @@ impl SslOpts {
     /// ```text
     /// openssl x509 -outform der -in rootca.pem -out rootca.der
     /// ```
-    pub fn set_root_cert_path<T: Into<Cow<'static, Path>>>(
-        &mut self,
+    pub fn with_root_cert_path<T: Into<Cow<'static, Path>>>(
+        mut self,
         root_cert_path: Option<T>,
-    ) -> &mut Self {
+    ) -> Self {
         self.root_cert_path = root_cert_path.map(Into::into);
         self
     }
 
     /// The way to not validate the server's domain
     /// name against its certificate (defaults to `false`).
-    pub fn set_danger_skip_domain_validation(&mut self, value: bool) -> &mut Self {
+    pub fn with_danger_skip_domain_validation(mut self, value: bool) -> Self {
         self.skip_domain_validation = value;
         self
     }
 
     /// If `true` then client will accept invalid certificate (expired, not trusted, ..)
     /// (defaults to `false`).
-    pub fn set_danger_accept_invalid_certs(&mut self, value: bool) -> &mut Self {
+    pub fn with_danger_accept_invalid_certs(mut self, value: bool) -> Self {
         self.accept_invalid_certs = value;
         self
     }
@@ -467,14 +467,14 @@ impl OptsBuilder {
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
     ///
     /// **Note:** IPv6 addresses must be given in square brackets, e.g. `[::1]`.
-    pub fn ip_or_hostname<T: Into<String>>(&mut self, ip_or_hostname: Option<T>) -> &mut Self {
+    pub fn ip_or_hostname<T: Into<String>>(mut self, ip_or_hostname: Option<T>) -> Self {
         let new = ip_or_hostname.map(Into::into).unwrap_or("127.0.0.1".into());
         self.opts.0.ip_or_hostname = url::Host::parse(&new).map(|host| host.to_owned()).unwrap_or_else(|_| url::Host::Domain(new.to_owned()));
         self
     }
 
     /// TCP port of mysql server (defaults to `3306`).
-    pub fn tcp_port(&mut self, tcp_port: u16) -> &mut Self {
+    pub fn tcp_port(mut self, tcp_port: u16) -> Self {
         self.opts.0.tcp_port = tcp_port;
         self
     }
@@ -482,25 +482,25 @@ impl OptsBuilder {
     /// Socket path on unix or pipe name on windows (defaults to `None`).
     ///
     /// Can be defined using `socket` connection url parameter.
-    pub fn socket<T: Into<String>>(&mut self, socket: Option<T>) -> &mut Self {
+    pub fn socket<T: Into<String>>(mut self, socket: Option<T>) -> Self {
         self.opts.0.socket = socket.map(Into::into);
         self
     }
 
     /// User (defaults to `None`).
-    pub fn user<T: Into<String>>(&mut self, user: Option<T>) -> &mut Self {
+    pub fn user<T: Into<String>>(mut self, user: Option<T>) -> Self {
         self.opts.0.user = user.map(Into::into);
         self
     }
 
     /// Password (defaults to `None`).
-    pub fn pass<T: Into<String>>(&mut self, pass: Option<T>) -> &mut Self {
+    pub fn pass<T: Into<String>>(mut self, pass: Option<T>) -> Self {
         self.opts.0.pass = pass.map(Into::into);
         self
     }
 
     /// Database name (defaults to `None`).
-    pub fn db_name<T: Into<String>>(&mut self, db_name: Option<T>) -> &mut Self {
+    pub fn db_name<T: Into<String>>(mut self, db_name: Option<T>) -> Self {
         self.opts.0.db_name = db_name.map(Into::into);
         self
     }
@@ -509,7 +509,7 @@ impl OptsBuilder {
     ///
     /// Note that named pipe connection will ignore duration's `nanos`, and also note that
     /// it is an error to pass the zero `Duration` to this method.
-    pub fn read_timeout(&mut self, read_timeout: Option<Duration>) -> &mut Self {
+    pub fn read_timeout(mut self, read_timeout: Option<Duration>) -> Self {
         self.opts.0.read_timeout = read_timeout;
         self
     }
@@ -518,7 +518,7 @@ impl OptsBuilder {
     ///
     /// Note that named pipe connection will ignore duration's `nanos`, and also note that
     /// it is likely error to pass the zero `Duration` to this method.
-    pub fn write_timeout(&mut self, write_timeout: Option<Duration>) -> &mut Self {
+    pub fn write_timeout(mut self, write_timeout: Option<Duration>) -> Self {
         self.opts.0.write_timeout = write_timeout;
         self
     }
@@ -527,7 +527,7 @@ impl OptsBuilder {
     /// `tcp_keepalive_time_ms` url parameter.
     ///
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
-    pub fn tcp_keepalive_time_ms(&mut self, tcp_keepalive_time_ms: Option<u32>) -> &mut Self {
+    pub fn tcp_keepalive_time_ms(mut self, tcp_keepalive_time_ms: Option<u32>) -> Self {
         self.opts.0.tcp_keepalive_time = tcp_keepalive_time_ms;
         self
     }
@@ -536,7 +536,7 @@ impl OptsBuilder {
     ///
     /// Setting this option to false re-enables Nagle's algorithm, which can cause unusually high
     /// latency (~40ms) but may increase maximum throughput. See #132.
-    pub fn tcp_nodelay(&mut self, nodelay: bool) -> &mut Self {
+    pub fn tcp_nodelay(mut self, nodelay: bool) -> Self {
         self.opts.0.tcp_nodelay = nodelay;
         self
     }
@@ -550,19 +550,19 @@ impl OptsBuilder {
     /// Will fall back to TCP on error. Use `socket` option to enforce socket connection.
     ///
     /// Can be defined using `prefer_socket` connection url parameter.
-    pub fn prefer_socket(&mut self, prefer_socket: bool) -> &mut Self {
+    pub fn prefer_socket(mut self, prefer_socket: bool) -> Self {
         self.opts.0.prefer_socket = prefer_socket;
         self
     }
 
     /// Commands to execute on each new database connection.
-    pub fn init<T: Into<String>>(&mut self, init: Vec<T>) -> &mut Self {
+    pub fn init<T: Into<String>>(mut self, init: Vec<T>) -> Self {
         self.opts.0.init = init.into_iter().map(Into::into).collect();
         self
     }
 
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
-    pub fn ssl_opts<T: Into<Option<SslOpts>>>(&mut self, ssl_opts: T) -> &mut Self {
+    pub fn ssl_opts<T: Into<Option<SslOpts>>>(mut self, ssl_opts: T) -> Self {
         self.opts.0.ssl_opts = ssl_opts.into();
         self
     }
@@ -573,7 +573,7 @@ impl OptsBuilder {
     /// to receive the contents of that file.
     /// If unset, the default callback will read files relative to
     /// the current directory.
-    pub fn local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) -> &mut Self {
+    pub fn local_infile_handler(mut self, handler: Option<LocalInfileHandler>) -> Self {
         self.opts.0.local_infile_handler = handler;
         self
     }
@@ -582,7 +582,7 @@ impl OptsBuilder {
     /// url parameter.
     ///
     /// Can be defined using `tcp_connect_timeout_ms` connection url parameter.
-    pub fn tcp_connect_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub fn tcp_connect_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.opts.0.tcp_connect_timeout = timeout;
         self
     }
@@ -591,7 +591,7 @@ impl OptsBuilder {
     ///
     /// Use carefully. Will probably make pool unusable because of *address already in use*
     /// errors.
-    pub fn bind_address<T>(&mut self, bind_address: Option<T>) -> &mut Self
+    pub fn bind_address<T>(mut self, bind_address: Option<T>) -> Self
     where
         T: Into<SocketAddr>,
     {
@@ -605,7 +605,7 @@ impl OptsBuilder {
     /// Can be defined using `stmt_cache_size` connection url parameter.
     ///
     /// Call with `None` to reset to default.
-    pub fn stmt_cache_size<T>(&mut self, cache_size: T) -> &mut Self
+    pub fn stmt_cache_size<T>(mut self, cache_size: T) -> Self
     where
         T: Into<Option<usize>>,
     {
@@ -624,7 +624,7 @@ impl OptsBuilder {
     ///   "no compression";
     ///
     /// Note that compression level defined here will affect only outgoing packets.
-    pub fn compress(&mut self, compress: Option<crate::Compression>) -> &mut Self {
+    pub fn compress(mut self, compress: Option<crate::Compression>) -> Self {
         self.opts.0.compress = compress;
         self
     }
@@ -640,9 +640,9 @@ impl OptsBuilder {
     /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
     /// pointless or may broke the connection, so this option should be used with caution.
     pub fn additional_capabilities(
-        &mut self,
+        mut self,
         additional_capabilities: CapabilityFlags,
-    ) -> &mut Self {
+    ) -> Self {
         let forbidden_flags: CapabilityFlags = CapabilityFlags::CLIENT_PROTOCOL_41
             | CapabilityFlags::CLIENT_SSL
             | CapabilityFlags::CLIENT_COMPRESS
@@ -691,9 +691,9 @@ impl OptsBuilder {
     /// [`performance_schema_session_connect_attrs_size`]: https://dev.mysql.com/doc/refman/en/performance-schema-system-variables.html#sysvar_performance_schema_session_connect_attrs_size
     ///
     pub fn connect_attrs<T1: Into<String> + Eq + Hash, T2: Into<String>>(
-        &mut self,
+        mut self,
         connect_attrs: HashMap<T1, T2>,
-    ) -> &mut Self {
+    ) -> Self {
         self.opts.0.connect_attrs = HashMap::with_capacity(connect_attrs.len());
         for (name, value) in connect_attrs {
             let name = name.into();

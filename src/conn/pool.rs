@@ -423,9 +423,9 @@ mod test {
                 .unwrap()
                 .exec_drop("INSERT INTO A.a VALUES (1)", ())
                 .unwrap();
-            let mut builder = OptsBuilder::from_opts(get_opts());
-            builder.db_name(Some("A"));
-            let pool2 = Pool::new(builder).unwrap();
+            let opts = OptsBuilder::from_opts(get_opts())
+                .db_name(Some("A"));
+            let pool2 = Pool::new(opts).unwrap();
             let count: u8 = pool2
                 .get_conn()
                 .unwrap()
