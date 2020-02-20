@@ -981,7 +981,7 @@ mod test {
         where
             T: FromValue,
         {
-            conn.query_first::<_, (String, T)>(format!("show variables like '{}'", name))
+            conn.query_first::<(String, T), _>(format!("show variables like '{}'", name))
                 .unwrap()
                 .unwrap()
                 .1
@@ -1094,7 +1094,7 @@ mod test {
             assert_eq!(conn.last_insert_id(), 0);
 
             assert!(conn
-                .query_first::<_, TestRow>("SELECT * FROM mysql.tbl WHERE a = 'bar'")
+                .query_first::<TestRow, _>("SELECT * FROM mysql.tbl WHERE a = 'bar'")
                 .unwrap()
                 .is_none());
 
@@ -1344,14 +1344,14 @@ mod test {
             let stmt1 = conn.prep("SELECT :foo").unwrap();
             let stmt2 = conn.prep("SELECT :bar").unwrap();
             assert_eq!(
-                conn.exec::<_, _, String>(&stmt1, params! { "foo" => "foo" })
+                conn.exec::<String, _, _>(&stmt1, params! { "foo" => "foo" })
                     .unwrap(),
-                vec!["foo".to_string()],
+                vec![String::from("foo")],
             );
             assert_eq!(
-                conn.exec::<_, _, String>(&stmt2, params! { "bar" => "bar" })
+                conn.exec::<String, _, _>(&stmt2, params! { "bar" => "bar" })
                     .unwrap(),
-                vec!["bar".to_string()],
+                vec![String::from("bar")],
             );
         }
 
@@ -1474,7 +1474,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             let stmt = conn.prep("SELECT :a, :b, :a, :c, :d").unwrap();
             let result =
-                conn.exec_first::<_, _, crate::Row>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
+                conn.exec_first::<crate::Row, _, _>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
                 _ => assert!(false),

@@ -55,11 +55,12 @@
 //! let mut conn = pool.get_conn()?;
 //!
 //! // Let's create a table for payments.
-//! conn.query_drop(r"CREATE TEMPORARY TABLE payment (
-//!                      customer_id int not null,
-//!                      amount int not null,
-//!                      account_name text
-//!                  )")?;
+//! conn.query_drop(
+//!     r"CREATE TEMPORARY TABLE payment (
+//!         customer_id int not null,
+//!         amount int not null,
+//!         account_name text
+//!     )")?;
 //!
 //! let payments = vec![
 //!     Payment { customer_id: 1, amount: 2, account_name: None },
@@ -70,28 +71,24 @@
 //! ];
 //!
 //! // Now let's insert payments to the database
-//!
-//! // First of all we'll prepare the statement to avoid
-//! // statement cache lookup (see the "statement cache" section)
-//! let stmt = conn.prep(r"INSERT INTO
-//!                        payment (customer_id, amount, account_name)
-//!                        VALUES (:customer_id, :amount, :account_name)")?;
-//!
-//! for p in &payments {
-//!     // `execute` takes ownership of `params`, so we'll pass account name by reference.
-//!     conn.exec_drop(&stmt, params! {
+//! conn.exec_batch(
+//!     r"INSERT INTO payment (customer_id, amount, account_name)
+//!       VALUES (:customer_id, :amount, :account_name)",
+//!     payments.iter().map(|p| params! {
 //!         "customer_id" => p.customer_id,
 //!         "amount" => p.amount,
 //!         "account_name" => &p.account_name,
-//!     })?;
-//! }
+//!     })
+//! )?;
 //!
-//! // Let's select payments from database
-//! let selected_payments: Vec<Payment> = conn
-//!     .query_map("SELECT customer_id, amount, account_name from payment", |row| {
-//!         let (customer_id, amount, account_name) = from_row(row);
-//!         Payment { customer_id, amount, account_name }
-//!     })?;
+//! // Let's select payments from database. Type inference should do the trick here.
+//! let selected_payments = conn
+//!     .query_map(
+//!         "SELECT customer_id, amount, account_name from payment",
+//!         |(customer_id, amount, account_name)| {
+//!             Payment { customer_id, amount, account_name }
+//!         },
+//!     )?;
 //!
 //! // Let's make sure, that `payments` equals to `selected_payments`.
 //! // Mysql gives no guaranties on order of returned rows
@@ -103,7 +100,7 @@
 //!
 //! ## API Documentation
 //!
-//! Please refer to the [generated docs].
+//! Please refer to the [crate docs].
 //!
 //! ## Basic structures
 //!
@@ -114,7 +111,7 @@
 //!
 //! #### URL-based connection string
 //!
-//! Note, that this crate offers URL-based connection string as a source of an `Opts` instance.
+//! Note, that you can use URL-based connection string as a source of an `Opts` instance.
 //! URL schema must be `mysql`. Host, port and credentials, as well as query parameters,
 //! should be given in accordance with the RFC 3986.
 //!
@@ -374,7 +371,7 @@
 //! # });
 //! ```
 //!
-//! [generated docs]: https://docs.rs/mysql
+//! [crate docs]: https://docs.rs/mysql
 //! [mysql_common docs]: https://docs.rs/mysql_common
 //! [max_prepared_stmt_count]: https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_max_prepared_stmt_count
 //!

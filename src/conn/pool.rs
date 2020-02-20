@@ -584,7 +584,7 @@ mod test {
             assert_eq!(
                 pool.get_conn()
                     .unwrap()
-                    .query_first::<_, u8>("SELECT COUNT(a) FROM mysql.tbl")
+                    .query_first::<u8, _>("SELECT COUNT(a) FROM mysql.tbl")
                     .unwrap()
                     .unwrap(),
                 2_u8
@@ -599,7 +599,7 @@ mod test {
             assert_eq!(
                 pool.get_conn()
                     .unwrap()
-                    .query_first::<_, u8>("SELECT COUNT(a) FROM mysql.tbl")
+                    .query_first::<u8, _>("SELECT COUNT(a) FROM mysql.tbl")
                     .unwrap()
                     .unwrap(),
                 2_u8
@@ -614,7 +614,7 @@ mod test {
             assert_eq!(
                 pool.get_conn()
                     .unwrap()
-                    .query_first::<_, u8>("SELECT COUNT(a) FROM mysql.tbl")
+                    .query_first::<u8, _>("SELECT COUNT(a) FROM mysql.tbl")
                     .unwrap()
                     .unwrap(),
                 2_u8
