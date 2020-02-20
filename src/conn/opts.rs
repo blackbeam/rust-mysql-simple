@@ -4,7 +4,7 @@ use url::Url;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
@@ -103,7 +103,7 @@ impl SslOpts {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct InnerOpts {
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
-    ip_or_hostname: Option<String>,
+    ip_or_hostname: url::Host,
     /// TCP port of mysql server (defaults to `3306`).
     tcp_port: u16,
     /// Path to unix socket on unix or pipe name on windows (defaults to `None`).
@@ -209,7 +209,7 @@ pub(crate) struct InnerOpts {
 impl Default for InnerOpts {
     fn default() -> Self {
         InnerOpts {
-            ip_or_hostname: Some("127.0.0.1".to_string()),
+            ip_or_hostname: url::Host::Domain(String::from("localhost")),
             tcp_port: 3306,
             socket: None,
             user: None,
@@ -244,20 +244,10 @@ pub struct Opts(pub(crate) Box<InnerOpts>);
 impl Opts {
     #[doc(hidden)]
     pub fn addr_is_loopback(&self) -> bool {
-        if self.0.ip_or_hostname.is_some() {
-            let v4addr: Option<Ipv4Addr> =
-                FromStr::from_str(self.0.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
-            let v6addr: Option<Ipv6Addr> =
-                FromStr::from_str(self.0.ip_or_hostname.as_ref().unwrap().as_ref()).ok();
-            if let Some(addr) = v4addr {
-                addr.is_loopback()
-            } else if let Some(addr) = v6addr {
-                addr.is_loopback()
-            } else {
-                self.0.ip_or_hostname.as_ref().unwrap() == "localhost"
-            }
-        } else {
-            false
+        match self.0.ip_or_hostname {
+            url::Host::Domain(ref name) => name == "localhost",
+            url::Host::Ipv4(ref addr) => addr.is_loopback(),
+            url::Host::Ipv6(ref addr) => addr.is_loopback(),
         }
     }
 
@@ -265,9 +255,13 @@ impl Opts {
         from_url(url)
     }
 
+    pub(crate) fn get_host(&self) -> url::Host {
+        self.0.ip_or_hostname.clone()
+    }
+
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
-    pub fn get_ip_or_hostname(&self) -> Option<&str> {
-        self.0.ip_or_hostname.as_ref().map(|x| &**x)
+    pub fn get_ip_or_hostname(&self) -> Cow<str> {
+        self.0.ip_or_hostname.to_string().into()
     }
     /// TCP port of mysql server (defaults to `3306`).
     pub fn get_tcp_port(&self) -> u16 {
@@ -456,6 +450,7 @@ impl Opts {
 /// let connection_url = "mysql://root:password@localhost:3307/mysql?prefer_socket=false";
 /// let pool = my::Pool::new(connection_url).unwrap();
 /// ```
+#[derive(Debug)]
 pub struct OptsBuilder {
     opts: Opts,
 }
@@ -470,8 +465,11 @@ impl OptsBuilder {
     }
 
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
+    ///
+    /// **Note:** IPv6 addresses must be given in square brackets, e.g. `[::1]`.
     pub fn ip_or_hostname<T: Into<String>>(&mut self, ip_or_hostname: Option<T>) -> &mut Self {
-        self.opts.0.ip_or_hostname = ip_or_hostname.map(Into::into);
+        let new = ip_or_hostname.map(Into::into).unwrap_or("127.0.0.1".into());
+        self.opts.0.ip_or_hostname = url::Host::parse(&new).map(|host| host.to_owned()).unwrap_or_else(|_| url::Host::Domain(new.to_owned()));
         self
     }
 
@@ -766,12 +764,14 @@ fn from_url_basic(url_str: &str) -> Result<(Opts, Vec<(String, String)>), UrlErr
     if url.scheme() != "mysql" {
         return Err(UrlError::UnsupportedScheme(url.scheme().to_string()));
     }
-    if url.cannot_be_a_base() || !url.has_host() {
+    if url.cannot_be_a_base() {
         return Err(UrlError::BadUrl);
     }
     let user = get_opts_user_from_url(&url);
     let pass = get_opts_pass_from_url(&url);
-    let ip_or_hostname = url.host_str().map(String::from);
+    let ip_or_hostname = url.host()
+        .ok_or(UrlError::BadUrl)
+        .and_then(|host| url::Host::parse(&host.to_string()).map_err(|_| UrlError::BadUrl))?;
     let tcp_port = url.port().unwrap_or(3306);
     let db_name = get_opts_db_name_from_url(&url);
 
@@ -887,7 +887,7 @@ mod test {
             Opts(Box::new(InnerOpts {
                 user: Some("us r".to_string()),
                 pass: Some("p w".to_string()),
-                ip_or_hostname: Some("localhost".to_string()),
+                ip_or_hostname: url::Host::Domain("localhost".to_string()),
                 tcp_port: 3308,
                 db_name: Some("db-name".to_string()),
                 prefer_socket: false,

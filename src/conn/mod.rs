@@ -29,7 +29,7 @@ use crate::consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN};
 use crate::io::Stream;
 use crate::prelude::*;
 use crate::DriverError::{
-    CouldNotConnect, MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
+    MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
     ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket, UnknownAuthPlugin,
     UnsupportedProtocol,
 };
@@ -226,7 +226,7 @@ impl Conn {
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> MyResult<()> {
         let stream = self.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
-        let stream = stream.make_secure(self.opts.get_ip_or_hostname(), ssl_opts)?;
+        let stream = stream.make_secure(self.opts.get_host(), ssl_opts)?;
         let stream = MySyncFramed::construct(in_buf, out_buf, codec, stream);
         self.stream = Some(stream);
         Ok(())
@@ -241,8 +241,13 @@ impl Conn {
         let bind_address = self.opts.bind_address().cloned();
         let stream = if let Some(socket) = self.opts.get_socket() {
             Stream::connect_socket(&*socket, read_timeout, write_timeout)?
-        } else if let Some(ip_or_hostname) = self.opts.get_ip_or_hostname() {
+        } else {
             let port = self.opts.get_tcp_port();
+            let ip_or_hostname = match self.opts.get_host() {
+                url::Host::Domain(domain) => domain,
+                url::Host::Ipv4(ip) => ip.to_string(),
+                url::Host::Ipv6(ip) => ip.to_string(),
+            };
             Stream::connect_tcp(
                 &*ip_or_hostname,
                 port,
@@ -253,8 +258,6 @@ impl Conn {
                 tcp_connect_timeout,
                 bind_address,
             )?
-        } else {
-            return Err(DriverError(CouldNotConnect(None)));
         };
         self.stream = Some(MySyncFramed::new(stream));
         Ok(())
@@ -1354,8 +1357,7 @@ mod test {
 
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
-            #[allow(unused_mut)]
-            let mut opts = OptsBuilder::from_opts(get_opts());
+            let opts = OptsBuilder::from_opts(get_opts());
             let conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
                 assert!(conn.is_socket());

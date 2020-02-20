@@ -124,13 +124,18 @@ impl Stream {
         }
     }
 
-    pub fn make_secure(self, ip_or_hostname: Option<&str>, ssl_opts: SslOpts) -> MyResult<Stream> {
+    pub fn make_secure(self, host: url::Host, ssl_opts: SslOpts) -> MyResult<Stream> {
         if self.is_socket() {
             // won't secure socket connection
             return Ok(self);
         }
 
-        let domain = ip_or_hostname.unwrap_or("127.0.0.1");
+        let domain = match host {
+            url::Host::Domain(domain) => domain,
+            url::Host::Ipv4(ip) => ip.to_string(),
+            url::Host::Ipv6(ip) => ip.to_string(),
+        };
+
         let mut builder = TlsConnector::builder();
         match ssl_opts.root_cert_path() {
             Some(root_cert_path) => {
@@ -154,7 +159,7 @@ impl Stream {
             Stream::TcpStream(tcp_stream) => match tcp_stream {
                 TcpStream::Insecure(insecure_stream) => {
                     let inner = insecure_stream.into_inner().map_err(io::Error::from)?;
-                    let secure_stream = tls_connector.connect(domain, inner)?;
+                    let secure_stream = tls_connector.connect(&domain, inner)?;
                     Ok(Stream::TcpStream(TcpStream::Secure(BufStream::new(
                         secure_stream,
                     ))))
