@@ -365,11 +365,17 @@
 //! // Some unknown row
 //! let row: Row = conn.query_first(
 //!     // ...
-//!     # "SELECT 255, Null"
+//!     # "SELECT 255, Null",
 //! )?.unwrap();
 //!
 //! for column in row.columns_ref() {
-//!     println!("Column {} of type {:?}", column.name_str(), column.column_type());
+//!     let column_value = &row[column.name_str().as_ref()];
+//!     println!(
+//!         "Column {} of type {:?} with value {:?}",
+//!         column.name_str(),
+//!         column.column_type(),
+//!         column_value,
+//!     );
 //! }
 //! # });
 //! ```
@@ -380,10 +386,33 @@
 //! Represents parameters of a prepared statement, but this type won't appear directly in your code
 //! because binary protocol API will ask for `T: Into<Params>`, where `Into<Params>` is implemented:
 //!
-//! *    for tuples of `Into<Value>` types up to arity 12, where empty tuple is for statements
-//!      without parameters, and unary tuple requires extra comma (e.g. `(val,)`);
-//! *    for `Vec<T: Into<Value>>` for cases, when your statement takes more than 12 parameters;
-//! *    for named parameters representation (the value of the `params!` macro, described below).
+//! *   for tuples of `Into<Value>` types up to arity 12;
+//!
+//!     **Note:** singular tuple requires extra comma, e.g. `("foo",)`;
+//!
+//! *   for `IntoIterator<Item: Into<Value>>` for cases, when your statement takes more
+//!     than 12 parameters;
+//! *   for named parameters representation (the value of the `params!` macro, described below).
+//!
+//! ```
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let mut conn = Conn::new(get_opts())?;
+//!
+//! // Singular tuple requires extra comma:
+//! let row: Option<u8> = conn.exec_first("SELECT ?", (0,))?;
+//! assert_eq!(row.unwrap(), 0);
+//!
+//! // More than 12 parameters:
+//! let row: Option<u8> = conn.exec_first(
+//!     "SELECT ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ?",
+//!     (0..16).collect::<Vec<_>>(),
+//! )?;
+//! assert_eq!(row.unwrap(), 120);
+//! # });
+//! ```
 //!
 //! **Note:** Please refer to the [**mysql_common** crate docs][mysql_common docs] for the list
 //! of types, that implements `Into<Value>`.
@@ -396,15 +425,20 @@
 //! ```rust
 //! # #[macro_use] extern crate serde_derive;
 //! # mysql::doctest_wrapper!(__result, {
-//! # use mysql::*;
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! /// Serializable structure.
 //! #[derive(Debug, PartialEq, Serialize, Deserialize)]
 //! struct Example {
 //!     foo: u32,
 //! }
 //!
+//! // Value::from for Serialized will emit json string.
 //! let value = Value::from(Serialized(Example { foo: 42 }));
-//! assert_eq!(value, Value::from(r#"{"foo":42}"#));
+//! assert_eq!(value, Value::Bytes(br#"{"foo":42}"#.to_vec()));
 //!
+//! // from_value for Deserialized will parse json string.
 //! let structure: Deserialized<Example> = from_value(value);
 //! assert_eq!(structure, Deserialized(Example { foo: 42 }));
 //! # });
@@ -414,12 +448,45 @@
 //!
 //! It's an iterator over rows of a query result with support of multi-result sets. It's intended
 //! for cases when you need full control during result set iteration. For other cases `Conn`
-//! provides a set of methods that will immediately costume the first result set and drop everything
+//! provides a set of methods that will immediately consume the first result set and drop everything
 //! else.
 //!
 //! This iterator is lazy so it won't read the result from server until you iterate over it.
 //! MySql protocol is strictly sequential, so `Conn` will be mutably borrowed until the result
 //! is fully consumed.
+//!
+//! ```rust
+//! # #[macro_use] extern crate serde_derive;
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let mut conn = Conn::new(get_opts())?;
+//!
+//! // This query will emit two result sets.
+//! let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
+//!
+//! let mut set = 0;
+//! while result.more_results_exists() {
+//!     println!("Result set columns: {:?}", result.columns_ref());
+//!
+//!     for row in result.by_ref() {
+//!         match set {
+//!             0 => {
+//!                 // First result set will contain two numbers.
+//!                 assert_eq!((1_u8, 2_u8), from_row(row?));
+//!             }
+//!             1 => {
+//!                 // Second result set will contain a number and a float.
+//!                 assert_eq!((3_u8, 3.14), from_row(row?));
+//!             }
+//!             _ => unreachable!(),
+//!         }
+//!     }
+//!     set += 1;
+//! }
+//! # });
+//! ```
 //!
 //! ## Text protocol
 //!
@@ -463,8 +530,8 @@
 //!
 //! ### Statements
 //!
-//! In mysql each prepared statement belongs to a particular connection and can't be executed
-//! on another connection. Trying to do so will lead to an error. Library won't tie statement
+//! In MySql each prepared statement belongs to a particular connection and can't be executed
+//! on another connection. Trying to do so will lead to an error. The driver won't tie statement
 //! to a connection in any way, but one can look on to the connection id, that is stored
 //! in the `Statement` structure.
 //!
@@ -479,9 +546,11 @@
 //!
 //! let stmt_1 = conn_1.prep("SELECT ?")?;
 //!
+//! // stmt_1 is for the conn_1, ..
 //! assert!(stmt_1.connection_id() == conn_1.connection_id());
 //! assert!(stmt_1.connection_id() != conn_2.connection_id());
 //!
+//! // .. so stmt_1 will execute only on conn_1
 //! assert!(conn_1.exec_drop(&stmt_1, ("foo",)).is_ok());
 //! assert!(conn_2.exec_drop(&stmt_1, ("foo",)).is_err());
 //! # });
