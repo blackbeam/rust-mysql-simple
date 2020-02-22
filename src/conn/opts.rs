@@ -17,7 +17,7 @@ use std::{
 use crate::{consts::CapabilityFlags, LocalInfileHandler, UrlError};
 
 /// Default value for client side per-connection statement cache.
-pub const DEFAULT_STMT_CACHE_SIZE: usize = 128;
+pub const DEFAULT_STMT_CACHE_SIZE: usize = 32;
 
 /// Ssl Options.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
