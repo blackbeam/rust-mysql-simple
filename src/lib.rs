@@ -511,11 +511,13 @@
 //! # });
 //! ```
 //!
-//! ## Binary protocol
+//! ## Binary protocol and prepared statements.
 //!
-//! MySql binary protocol is implemented in the set of `Conn::exec*` methods. It's useful when your
-//! query have parameters. MySql uses `?` symbol as a parameter placeholder and it's only possible
-//! to use parameters where a single MySql value is expected. For example:
+//! MySql binary protocol is implemented in `prep, `close` and the set of `exec*` methods,
+//! defined on the [`Queryable`](#queryable) trait. Prepared statements is the only way to
+//! pass rust value to the MySql server. MySql uses `?` symbol as a parameter placeholder
+//! and it's only possible to use parameters where a single MySql value is expected.
+//! For example:
 //!
 //! ```rust
 //! # mysql::doctest_wrapper!(__result, {
@@ -609,6 +611,27 @@
 //! assert_eq!((13, foo, 13), val_13);
 //! # });
 //! ```
+//!
+//! ### `Queryable`
+//!
+//! The `Queryable` trait defines common methods for `Conn`, `PooledConn` and `Transaction`.
+//! The set of basic methods consts of:
+//!
+//! *   `query_iter` - basic methods to execute text query and get `QueryRestul`;
+//! *   `prep` - basic method to prepare a statement;
+//! *   `exec_iter` - basic method to execute statement and get `QueryResult`;
+//! *   `close` - basic method to close the statement;
+//!
+//! The trait also defines the set of helper methods, that is based on basic methods.
+//! These methods will consume only the firt result set, other result sets will be dropped:
+//!
+//! *   `{query|exec}` - to collect the result into a `Vec<T: FromRow>`;
+//! *   `{query|exec}_first` - to get the first `T: FromRow`, if any;
+//! *   `{query|exec}_map` - to map each `T: FromRow` to some `U`;
+//! *   `{query|exec}_fold` - to fold the set of `T: FromRow` to a single value;
+//! *   `{query|exec}_drop` - to immediately drop the result.
+//!
+//! The trait also defines additional helper for a batch statement execution.
 //!
 //! [crate docs]: https://docs.rs/mysql
 //! [mysql_common docs]: https://docs.rs/mysql_common
