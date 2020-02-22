@@ -1,7 +1,3 @@
-//! # rust-mysql-simple
-//!
-//! **Crate name:** mysql
-//!
 //! This create offers:
 //!
 //! *   MySql database driver in pure rust;

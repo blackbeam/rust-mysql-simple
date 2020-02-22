@@ -16,23 +16,8 @@ build = "build.rs"
 name = "mysql"
 path = "src/lib.rs"
 
-[profile.dev]
-opt-level = 0
-debug = true
-
-[profile.release]
-opt-level = 3
-debug = false
-lto = true
-
-[profile.test]
-opt-level = 0
-debug = true
-
 [profile.bench]
 opt-level = 3
-debug = false
-lto = true
 
 [features]
 nightly = []
