@@ -1,14 +1,16 @@
-use mysql_common::crypto;
-use mysql_common::io::ReadMysqlExt;
-use mysql_common::named_params::parse_named_params;
-use mysql_common::packets::{
-    column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
-    parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
-    ComStmtExecuteRequestBuilder, ComStmtSendLongData, HandshakePacket, HandshakeResponse,
-    OkPacket, SslRequest,
+use mysql_common::{
+    crypto,
+    io::ReadMysqlExt,
+    named_params::parse_named_params,
+    packets::{
+        column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
+        parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
+        ComStmtExecuteRequestBuilder, ComStmtSendLongData, HandshakePacket, HandshakeResponse,
+        OkPacket, SslRequest,
+    },
+    proto::{codec::Compression, sync_framed::MySyncFramed},
+    value::{read_bin_values, read_text_values, ServerSide},
 };
-use mysql_common::proto::{codec::Compression, sync_framed::MySyncFramed};
-use mysql_common::value::{read_bin_values, read_text_values, ServerSide};
 
 use std::{
     borrow::Borrow,
@@ -21,23 +23,26 @@ use std::{
     sync::Arc,
 };
 
-use crate::conn::local_infile::LocalInfile;
-use crate::conn::stmt::{InnerStmt, Statement};
-use crate::conn::stmt_cache::StmtCache;
-use crate::conn::transaction::IsolationLevel;
-use crate::consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN};
-use crate::io::Stream;
-use crate::prelude::*;
-use crate::DriverError::{
-    MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
-    ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket, UnknownAuthPlugin,
-    UnsupportedProtocol,
-};
-use crate::Error::{DriverError, MySqlError};
-use crate::Value::{self, Bytes, NULL};
 use crate::{
-    from_value, from_value_opt, LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult,
-    Result as MyResult, SslOpts, Transaction,
+    conn::{
+        local_infile::LocalInfile,
+        stmt::{InnerStmt, Statement},
+        stmt_cache::StmtCache,
+        transaction::IsolationLevel,
+    },
+    consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN},
+    from_value, from_value_opt,
+    io::Stream,
+    prelude::*,
+    DriverError::{
+        MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
+        ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket,
+        UnknownAuthPlugin, UnsupportedProtocol,
+    },
+    Error::{DriverError, MySqlError},
+    LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result as MyResult, SslOpts,
+    Transaction,
+    Value::{self, Bytes, NULL},
 };
 
 pub mod local_infile;
@@ -1009,8 +1014,7 @@ mod test {
         #[test]
         #[should_panic(expected = "Could not connect to address")]
         fn should_fail_on_wrong_socket_path() {
-            let opts = OptsBuilder::from_opts(get_opts())
-                .socket(Some("/foo/bar/baz"));
+            let opts = OptsBuilder::from_opts(get_opts()).socket(Some("/foo/bar/baz"));
             let _ = Conn::new(opts).unwrap();
         }
 
@@ -1025,8 +1029,7 @@ mod test {
         fn should_connect_with_database() {
             const DB_NAME: &str = "mysql";
 
-            let opts = OptsBuilder::from_opts(get_opts())
-                .db_name(Some(DB_NAME));
+            let opts = OptsBuilder::from_opts(get_opts()).db_name(Some(DB_NAME));
 
             let mut conn = Conn::new(opts).unwrap();
 
@@ -1036,8 +1039,7 @@ mod test {
 
         #[test]
         fn should_connect_by_hostname() {
-            let opts = OptsBuilder::from_opts(get_opts())
-                .ip_or_hostname(Some("localhost"));
+            let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
             let mut conn = Conn::new(opts).unwrap();
             assert!(conn.ping());
         }
@@ -1194,8 +1196,7 @@ mod test {
 
         #[test]
         fn manually_closed_stmt() {
-            let opts = OptsBuilder::from(get_opts())
-                .stmt_cache_size(1);
+            let opts = OptsBuilder::from(get_opts()).stmt_cache_size(1);
             let mut conn = Conn::new(opts).unwrap();
             let stmt = conn.prep("SELECT 1").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
@@ -1365,8 +1366,7 @@ mod test {
 
         #[test]
         fn should_connect_via_socket_localhost() {
-            let opts = OptsBuilder::from_opts(get_opts())
-                .ip_or_hostname(Some("localhost"));
+            let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
             let conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
                 assert!(conn.is_socket());
@@ -1375,8 +1375,7 @@ mod test {
 
         #[test]
         fn should_drop_multi_result_set() {
-            let opts = OptsBuilder::from_opts(get_opts())
-                .db_name(Some("mysql"));
+            let opts = OptsBuilder::from_opts(get_opts()).db_name(Some("mysql"));
             let mut conn = Conn::new(opts).unwrap();
             conn.query_drop("CREATE TEMPORARY TABLE TEST_TABLE ( name varchar(255) )")
                 .unwrap();
@@ -1562,8 +1561,7 @@ mod test {
 
         #[test]
         fn should_not_cache_statements_if_stmt_cache_size_is_zero() {
-            let opts = OptsBuilder::from_opts(get_opts())
-                .stmt_cache_size(0);
+            let opts = OptsBuilder::from_opts(get_opts()).stmt_cache_size(0);
             let mut conn = Conn::new(opts).unwrap();
 
             let stmt1 = conn.prep("DO 1").unwrap();
@@ -1738,8 +1736,7 @@ mod test {
     mod bench {
         use test;
 
-        use crate::test_misc::get_opts;
-        use crate::{params, Conn, Value::NULL};
+        use crate::{params, test_misc::get_opts, Conn, Value::NULL};
 
         #[bench]
         fn simple_exec(bencher: &mut test::Bencher) {

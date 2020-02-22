@@ -1,16 +1,12 @@
 use percent_encoding::{percent_decode, percent_decode_str};
 use url::Url;
 
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::net::SocketAddr;
-use std::path::Path;
-use std::str::FromStr;
-use std::time::Duration;
+use std::{
+    borrow::Cow, collections::HashMap, hash::Hash, net::SocketAddr, path::Path, str::FromStr,
+    time::Duration,
+};
 
-use crate::consts::CapabilityFlags;
-use crate::{LocalInfileHandler, UrlError};
+use crate::{consts::CapabilityFlags, LocalInfileHandler, UrlError};
 
 /// Default value for client side per-connection statement cache.
 pub const DEFAULT_STMT_CACHE_SIZE: usize = 128;
@@ -34,10 +30,7 @@ impl SslOpts {
     /// ```text
     /// openssl pkcs12 -password pass: -export -out path.p12 -inkey privatekey.pem -in cert.pem -no-CAfile
     /// ```
-    pub fn with_pkcs12_path<T: Into<Cow<'static, Path>>>(
-        mut self,
-        pkcs12_path: Option<T>,
-    ) -> Self {
+    pub fn with_pkcs12_path<T: Into<Cow<'static, Path>>>(mut self, pkcs12_path: Option<T>) -> Self {
         self.pkcs12_path = pkcs12_path.map(Into::into);
         self
     }
@@ -469,7 +462,9 @@ impl OptsBuilder {
     /// **Note:** IPv6 addresses must be given in square brackets, e.g. `[::1]`.
     pub fn ip_or_hostname<T: Into<String>>(mut self, ip_or_hostname: Option<T>) -> Self {
         let new = ip_or_hostname.map(Into::into).unwrap_or("127.0.0.1".into());
-        self.opts.0.ip_or_hostname = url::Host::parse(&new).map(|host| host.to_owned()).unwrap_or_else(|_| url::Host::Domain(new.to_owned()));
+        self.opts.0.ip_or_hostname = url::Host::parse(&new)
+            .map(|host| host.to_owned())
+            .unwrap_or_else(|_| url::Host::Domain(new.to_owned()));
         self
     }
 
@@ -639,10 +634,7 @@ impl OptsBuilder {
     /// won't let you to interfere with capabilities managed by other options (like
     /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
     /// pointless or may broke the connection, so this option should be used with caution.
-    pub fn additional_capabilities(
-        mut self,
-        additional_capabilities: CapabilityFlags,
-    ) -> Self {
+    pub fn additional_capabilities(mut self, additional_capabilities: CapabilityFlags) -> Self {
         let forbidden_flags: CapabilityFlags = CapabilityFlags::CLIENT_PROTOCOL_41
             | CapabilityFlags::CLIENT_SSL
             | CapabilityFlags::CLIENT_COMPRESS
@@ -769,7 +761,8 @@ fn from_url_basic(url_str: &str) -> Result<(Opts, Vec<(String, String)>), UrlErr
     }
     let user = get_opts_user_from_url(&url);
     let pass = get_opts_pass_from_url(&url);
-    let ip_or_hostname = url.host()
+    let ip_or_hostname = url
+        .host()
         .ok_or(UrlError::BadUrl)
         .and_then(|host| url::Host::parse(&host.to_string()).map_err(|_| UrlError::BadUrl))?;
     let tcp_port = url.port().unwrap_or(3306);

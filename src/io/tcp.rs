@@ -8,11 +8,13 @@ use nix::{
 #[cfg(target_os = "windows")]
 use winapi::um::winsock2::*;
 
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 #[cfg(unix)]
 use std::os::unix::prelude::*;
-use std::time::Duration;
-use std::{io, mem};
+use std::{
+    io, mem,
+    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    time::Duration,
+};
 #[cfg(target_os = "windows")]
 use std::{os::raw::*, os::windows::prelude::*, ptr};
 

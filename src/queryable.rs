@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::{prelude::FromRow, from_row, Params, QueryResult, Result, Statement};
+use crate::{from_row, prelude::FromRow, Params, QueryResult, Result, Statement};
 
 pub trait AsStatement {
     fn as_statement<Q: Queryable>(&self, queryable: &mut Q) -> Result<Cow<'_, Statement>>;
@@ -74,7 +74,7 @@ pub trait Queryable {
         Self: Sized,
         S: AsStatement,
         P: Into<Params>,
-        I: IntoIterator<Item=P>,
+        I: IntoIterator<Item = P>,
     {
         let stmt = stmt.as_statement(self)?;
         for params in params {

@@ -761,9 +761,7 @@ macro_rules! def_get_opts {
                 let ssl_opts = $crate::SslOpts::default()
                     .with_danger_skip_domain_validation(true)
                     .with_danger_accept_invalid_certs(true);
-                builder = builder
-                    .prefer_socket(false)
-                    .ssl_opts(ssl_opts);
+                builder = builder.prefer_socket(false).ssl_opts(ssl_opts);
             }
             builder
         }

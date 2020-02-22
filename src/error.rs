@@ -1,9 +1,8 @@
-use mysql_common::named_params::MixedParamsError;
-use mysql_common::packets::ErrPacket;
-use mysql_common::params::MissingNamedParameterError;
-use mysql_common::proto::codec::error::PacketCodecError;
-use mysql_common::row::convert::FromRowError;
-use mysql_common::value::convert::FromValueError;
+use mysql_common::{
+    named_params::MixedParamsError, packets::ErrPacket, params::MissingNamedParameterError,
+    proto::codec::error::PacketCodecError, row::convert::FromRowError,
+    value::convert::FromValueError,
+};
 use url::ParseError;
 
 use std::{error, fmt, io, result, sync};

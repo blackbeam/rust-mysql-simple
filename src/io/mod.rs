@@ -4,18 +4,24 @@ use io_enum::*;
 use named_pipe as np;
 use native_tls::{Certificate, Identity, TlsConnector, TlsStream};
 
-use std::fmt;
-use std::fs::File;
-use std::io::{self, Read as _};
-use std::net::{self, SocketAddr};
 #[cfg(unix)]
 use std::os::unix;
-use std::time::Duration;
+use std::{
+    fmt,
+    fs::File,
+    io::{self, Read as _},
+    net::{self, SocketAddr},
+    time::Duration,
+};
 
-use crate::error::DriverError::{ConnectTimeout, CouldNotConnect};
-use crate::error::Error::DriverError;
-use crate::error::Result as MyResult;
-use crate::SslOpts;
+use crate::{
+    error::{
+        DriverError::{ConnectTimeout, CouldNotConnect},
+        Error::DriverError,
+        Result as MyResult,
+    },
+    SslOpts,
+};
 
 mod tcp;
 

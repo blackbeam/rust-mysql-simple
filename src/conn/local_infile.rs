@@ -1,5 +1,7 @@
-use std::sync::{Arc, Mutex};
-use std::{fmt, io};
+use std::{
+    fmt, io,
+    sync::{Arc, Mutex},
+};
 
 use crate::Conn;
 

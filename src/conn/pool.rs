@@ -1,9 +1,13 @@
-use std::collections::VecDeque;
-use std::fmt;
-use std::ops::Deref;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration as StdDuration;
+use std::{
+    collections::VecDeque,
+    fmt,
+    ops::Deref,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Condvar, Mutex,
+    },
+    time::Duration as StdDuration,
+};
 
 use crate::{
     prelude::*,
@@ -396,9 +400,9 @@ mod test {
     mod pool {
         use std::{thread, time::Duration};
 
-        use crate::prelude::*;
-        use crate::test_misc::get_opts;
-        use crate::{from_value, DriverError, Error, OptsBuilder, Pool};
+        use crate::{
+            from_value, prelude::*, test_misc::get_opts, DriverError, Error, OptsBuilder, Pool,
+        };
 
         #[test]
         fn multiple_pools_should_work() {
@@ -423,8 +427,7 @@ mod test {
                 .unwrap()
                 .exec_drop("INSERT INTO A.a VALUES (1)", ())
                 .unwrap();
-            let opts = OptsBuilder::from_opts(get_opts())
-                .db_name(Some("A"));
+            let opts = OptsBuilder::from_opts(get_opts()).db_name(Some("A"));
             let pool2 = Pool::new(opts).unwrap();
             let count: u8 = pool2
                 .get_conn()
@@ -671,8 +674,7 @@ mod test {
 
             use std::thread;
 
-            use crate::test_misc::get_opts;
-            use crate::Pool;
+            use crate::{test_misc::get_opts, Pool};
 
             #[bench]
             fn many_prepares(bencher: &mut test::Bencher) {
