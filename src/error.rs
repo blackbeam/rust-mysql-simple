@@ -1,9 +1,16 @@
-use mysql_common::named_params::MixedParamsError;
-use mysql_common::packets::ErrPacket;
-use mysql_common::params::MissingNamedParameterError;
-use mysql_common::proto::codec::error::PacketCodecError;
-use mysql_common::row::convert::FromRowError;
-use mysql_common::value::convert::FromValueError;
+// Copyright (c) 2020 rust-mysql-common contributors
+//
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. All files in the project carrying such notice may not be copied,
+// modified, or distributed except according to those terms.
+
+use mysql_common::{
+    named_params::MixedParamsError, packets::ErrPacket, params::MissingNamedParameterError,
+    proto::codec::error::PacketCodecError, row::convert::FromRowError,
+    value::convert::FromValueError,
+};
 use url::ParseError;
 
 use std::{error, fmt, io, result, sync};

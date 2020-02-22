@@ -1,39 +1,16 @@
-use fnv::FnvHasher;
+// Copyright (c) 2020 rust-mysql-common contributors
+//
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. All files in the project carrying such notice may not be copied,
+// modified, or distributed except according to those terms.
+
 use mysql_common::row::new_row;
 
-use std::collections::hash_map::HashMap;
-use std::hash::BuildHasherDefault as BldHshrDflt;
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::{collections::hash_map::HashMap, sync::Arc};
 
-use crate::{Column, Conn, Result as MyResult, Row, Stmt};
-
-/// Possible ways to pass conn to a query result
-#[derive(Debug)]
-pub enum ResultConnRef<'a> {
-    ViaConnRef(&'a mut Conn),
-    ViaStmt(Stmt<'a>),
-}
-
-impl<'a> Deref for ResultConnRef<'a> {
-    type Target = Conn;
-
-    fn deref(&self) -> &Conn {
-        match *self {
-            ResultConnRef::ViaConnRef(ref conn_ref) => conn_ref,
-            ResultConnRef::ViaStmt(ref stmt) => stmt.conn.deref(),
-        }
-    }
-}
-
-impl<'a> DerefMut for ResultConnRef<'a> {
-    fn deref_mut(&mut self) -> &mut Conn {
-        match *self {
-            ResultConnRef::ViaConnRef(ref mut conn_ref) => conn_ref,
-            ResultConnRef::ViaStmt(ref mut stmt) => stmt.conn.deref_mut(),
-        }
-    }
-}
+use crate::{Column, Conn, Result as MyResult, Row};
 
 /// Mysql result set for text and binary protocols.
 ///
@@ -44,46 +21,17 @@ impl<'a> DerefMut for ResultConnRef<'a> {
 /// [`Row`](struct.Row.html) you should rely on `FromRow` trait implemented for tuples of
 /// `FromValue` implementors up to arity 12, or on `FromValue` trait for rows with higher arity.
 ///
-/// ```rust
-/// # use mysql::Pool;
-/// # use mysql::{Opts, OptsBuilder, from_row};
-/// # fn get_opts() -> Opts {
-/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
-/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
-/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
-/// #             panic!("database name is empty");
-/// #         }
-/// #         url
-/// #     } else {
-/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
-/// #     };
-/// #     Opts::from_url(&*url).unwrap()
-/// # }
-/// # let opts = get_opts();
-/// # let pool = Pool::new(opts).unwrap();
-/// let mut conn = pool.get_conn().unwrap();
-///
-/// for row in conn.prep_exec("SELECT ?, ?", (42, 2.5)).unwrap() {
-///     let (a, b) = from_row(row.unwrap());
-///     assert_eq!((a, b), (42u8, 2.5_f32));
-/// }
-/// ```
-///
 /// For more info on how to work with values please look at
 /// [`Value`](../value/enum.Value.html) documentation.
 #[derive(Debug)]
 pub struct QueryResult<'a> {
-    conn: ResultConnRef<'a>,
+    conn: &'a mut Conn,
     columns: Arc<Vec<Column>>,
     is_bin: bool,
 }
 
 impl<'a> QueryResult<'a> {
-    pub(crate) fn new(
-        conn: ResultConnRef<'a>,
-        columns: Vec<Column>,
-        is_bin: bool,
-    ) -> QueryResult<'a> {
+    pub(crate) fn new(conn: &'a mut Conn, columns: Vec<Column>, is_bin: bool) -> QueryResult<'a> {
         QueryResult {
             conn,
             columns: Arc::new(columns),
@@ -105,23 +53,17 @@ impl<'a> QueryResult<'a> {
         }
     }
 
-    /// Returns
-    /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
-    /// affected rows.
+    /// Returns number affected rows for the current result set.
     pub fn affected_rows(&self) -> u64 {
         self.conn.affected_rows
     }
 
-    /// Returns
-    /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
-    /// last insert id.
+    /// Returns the last insert id for the current result set.
     pub fn last_insert_id(&self) -> u64 {
         self.conn.last_insert_id
     }
 
-    /// Returns
-    /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
-    /// warnings count.
+    /// Returns warnings count for the current result set.
     pub fn warnings(&self) -> u16 {
         self.conn.warnings
     }
@@ -148,8 +90,8 @@ impl<'a> QueryResult<'a> {
         None
     }
 
-    /// Returns HashMap which maps column names to column indexes.
-    pub fn column_indexes(&self) -> HashMap<String, usize, BldHshrDflt<FnvHasher>> {
+    /// Returns a `HashMap` which maps column names to column indexes.
+    pub fn column_indexes(&self) -> HashMap<String, usize> {
         let mut indexes = HashMap::default();
         for (i, column) in self.columns.iter().enumerate() {
             indexes.insert(column.name_str().into_owned(), i);
@@ -157,34 +99,40 @@ impl<'a> QueryResult<'a> {
         indexes
     }
 
-    /// Returns a slice of a [`Column`s](struct.Column.html) which represents
-    /// `QueryResult`'s columns if any.
+    /// Returns a list of columns in the current result set.
     pub fn columns_ref(&self) -> &[Column] {
         self.columns.as_ref()
     }
 
-    /// This predicate will help you to consume multiple result sets.
+    /// Returns `true` if this query result contains another result set,
+    /// or if last result set isn't fully consumed.
     ///
     /// # Note
     ///
-    /// Note that it'll also return `true` for unconsumed singe-result set.
+    /// Note, that the metadata of a query result (number of affected rows, last insert id etc.)
+    /// will change on the result set boundary, i.e:
     ///
-    /// # Example
+    /// ```rust
+    /// # mysql::doctest_wrapper!(__result, {
+    /// # use mysql::*;
+    /// # use mysql::prelude::*;
+    /// # let mut conn = Conn::new(get_opts())?;
+    /// let mut result = conn.query_iter("SELECT 1; SELECT 'foo', 'bar';")?;
     ///
-    /// ```ignore
-    /// conn.query(r#"
-    ///            CREATE PROCEDURE multi() BEGIN
-    ///                SELECT 1;
-    ///                SELECT 2;
-    ///            END
-    ///            "#);
-    /// let mut result = conn.query("CALL multi()").unwrap();
-    /// while result.more_results_exists() {
-    ///     for x in result.by_ref() {
-    ///         // On first iteration of `while` you will get result set from
-    ///         // SELECT 1 and from SELECT 2 on second.
-    ///     }
-    /// }
+    /// // First result set contains one column.
+    /// assert_eq!(result.columns_ref().len(), 1);
+    /// for row in result.by_ref() {} // first result set was consumed
+    ///
+    /// // More results exists
+    /// assert!(result.more_results_exists());
+    ///
+    /// // Second result set contains two columns.
+    /// assert_eq!(result.columns_ref().len(), 2);
+    /// for row in result.by_ref() {} // second result set was consumed
+    ///
+    /// // No more results
+    /// assert!(result.more_results_exists() == false);
+    /// # });
     /// ```
     pub fn more_results_exists(&self) -> bool {
         self.conn.more_results_exists() || !self.consumed()

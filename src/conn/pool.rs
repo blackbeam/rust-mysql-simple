@@ -1,18 +1,27 @@
-use mysql_common::named_params::parse_named_params;
-use mysql_common::row::convert::from_row;
+// Copyright (c) 2020 rust-mysql-common contributors
+//
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. All files in the project carrying such notice may not be copied,
+// modified, or distributed except according to those terms.
 
-use std::borrow::Borrow;
-use std::collections::VecDeque;
-use std::fmt;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration as StdDuration;
+use std::{
+    collections::VecDeque,
+    fmt,
+    ops::Deref,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Condvar, Mutex,
+    },
+    time::Duration as StdDuration,
+};
 
-use crate::prelude::{FromRow, GenericConnection};
-use crate::time::{Duration, SteadyTime};
 use crate::{
+    prelude::*,
+    time::{Duration, SteadyTime},
     Conn, DriverError, Error, IsolationLevel, LocalInfileHandler, Opts, Params, QueryResult,
-    Result as MyResult, Row, Stmt, Transaction,
+    Result as MyResult, Statement, Transaction,
 };
 
 #[derive(Debug)]
@@ -56,37 +65,27 @@ impl InnerPool {
 /// Example of multithreaded `Pool` usage:
 ///
 /// ```rust
-/// use mysql::{Pool, Opts};
-/// # use mysql::OptsBuilder;
-/// use std::thread;
-///
-/// fn get_opts() -> Opts {
-///       // ...
-/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
-/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
-/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
-/// #             panic!("database name is empty");
-/// #         }
-/// #         url
-/// #     } else {
-/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
-/// #     };
-/// #     Opts::from_url(&*url).unwrap()
-/// }
-///
+/// # mysql::doctest_wrapper!(__result, {
+/// # use mysql::*;
+/// # use mysql::prelude::*;
+/// # let mut conn = Conn::new(get_opts())?;
 /// let opts = get_opts();
 /// let pool = Pool::new(opts).unwrap();
 /// let mut threads = Vec::new();
+///
 /// for _ in 0..100 {
 ///     let pool = pool.clone();
-///     threads.push(thread::spawn(move || {
-///         let mut result = pool.prep_exec("SELECT 1", ()).unwrap();
-///         assert_eq!(result.next().unwrap().unwrap().unwrap(), vec![1.into()]);
+///     threads.push(std::thread::spawn(move || {
+///         let mut conn = pool.get_conn().unwrap();
+///         let result: u8 = conn.query_first("SELECT 1").unwrap().unwrap();
+///         assert_eq!(result, 1_u8);
 ///     }));
 /// }
+///
 /// for t in threads.into_iter() {
 ///     assert!(t.join().is_ok());
 /// }
+/// # });
 /// ```
 ///
 /// For more info on how to work with mysql connection please look at
@@ -232,57 +231,6 @@ impl Pool {
         self._get_conn(None::<String>, Some(timeout_ms), true)
     }
 
-    fn get_conn_by_stmt<T: AsRef<str>>(&self, query: T, call_ping: bool) -> MyResult<PooledConn> {
-        self._get_conn(Some(query), None, call_ping)
-    }
-
-    /// Will prepare statement. See [`Conn::prepare`](struct.Conn.html#method.prepare).
-    ///
-    /// It will try to find connection which has this statement cached.
-    pub fn prepare<T: AsRef<str>>(&self, query: T) -> MyResult<Stmt<'static>> {
-        let conn = self.get_conn_by_stmt(query.as_ref(), true)?;
-        conn.pooled_prepare(query)
-    }
-
-    /// Shortcut for `pool.get_conn()?.prep_exec(..)`. See
-    /// [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
-    ///
-    /// It will try to find connection which has this statement cached.
-    pub fn prep_exec<A, T>(&self, query: A, params: T) -> MyResult<QueryResult<'static>>
-    where
-        A: AsRef<str>,
-        T: Into<Params>,
-    {
-        let conn = self.get_conn_by_stmt(query.as_ref(), false)?;
-        let params = params.into();
-        match conn.pooled_prep_exec(query.as_ref(), params.clone()) {
-            Ok(stmt) => Ok(stmt),
-            Err(e) => {
-                if e.is_connectivity_error() {
-                    let conn = self._get_conn(None::<String>, None, true)?;
-                    conn.pooled_prep_exec(query, params)
-                } else {
-                    Err(e)
-                }
-            }
-        }
-    }
-
-    /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
-    pub fn first_exec<Q, P>(&self, query: Q, params: P) -> MyResult<Option<Row>>
-    where
-        Q: AsRef<str>,
-        P: Into<Params>,
-    {
-        self.prep_exec(query, params).and_then(|mut result| {
-            if let Some(row) = result.next() {
-                row.map(Some)
-            } else {
-                Ok(None)
-            }
-        })
-    }
-
     /// Shortcut for `pool.get_conn()?.start_transaction(..)`.
     pub fn start_transaction(
         &self,
@@ -325,33 +273,24 @@ impl fmt::Debug for Pool {
 /// `Value::Bytes` as a result and `from_value` will need to parse it if you want, for example, `i64`
 ///
 /// ```rust
-/// # use mysql::{Pool, Opts, OptsBuilder, from_value, Value};
-/// # fn get_opts() -> Opts {
-/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
-/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
-/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
-/// #             panic!("database name is empty");
-/// #         }
-/// #         url
-/// #     } else {
-/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
-/// #     };
-/// #     Opts::from_url(&*url).unwrap()
-/// # }
-/// # let opts = get_opts();
-/// # let pool = Pool::new(opts).unwrap();
+/// # mysql::doctest_wrapper!(__result, {
+/// # use mysql::*;
+/// # use mysql::prelude::*;
+/// # let mut conn = Conn::new(get_opts())?;
+/// let pool = Pool::new(get_opts()).unwrap();
 /// let mut conn = pool.get_conn().unwrap();
 ///
-/// conn.query("SELECT 42").map(|mut result| {
-///     let cell = result.next().unwrap().unwrap().take(0).unwrap();
-///     assert_eq!(cell, Value::Bytes(b"42".to_vec()));
-///     assert_eq!(from_value::<i64>(cell), 42i64);
+/// conn.query_first("SELECT 42").map(|result: Option<Value>| {
+///     let result = result.unwrap();
+///     assert_eq!(result, Value::Bytes(b"42".to_vec()));
+///     assert_eq!(from_value::<i64>(result), 42i64);
 /// }).unwrap();
-/// conn.prep_exec("SELECT 42", ()).map(|mut result| {
+/// conn.exec_iter("SELECT 42", ()).map(|mut result| {
 ///     let cell = result.next().unwrap().unwrap().take(0).unwrap();
 ///     assert_eq!(cell, Value::Int(42i64));
 ///     assert_eq!(from_value::<i64>(cell), 42i64);
 /// }).unwrap();
+/// # });
 /// ```
 ///
 /// For more info on how to work with query results please look at
@@ -360,6 +299,14 @@ impl fmt::Debug for Pool {
 pub struct PooledConn {
     pool: Pool,
     conn: Option<Conn>,
+}
+
+impl Deref for PooledConn {
+    type Target = Conn;
+
+    fn deref(&self) -> &Self::Target {
+        self.conn.as_ref().expect("deref after drop")
+    }
 }
 
 impl Drop for PooledConn {
@@ -379,53 +326,6 @@ impl Drop for PooledConn {
 }
 
 impl PooledConn {
-    /// Redirects to
-    /// [`Conn#query`](struct.Conn.html#method.query).
-    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
-        self.conn.as_mut().unwrap().query(query)
-    }
-
-    /// See [`Conn::first`](struct.Conn.html#method.first).
-    pub fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
-        self.query(query).and_then(|mut result| {
-            if let Some(row) = result.next() {
-                row.map(|x| Some(from_row(x)))
-            } else {
-                Ok(None)
-            }
-        })
-    }
-
-    /// See [`Conn::prepare`](struct.Conn.html#method.prepare).
-    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
-        self.conn.as_mut().unwrap().prepare(query)
-    }
-
-    /// See [`Conn::prep_exec`](struct.Conn.html#method.prep_exec).
-    pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
-    where
-        A: AsRef<str>,
-        T: Into<Params>,
-    {
-        self.conn.as_mut().unwrap().prep_exec(query, params)
-    }
-
-    /// See [`Conn::first_exec`](struct.Conn.html#method.first_exec).
-    pub fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
-    where
-        Q: AsRef<str>,
-        P: Into<Params>,
-        T: FromRow,
-    {
-        self.prep_exec(query, params).and_then(|mut result| {
-            if let Some(row) = result.next() {
-                row.map(|x| Some(from_row(x)))
-            } else {
-                Ok(None)
-            }
-        })
-    }
-
     /// Redirects to
     /// [`Conn#start_transaction`](struct.Conn.html#method.start_transaction)
     pub fn start_transaction(
@@ -458,26 +358,6 @@ impl PooledConn {
         self.conn.take().unwrap()
     }
 
-    fn pooled_prepare<'a, T: AsRef<str>>(mut self, query: T) -> MyResult<Stmt<'a>> {
-        let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query)?;
-        self.as_mut()
-            ._prepare(real_query.borrow(), named_params)
-            .map(|stmt| Stmt::new_pooled(stmt, self))
-    }
-
-    fn pooled_prep_exec<'a, A, T>(mut self, query: A, params: T) -> MyResult<QueryResult<'a>>
-    where
-        A: AsRef<str>,
-        T: Into<Params>,
-    {
-        let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query)?;
-        let stmt = self.as_mut()._prepare(real_query.borrow(), named_params)?;
-        let stmt = Stmt::new_pooled(stmt, self);
-        stmt.prep_exec(params)
-    }
-
     fn pooled_start_transaction<'a>(
         mut self,
         consistent_snapshot: bool,
@@ -500,34 +380,25 @@ impl PooledConn {
     }
 }
 
-impl GenericConnection for PooledConn {
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
-        self.query(query)
+impl Queryable for PooledConn {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
+        self.conn.as_mut().unwrap().query_iter(query)
     }
 
-    fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
-        self.first(query)
+    fn prep<T: AsRef<str>>(&mut self, query: T) -> MyResult<Statement> {
+        self.conn.as_mut().unwrap().prep(query)
     }
 
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
-        self.prepare(query)
+    fn close(&mut self, stmt: Statement) -> Result<(), Error> {
+        self.conn.as_mut().unwrap().close(stmt)
     }
 
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_>>
     where
-        A: AsRef<str>,
-        T: Into<Params>,
-    {
-        self.prep_exec(query, params)
-    }
-
-    fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
-    where
-        Q: AsRef<str>,
+        S: AsStatement,
         P: Into<Params>,
-        T: FromRow,
     {
-        self.first_exec(query, params)
+        self.conn.as_mut().unwrap().exec_iter(stmt, params)
     }
 }
 
@@ -537,27 +408,46 @@ mod test {
     mod pool {
         use std::{thread, time::Duration};
 
-        use crate::test_misc::get_opts;
-        use crate::{from_row, from_value, params, DriverError, Error, OptsBuilder, Pool};
+        use crate::{
+            from_value, prelude::*, test_misc::get_opts, DriverError, Error, OptsBuilder, Pool,
+        };
 
         #[test]
         fn multiple_pools_should_work() {
             let pool = Pool::new(get_opts()).unwrap();
-            pool.prep_exec("DROP DATABASE IF EXISTS A", ()).unwrap();
-            pool.prep_exec("CREATE DATABASE A", ()).unwrap();
-            pool.prep_exec("DROP TABLE IF EXISTS A.a", ()).unwrap();
-            pool.prep_exec("CREATE TABLE IF NOT EXISTS A.a (id INT)", ())
+            pool.get_conn()
+                .unwrap()
+                .exec_drop("DROP DATABASE IF EXISTS A", ())
                 .unwrap();
-            pool.prep_exec("INSERT INTO A.a VALUES (1)", ()).unwrap();
-            let mut builder = OptsBuilder::from_opts(get_opts());
-            builder.db_name(Some("A"));
-            let pool2 = Pool::new(builder).unwrap();
-            let row = pool2
-                .first_exec("SELECT COUNT(*) FROM a", ())
+            pool.get_conn()
+                .unwrap()
+                .exec_drop("CREATE DATABASE A", ())
+                .unwrap();
+            pool.get_conn()
+                .unwrap()
+                .exec_drop("DROP TABLE IF EXISTS A.a", ())
+                .unwrap();
+            pool.get_conn()
+                .unwrap()
+                .exec_drop("CREATE TABLE IF NOT EXISTS A.a (id INT)", ())
+                .unwrap();
+            pool.get_conn()
+                .unwrap()
+                .exec_drop("INSERT INTO A.a VALUES (1)", ())
+                .unwrap();
+            let opts = OptsBuilder::from_opts(get_opts()).db_name(Some("A"));
+            let pool2 = Pool::new(opts).unwrap();
+            let count: u8 = pool2
+                .get_conn()
+                .unwrap()
+                .exec_first("SELECT COUNT(*) FROM a", ())
                 .unwrap()
                 .unwrap();
-            assert_eq!((1u8,), from_row(row));
-            pool.prep_exec("DROP DATABASE A", ()).unwrap();
+            assert_eq!(1, count);
+            pool.get_conn()
+                .unwrap()
+                .exec_drop("DROP DATABASE A", ())
+                .unwrap();
         }
 
         struct A {
@@ -576,15 +466,19 @@ mod test {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
 
-            let row = pool
-                .first_exec("SELECT CONNECTION_ID();", ())
+            let id: u32 = pool
+                .get_conn()
+                .unwrap()
+                .exec_first("SELECT CONNECTION_ID();", ())
                 .unwrap()
                 .unwrap();
-            let (id,): (u32,) = from_row(row);
 
-            conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
+            conn.exec_drop("KILL CONNECTION ?", (id,)).unwrap();
             thread::sleep(Duration::from_millis(250));
-            pool.prepare("SHOW FULL PROCESSLIST").unwrap();
+            pool.get_conn()
+                .unwrap()
+                .prep("SHOW FULL PROCESSLIST")
+                .unwrap();
         }
 
         #[test]
@@ -592,28 +486,33 @@ mod test {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
 
-            let row = pool
-                .first_exec("SELECT CONNECTION_ID();", ())
+            let id: u32 = pool
+                .get_conn()
+                .unwrap()
+                .exec_first("SELECT CONNECTION_ID();", ())
                 .unwrap()
                 .unwrap();
-            let (id,): (u32,) = from_row(row);
 
-            conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
+            conn.exec_drop("KILL CONNECTION ?", (id,)).unwrap();
             thread::sleep(Duration::from_millis(250));
-            pool.prep_exec("SHOW FULL PROCESSLIST", ()).unwrap();
+            pool.get_conn()
+                .unwrap()
+                .exec_drop("SHOW FULL PROCESSLIST", ())
+                .unwrap();
         }
         #[test]
         fn should_fix_connectivity_errors_on_start_transaction() {
             let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
 
-            let row = pool
-                .first_exec("SELECT CONNECTION_ID();", ())
+            let id: u32 = pool
+                .get_conn()
+                .unwrap()
+                .exec_first("SELECT CONNECTION_ID();", ())
                 .unwrap()
                 .unwrap();
-            let (id,): (u32,) = from_row(row);
 
-            conn.prep_exec("KILL CONNECTION ?", (id,)).unwrap();
+            conn.exec_drop("KILL CONNECTION ?", (id,)).unwrap();
             thread::sleep(Duration::from_millis(250));
             pool.start_transaction(false, None, None).unwrap();
         }
@@ -627,7 +526,7 @@ mod test {
                     let conn = pool.get_conn();
                     assert!(conn.is_ok());
                     let mut conn = conn.unwrap();
-                    assert!(conn.query("SELECT 1").is_ok());
+                    conn.query_drop("SELECT 1").unwrap();
                 }));
             }
             for t in threads.into_iter() {
@@ -647,6 +546,7 @@ mod test {
             drop(conn1);
             assert!(pool.try_get_conn(357).is_ok());
         }
+
         #[test]
         fn should_execute_statements_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
@@ -655,8 +555,8 @@ mod test {
                 let pool = pool.clone();
                 threads.push(thread::spawn(move || {
                     let mut conn = pool.get_conn().unwrap();
-                    let mut stmt = conn.prepare("SELECT 1").unwrap();
-                    assert!(stmt.execute(()).is_ok());
+                    let stmt = conn.prep("SELECT 1").unwrap();
+                    conn.exec_drop(&stmt, ()).unwrap();
                 }));
             }
             for t in threads.into_iter() {
@@ -669,104 +569,67 @@ mod test {
                 let pool = pool.clone();
                 threads.push(thread::spawn(move || {
                     let mut conn = pool.get_conn().unwrap();
-                    conn.prep_exec("SELECT ?", (1,)).unwrap();
+                    conn.exec_drop("SELECT ?", (1,)).unwrap();
                 }));
             }
             for t in threads.into_iter() {
                 assert!(t.join().is_ok());
             }
         }
-        #[test]
-        fn should_execute_statements_on_Pool() {
-            let pool = Pool::new(get_opts()).unwrap();
-            let mut threads = Vec::new();
-            for _ in 0usize..10 {
-                let pool = pool.clone();
-                threads.push(thread::spawn(move || {
-                    let mut stmt = pool.prepare("SELECT 1").unwrap();
-                    assert!(stmt.execute(()).is_ok());
-                }));
-            }
-            for t in threads.into_iter() {
-                assert!(t.join().is_ok());
-            }
 
-            let pool = Pool::new(get_opts()).unwrap();
-            let mut threads = Vec::new();
-            for _ in 0usize..10 {
-                let pool = pool.clone();
-                threads.push(thread::spawn(move || {
-                    pool.prep_exec("SELECT ?", (1,)).unwrap();
-                }));
-            }
-            for t in threads.into_iter() {
-                assert!(t.join().is_ok());
-            }
-            pool.prep_exec("SELECT 1", ())
-                .and_then(|mut res1| {
-                    pool.prep_exec("SELECT 2", ()).map(|mut res2| {
-                        let (x1,) = from_row::<(u8,)>(res1.next().unwrap().unwrap());
-                        let (x2,) = from_row::<(u8,)>(res2.next().unwrap().unwrap());
-                        assert_eq!(1, x1);
-                        assert_eq!(2, x2);
-                    })
-                })
-                .unwrap()
-        }
         #[test]
         #[allow(unused_variables)]
         fn should_start_transaction_on_Pool() {
             let pool = Pool::new_manual(1, 10, get_opts()).unwrap();
-            pool.prepare("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
-                .ok()
-                .map(|mut stmt| {
-                    assert!(stmt.execute(()).is_ok());
-                });
+            pool.get_conn()
+                .unwrap()
+                .query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
+                .unwrap();
             pool.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
-                    t.query("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.commit()
                 })
                 .unwrap();
-            pool.prepare("SELECT COUNT(a) FROM mysql.tbl")
-                .ok()
-                .map(|mut stmt| {
-                    for x in stmt.execute(()).unwrap() {
-                        let mut x = x.unwrap();
-                        assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
-                    }
-                });
+            assert_eq!(
+                pool.get_conn()
+                    .unwrap()
+                    .query_first::<u8, _>("SELECT COUNT(a) FROM mysql.tbl")
+                    .unwrap()
+                    .unwrap(),
+                2_u8
+            );
             pool.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
-                    t.query("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.rollback()
                 })
                 .unwrap();
-            pool.prepare("SELECT COUNT(a) FROM mysql.tbl")
-                .ok()
-                .map(|mut stmt| {
-                    for x in stmt.execute(()).unwrap() {
-                        let mut x = x.unwrap();
-                        assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
-                    }
-                });
+            assert_eq!(
+                pool.get_conn()
+                    .unwrap()
+                    .query_first::<u8, _>("SELECT COUNT(a) FROM mysql.tbl")
+                    .unwrap()
+                    .unwrap(),
+                2_u8
+            );
             pool.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
-                    t.query("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     Ok(())
                 })
                 .unwrap();
-            pool.prepare("SELECT COUNT(a) FROM mysql.tbl")
-                .ok()
-                .map(|mut stmt| {
-                    for x in stmt.execute(()).unwrap() {
-                        let mut x = x.unwrap();
-                        assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
-                    }
-                });
+            assert_eq!(
+                pool.get_conn()
+                    .unwrap()
+                    .query_first::<u8, _>("SELECT COUNT(a) FROM mysql.tbl")
+                    .unwrap()
+                    .unwrap(),
+                2_u8
+            );
             let mut a = A { pool, x: 0 };
             let transaction = a.pool.start_transaction(false, None, None).unwrap();
             a.add();
@@ -776,70 +639,41 @@ mod test {
         fn should_start_transaction_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();
-            assert!(conn
-                .query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
-                .is_ok());
-            assert!(conn
-                .start_transaction(false, None, None)
+            conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
+                .unwrap();
+            conn.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.commit()
                 })
-                .is_ok());
-            for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
+                .unwrap();
+            for x in conn.query_iter("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
-            assert!(conn
-                .start_transaction(false, None, None)
+            conn.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.rollback()
                 })
-                .is_ok());
-            for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
+                .unwrap();
+            for x in conn.query_iter("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
-            assert!(conn
-                .start_transaction(false, None, None)
+            conn.start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     Ok(())
                 })
-                .is_ok());
-            for x in conn.query("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
+                .unwrap();
+            for x in conn.query_iter("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
-        }
-        #[test]
-        fn should_work_with_named_params() {
-            let pool = Pool::new(get_opts()).unwrap();
-            pool.prepare("SELECT :a, :b, :a + :b, :abc")
-                .map(|mut stmt| {
-                    let mut result = stmt
-                        .execute(params! {
-                            "a" => 1,
-                            "b" => 2,
-                            "abc" => 4,
-                        })
-                        .unwrap();
-                    let row = result.next().unwrap().unwrap();
-                    assert_eq!((1, 2, 3, 4), from_row(row));
-                })
-                .unwrap();
-
-            let params = params! {"a" => 1, "b" => 2, "abc" => 4};
-            pool.prep_exec("SELECT :a, :b, :a+:b, :abc", params)
-                .map(|mut result| {
-                    let row = result.next().unwrap().unwrap();
-                    assert_eq!((1, 2, 3, 4), from_row(row));
-                })
-                .unwrap();
         }
 
         #[cfg(feature = "nightly")]
@@ -848,8 +682,7 @@ mod test {
 
             use std::thread;
 
-            use crate::test_misc::get_opts;
-            use crate::Pool;
+            use crate::{test_misc::get_opts, Pool};
 
             #[bench]
             fn many_prepares(bencher: &mut test::Bencher) {

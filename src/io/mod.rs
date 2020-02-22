@@ -1,21 +1,35 @@
+// Copyright (c) 2020 rust-mysql-common contributors
+//
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. All files in the project carrying such notice may not be copied,
+// modified, or distributed except according to those terms.
+
 use bufstream::BufStream;
 use io_enum::*;
 #[cfg(windows)]
 use named_pipe as np;
 use native_tls::{Certificate, Identity, TlsConnector, TlsStream};
 
-use std::fmt;
-use std::fs::File;
-use std::io::{self, Read as _};
-use std::net::{self, SocketAddr};
 #[cfg(unix)]
 use std::os::unix;
-use std::time::Duration;
+use std::{
+    fmt,
+    fs::File,
+    io::{self, Read as _},
+    net::{self, SocketAddr},
+    time::Duration,
+};
 
-use crate::error::DriverError::{ConnectTimeout, CouldNotConnect};
-use crate::error::Error::DriverError;
-use crate::error::Result as MyResult;
-use crate::SslOpts;
+use crate::{
+    error::{
+        DriverError::{ConnectTimeout, CouldNotConnect},
+        Error::DriverError,
+        Result as MyResult,
+    },
+    SslOpts,
+};
 
 mod tcp;
 
@@ -124,13 +138,18 @@ impl Stream {
         }
     }
 
-    pub fn make_secure(self, ip_or_hostname: Option<&str>, ssl_opts: SslOpts) -> MyResult<Stream> {
+    pub fn make_secure(self, host: url::Host, ssl_opts: SslOpts) -> MyResult<Stream> {
         if self.is_socket() {
             // won't secure socket connection
             return Ok(self);
         }
 
-        let domain = ip_or_hostname.unwrap_or("127.0.0.1");
+        let domain = match host {
+            url::Host::Domain(domain) => domain,
+            url::Host::Ipv4(ip) => ip.to_string(),
+            url::Host::Ipv6(ip) => ip.to_string(),
+        };
+
         let mut builder = TlsConnector::builder();
         match ssl_opts.root_cert_path() {
             Some(root_cert_path) => {
@@ -154,7 +173,7 @@ impl Stream {
             Stream::TcpStream(tcp_stream) => match tcp_stream {
                 TcpStream::Insecure(insecure_stream) => {
                     let inner = insecure_stream.into_inner().map_err(io::Error::from)?;
-                    let secure_stream = tls_connector.connect(domain, inner)?;
+                    let secure_stream = tls_connector.connect(&domain, inner)?;
                     Ok(Stream::TcpStream(TcpStream::Secure(BufStream::new(
                         secure_stream,
                     ))))

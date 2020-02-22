@@ -1,5 +1,15 @@
-use std::sync::{Arc, Mutex};
-use std::{fmt, io};
+// Copyright (c) 2020 rust-mysql-common contributors
+//
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. All files in the project carrying such notice may not be copied,
+// modified, or distributed except according to those terms.
+
+use std::{
+    fmt, io,
+    sync::{Arc, Mutex},
+};
 
 use crate::Conn;
 
@@ -22,8 +32,10 @@ pub(crate) type LocalInfileInner =
 /// #     OptsBuilder,
 /// #     LocalInfileHandler,
 /// #     from_row,
-/// #     error::Error
+/// #     error::Error,
+/// #     prelude::*,
 /// # };
+/// use mysql::prelude::Queryable;
 /// # fn get_opts() -> Opts {
 /// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
 /// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
@@ -38,11 +50,11 @@ pub(crate) type LocalInfileInner =
 /// # }
 /// # let opts = get_opts();
 /// # let pool = Pool::new_manual(1, 1, opts).unwrap();
-/// # pool.prep_exec("CREATE TEMPORARY TABLE mysql.Users (id INT, name TEXT, age INT, email TEXT)", ()).unwrap();
-/// # pool.prep_exec("INSERT INTO mysql.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
-/// #                (1, "John", 17, "foo@bar.baz")).unwrap();
 /// # let mut conn = pool.get_conn().unwrap();
-/// conn.query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)").unwrap();
+/// # conn.query_drop("CREATE TEMPORARY TABLE mysql.Users (id INT, name TEXT, age INT, email TEXT)").unwrap();
+/// # conn.exec_drop("INSERT INTO mysql.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
+/// #                (1, "John", 17, "foo@bar.baz")).unwrap();
+/// conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)").unwrap();
 ///
 /// conn.set_local_infile_handler(Some(
 ///     LocalInfileHandler::new(|file_name, writer| {
@@ -54,29 +66,23 @@ pub(crate) type LocalInfileInner =
 ///     })
 /// ));
 ///
-/// match conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE mysql.tbl") {
+/// match conn.query_drop("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE mysql.tbl") {
 ///     Ok(_) => (),
 ///     Err(Error::MySqlError(ref e)) if e.code == 1148 => {
 ///         // functionality is not supported by the server
 ///         return;
-///     },
+///     }
 ///     err => {
 ///         err.unwrap();
-///     },
-/// }
-///
-/// let mut row_num = 0;
-/// for (row_idx, row) in conn.query("SELECT * FROM mysql.tbl").unwrap().enumerate() {
-///     row_num = row_idx + 1;
-///     let row: (String,) = from_row(row.unwrap());
-///     match row_num {
-///         1 => assert_eq!(row.0, "row1: file name is file_name"),
-///         2 => assert_eq!(row.0, "row2: foobar"),
-///         _ => unreachable!(),
 ///     }
 /// }
 ///
-/// assert_eq!(row_num, 2);
+/// let mut row_num = 0;
+/// let result: Vec<String> = conn.query("SELECT * FROM mysql.tbl").unwrap();
+/// assert_eq!(
+///     result,
+///     vec!["row1: file name is file_name".to_string(), "row2: foobar".to_string()],
+/// );
 /// ```
 #[derive(Clone)]
 pub struct LocalInfileHandler(pub(crate) LocalInfileInner);

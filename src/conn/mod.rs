@@ -1,39 +1,56 @@
-use mysql_common::crypto;
-use mysql_common::io::ReadMysqlExt;
-use mysql_common::named_params::parse_named_params;
-use mysql_common::packets::{
-    column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
-    parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
-    ComStmtExecuteRequestBuilder, ComStmtSendLongData, HandshakePacket, HandshakeResponse,
-    OkPacket, SslRequest,
-};
-use mysql_common::proto::{codec::Compression, sync_framed::MySyncFramed};
-use mysql_common::value::{read_bin_values, read_text_values, ServerSide};
+// Copyright (c) 2020 rust-mysql-common contributors
+//
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. All files in the project carrying such notice may not be copied,
+// modified, or distributed except according to those terms.
 
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::io::{self, Read, Write as _};
-use std::ops::{Deref, DerefMut};
-use std::{cmp, mem, process};
-
-use crate::conn::local_infile::LocalInfile;
-use crate::conn::query_result::ResultConnRef;
-use crate::conn::stmt::InnerStmt;
-use crate::conn::stmt_cache::StmtCache;
-use crate::conn::transaction::IsolationLevel;
-use crate::consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN};
-use crate::io::Stream;
-use crate::prelude::FromRow;
-use crate::DriverError::{
-    CouldNotConnect, MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
-    ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket, UnknownAuthPlugin,
-    UnsupportedProtocol,
+use mysql_common::{
+    crypto,
+    io::ReadMysqlExt,
+    named_params::parse_named_params,
+    packets::{
+        column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
+        parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
+        ComStmtExecuteRequestBuilder, ComStmtSendLongData, HandshakePacket, HandshakeResponse,
+        OkPacket, SslRequest,
+    },
+    proto::{codec::Compression, sync_framed::MySyncFramed},
+    value::{read_bin_values, read_text_values, ServerSide},
 };
-use crate::Error::{DriverError, MySqlError};
-use crate::Value::{self, Bytes, NULL};
+
+use std::{
+    borrow::Borrow,
+    cmp,
+    collections::HashMap,
+    io::{self, Read, Write as _},
+    mem,
+    ops::{Deref, DerefMut},
+    process,
+    sync::Arc,
+};
+
 use crate::{
-    from_row, from_value, from_value_opt, LocalInfileHandler, Opts, OptsBuilder, Params,
-    QueryResult, Result as MyResult, SslOpts, Stmt, Transaction,
+    conn::{
+        local_infile::LocalInfile,
+        stmt::{InnerStmt, Statement},
+        stmt_cache::StmtCache,
+        transaction::IsolationLevel,
+    },
+    consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN},
+    from_value, from_value_opt,
+    io::Stream,
+    prelude::*,
+    DriverError::{
+        MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
+        ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket,
+        UnknownAuthPlugin, UnsupportedProtocol,
+    },
+    Error::{DriverError, MySqlError},
+    LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result as MyResult, SslOpts,
+    Transaction,
+    Value::{self, Bytes, NULL},
 };
 
 pub mod local_infile;
@@ -43,36 +60,6 @@ pub mod query_result;
 pub mod stmt;
 mod stmt_cache;
 pub mod transaction;
-
-/// A trait allowing abstraction over connections and transactions
-pub trait GenericConnection {
-    /// See
-    /// [`Conn#query`](struct.Conn.html#method.query).
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>>;
-
-    /// See
-    /// [`Conn#first`](struct.Conn.html#method.first).
-    fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>>;
-
-    /// See
-    /// [`Conn#prepare`](struct.Conn.html#method.prepare).
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>>;
-
-    /// See
-    /// [`Conn#prep_exec`](struct.Conn.html#method.prep_exec).
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
-    where
-        A: AsRef<str>,
-        T: Into<Params>;
-
-    /// See
-    /// [`Conn#first_exec`](struct.Conn.html#method.first_exec).
-    fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
-    where
-        Q: AsRef<str>,
-        P: Into<Params>,
-        T: FromRow;
-}
 
 /// Mysql connection.
 #[derive(Debug)]
@@ -97,6 +84,21 @@ pub struct Conn {
 }
 
 impl Conn {
+    /// Returns connection identifier.
+    pub fn connection_id(&self) -> u32 {
+        self.connection_id
+    }
+
+    /// Returns number of rows affected by the last query.
+    pub fn affected_rows(&self) -> u64 {
+        self.affected_rows
+    }
+
+    /// Returns last insert id of the last query.
+    pub fn last_insert_id(&self) -> u64 {
+        self.last_insert_id
+    }
+
     fn stream_ref(&self) -> &MySyncFramed<Stream> {
         self.stream.as_ref().expect("incomplete connection")
     }
@@ -150,10 +152,9 @@ impl Conn {
             }
             if let Some(socket) = socket {
                 if self.opts.get_socket().is_none() {
-                    let mut socket_opts = OptsBuilder::from_opts(self.opts.clone());
+                    let socket_opts = OptsBuilder::from_opts(self.opts.clone());
                     if !socket.is_empty() {
-                        socket_opts.socket(Some(socket));
-                        return Ok(Some(socket_opts.into()));
+                        return Ok(Some(socket_opts.socket(Some(socket)).into()));
                     }
                 }
             }
@@ -181,7 +182,7 @@ impl Conn {
             }
         };
         for cmd in conn.opts.get_init() {
-            conn.query(cmd)?;
+            conn.query_drop(cmd)?;
         }
         Ok(conn)
     }
@@ -237,7 +238,7 @@ impl Conn {
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> MyResult<()> {
         let stream = self.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
-        let stream = stream.make_secure(self.opts.get_ip_or_hostname(), ssl_opts)?;
+        let stream = stream.make_secure(self.opts.get_host(), ssl_opts)?;
         let stream = MySyncFramed::construct(in_buf, out_buf, codec, stream);
         self.stream = Some(stream);
         Ok(())
@@ -252,8 +253,13 @@ impl Conn {
         let bind_address = self.opts.bind_address().cloned();
         let stream = if let Some(socket) = self.opts.get_socket() {
             Stream::connect_socket(&*socket, read_timeout, write_timeout)?
-        } else if let Some(ip_or_hostname) = self.opts.get_ip_or_hostname() {
+        } else {
             let port = self.opts.get_tcp_port();
+            let ip_or_hostname = match self.opts.get_host() {
+                url::Host::Domain(domain) => domain,
+                url::Host::Ipv4(ip) => ip.to_string(),
+                url::Host::Ipv6(ip) => ip.to_string(),
+            };
             Stream::connect_tcp(
                 &*ip_or_hostname,
                 port,
@@ -264,8 +270,6 @@ impl Conn {
                 tcp_connect_timeout,
                 bind_address,
             )?
-        } else {
-            return Err(DriverError(CouldNotConnect(None)));
         };
         self.stream = Some(MySyncFramed::new(stream));
         Ok(())
@@ -580,7 +584,7 @@ impl Conn {
         self.write_command_raw(body)
     }
 
-    fn send_long_data(&mut self, stmt: &InnerStmt, params: &[Value]) -> MyResult<()> {
+    fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> MyResult<()> {
         for (i, value) in params.into_iter().enumerate() {
             match value {
                 Bytes(bytes) => {
@@ -591,7 +595,7 @@ impl Conn {
                         None
                     });
                     for chunk in chunks {
-                        let com = ComStmtSendLongData::new(stmt.id(), i, chunk);
+                        let com = ComStmtSendLongData::new(stmt_id, i, chunk);
                         self.write_command_raw(com)?;
                     }
                 }
@@ -602,7 +606,7 @@ impl Conn {
         Ok(())
     }
 
-    fn _execute(&mut self, stmt: &InnerStmt, params: Params) -> MyResult<Vec<Column>> {
+    fn _execute(&mut self, stmt: &Statement, params: Params) -> MyResult<Vec<Column>> {
         let exec_request = match params {
             Params::Empty => {
                 if stmt.num_params() != 0 {
@@ -624,32 +628,21 @@ impl Conn {
                     ComStmtExecuteRequestBuilder::new(stmt.id()).build(&*params);
 
                 if as_long_data {
-                    self.send_long_data(stmt, &*params)?;
+                    self.send_long_data(stmt.id(), &*params)?;
                 }
 
                 body
             }
             Params::Named(_) => {
-                if stmt.named_params().is_none() {
+                if stmt.named_params.is_none() {
                     return Err(DriverError(NamedParamsForPositionalQuery));
                 }
-                let named_params = stmt.named_params().unwrap();
+                let named_params = stmt.named_params.as_ref().unwrap();
                 return self._execute(stmt, params.into_positional(named_params)?);
             }
         };
         self.write_command_raw(exec_request)?;
         self.handle_result_set()
-    }
-
-    fn execute<T: Into<Params>>(&mut self, stmt: &InnerStmt, params: T) -> MyResult<QueryResult> {
-        match self._execute(stmt, params.into()) {
-            Ok(columns) => Ok(QueryResult::new(
-                ResultConnRef::ViaConnRef(self),
-                columns,
-                true,
-            )),
-            Err(err) => Err(err),
-        }
     }
 
     fn _start_transaction(
@@ -659,7 +652,7 @@ impl Conn {
         readonly: Option<bool>,
     ) -> MyResult<()> {
         if let Some(i_level) = isolation_level {
-            let _ = self.query(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
+            self.query_drop(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
         }
         if let Some(readonly) = readonly {
             let supported = match (self.server_version, self.mariadb_server_version) {
@@ -670,16 +663,16 @@ impl Conn {
             if !supported {
                 return Err(DriverError(ReadOnlyTransNotSupported));
             }
-            let _ = if readonly {
-                self.query("SET TRANSACTION READ ONLY")?
+            if readonly {
+                self.query_drop("SET TRANSACTION READ ONLY")?;
             } else {
-                self.query("SET TRANSACTION READ WRITE")?
-            };
+                self.query_drop("SET TRANSACTION READ WRITE")?;
+            }
         }
-        let _ = if consistent_snapshot {
-            self.query("START TRANSACTION WITH CONSISTENT SNAPSHOT")?
+        if consistent_snapshot {
+            self.query_drop("START TRANSACTION WITH CONSISTENT SNAPSHOT")?;
         } else {
-            self.query("START TRANSACTION")?
+            self.query_drop("START TRANSACTION")?;
         };
         Ok(())
     }
@@ -786,47 +779,17 @@ impl Conn {
         Ok(Transaction::new(self))
     }
 
-    /// Implements text protocol of mysql server.
-    ///
-    /// Executes mysql query on `Conn`. [`QueryResult`](struct.QueryResult.html)
-    /// will borrow `Conn` until the end of its scope.
-    pub fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
-        match self._query(query.as_ref()) {
-            Ok(columns) => Ok(QueryResult::new(
-                ResultConnRef::ViaConnRef(self),
-                columns,
-                false,
-            )),
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Performs query and returns first row.
-    pub fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
-        self.query(query).and_then(|mut result| {
-            if let Some(row) = result.next() {
-                row.map(|x| Some(from_row(x)))
-            } else {
-                Ok(None)
-            }
-        })
-    }
-
-    fn _true_prepare(
-        &mut self,
-        query: &str,
-        named_params: Option<Vec<String>>,
-    ) -> MyResult<InnerStmt> {
+    fn _true_prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
         self.write_command(Command::COM_STMT_PREPARE, query.as_bytes())?;
         let pld = self.read_packet()?;
-        let mut stmt = InnerStmt::from_payload(pld.as_ref(), named_params)?;
+        let mut stmt = InnerStmt::from_payload(pld.as_ref(), self.connection_id())?;
         if stmt.num_params() > 0 {
             let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
             for _ in 0..stmt.num_params() {
                 let pld = self.read_packet()?;
                 params.push(column_from_payload(pld)?);
             }
-            stmt.set_params(Some(params));
+            stmt = stmt.with_params(Some(params));
             self.read_packet()?;
         }
         if stmt.num_columns() > 0 {
@@ -835,151 +798,27 @@ impl Conn {
                 let pld = self.read_packet()?;
                 columns.push(column_from_payload(pld)?);
             }
-            stmt.set_columns(Some(columns));
+            stmt = stmt.with_columns(Some(columns));
             self.read_packet()?;
         }
         Ok(stmt)
     }
 
-    fn _prepare(&mut self, query: &str, named_params: Option<Vec<String>>) -> MyResult<InnerStmt> {
-        if let Some(inner_st) = self.stmt_cache.get(query) {
-            let mut inner_st = inner_st.clone();
-            inner_st.set_named_params(named_params);
-            return Ok(inner_st);
+    fn _prepare(&mut self, query: &str) -> MyResult<Arc<InnerStmt>> {
+        if let Some(entry) = self.stmt_cache.by_query(query) {
+            return Ok(entry.stmt.clone());
         }
 
-        let inner_st = self._true_prepare(query, named_params)?;
+        let inner_st = Arc::new(self._true_prepare(query)?);
 
-        if self.stmt_cache.get_cap() > 0 {
-            if let Some(old_st) = self.stmt_cache.put(query.into(), inner_st.clone()) {
-                let com_stmt_close = ComStmtClose::new(old_st.id());
-                self.write_command_raw(com_stmt_close)?;
-            }
+        if let Some(old_stmt) = self
+            .stmt_cache
+            .put(Arc::new(query.into()), inner_st.clone())
+        {
+            self.close(Statement::new(old_stmt, None))?;
         }
 
         Ok(inner_st)
-    }
-
-    /// Implements binary protocol of mysql server.
-    ///
-    /// Prepares mysql statement on `Conn`. [`Stmt`](struct.Stmt.html) will
-    /// borrow `Conn` until the end of its scope.
-    ///
-    /// This call will take statement from cache if has been prepared on this connection.
-    ///
-    /// ### JSON caveats
-    ///
-    /// For the following statement you will get somewhat unexpected result `{"a": 0}`, because
-    /// booleans in mysql binary protocol is `TINYINT(1)` and will be interpreted as `0`:
-    ///
-    /// ```ignore
-    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (false,));
-    /// ```
-    ///
-    /// You should wrap such parameters to a proper json value. For example:
-    ///
-    /// ```ignore
-    /// pool.prep_exec(r#"SELECT JSON_REPLACE('{"a": true}', '$.a', ?)"#, (Value::Bool(false),));
-    /// ```
-    ///
-    /// ### Named parameters support
-    ///
-    /// `prepare` supports named parameters in form of `:named_param_name`. Allowed characters for
-    /// parameter name is `[a-z_]`. Named parameters will be converted to positional before actual
-    /// call to prepare so `SELECT :a-:b, :a*:b` is actually `SELECT ?-?, ?*?`.
-    ///
-    /// ```
-    /// # #[macro_use] extern crate mysql; fn main() {
-    /// # use mysql::{Pool, Opts, OptsBuilder, from_row};
-    /// # use mysql::Error::DriverError;
-    /// # use mysql::DriverError::MixedParams;
-    /// # use mysql::DriverError::MissingNamedParameter;
-    /// # use mysql::DriverError::NamedParamsForPositionalQuery;
-    /// # fn get_opts() -> Opts {
-    /// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
-    /// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
-    /// #         if opts.get_db_name().expect("a database name is required").is_empty() {
-    /// #             panic!("database name is empty");
-    /// #         }
-    /// #         url
-    /// #     } else {
-    /// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
-    /// #     };
-    /// #     Opts::from_url(&*url).unwrap()
-    /// # }
-    /// # let opts = get_opts();
-    /// # let pool = Pool::new(opts).unwrap();
-    /// // Names could be repeated
-    /// pool.prep_exec("SELECT :a+:b, :a * :b, ':c'", params!{"a" => 2, "b" => 3}).map(|mut result| {
-    ///     let row = result.next().unwrap().unwrap();
-    ///     assert_eq!((5, 6, String::from(":c")), from_row(row));
-    /// }).unwrap();
-    ///
-    /// // You can call named statement with positional parameters
-    /// pool.prep_exec("SELECT :a+:b, :a*:b", (2, 3, 2, 3)).map(|mut result| {
-    ///     let row = result.next().unwrap().unwrap();
-    ///     assert_eq!((5, 6), from_row(row));
-    /// }).unwrap();
-    ///
-    /// // You must pass all named parameters for statement
-    /// let err = pool.prep_exec("SELECT :name", params!{"another_name" => 42}).unwrap_err();
-    /// match err {
-    ///     DriverError(e) => {
-    ///         assert_eq!(MissingNamedParameter("name".into()), e);
-    ///     }
-    ///     _ => unreachable!(),
-    /// }
-    ///
-    /// // You can't call positional statement with named parameters
-    /// let err = pool.prep_exec("SELECT ?", params!{"first" => 42}).unwrap_err();
-    /// match err {
-    ///     DriverError(e) => assert_eq!(NamedParamsForPositionalQuery, e),
-    ///     _ => unreachable!(),
-    /// }
-    ///
-    /// // You can't mix named and positional parameters
-    /// let err = pool.prepare("SELECT :a, ?").unwrap_err();
-    /// match err {
-    ///     DriverError(e) => assert_eq!(MixedParams, e),
-    ///     _ => unreachable!(),
-    /// }
-    /// # }
-    /// ```
-    pub fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
-        let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query)?;
-        match self._prepare(real_query.borrow(), named_params) {
-            Ok(stmt) => Ok(Stmt::new(stmt, self)),
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Prepares and executes statement in one call. See
-    /// ['Conn::prepare'](struct.Conn.html#method.prepare)
-    ///
-    /// This call will take statement from cache if has been prepared on this connection.
-    pub fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
-    where
-        A: AsRef<str>,
-        T: Into<Params>,
-    {
-        self.prepare(query)?.prep_exec(params.into())
-    }
-
-    /// Executes statement and returns first row.
-    pub fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
-    where
-        Q: AsRef<str>,
-        P: Into<Params>,
-        T: FromRow,
-    {
-        self.prep_exec(query, params).and_then(|mut result| {
-            if let Some(row) = result.next() {
-                row.map(|x| Some(from_row(x)))
-            } else {
-                Ok(None)
-            }
-        })
     }
 
     fn connect(&mut self) -> MyResult<()> {
@@ -1005,14 +844,7 @@ impl Conn {
     }
 
     fn get_system_var(&mut self, name: &str) -> MyResult<Option<Value>> {
-        for row in self.query(format!("SELECT @@{}", name))? {
-            if let Ok(mut r) = row {
-                if r.len() > 0 {
-                    return Ok(r.take(0));
-                }
-            }
-        }
-        Ok(None)
+        self.query_first(format!("SELECT @@{}", name))
     }
 
     fn next_bin(&mut self, columns: &[Column]) -> MyResult<Option<Vec<Value>>> {
@@ -1046,7 +878,7 @@ impl Conn {
     }
 
     fn has_stmt(&self, query: &str) -> bool {
-        self.stmt_cache.contains(query)
+        self.stmt_cache.contains_query(query)
     }
 
     /// Sets a callback to handle requests for local files. These are
@@ -1065,43 +897,47 @@ impl Conn {
     }
 }
 
-impl GenericConnection for Conn {
-    fn query<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
-        self.query(query)
+impl crate::prelude::Queryable for Conn {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
+        match self._query(query.as_ref()) {
+            Ok(columns) => Ok(QueryResult::new(self, columns, false)),
+            Err(err) => Err(err),
+        }
     }
 
-    fn first<T: AsRef<str>, U: FromRow>(&mut self, query: T) -> MyResult<Option<U>> {
-        self.first(query)
+    fn prep<T: AsRef<str>>(&mut self, query: T) -> MyResult<Statement> {
+        let query = query.as_ref();
+        let (named_params, real_query) = parse_named_params(query)?;
+        self._prepare(real_query.borrow())
+            .map(|inner| Statement::new(inner, named_params))
     }
 
-    fn prepare<T: AsRef<str>>(&mut self, query: T) -> MyResult<Stmt<'_>> {
-        self.prepare(query)
+    fn close(&mut self, stmt: Statement) -> MyResult<()> {
+        self.stmt_cache.remove(stmt.id());
+        let com_stmt_close = ComStmtClose::new(stmt.id());
+        self.write_command_raw(com_stmt_close)?;
+        Ok(())
     }
 
-    fn prep_exec<A, T>(&mut self, query: A, params: T) -> MyResult<QueryResult<'_>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_>>
     where
-        A: AsRef<str>,
-        T: Into<Params>,
-    {
-        self.prep_exec(query, params)
-    }
-
-    fn first_exec<Q, P, T>(&mut self, query: Q, params: P) -> MyResult<Option<T>>
-    where
-        Q: AsRef<str>,
+        S: AsStatement,
         P: Into<Params>,
-        T: FromRow,
     {
-        self.first_exec(query, params)
+        let statement = stmt.as_statement(self)?;
+        let columns = self._execute(&*statement, params.into())?;
+        Ok(QueryResult::new(self, columns, true))
     }
 }
 
 impl Drop for Conn {
     fn drop(&mut self) {
         let stmt_cache = mem::replace(&mut self.stmt_cache, StmtCache::new(0));
-        for (_, inner_st) in stmt_cache.into_iter() {
-            let _ = self.write_command_raw(ComStmtClose::new(inner_st.id()));
+
+        for (_, entry) in stmt_cache.into_iter() {
+            let _ = self.close(Statement::new(entry.stmt, None));
         }
+
         if self.stream.is_some() {
             let _ = self.write_command(Command::COM_QUIT, &[]);
         }
@@ -1139,44 +975,38 @@ impl<'a> DerefMut for ConnRef<'a> {
 #[allow(non_snake_case)]
 mod test {
     mod my_conn {
-        use std::collections::HashMap;
-        use std::io::Write;
-        use std::{iter, process};
+        use std::{collections::HashMap, io::Write, iter, process};
 
-        use crate::prelude::{FromValue, ToValue};
-        use crate::test_misc::get_opts;
-        use crate::time::{now, Tm};
-        use crate::DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery};
-        use crate::Error::DriverError;
-        use crate::Value::{Bytes, Date, Int, NULL};
         use crate::{
-            from_row, from_value, params, Conn, LocalInfileHandler, Opts, OptsBuilder, Params,
+            from_row, from_value, params,
+            prelude::*,
+            test_misc::get_opts,
+            time::Timespec,
+            Conn,
+            DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
+            Error::DriverError,
+            LocalInfileHandler, Opts, OptsBuilder, Params,
+            Value::{self, Bytes, Date, Float, Int, NULL},
         };
 
         fn get_system_variable<T>(conn: &mut Conn, name: &str) -> T
         where
             T: FromValue,
         {
-            let row = conn
-                .first(format!("show variables like '{}'", name))
+            conn.query_first::<(String, T), _>(format!("show variables like '{}'", name))
                 .unwrap()
-                .unwrap();
-            let (_, value): (String, T) = from_row(row);
-            value
+                .unwrap()
+                .1
         }
 
         #[test]
         fn should_connect() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mode = conn
-                .query("SELECT @@GLOBAL.sql_mode")
+
+            let mode: String = conn
+                .query_first("SELECT @@GLOBAL.sql_mode")
                 .unwrap()
-                .next()
-                .unwrap()
-                .unwrap()
-                .take(0)
                 .unwrap();
-            let mode = from_value::<String>(mode);
             assert!(mode.contains("TRADITIONAL"));
             assert!(conn.ping());
 
@@ -1192,250 +1022,216 @@ mod test {
         #[test]
         #[should_panic(expected = "Could not connect to address")]
         fn should_fail_on_wrong_socket_path() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.socket(Some("/foo/bar/baz"));
+            let opts = OptsBuilder::from_opts(get_opts()).socket(Some("/foo/bar/baz"));
             let _ = Conn::new(opts).unwrap();
         }
+
         #[test]
         fn should_fallback_to_tcp_if_cant_switch_to_socket() {
             let mut opts = Opts::from(get_opts());
             opts.0.injected_socket = Some("/foo/bar/baz".into());
             let _ = Conn::new(opts).unwrap();
         }
+
         #[test]
         fn should_connect_with_database() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.db_name(Some("mysql"));
+            const DB_NAME: &str = "mysql";
+
+            let opts = OptsBuilder::from_opts(get_opts()).db_name(Some(DB_NAME));
+
             let mut conn = Conn::new(opts).unwrap();
-            assert_eq!(
-                conn.query("SELECT DATABASE()")
-                    .unwrap()
-                    .next()
-                    .unwrap()
-                    .unwrap()
-                    .unwrap(),
-                vec![Bytes(b"mysql".to_vec())]
-            );
+
+            let db_name: String = conn.query_first("SELECT DATABASE()").unwrap().unwrap();
+            assert_eq!(db_name, DB_NAME);
         }
+
         #[test]
         fn should_connect_by_hostname() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.db_name(Some("mysql"));
-            opts.ip_or_hostname(Some("localhost"));
+            let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
             let mut conn = Conn::new(opts).unwrap();
-            assert_eq!(
-                conn.query("SELECT DATABASE()")
-                    .unwrap()
-                    .next()
-                    .unwrap()
-                    .unwrap()
-                    .unwrap(),
-                vec![Bytes(b"mysql".to_vec())]
-            );
+            assert!(conn.ping());
         }
+
         #[test]
         fn should_select_db() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.db_name(Some("mysql"));
-            opts.ip_or_hostname(Some("localhost"));
-            let mut conn = Conn::new(opts).unwrap();
-            assert!(conn
-                .query("CREATE DATABASE IF NOT EXISTS t_select_db")
-                .is_ok());
-            assert!(conn.select_db("t_select_db"));
-            assert_eq!(
-                conn.query("SELECT DATABASE()")
-                    .unwrap()
-                    .next()
-                    .unwrap()
-                    .unwrap()
-                    .unwrap(),
-                vec![Bytes(b"t_select_db".to_vec())]
-            );
-            assert!(conn.query("DROP DATABASE t_select_db").is_ok());
+            const DB_NAME: &str = "t_select_db";
+
+            let mut conn = Conn::new(get_opts()).unwrap();
+            conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS {}", DB_NAME))
+                .unwrap();
+            assert!(conn.select_db(DB_NAME));
+
+            let db_name: String = conn.query_first("SELECT DATABASE()").unwrap().unwrap();
+            assert_eq!(db_name, DB_NAME);
+
+            conn.query_drop(format!("DROP DATABASE {}", DB_NAME))
+                .unwrap();
         }
+
         #[test]
         fn should_execute_queryes_and_parse_results() {
+            type TestRow = (String, String, String, String, String, String);
+
+            const CREATE_QUERY: &str = r"CREATE TEMPORARY TABLE mysql.tbl
+                (id SERIAL, a TEXT, b INT, c INT UNSIGNED, d DATE, e FLOAT)";
+            const INSERT_QUERY_1: &str = r"INSERT
+                INTO mysql.tbl(a, b, c, d, e)
+                VALUES ('hello', -123, 123, '2014-05-05', 123.123)";
+            const INSERT_QUERY_2: &str = r"INSERT
+                INTO mysql.tbl(a, b, c, d, e)
+                VALUES ('world', -321, 321, '2014-06-06', 321.321)";
+
             let mut conn = Conn::new(get_opts()).unwrap();
+
+            conn.query_drop(CREATE_QUERY).unwrap();
+            assert_eq!(conn.affected_rows(), 0);
+            assert_eq!(conn.last_insert_id(), 0);
+
+            conn.query_drop(INSERT_QUERY_1).unwrap();
+            assert_eq!(conn.affected_rows(), 1);
+            assert_eq!(conn.last_insert_id(), 1);
+
+            conn.query_drop(INSERT_QUERY_2).unwrap();
+            assert_eq!(conn.affected_rows(), 1);
+            assert_eq!(conn.last_insert_id(), 2);
+
+            conn.query_drop("SELECT * FROM unexisted").unwrap_err();
+            conn.query_iter("SELECT * FROM mysql.tbl").unwrap(); // Drop::drop for QueryResult
+
+            conn.query_drop("UPDATE mysql.tbl SET a = 'foo'").unwrap();
+            assert_eq!(conn.affected_rows(), 2);
+            assert_eq!(conn.last_insert_id(), 0);
+
             assert!(conn
-                .query(
-                    "CREATE TEMPORARY TABLE mysql.tbl(\
-                                    a TEXT,\
-                                    b INT,\
-                                    c INT UNSIGNED,\
-                                    d DATE,\
-                                    e FLOAT
-                                )"
-                )
-                .is_ok());
-            assert!(conn
-                .query(
-                    "INSERT INTO mysql.tbl(a, b, c, d, e) VALUES (\
-                     'hello',\
-                     -123,\
-                     123,\
-                     '2014-05-05',\
-                     123.123\
-                     )"
-                )
-                .is_ok());
-            assert!(conn
-                .query(
-                    "INSERT INTO mysql.tbl(a, b, c, d, e) VALUES (\
-                     'world',\
-                     -321,\
-                     321,\
-                     '2014-06-06',\
-                     321.321\
-                     )"
-                )
-                .is_ok());
-            assert!(conn.query("SELECT * FROM unexisted").is_err());
-            assert!(conn.query("SELECT * FROM mysql.tbl").is_ok());
-            // Drop
-            assert!(conn.query("UPDATE mysql.tbl SET a = 'foo'").is_ok());
-            assert_eq!(conn.affected_rows, 2);
-            assert!(conn
-                .query("SELECT * FROM mysql.tbl WHERE a = 'bar'")
+                .query_first::<TestRow, _>("SELECT * FROM mysql.tbl WHERE a = 'bar'")
                 .unwrap()
-                .next()
                 .is_none());
-            for (i, row) in conn.query("SELECT * FROM mysql.tbl").unwrap().enumerate() {
-                let row = row.unwrap();
-                if i == 0 {
-                    assert_eq!(row[0], Bytes(b"foo".to_vec()));
-                    assert_eq!(row[1], Bytes(b"-123".to_vec()));
-                    assert_eq!(row[2], Bytes(b"123".to_vec()));
-                    assert_eq!(row[3], Bytes(b"2014-05-05".to_vec()));
-                    assert_eq!(row[4], Bytes(b"123.123".to_vec()));
-                } else if i == 1 {
-                    assert_eq!(row[0], Bytes(b"foo".to_vec()));
-                    assert_eq!(row[1], Bytes(b"-321".to_vec()));
-                    assert_eq!(row[2], Bytes(b"321".to_vec()));
-                    assert_eq!(row[3], Bytes(b"2014-06-06".to_vec()));
-                    assert_eq!(row[4], Bytes(b"321.321".to_vec()));
-                } else {
-                    unreachable!();
-                }
-            }
+
+            let rows: Vec<TestRow> = conn.query("SELECT * FROM mysql.tbl").unwrap();
+            assert_eq!(
+                rows,
+                vec![
+                    (
+                        "1".into(),
+                        "foo".into(),
+                        "-123".into(),
+                        "123".into(),
+                        "2014-05-05".into(),
+                        "123.123".into()
+                    ),
+                    (
+                        "2".into(),
+                        "foo".into(),
+                        "-321".into(),
+                        "321".into(),
+                        "2014-06-06".into(),
+                        "321.321".into()
+                    )
+                ]
+            );
         }
+
         #[test]
         fn should_parse_large_text_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert_eq!(
-                conn.query("SELECT REPEAT('A', 20000000)")
-                    .unwrap()
-                    .next()
-                    .unwrap()
-                    .unwrap()
-                    .unwrap(),
-                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
-            );
+            let value: Value = conn
+                .query_first("SELECT REPEAT('A', 20000000)")
+                .unwrap()
+                .unwrap();
+            assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
         }
+
         #[test]
         fn should_execute_statements_and_parse_results() {
+            const CREATE_QUERY: &str = r"CREATE TEMPORARY TABLE
+                mysql.tbl (a TEXT, b INT, c INT UNSIGNED, d DATE, e DOUBLE)";
+            const INSERT_SMTM: &str = r"INSERT
+                INTO mysql.tbl (a, b, c, d, e)
+                VALUES (?, ?, ?, ?, ?)";
+
+            type RowType = (Value, Value, Value, Value, Value);
+
+            let row1 = (
+                Bytes(b"hello".to_vec()),
+                Int(-123_i64),
+                Int(123_i64),
+                Date(2014_u16, 5_u8, 5_u8, 0_u8, 0_u8, 0_u8, 0_u32),
+                Float(123.123_f64),
+            );
+            let row2 = (Bytes(b"".to_vec()), NULL, NULL, NULL, Float(321.321_f64));
+
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(conn
-                .query(
-                    "CREATE TEMPORARY TABLE mysql.tbl(\
-                     a TEXT,\
-                     b INT,\
-                     c INT UNSIGNED,\
-                     d DATE,\
-                     e DOUBLE\
-                     )"
-                )
-                .is_ok());
-            let _ = conn
-                .prepare(
-                    "INSERT INTO mysql.tbl(a, b, c, d, e)\
-                     VALUES (?, ?, ?, ?, ?)",
-                )
-                .and_then(|mut stmt| {
-                    let tm = Tm {
-                        tm_year: 114,
-                        tm_mon: 4,
-                        tm_mday: 5,
-                        tm_hour: 0,
-                        tm_min: 0,
-                        tm_sec: 0,
-                        tm_nsec: 0,
-                        ..now()
-                    };
-                    let hello = b"hello".to_vec();
-                    assert!(stmt
-                        .execute((&hello, -123, 123, tm.to_timespec(), 123.123f64))
-                        .is_ok());
-                    stmt.execute(
-                        &[
-                            &b"".to_vec() as &dyn ToValue,
-                            &NULL as &dyn ToValue,
-                            &NULL as &dyn ToValue,
-                            &NULL as &dyn ToValue,
-                            &321.321f64 as &dyn ToValue,
-                        ][..],
-                    )
-                    .unwrap();
-                    Ok(())
-                })
-                .unwrap();
-            let _ = conn
-                .prepare("SELECT * from mysql.tbl")
-                .and_then(|mut stmt| {
-                    for (i, row) in stmt.execute(()).unwrap().enumerate() {
-                        let mut row = row.unwrap();
-                        if i == 0 {
-                            assert_eq!(row[0], Bytes(b"hello".to_vec()));
-                            assert_eq!(row[1], Int(-123i64));
-                            assert_eq!(row[2], Int(123i64));
-                            assert_eq!(row[3], Date(2014u16, 5u8, 5u8, 0u8, 0u8, 0u8, 0u32));
-                            assert_eq!(row.take::<f64, _>(4).unwrap(), 123.123f64);
-                        } else if i == 1 {
-                            assert_eq!(row[0], Bytes(b"".to_vec()));
-                            assert_eq!(row[1], NULL);
-                            assert_eq!(row[2], NULL);
-                            assert_eq!(row[3], NULL);
-                            assert_eq!(row.take::<f64, _>(4).unwrap(), 321.321f64);
-                        } else {
-                            unreachable!();
-                        }
-                    }
-                    Ok(())
-                })
-                .unwrap();
-            let mut result = conn.prep_exec("SELECT ?, ?, ?", ("hello", 1, 1.1)).unwrap();
-            let row = result.next().unwrap();
-            let mut row = row.unwrap();
-            assert_eq!(row.take::<String, _>(0).unwrap(), "hello".to_string());
-            assert_eq!(row.take::<i8, _>(1).unwrap(), 1i8);
-            assert_eq!(row.take::<f32, _>(2).unwrap(), 1.1f32);
+            conn.query_drop(CREATE_QUERY).unwrap();
+
+            let insert_stmt = conn.prep(INSERT_SMTM).unwrap();
+            assert_eq!(insert_stmt.connection_id(), conn.connection_id());
+            conn.exec_drop(
+                &insert_stmt,
+                (
+                    from_value::<String>(row1.0.clone()),
+                    from_value::<i32>(row1.1.clone()),
+                    from_value::<u32>(row1.2.clone()),
+                    from_value::<Timespec>(row1.3.clone()),
+                    from_value::<f64>(row1.4.clone()),
+                ),
+            )
+            .unwrap();
+            conn.exec_drop(
+                &insert_stmt,
+                (
+                    from_value::<String>(row2.0.clone()),
+                    row2.1.clone(),
+                    row2.2.clone(),
+                    row2.3.clone(),
+                    from_value::<f64>(row2.4.clone()),
+                ),
+            )
+            .unwrap();
+
+            let select_stmt = conn.prep("SELECT * from mysql.tbl").unwrap();
+            let rows: Vec<RowType> = conn.exec(&select_stmt, ()).unwrap();
+
+            assert_eq!(rows, vec![row1, row2]);
         }
+
         #[test]
         fn should_parse_large_binary_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT REPEAT('A', 20000000);").unwrap();
-            assert_eq!(
-                stmt.execute(()).unwrap().next().unwrap().unwrap().unwrap(),
-                vec![Bytes(iter::repeat(b'A').take(20_000_000).collect())]
-            );
+            let stmt = conn.prep("SELECT REPEAT('A', 20000000)").unwrap();
+            let value: Value = conn.exec_first(&stmt, ()).unwrap().unwrap();
+            assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
         }
+
+        #[test]
+        fn manually_closed_stmt() {
+            let opts = OptsBuilder::from(get_opts()).stmt_cache_size(1);
+            let mut conn = Conn::new(opts).unwrap();
+            let stmt = conn.prep("SELECT 1").unwrap();
+            conn.exec_drop(&stmt, ()).unwrap();
+            conn.close(stmt).unwrap();
+            let stmt = conn.prep("SELECT 1").unwrap();
+            conn.exec_drop(&stmt, ()).unwrap();
+            conn.close(stmt).unwrap();
+            let stmt = conn.prep("SELECT 2").unwrap();
+            conn.exec_drop(&stmt, ()).unwrap();
+        }
+
         #[test]
         fn should_start_commit_and_rollback_transactions() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(conn
-                .query("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
-                .is_ok());
+            conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
+                .unwrap();
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
-                    assert!(t.commit().is_ok());
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
+                    t.commit().unwrap();
                     Ok(())
                 })
                 .unwrap();
             assert_eq!(
-                conn.query("SELECT COUNT(a) from mysql.tbl")
+                conn.query_iter("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -1446,13 +1242,13 @@ mod test {
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    t.query("INSERT INTO tbl2(a) VALUES(1)").unwrap_err();
+                    t.query_drop("INSERT INTO tbl2(a) VALUES(1)").unwrap_err();
                     Ok(())
                     // implicit rollback
                 })
                 .unwrap();
             assert_eq!(
-                conn.query("SELECT COUNT(a) from mysql.tbl")
+                conn.query_iter("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -1463,14 +1259,14 @@ mod test {
             let _ = conn
                 .start_transaction(false, None, None)
                 .and_then(|mut t| {
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(1)").is_ok());
-                    assert!(t.query("INSERT INTO mysql.tbl(a) VALUES(2)").is_ok());
-                    assert!(t.rollback().is_ok());
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
+                    t.rollback().unwrap();
                     Ok(())
                 })
                 .unwrap();
             assert_eq!(
-                conn.query("SELECT COUNT(a) from mysql.tbl")
+                conn.query_iter("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -1478,23 +1274,14 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"2".to_vec())]
             );
-            let _ = conn
-                .start_transaction(false, None, None)
-                .and_then(|mut t| {
-                    let _ = t
-                        .prepare("INSERT INTO mysql.tbl(a) VALUES(?)")
-                        .and_then(|mut stmt| {
-                            assert!(stmt.execute((3,)).is_ok());
-                            assert!(stmt.execute((4,)).is_ok());
-                            Ok(())
-                        })
-                        .unwrap();
-                    assert!(t.commit().is_ok());
-                    Ok(())
-                })
+            let mut tx = conn.start_transaction(false, None, None).unwrap();
+            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (3,))
                 .unwrap();
+            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (4,))
+                .unwrap();
+            tx.commit().unwrap();
             assert_eq!(
-                conn.query("SELECT COUNT(a) from mysql.tbl")
+                conn.query_iter("SELECT COUNT(a) from mysql.tbl")
                     .unwrap()
                     .next()
                     .unwrap()
@@ -1502,21 +1289,21 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"4".to_vec())]
             );
-            let _ = conn
-                .start_transaction(false, None, None)
-                .and_then(|mut t| {
-                    t.prep_exec("INSERT INTO mysql.tbl(a) VALUES(?)", (5,))
-                        .unwrap();
-                    t.prep_exec("INSERT INTO mysql.tbl(a) VALUES(?)", (6,))
-                        .unwrap();
-                    Ok(())
-                })
+            let mut tx = conn.start_transaction(false, None, None).unwrap();
+            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (5,))
                 .unwrap();
+            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (6,))
+                .unwrap();
+            drop(tx);
+            assert_eq!(
+                conn.query_first("SELECT COUNT(a) from mysql.tbl").unwrap(),
+                Some(4_usize),
+            );
         }
         #[test]
         fn should_handle_LOCAL_INFILE_with_custom_handler() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
+            conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)")
                 .unwrap();
             conn.set_local_infile_handler(Some(LocalInfileHandler::new(|_, stream| {
                 let mut cell_data = vec![b'Z'; 65535];
@@ -1526,7 +1313,7 @@ mod test {
                 }
                 Ok(())
             })));
-            match conn.query("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE mysql.tbl") {
+            match conn.query_drop("LOAD DATA LOCAL INFILE 'file_name' INTO TABLE mysql.tbl") {
                 Ok(_) => {}
                 Err(ref err) if format!("{}", err).find("not allowed").is_some() => {
                     return;
@@ -1534,7 +1321,7 @@ mod test {
                 Err(err) => panic!("ERROR {}", err),
             }
             let count = conn
-                .query("SELECT * FROM mysql.tbl")
+                .query_iter("SELECT * FROM mysql.tbl")
                 .unwrap()
                 .map(|row| {
                     assert_eq!(from_row::<(Vec<u8>,)>(row.unwrap()).0.len(), 65535);
@@ -1547,21 +1334,38 @@ mod test {
         #[test]
         fn should_reset_connection() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            assert!(conn
-                .query(
-                    "CREATE TEMPORARY TABLE `mysql`.`test` \
-                     (`test` VARCHAR(255) NULL);"
-                )
-                .is_ok());
-            assert!(conn.query("SELECT * FROM `mysql`.`test`;").is_ok());
-            assert!(conn.reset().is_ok());
-            assert!(conn.query("SELECT * FROM `mysql`.`test`;").is_err());
+            conn.query_drop(
+                "CREATE TEMPORARY TABLE `mysql`.`test` \
+                 (`test` VARCHAR(255) NULL);",
+            )
+            .unwrap();
+            conn.query_drop("SELECT * FROM `mysql`.`test`;").unwrap();
+            conn.reset().unwrap();
+            conn.query_drop("SELECT * FROM `mysql`.`test`;")
+                .unwrap_err();
+        }
+
+        #[test]
+        fn prep_exec() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+
+            let stmt1 = conn.prep("SELECT :foo").unwrap();
+            let stmt2 = conn.prep("SELECT :bar").unwrap();
+            assert_eq!(
+                conn.exec::<String, _, _>(&stmt1, params! { "foo" => "foo" })
+                    .unwrap(),
+                vec![String::from("foo")],
+            );
+            assert_eq!(
+                conn.exec::<String, _, _>(&stmt2, params! { "bar" => "bar" })
+                    .unwrap(),
+                vec![String::from("bar")],
+            );
         }
 
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
-            #[allow(unused_mut)]
-            let mut opts = OptsBuilder::from_opts(get_opts());
+            let opts = OptsBuilder::from_opts(get_opts());
             let conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
                 assert!(conn.is_socket());
@@ -1570,8 +1374,7 @@ mod test {
 
         #[test]
         fn should_connect_via_socket_localhost() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.ip_or_hostname(Some("localhost"));
+            let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
             let conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
                 assert!(conn.is_socket());
@@ -1580,30 +1383,29 @@ mod test {
 
         #[test]
         fn should_drop_multi_result_set() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.db_name(Some("mysql"));
+            let opts = OptsBuilder::from_opts(get_opts()).db_name(Some("mysql"));
             let mut conn = Conn::new(opts).unwrap();
-            conn.query("CREATE TEMPORARY TABLE TEST_TABLE ( name varchar(255) )")
+            conn.query_drop("CREATE TEMPORARY TABLE TEST_TABLE ( name varchar(255) )")
                 .unwrap();
-            conn.prep_exec("SELECT * FROM TEST_TABLE", ()).unwrap();
-            conn.query(
+            conn.exec_drop("SELECT * FROM TEST_TABLE", ()).unwrap();
+            conn.query_drop(
                 r"
                 INSERT INTO TEST_TABLE (name) VALUES ('one');
                 INSERT INTO TEST_TABLE (name) VALUES ('two');
                 INSERT INTO TEST_TABLE (name) VALUES ('three');",
             )
             .unwrap();
-            conn.prep_exec("SELECT * FROM TEST_TABLE", ()).unwrap();
+            conn.exec_drop("SELECT * FROM TEST_TABLE", ()).unwrap();
         }
 
         #[test]
         fn should_handle_multi_resultset() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.db_name(Some("mysql"));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .db_name(Some("mysql"));
             let mut conn = Conn::new(opts).unwrap();
-            conn.query("DROP PROCEDURE IF EXISTS multi").unwrap();
-            conn.query(
+            conn.query_drop("DROP PROCEDURE IF EXISTS multi").unwrap();
+            conn.query_drop(
                 r#"CREATE PROCEDURE multi() BEGIN
                         SELECT 1 UNION ALL SELECT 2;
                         DO 1;
@@ -1616,7 +1418,7 @@ mod test {
             )
             .unwrap();
             {
-                let mut query_result = conn.query("CALL multi()").unwrap();
+                let mut query_result = conn.query_iter("CALL multi()").unwrap();
                 let result_set = query_result
                     .by_ref()
                     .map(|row| row.unwrap().unwrap().pop().unwrap())
@@ -1629,7 +1431,7 @@ mod test {
                     .collect::<Vec<crate::Value>>();
                 assert_eq!(result_set, vec![Bytes(b"3".to_vec()), Bytes(b"4".to_vec())]);
             }
-            let mut result = conn.query("SELECT 1; SELECT 2; SELECT 3;").unwrap();
+            let mut result = conn.query_iter("SELECT 1; SELECT 2; SELECT 3;").unwrap();
             let mut i = 0;
             while {
                 i += 1;
@@ -1651,16 +1453,16 @@ mod test {
         fn should_work_with_named_params() {
             let mut conn = Conn::new(get_opts()).unwrap();
             {
-                let mut stmt = conn.prepare("SELECT :a, :b, :a, :c").unwrap();
-                let mut result = stmt
-                    .execute(params! {"a" => 1, "b" => 2, "c" => 3})
+                let stmt = conn.prep("SELECT :a, :b, :a, :c").unwrap();
+                let result = conn
+                    .exec_first(&stmt, params! {"a" => 1, "b" => 2, "c" => 3})
+                    .unwrap()
                     .unwrap();
-                let row = result.next().unwrap().unwrap();
-                assert_eq!((1, 2, 1, 3), from_row(row));
+                assert_eq!((1_u8, 2_u8, 1_u8, 3_u8), result);
             }
 
-            let mut result = conn
-                .prep_exec(
+            let result = conn
+                .exec_first(
                     "SELECT :a, :b, :a + :b, :c",
                     params! {
                         "a" => 1,
@@ -1668,16 +1470,17 @@ mod test {
                         "c" => 3,
                     },
                 )
+                .unwrap()
                 .unwrap();
-            let row = result.next().unwrap().unwrap();
-            assert_eq!((1, 2, 3, 3), from_row(row));
+            assert_eq!((1_u8, 2_u8, 3_u8, 3_u8), result);
         }
 
         #[test]
         fn should_return_error_on_missing_named_parameter() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT :a, :b, :a, :c, :d").unwrap();
-            let result = stmt.execute(params! {"a" => 1, "b" => 2, "c" => 3,});
+            let stmt = conn.prep("SELECT :a, :b, :a, :c, :d").unwrap();
+            let result =
+                conn.exec_first::<crate::Row, _, _>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
                 _ => assert!(false),
@@ -1687,8 +1490,8 @@ mod test {
         #[test]
         fn should_return_error_on_named_params_for_positional_statement() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
-            let result = stmt.execute(params! {"a" => 1, "b" => 2, "c" => 3,});
+            let stmt = conn.prep("SELECT ?, ?, ?, ?, ?").unwrap();
+            let result = conn.exec_drop(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(NamedParamsForPositionalQuery)) => (),
                 _ => assert!(false),
@@ -1705,15 +1508,15 @@ mod test {
         fn should_handle_tcp_connect_timeout() {
             use crate::error::{DriverError::ConnectTimeout, Error::DriverError};
 
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
             assert!(Conn::new(opts).unwrap().ping());
 
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
-            opts.ip_or_hostname(Some("192.168.255.255"));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)))
+                .ip_or_hostname(Some("192.168.255.255"));
             match Conn::new(opts).unwrap_err() {
                 DriverError(ConnectTimeout) => {}
                 err => panic!("Unexpected error: {}", err),
@@ -1724,16 +1527,16 @@ mod test {
         fn should_set_additional_capabilities() {
             use crate::consts::CapabilityFlags;
 
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.additional_capabilities(CapabilityFlags::CLIENT_FOUND_ROWS);
+            let opts = OptsBuilder::from_opts(get_opts())
+                .additional_capabilities(CapabilityFlags::CLIENT_FOUND_ROWS);
 
             let mut conn = Conn::new(opts).unwrap();
-            conn.query("CREATE TEMPORARY TABLE mysql.tbl (a INT, b TEXT)")
+            conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl (a INT, b TEXT)")
                 .unwrap();
-            conn.query("INSERT INTO mysql.tbl (a, b) VALUES (1, 'foo')")
+            conn.query_drop("INSERT INTO mysql.tbl (a, b) VALUES (1, 'foo')")
                 .unwrap();
             let result = conn
-                .query("UPDATE mysql.tbl SET b = 'foo' WHERE a = 1")
+                .query_iter("UPDATE mysql.tbl SET b = 'foo' WHERE a = 1")
                 .unwrap();
             assert_eq!(result.affected_rows(), 1);
         }
@@ -1741,10 +1544,10 @@ mod test {
         #[test]
         fn should_bind_before_connect() {
             let port = 27200 + (rand::random::<u16>() % 100);
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.ip_or_hostname(Some("127.0.0.1"));
-            opts.bind_address(Some(([127, 0, 0, 1], port)));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .ip_or_hostname(Some("127.0.0.1"))
+                .bind_address(Some(([127, 0, 0, 1], port)));
             let conn = Conn::new(opts).unwrap();
             let debug_format: String = format!("{:?}", conn);
             assert!(debug_format.contains(&*format!("addr: V4(127.0.0.1:{})", port)));
@@ -1753,11 +1556,11 @@ mod test {
         #[test]
         fn should_bind_before_connect_with_timeout() {
             let port = 27300 + (rand::random::<u16>() % 100);
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.prefer_socket(false);
-            opts.ip_or_hostname(Some("127.0.0.1"));
-            opts.bind_address(Some(([127, 0, 0, 1], port)));
-            opts.tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
+            let opts = OptsBuilder::from_opts(get_opts())
+                .prefer_socket(false)
+                .ip_or_hostname(Some("127.0.0.1"))
+                .bind_address(Some(([127, 0, 0, 1], port)))
+                .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
             let mut conn = Conn::new(opts).unwrap();
             assert!(conn.ping());
             let debug_format: String = format!("{:?}", conn);
@@ -1766,44 +1569,52 @@ mod test {
 
         #[test]
         fn should_not_cache_statements_if_stmt_cache_size_is_zero() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.stmt_cache_size(0);
+            let opts = OptsBuilder::from_opts(get_opts()).stmt_cache_size(0);
             let mut conn = Conn::new(opts).unwrap();
-            conn.prepare("DO 1").unwrap();
-            conn.prepare("DO 2").unwrap();
-            conn.prepare("DO 3").unwrap();
-            let row = conn
-                .first("SHOW SESSION STATUS LIKE 'Com_stmt_close';")
+
+            let stmt1 = conn.prep("DO 1").unwrap();
+            let stmt2 = conn.prep("DO 2").unwrap();
+            let stmt3 = conn.prep("DO 3").unwrap();
+
+            conn.close(stmt1).unwrap();
+            conn.close(stmt2).unwrap();
+            conn.close(stmt3).unwrap();
+
+            let status: (Value, u8) = conn
+                .query_first("SHOW SESSION STATUS LIKE 'Com_stmt_close';")
                 .unwrap()
                 .unwrap();
-            assert_eq!(from_row::<(String, usize)>(row).1, 3);
+            assert_eq!(status.1, 3);
         }
 
         #[test]
-        fn should_hold_stmt_cache_size_bound() {
-            let mut opts = OptsBuilder::from_opts(get_opts());
-            opts.stmt_cache_size(3);
+        fn should_hold_stmt_cache_size_bounds() {
+            let opts = OptsBuilder::from_opts(get_opts()).stmt_cache_size(3);
             let mut conn = Conn::new(opts).unwrap();
-            conn.prepare("DO 1").unwrap();
-            conn.prepare("DO 2").unwrap();
-            conn.prepare("DO 3").unwrap();
-            conn.prepare("DO 1").unwrap();
-            conn.prepare("DO 4").unwrap();
-            conn.prepare("DO 3").unwrap();
-            conn.prepare("DO 5").unwrap();
-            conn.prepare("DO 6").unwrap();
-            let row = conn
-                .first("SHOW SESSION STATUS LIKE 'Com_stmt_close';")
+
+            conn.prep("DO 1").unwrap();
+            conn.prep("DO 2").unwrap();
+            conn.prep("DO 3").unwrap();
+            conn.prep("DO 1").unwrap();
+            conn.prep("DO 4").unwrap();
+            conn.prep("DO 3").unwrap();
+            conn.prep("DO 5").unwrap();
+            conn.prep("DO 6").unwrap();
+
+            let status: (String, usize) = conn
+                .query_first("SHOW SESSION STATUS LIKE 'Com_stmt_close'")
                 .unwrap()
                 .unwrap();
-            assert_eq!(from_row::<(String, usize)>(row).1, 3);
+
+            assert_eq!(status.1, 3);
+
             let mut order = conn
                 .stmt_cache
                 .iter()
-                .map(|(stmt, i)| (stmt.as_ref(), i))
-                .collect::<Vec<(&str, u64)>>();
+                .map(|(_, entry)| &**entry.query.0.as_ref())
+                .collect::<Vec<&str>>();
             order.sort();
-            assert_eq!(order, &[("DO 3", 5), ("DO 5", 6), ("DO 6", 7)]);
+            assert_eq!(order, &["DO 3", "DO 5", "DO 6"]);
         }
 
         #[test]
@@ -1825,20 +1636,22 @@ mod test {
 
             let mut conn = Conn::new(get_opts()).unwrap();
             if conn
-                .query("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b JSON)")
+                .query_drop("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b JSON)")
                 .is_err()
             {
-                conn.query("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b TEXT)")
+                conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a VARCHAR(32), b TEXT)")
                     .unwrap();
             }
-            conn.prep_exec(
+            conn.exec_drop(
                 r#"INSERT INTO mysql.tbl VALUES ('hello', ?)"#,
                 (Serialized(&decodable),),
             )
             .unwrap();
 
-            let row = conn.first("SELECT a, b FROM mysql.tbl").unwrap().unwrap();
-            let (a, b): (String, Json) = from_row(row);
+            let (a, b): (String, Json) = conn
+                .query_first("SELECT a, b FROM mysql.tbl")
+                .unwrap()
+                .unwrap();
             assert_eq!(
                 (a, b),
                 (
@@ -1848,7 +1661,7 @@ mod test {
             );
 
             let row = conn
-                .first_exec("SELECT a, b FROM mysql.tbl WHERE a = ?", ("hello",))
+                .exec_first("SELECT a, b FROM mysql.tbl WHERE a = ?", ("hello",))
                 .unwrap()
                 .unwrap();
             let (a, Deserialized(b)) = from_row(row);
@@ -1880,7 +1693,7 @@ mod test {
 
                 fn assert_connect_attrs(conn: &mut Conn, expected_values: &[(&str, &str)]) {
                     let mut actual_values = HashMap::new();
-                    for row in conn.query("SELECT attr_name, attr_value FROM performance_schema.session_account_connect_attrs WHERE processlist_id = connection_id()").unwrap() {
+                    for row in conn.query_iter("SELECT attr_name, attr_value FROM performance_schema.session_account_connect_attrs WHERE processlist_id = connection_id()").unwrap() {
                         let (name, value) = from_row::<(String, String)>(row.unwrap());
                         actual_values.insert(name, value);
                     }
@@ -1912,13 +1725,12 @@ mod test {
                 assert_connect_attrs(&mut conn, &expected_values);
 
                 // Connect attributes are added.
-                let mut opts = OptsBuilder::from_opts(get_opts());
+                let opts = OptsBuilder::from_opts(get_opts());
                 let mut connect_attrs = HashMap::with_capacity(3);
                 connect_attrs.insert("foo", "foo val");
                 connect_attrs.insert("bar", "bar val");
                 connect_attrs.insert("program_name", "my program name");
-                opts.connect_attrs(connect_attrs);
-                let mut conn = Conn::new(opts).unwrap();
+                let mut conn = Conn::new(opts.connect_attrs(connect_attrs)).unwrap();
                 expected_values.pop(); // remove program_name at the last
                 expected_values.push(("foo", "foo val"));
                 expected_values.push(("bar", "bar val"));
@@ -1932,8 +1744,7 @@ mod test {
     mod bench {
         use test;
 
-        use crate::test_misc::get_opts;
-        use crate::{params, Conn, Value::NULL};
+        use crate::{params, test_misc::get_opts, Conn, Value::NULL};
 
         #[bench]
         fn simple_exec(bencher: &mut test::Bencher) {

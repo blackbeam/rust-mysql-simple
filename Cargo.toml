@@ -3,7 +3,7 @@ name = "mysql"
 version = "17.0.0"
 authors = ["blackbeam"]
 description = "Mysql client library implemented in rust"
-license = "MIT"
+license = "MIT OR APACHE"
 documentation = "https://docs.rs/mysql"
 repository = "https://github.com/blackbeam/rust-mysql-simple"
 keywords = ["database", "sql"]
@@ -12,27 +12,16 @@ categories = ["database"]
 edition = "2018"
 build = "build.rs"
 
+[badges]
+appveyor = { repository = "blackbeam/rust-mysql-simple", branch = "master", service = "github" }
+travis-ci = { repository = "blackbeam/rust-mysql-simple", branch = "master" }
+
 [lib]
 name = "mysql"
 path = "src/lib.rs"
 
-[profile.dev]
-opt-level = 0
-debug = true
-
-[profile.release]
-opt-level = 3
-debug = false
-lto = true
-
-[profile.test]
-opt-level = 0
-debug = true
-
 [profile.bench]
 opt-level = 3
-debug = false
-lto = true
 
 [features]
 nightly = []
@@ -44,9 +33,9 @@ serde_derive = "1"
 
 [dependencies]
 bufstream = "~0.1"
-fnv = "1"
 io-enum = "0.2.1"
-mysql_common = "0.19.2"
+lru = "0.4.3"
+mysql_common = "0.20.1"
 native-tls = "0.2.3"
 net2 = "~0.2"
 percent-encoding = "2.1.0"
@@ -61,4 +50,4 @@ winapi = "~0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-nix = "0.15.0"
+nix = "0.17.0"

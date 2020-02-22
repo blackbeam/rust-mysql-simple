@@ -1,88 +1,119 @@
+// Copyright (c) 2020 rust-mysql-common contributors
+//
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. All files in the project carrying such notice may not be copied,
+// modified, or distributed except according to those terms.
+
+use lru::LruCache;
 use twox_hash::XxHash;
 
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hash};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    hash::{BuildHasherDefault, Hash},
+    sync::Arc,
+};
 
 use crate::conn::stmt::InnerStmt;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct QueryString(pub Arc<String>);
+
+impl Borrow<str> for QueryString {
+    fn borrow(&self) -> &str {
+        &**self.0.as_ref()
+    }
+}
+
+impl PartialEq<str> for QueryString {
+    fn eq(&self, other: &str) -> bool {
+        &**self.0.as_ref() == other
+    }
+}
+
+pub struct Entry {
+    pub stmt: Arc<InnerStmt>,
+    pub query: QueryString,
+}
 
 #[derive(Debug)]
 pub struct StmtCache {
     cap: usize,
-    map: HashMap<String, (u64, InnerStmt), BuildHasherDefault<XxHash>>,
-    iter: u64,
+    cache: LruCache<u32, Entry>,
+    query_map: HashMap<QueryString, u32, BuildHasherDefault<XxHash>>,
 }
 
 impl StmtCache {
     pub fn new(cap: usize) -> StmtCache {
         StmtCache {
             cap,
-            map: Default::default(),
-            iter: 0,
+            cache: LruCache::unbounded(),
+            query_map: Default::default(),
         }
     }
 
-    pub fn contains<T>(&self, key: &T) -> bool
+    pub fn contains_query<T>(&self, key: &T) -> bool
     where
-        String: Borrow<T>,
+        QueryString: Borrow<T>,
         T: Hash + Eq,
         T: ?Sized,
     {
-        self.map.contains_key(key)
+        self.query_map.contains_key(key)
     }
 
-    pub fn get<T>(&mut self, key: &T) -> Option<&InnerStmt>
+    pub fn by_query<T>(&mut self, query: &T) -> Option<&Entry>
     where
-        String: Borrow<T>,
-        String: PartialEq<T>,
+        QueryString: Borrow<T>,
+        QueryString: PartialEq<T>,
         T: Hash + Eq,
         T: ?Sized,
     {
-        if let Some(&mut (ref mut last, ref st)) = self.map.get_mut(key) {
-            *last = self.iter;
-            self.iter += 1;
-            Some(st)
-        } else {
-            None
+        let id = self.query_map.get(query).cloned();
+        match id {
+            Some(id) => self.cache.get(&id),
+            None => None,
         }
     }
 
-    pub fn put(&mut self, key: String, value: InnerStmt) -> Option<InnerStmt> {
+    pub fn put(&mut self, query: Arc<String>, stmt: Arc<InnerStmt>) -> Option<Arc<InnerStmt>> {
         if self.cap == 0 {
             return None;
         }
 
-        self.map.insert(key, (self.iter, value));
-        self.iter += 1;
+        let query = QueryString(query);
 
-        if self.map.len() > self.cap {
-            if let Some(evict) = self
-                .map
-                .iter()
-                .map(|(key, &(last, _))| (last, key))
-                .min()
-                .map(|(_, key)| key.to_string())
-            {
-                return self.map.remove(&evict).map(|(_, st)| st);
+        self.query_map.insert(query.clone(), stmt.id());
+        self.cache.put(stmt.id(), Entry { stmt, query });
+
+        if self.cache.len() > self.cap {
+            if let Some((_, entry)) = self.cache.pop_lru() {
+                self.query_map.remove(&**entry.query.0.as_ref());
+                return Some(entry.stmt);
             }
         }
+
         None
     }
 
     pub fn clear(&mut self) {
-        self.map.clear();
+        self.query_map.clear();
+        self.cache.clear();
+    }
+
+    pub fn remove(&mut self, id: u32) {
+        if let Some(entry) = self.cache.pop(&id) {
+            self.query_map.remove::<str>(entry.query.borrow());
+        }
     }
 
     #[cfg(test)]
-    pub fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = (&'a String, u64)> + 'a> {
-        Box::new(self.map.iter().map(|(stmt, &(i, _))| (stmt, i)))
+    pub fn iter(&self) -> impl Iterator<Item = (&u32, &Entry)> {
+        self.cache.iter()
     }
 
-    pub fn into_iter(self) -> Box<dyn Iterator<Item = (String, InnerStmt)>> {
-        Box::new(self.map.into_iter().map(|(k, (_, v))| (k, v)))
-    }
-
-    pub fn get_cap(&self) -> usize {
-        self.cap
+    pub fn into_iter(mut self) -> impl Iterator<Item = (u32, Entry)> {
+        std::iter::from_fn(move || self.cache.pop_lru())
     }
 }
