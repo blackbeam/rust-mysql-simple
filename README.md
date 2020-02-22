@@ -483,7 +483,7 @@ assert_eq!(val, Some(Value::Bytes("65536".as_bytes().to_vec())));
 
 ### Binary protocol and prepared statements.
 
-MySql binary protocol is implemented in `prep, `close` and the set of `exec*` methods,
+MySql binary protocol is implemented in `prep`, `close` and the set of `exec*` methods,
 defined on the [`Queryable`](#queryable) trait. Prepared statements is the only way to
 pass rust value to the MySql server. MySql uses `?` symbol as a parameter placeholder
 and it's only possible to use parameters where a single MySql value is expected.
