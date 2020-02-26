@@ -8,7 +8,10 @@
 
 use std::borrow::Cow;
 
-use crate::{from_row, prelude::FromRow, Params, QueryResult, Result, Statement};
+use crate::{
+    conn::query_result::{Binary, Text}, from_row, prelude::FromRow, Params, QueryResult, Result,
+    Statement
+};
 
 pub trait AsStatement {
     fn as_statement<Q: Queryable>(&self, queryable: &mut Q) -> Result<Cow<'_, Statement>>;
@@ -16,7 +19,7 @@ pub trait AsStatement {
 
 /// Queryable object.
 pub trait Queryable {
-    fn query_iter<Q: AsRef<str>>(&mut self, query: Q) -> Result<QueryResult<'_>>;
+    fn query_iter<Q: AsRef<str>>(&mut self, query: Q) -> Result<QueryResult<'_, Text>>;
 
     fn query<T, Q>(&mut self, query: Q) -> Result<Vec<T>>
     where
@@ -72,7 +75,7 @@ pub trait Queryable {
     /// This function will close the given statement on the server side.
     fn close(&mut self, stmt: Statement) -> Result<()>;
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>;

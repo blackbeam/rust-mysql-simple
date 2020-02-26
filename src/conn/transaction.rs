@@ -9,7 +9,8 @@
 use std::fmt;
 
 use crate::{
-    conn::ConnMut, prelude::*, LocalInfileHandler, Params, QueryResult, Result, Statement,
+    conn::{query_result::{Binary, Text}, ConnMut}, prelude::*, LocalInfileHandler, Params,
+    QueryResult, Result, Statement,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -73,7 +74,7 @@ impl<'a> Transaction<'a> {
 }
 
 impl<'a> Queryable for Transaction<'a> {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_>> {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, Text>> {
         self.conn.query_iter(query)
     }
 
@@ -85,7 +86,7 @@ impl<'a> Queryable for Transaction<'a> {
         self.conn.close(stmt)
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,

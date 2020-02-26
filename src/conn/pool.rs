@@ -18,6 +18,7 @@ use std::{
 };
 
 use crate::{
+    conn::query_result::{Binary, Text},
     prelude::*,
     time::{Duration, SteadyTime},
     Conn, DriverError, Error, IsolationLevel, LocalInfileHandler, Opts, Params, QueryResult,
@@ -381,7 +382,7 @@ impl PooledConn {
 }
 
 impl Queryable for PooledConn {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_, Text>> {
         self.conn.as_mut().unwrap().query_iter(query)
     }
 
@@ -393,7 +394,7 @@ impl Queryable for PooledConn {
         self.conn.as_mut().unwrap().close(stmt)
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,

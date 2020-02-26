@@ -34,6 +34,7 @@ use crate::{
     conn::{
         local_infile::LocalInfile,
         pool::{Pool, PooledConn},
+        query_result::{Binary, Or, Text},
         stmt::{InnerStmt, Statement},
         stmt_cache::StmtCache,
         transaction::IsolationLevel,
@@ -668,7 +669,11 @@ impl Conn {
         Ok(())
     }
 
-    fn _execute(&mut self, stmt: &Statement, params: Params) -> Result<Vec<Column>> {
+    fn _execute(
+        &mut self,
+        stmt: &Statement,
+        params: Params,
+    ) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         let exec_request = match params {
             Params::Empty => {
                 if stmt.num_params() != 0 {
@@ -739,7 +744,7 @@ impl Conn {
         Ok(())
     }
 
-    fn send_local_infile(&mut self, file_name: &[u8]) -> Result<()> {
+    fn send_local_infile(&mut self, file_name: &[u8]) -> Result<OkPacket<'static>> {
         {
             let buffer_size = cmp::min(
                 MAX_PAYLOAD_LEN - 4,
@@ -762,14 +767,12 @@ impl Conn {
         }
         self.write_packet(Vec::new())?;
         let pld = self.read_packet()?;
-        if pld[0] == 0u8 {
-            let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
-            self.handle_ok(&ok);
-        }
-        Ok(())
+        let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+        self.handle_ok(&ok);
+        Ok(ok.into_owned())
     }
 
-    fn handle_result_set(&mut self) -> Result<Vec<Column>> {
+    fn handle_result_set(&mut self) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         if self.more_results_exists() {
             self.sync_seq_id();
         }
@@ -779,14 +782,14 @@ impl Conn {
             0x00 => {
                 let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
                 self.handle_ok(&ok);
-                Ok(Vec::new())
+                Ok(Or::B(ok.into_owned()))
             }
             0xfb => {
                 let mut reader = &pld[1..];
                 let mut file_name = Vec::with_capacity(reader.len());
                 reader.read_to_end(&mut file_name)?;
                 match self.send_local_infile(file_name.as_ref()) {
-                    Ok(_) => Ok(Vec::new()),
+                    Ok(ok) => Ok(Or::B(ok)),
                     Err(err) => Err(err),
                 }
             }
@@ -801,12 +804,12 @@ impl Conn {
                 // skip eof packet
                 self.read_packet()?;
                 self.has_results = column_count > 0;
-                Ok(columns)
+                Ok(Or::A(columns))
             }
         }
     }
 
-    fn _query(&mut self, query: &str) -> Result<Vec<Column>> {
+    fn _query(&mut self, query: &str) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         self.write_command(Command::COM_QUERY, query.as_bytes())?;
         self.handle_result_set()
     }
@@ -960,11 +963,9 @@ impl Conn {
 }
 
 impl crate::prelude::Queryable for Conn {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_>> {
-        match self._query(query.as_ref()) {
-            Ok(columns) => Ok(QueryResult::new(self.into(), columns, false)),
-            Err(err) => Err(err),
-        }
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, Text>> {
+        let meta = self._query(query.as_ref())?;
+        Ok(QueryResult::new(self.into(), meta))
     }
 
     fn prep<T: AsRef<str>>(&mut self, query: T) -> Result<Statement> {
@@ -981,14 +982,14 @@ impl crate::prelude::Queryable for Conn {
         Ok(())
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,
     {
         let statement = stmt.as_statement(self)?;
-        let columns = self._execute(&*statement, params.into())?;
-        Ok(QueryResult::new(self.into(), columns, true))
+        let meta = self._execute(&*statement, params.into())?;
+        Ok(QueryResult::new(self.into(), meta))
     }
 }
 
@@ -1459,7 +1460,6 @@ mod test {
                     .map(|row| row.unwrap().unwrap().pop().unwrap())
                     .collect::<Vec<crate::Value>>();
                 assert_eq!(result_set, vec![Bytes(b"1".to_vec()), Bytes(b"2".to_vec())]);
-                assert!(query_result.more_results_exists());
                 let result_set = query_result
                     .by_ref()
                     .map(|row| row.unwrap().unwrap().pop().unwrap())
@@ -1468,11 +1468,9 @@ mod test {
             }
             let mut result = conn.query_iter("SELECT 1; SELECT 2; SELECT 3;").unwrap();
             let mut i = 0;
-            while {
+            while let Some(result_set) = result.next_set() {
                 i += 1;
-                result.more_results_exists()
-            } {
-                for row in result.by_ref() {
+                for row in result_set.unwrap() {
                     match i {
                         1 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"1".to_vec())]),
                         2 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"2".to_vec())]),
@@ -1481,7 +1479,7 @@ mod test {
                     }
                 }
             }
-            assert_eq!(i, 4);
+            assert_eq!(i, 3);
         }
 
         #[test]

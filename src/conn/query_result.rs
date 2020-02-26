@@ -6,173 +6,331 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use mysql_common::row::new_row;
+use mysql_common::{packets::OkPacket, row::new_row};
 
-use std::{collections::hash_map::HashMap, sync::Arc};
+use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
-use crate::{conn::ConnMut, Column, Result, Row};
+use crate::{
+    conn::ConnMut,
+    Column, Conn, Error, Result, Row, Value,
+};
 
-/// Mysql result set for text and binary protocols.
-///
-/// If you want to get rows from `QueryResult` you should rely on implementation
-/// of `Iterator` over `Result<Row>` on `QueryResult`.
-///
-/// [`Row`](struct.Row.html) is the current row representation. To get something useful from
-/// [`Row`](struct.Row.html) you should rely on `FromRow` trait implemented for tuples of
-/// `FromValue` implementors up to arity 12, or on `FromValue` trait for rows with higher arity.
-///
-/// For more info on how to work with values please look at
-/// [`Value`](../value/enum.Value.html) documentation.
-#[derive(Debug)]
-pub struct QueryResult<'a> {
-    conn: ConnMut<'a>,
-    columns: Arc<Vec<Column>>,
-    is_bin: bool,
+pub enum Or<A, B> {
+    A(A),
+    B(B),
 }
 
-impl<'a> QueryResult<'a> {
-    pub(crate) fn new(conn: ConnMut<'a>, columns: Vec<Column>, is_bin: bool) -> QueryResult<'a> {
-        QueryResult {
-            conn,
-            columns: Arc::new(columns),
-            is_bin,
-        }
-    }
+/// Result set kind.
+pub trait Protocol: 'static + Send + Sync {
+    fn next(conn: &mut Conn, columns: &Arc<Vec<Column>>) -> Result<Option<Vec<Value>>>;
+}
 
-    fn handle_if_more_results(&mut self) -> Option<Result<Row>> {
-        if self.conn.more_results_exists() {
-            match self.conn.handle_result_set() {
-                Ok(cols) => {
-                    self.columns = Arc::new(cols);
-                    None
-                }
-                Err(e) => Some(Err(e)),
-            }
+/// Text result set marker.
+#[derive(Debug)]
+pub struct Text;
+
+impl Protocol for Text {
+    fn next(conn: &mut Conn, columns: &Arc<Vec<Column>>) -> Result<Option<Vec<Value>>> {
+        conn.next_text(columns.len())
+    }
+}
+
+/// Binary result set marker.
+#[derive(Debug)]
+pub struct Binary;
+
+impl Protocol for Binary {
+    fn next(conn: &mut Conn, columns: &Arc<Vec<Column>>) -> Result<Option<Vec<Value>>> {
+        conn.next_bin(columns)
+    }
+}
+
+/// State of a result set iterator.
+#[derive(Debug)]
+enum SetIteratorState {
+    /// Iterator is in a non-empty set.
+    InSet(Arc<Vec<Column>>),
+    /// Iterator is in an empty set.
+    InEmptySet(OkPacket<'static>),
+    /// Iterator is in an errored result set.
+    Errored(Error),
+    /// Next result set isn't handled.
+    OnBoundary,
+    /// No more result sets.
+    Done,
+}
+
+impl SetIteratorState {
+    fn ok_packet(&self) -> Option<&OkPacket<'_>> {
+        if let Self::InEmptySet(ref ok) = self {
+            Some(ok)
         } else {
             None
         }
     }
 
-    /// Returns number affected rows for the current result set.
+    fn columns(&self) -> Option<&Arc<Vec<Column>>> {
+        if let Self::InSet(ref cols) = self {
+            Some(cols)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<Vec<Column>> for SetIteratorState {
+    fn from(columns: Vec<Column>) -> Self {
+        Self::InSet(columns.into())
+    }
+}
+
+impl From<OkPacket<'static>> for SetIteratorState {
+    fn from(ok_packet: OkPacket<'static>) -> Self {
+        Self::InEmptySet(ok_packet)
+    }
+}
+
+impl From<Error> for SetIteratorState {
+    fn from(err: Error) -> Self {
+        Self::Errored(err)
+    }
+}
+
+impl From<Or<Vec<Column>, OkPacket<'static>>> for SetIteratorState {
+    fn from(or: Or<Vec<Column>, OkPacket<'static>>) -> Self {
+        match or {
+            Or::A(cols) => Self::from(cols),
+            Or::B(ok) => Self::from(ok),
+        }
+    }
+}
+
+/// Response to a query or statement execution.
+///
+/// It is an iterator:
+/// *   over result sets (via `Self::next_set`)
+/// *   over rows of a current result set (via `Iterator` impl)
+#[derive(Debug)]
+pub struct QueryResult<'a, T: Protocol> {
+    conn: ConnMut<'a>,
+    state: SetIteratorState,
+    set_index: usize,
+    protocol: PhantomData<T>,
+}
+
+impl<'a, T: Protocol> QueryResult<'a, T> {
+    fn from_state<'b>(conn: ConnMut<'b>, state: SetIteratorState) -> QueryResult<'b, T> {
+        QueryResult {
+            conn,
+            state,
+            set_index: 0,
+            protocol: PhantomData,
+        }
+    }
+
+    pub(crate) fn new<'b>(
+        conn: ConnMut<'b>,
+        meta: Or<Vec<Column>, OkPacket<'static>>,
+    ) -> QueryResult<'b, T> {
+        Self::from_state(conn, meta.into())
+    }
+
+    /// Updates state with the next result set, if any.
+    ///
+    /// Returns `false` if there is no next result set.
+    ///
+    /// **Requires:** `self.state == OnBoundary`
+    fn handle_next(&mut self) {
+        if cfg!(debug_assertions) {
+            if let SetIteratorState::OnBoundary = self.state {
+            } else {
+                panic!("self.state == OnBoundary");
+            }
+        }
+
+        if self.conn.more_results_exists() {
+            match self.conn.handle_result_set() {
+                Ok(meta) => self.state = meta.into(),
+                Err(err) => self.state = err.into(),
+            }
+            self.set_index += 1;
+        } else {
+            self.state = SetIteratorState::Done;
+        }
+    }
+
+    /// Returns an iterator over the current result set.
+    pub fn next_set<'b>(&'b mut self) -> Option<Result<ResultSet<'a, 'b, T>>> {
+        use SetIteratorState::*;
+
+        if let OnBoundary | Done = &self.state {
+            debug_assert!(
+                self.conn.more_results_exists() == false,
+                "the next state must be handled by the Iterator::next"
+            );
+
+            None
+        } else {
+            Some(Ok(ResultSet {
+                set_index: self.set_index,
+                inner: self,
+            }))
+        }
+    }
+
+    /// Returns the number of affected rows for the current result set.
     pub fn affected_rows(&self) -> u64 {
-        self.conn.affected_rows
+        self.state
+            .ok_packet()
+            .map(|ok| ok.affected_rows())
+            .unwrap_or_default()
     }
 
     /// Returns the last insert id for the current result set.
-    pub fn last_insert_id(&self) -> u64 {
-        self.conn.last_insert_id
+    pub fn last_insert_id(&self) -> Option<u64> {
+        self.state
+            .ok_packet()
+            .map(|ok| ok.last_insert_id())
+            .unwrap_or_default()
     }
 
-    /// Returns warnings count for the current result set.
+    /// Returns the warnings count for the current result set.
     pub fn warnings(&self) -> u16 {
-        self.conn.warnings
+        self.state
+            .ok_packet()
+            .map(|ok| ok.warnings())
+            .unwrap_or_default()
     }
 
-    /// Returns
-    /// [`OkPacket`'s](http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html)
-    /// info.
-    pub fn info(&self) -> Vec<u8> {
-        self.conn
-            .info
-            .as_ref()
-            .map(Clone::clone)
-            .unwrap_or_else(Vec::new)
+    /// [Info] for the current result set.
+    ///
+    /// Will be empty if not defined.
+    ///
+    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
+    pub fn info_ref(&self) -> &[u8] {
+        self.state
+            .ok_packet()
+            .and_then(|ok| ok.info_ref())
+            .unwrap_or_default()
     }
 
-    /// Returns index of a `QueryResult`'s column by name.
-    pub fn column_index<T: AsRef<str>>(&self, name: T) -> Option<usize> {
-        let name = name.as_ref().as_bytes();
-        for (i, c) in self.columns.iter().enumerate() {
-            if c.name_ref() == name {
-                return Some(i);
-            }
+
+    /// [Info] for the current result set.
+    ///
+    /// Will be empty if not defined.
+    ///
+    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
+    pub fn info_str(&self) -> Cow<str> {
+        self.state
+            .ok_packet()
+            .and_then(|ok| ok.info_str())
+            .unwrap_or_else(|| "".into())
+    }
+
+    /// Returns columns of the current result rest.
+    pub fn columns(&self) -> SetColumns {
+        SetColumns {
+            inner: self.state.columns().map(Into::into),
         }
-        None
-    }
-
-    /// Returns a `HashMap` which maps column names to column indexes.
-    pub fn column_indexes(&self) -> HashMap<String, usize> {
-        let mut indexes = HashMap::default();
-        for (i, column) in self.columns.iter().enumerate() {
-            indexes.insert(column.name_str().into_owned(), i);
-        }
-        indexes
-    }
-
-    /// Returns a list of columns in the current result set.
-    pub fn columns_ref(&self) -> &[Column] {
-        self.columns.as_ref()
-    }
-
-    /// Returns `true` if this query result contains another result set,
-    /// or if last result set isn't fully consumed.
-    ///
-    /// # Note
-    ///
-    /// Note, that the metadata of a query result (number of affected rows, last insert id etc.)
-    /// will change on the result set boundary, i.e:
-    ///
-    /// ```rust
-    /// # mysql::doctest_wrapper!(__result, {
-    /// # use mysql::*;
-    /// # use mysql::prelude::*;
-    /// # let mut conn = Conn::new(get_opts())?;
-    /// let mut result = conn.query_iter("SELECT 1; SELECT 'foo', 'bar';")?;
-    ///
-    /// // First result set contains one column.
-    /// assert_eq!(result.columns_ref().len(), 1);
-    /// for row in result.by_ref() {} // first result set was consumed
-    ///
-    /// // More results exists
-    /// assert!(result.more_results_exists());
-    ///
-    /// // Second result set contains two columns.
-    /// assert_eq!(result.columns_ref().len(), 2);
-    /// for row in result.by_ref() {} // second result set was consumed
-    ///
-    /// // No more results
-    /// assert!(result.more_results_exists() == false);
-    /// # });
-    /// ```
-    pub fn more_results_exists(&self) -> bool {
-        self.conn.more_results_exists() || !self.consumed()
-    }
-
-    /// Returns true if current result set is consumed.
-    ///
-    /// See also [`QueryResult::more_results_exists`].
-    pub fn consumed(&self) -> bool {
-        !self.conn.has_results
     }
 }
 
-impl<'a> Iterator for QueryResult<'a> {
+impl<'a, T: Protocol> Drop for QueryResult<'a, T> {
+    fn drop(&mut self) {
+        while self.next_set().is_some() {}
+    }
+}
+
+#[derive(Debug)]
+pub struct ResultSet<'a, 'b, T: Protocol> {
+    set_index: usize,
+    inner: &'b mut QueryResult<'a, T>,
+}
+
+impl<'a, 'b, T: Protocol> std::ops::Deref for ResultSet<'a, 'b, T> {
+    type Target = QueryResult<'a, T>;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
+}
+
+impl<'a, 'b, T: Protocol> Iterator for ResultSet<'a, 'b, T> {
     type Item = Result<Row>;
 
-    fn next(&mut self) -> Option<Result<Row>> {
-        let values = if self.columns.len() > 0 {
-            if self.is_bin {
-                self.conn.next_bin(&self.columns)
-            } else {
-                self.conn.next_text(self.columns.len())
-            }
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.set_index == self.inner.set_index {
+            self.inner.next()
         } else {
-            Ok(None)
-        };
-        match values {
-            Ok(values) => match values {
-                Some(values) => Some(Ok(new_row(values, self.columns.clone()))),
-                None => self.handle_if_more_results(),
-            },
-            Err(e) => Some(Err(e)),
+            None
         }
     }
 }
 
-impl<'a> Drop for QueryResult<'a> {
-    fn drop(&mut self) {
-        while self.more_results_exists() {
-            while let Some(_) = self.next() {}
+impl<'a, T: Protocol> Iterator for QueryResult<'a, T> {
+    type Item = Result<Row>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use SetIteratorState::*;
+
+        let state = std::mem::replace(&mut self.state, OnBoundary);
+
+        match state {
+            InSet(cols) => match T::next(&mut *self.conn, &cols) {
+                Ok(Some(vals)) => {
+                    self.state = InSet(cols.clone());
+                    Some(Ok(new_row(vals, cols)))
+                }
+                Ok(None) => {
+                    self.handle_next();
+                    None
+                }
+                Err(e) => {
+                    self.handle_next();
+                    Some(Err(e))
+                }
+            },
+            InEmptySet(_) => {
+                self.handle_next();
+                None
+            }
+            Errored(err) => {
+                self.handle_next();
+                Some(Err(err))
+            }
+            OnBoundary => None,
+            Done => {
+                self.state = Done;
+                None
+            }
         }
+    }
+}
+
+impl<'a, 'b, T: Protocol> Drop for ResultSet<'a, 'b, T> {
+    fn drop(&mut self) {
+        while self.next().is_some() {}
+    }
+}
+
+#[derive(Debug)]
+pub struct SetColumns<'a> {
+    inner: Option<&'a Arc<Vec<Column>>>,
+}
+
+impl<'a> SetColumns<'a> {
+    /// Returns an index of a column by its name.
+    pub fn column_index<U: AsRef<str>>(&self, name: U) -> Option<usize> {
+        let name = name.as_ref().as_bytes();
+        self.inner
+            .as_ref()
+            .and_then(|cols| cols.iter().position(|col| col.name_ref() == name))
+    }
+
+    pub fn as_ref(&self) -> &[Column] {
+        self.inner
+            .as_ref()
+            .map(|cols| &(*cols)[..])
+            .unwrap_or(&[][..])
     }
 }

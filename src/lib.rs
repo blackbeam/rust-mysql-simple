@@ -451,9 +451,9 @@
 //! ### `QueryResult`
 //!
 //! It's an iterator over rows of a query result with support of multi-result sets. It's intended
-//! for cases when you need full control during result set iteration. For other cases `Conn`
-//! provides a set of methods that will immediately consume the first result set and drop everything
-//! else.
+//! for cases when you need full control during result set iteration. For other cases
+//! [`Queryalbe`](#queryable) provides a set of methods that will immediately consume
+//! the first result set and drop everything else.
 //!
 //! This iterator is lazy so it won't read the result from server until you iterate over it.
 //! MySql protocol is strictly sequential, so `Conn` will be mutably borrowed until the result
@@ -470,25 +470,36 @@
 //! // This query will emit two result sets.
 //! let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
 //!
-//! let mut set = 0;
-//! while result.more_results_exists() {
-//!     println!("Result set columns: {:?}", result.columns_ref());
+//! let mut sets = 0;
+//! while let Some(result_set) = result.next_set() {
+//!     let result_set = result_set?;
+//!     sets += 1;
 //!
-//!     for row in result.by_ref() {
-//!         match set {
-//!             0 => {
+//!     println!("Result set columns: {:?}", result_set.columns());
+//!     println!(
+//!         "Result set meta: {}, {:?}, {} {}",
+//!         result_set.affected_rows(),
+//!         result_set.last_insert_id(),
+//!         result_set.warnings(),
+//!         result_set.info_str(),
+//!     );
+//!
+//!     for row in result_set {
+//!         match sets {
+//!             1 => {
 //!                 // First result set will contain two numbers.
 //!                 assert_eq!((1_u8, 2_u8), from_row(row?));
 //!             }
-//!             1 => {
+//!             2 => {
 //!                 // Second result set will contain a number and a float.
 //!                 assert_eq!((3_u8, 3.14), from_row(row?));
 //!             }
 //!             _ => unreachable!(),
 //!         }
 //!     }
-//!     set += 1;
 //! }
+//!
+//! assert_eq!(sets, 2);
 //! # });
 //! ```
 //!
@@ -679,7 +690,7 @@ pub use crate::conn::opts::{Opts, OptsBuilder, DEFAULT_STMT_CACHE_SIZE};
 #[doc(inline)]
 pub use crate::conn::pool::{Pool, PooledConn};
 #[doc(inline)]
-pub use crate::conn::query_result::QueryResult;
+pub use crate::conn::query_result::{Text, Binary, QueryResult, ResultSet};
 #[doc(inline)]
 pub use crate::conn::stmt::Statement;
 #[doc(inline)]
