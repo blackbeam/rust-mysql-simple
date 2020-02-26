@@ -10,12 +10,12 @@ use mysql_common::row::new_row;
 
 use std::{collections::hash_map::HashMap, sync::Arc};
 
-use crate::{Column, Conn, Result as MyResult, Row};
+use crate::{conn::ConnMut, Column, Result, Row};
 
 /// Mysql result set for text and binary protocols.
 ///
 /// If you want to get rows from `QueryResult` you should rely on implementation
-/// of `Iterator` over `MyResult<Row>` on `QueryResult`.
+/// of `Iterator` over `Result<Row>` on `QueryResult`.
 ///
 /// [`Row`](struct.Row.html) is the current row representation. To get something useful from
 /// [`Row`](struct.Row.html) you should rely on `FromRow` trait implemented for tuples of
@@ -25,13 +25,13 @@ use crate::{Column, Conn, Result as MyResult, Row};
 /// [`Value`](../value/enum.Value.html) documentation.
 #[derive(Debug)]
 pub struct QueryResult<'a> {
-    conn: &'a mut Conn,
+    conn: ConnMut<'a>,
     columns: Arc<Vec<Column>>,
     is_bin: bool,
 }
 
 impl<'a> QueryResult<'a> {
-    pub(crate) fn new(conn: &'a mut Conn, columns: Vec<Column>, is_bin: bool) -> QueryResult<'a> {
+    pub(crate) fn new(conn: ConnMut<'a>, columns: Vec<Column>, is_bin: bool) -> QueryResult<'a> {
         QueryResult {
             conn,
             columns: Arc::new(columns),
@@ -39,7 +39,7 @@ impl<'a> QueryResult<'a> {
         }
     }
 
-    fn handle_if_more_results(&mut self) -> Option<MyResult<Row>> {
+    fn handle_if_more_results(&mut self) -> Option<Result<Row>> {
         if self.conn.more_results_exists() {
             match self.conn.handle_result_set() {
                 Ok(cols) => {
@@ -147,9 +147,9 @@ impl<'a> QueryResult<'a> {
 }
 
 impl<'a> Iterator for QueryResult<'a> {
-    type Item = MyResult<Row>;
+    type Item = Result<Row>;
 
-    fn next(&mut self) -> Option<MyResult<Row>> {
+    fn next(&mut self) -> Option<Result<Row>> {
         let values = if self.columns.len() > 0 {
             if self.is_bin {
                 self.conn.next_bin(&self.columns)

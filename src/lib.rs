@@ -666,7 +666,6 @@ pub use crate::myc::uuid;
 mod conn;
 pub mod error;
 mod io;
-mod queryable;
 
 #[doc(inline)]
 pub use crate::myc::constants as consts;
@@ -708,13 +707,13 @@ pub use crate::myc::value::Value;
 
 pub mod prelude {
     #[doc(inline)]
+    pub use crate::conn::queryable::{AsStatement, Queryable};
+    #[doc(inline)]
     pub use crate::myc::row::convert::FromRow;
     #[doc(inline)]
     pub use crate::myc::row::ColumnIndex;
     #[doc(inline)]
     pub use crate::myc::value::convert::{ConvIr, FromValue, ToValue};
-    #[doc(inline)]
-    pub use crate::queryable::{AsStatement, Queryable};
 }
 
 #[doc(inline)]

@@ -366,7 +366,7 @@ impl PooledConn {
     ) -> MyResult<Transaction<'a>> {
         self.as_mut()
             ._start_transaction(consistent_snapshot, isolation_level, readonly)?;
-        Ok(Transaction::new_pooled(self))
+        Ok(Transaction::new(self.into()))
     }
 
     /// A way to override default local infile handler for this pooled connection. Destructor will

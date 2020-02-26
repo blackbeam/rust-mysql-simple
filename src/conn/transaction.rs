@@ -9,8 +9,7 @@
 use std::fmt;
 
 use crate::{
-    conn::ConnRef, prelude::*, Conn, LocalInfileHandler, Params, PooledConn, QueryResult, Result,
-    Statement,
+    conn::ConnMut, prelude::*, LocalInfileHandler, Params, QueryResult, Result, Statement,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -34,27 +33,17 @@ impl fmt::Display for IsolationLevel {
 
 #[derive(Debug)]
 pub struct Transaction<'a> {
-    conn: ConnRef<'a>,
+    conn: ConnMut<'a>,
     committed: bool,
     rolled_back: bool,
     restore_local_infile_handler: Option<LocalInfileHandler>,
 }
 
 impl<'a> Transaction<'a> {
-    pub(crate) fn new(conn: &'a mut Conn) -> Transaction<'a> {
+    pub(crate) fn new(conn: ConnMut<'a>) -> Transaction<'a> {
         let handler = conn.local_infile_handler.clone();
         Transaction {
-            conn: ConnRef::ViaConnRef(conn),
-            committed: false,
-            rolled_back: false,
-            restore_local_infile_handler: handler,
-        }
-    }
-
-    pub(crate) fn new_pooled(conn: PooledConn) -> Transaction<'a> {
-        let handler = conn.as_ref().local_infile_handler.clone();
-        Transaction {
-            conn: ConnRef::ViaPooledConn(conn),
+            conn,
             committed: false,
             rolled_back: false,
             restore_local_infile_handler: handler,
