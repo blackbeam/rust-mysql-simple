@@ -157,6 +157,12 @@ impl From<PacketCodecError> for Error {
     }
 }
 
+impl From<std::convert::Infallible> for Error {
+    fn from(err: std::convert::Infallible) -> Self {
+        match err {}
+    }
+}
+
 #[cfg(unix)]
 impl From<::nix::Error> for Error {
     fn from(x: ::nix::Error) -> Error {

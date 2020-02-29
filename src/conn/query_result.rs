@@ -111,15 +111,15 @@ impl From<Or<Vec<Column>, OkPacket<'static>>> for SetIteratorState {
 /// *   over result sets (via `Self::next_set`)
 /// *   over rows of a current result set (via `Iterator` impl)
 #[derive(Debug)]
-pub struct QueryResult<'a, T: Protocol> {
-    conn: ConnMut<'a>,
+pub struct QueryResult<'c, 't, 'tc, T: Protocol> {
+    conn: ConnMut<'c, 't, 'tc>,
     state: SetIteratorState,
     set_index: usize,
     protocol: PhantomData<T>,
 }
 
-impl<'a, T: Protocol> QueryResult<'a, T> {
-    fn from_state<'b>(conn: ConnMut<'b>, state: SetIteratorState) -> QueryResult<'b, T> {
+impl<'c, 't, 'tc, T: Protocol> QueryResult<'c, 't, 'tc, T> {
+    fn from_state(conn: ConnMut<'c, 't, 'tc>, state: SetIteratorState) -> QueryResult<'c, 't, 'tc, T> {
         QueryResult {
             conn,
             state,
@@ -128,10 +128,10 @@ impl<'a, T: Protocol> QueryResult<'a, T> {
         }
     }
 
-    pub(crate) fn new<'b>(
-        conn: ConnMut<'b>,
+    pub(crate) fn new(
+        conn: ConnMut<'c, 't, 'tc>,
         meta: Or<Vec<Column>, OkPacket<'static>>,
-    ) -> QueryResult<'b, T> {
+    ) -> QueryResult<'c, 't, 'tc, T> {
         Self::from_state(conn, meta.into())
     }
 
@@ -160,7 +160,7 @@ impl<'a, T: Protocol> QueryResult<'a, T> {
     }
 
     /// Returns an iterator over the current result set.
-    pub fn next_set<'b>(&'b mut self) -> Option<Result<ResultSet<'a, 'b, T>>> {
+    pub fn next_set<'d>(&'d mut self) -> Option<Result<ResultSet<'c, 't, 'tc, 'd, T>>> {
         use SetIteratorState::*;
 
         if let OnBoundary | Done = &self.state {
@@ -235,27 +235,27 @@ impl<'a, T: Protocol> QueryResult<'a, T> {
     }
 }
 
-impl<'a, T: Protocol> Drop for QueryResult<'a, T> {
+impl<'c, 't, 'tc, T: Protocol> Drop for QueryResult<'c, 't, 'tc, T> {
     fn drop(&mut self) {
         while self.next_set().is_some() {}
     }
 }
 
 #[derive(Debug)]
-pub struct ResultSet<'a, 'b, T: Protocol> {
+pub struct ResultSet<'a, 'b, 'c, 'd, T: Protocol> {
     set_index: usize,
-    inner: &'b mut QueryResult<'a, T>,
+    inner: &'d mut QueryResult<'a, 'b, 'c, T>,
 }
 
-impl<'a, 'b, T: Protocol> std::ops::Deref for ResultSet<'a, 'b, T> {
-    type Target = QueryResult<'a, T>;
+impl<'a, 'b, 'c, T: Protocol> std::ops::Deref for ResultSet<'a, 'b, 'c, '_, T> {
+    type Target = QueryResult<'a, 'b, 'c, T>;
 
     fn deref(&self) -> &Self::Target {
         &*self.inner
     }
 }
 
-impl<'a, 'b, T: Protocol> Iterator for ResultSet<'a, 'b, T> {
+impl<T: Protocol> Iterator for ResultSet<'_, '_, '_, '_, T> {
     type Item = Result<Row>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -267,7 +267,7 @@ impl<'a, 'b, T: Protocol> Iterator for ResultSet<'a, 'b, T> {
     }
 }
 
-impl<'a, T: Protocol> Iterator for QueryResult<'a, T> {
+impl<T: Protocol> Iterator for QueryResult<'_, '_, '_, T> {
     type Item = Result<Row>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -307,7 +307,7 @@ impl<'a, T: Protocol> Iterator for QueryResult<'a, T> {
     }
 }
 
-impl<'a, 'b, T: Protocol> Drop for ResultSet<'a, 'b, T> {
+impl<T: Protocol> Drop for ResultSet<'_, '_, '_, '_, T> {
     fn drop(&mut self) {
         while self.next().is_some() {}
     }

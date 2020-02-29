@@ -26,7 +26,7 @@ use std::{
     collections::HashMap,
     convert::TryFrom,
     io::{self, Read, Write as _},
-    mem, process,
+    mem, ops::{Deref, DerefMut}, process,
     sync::Arc,
 };
 
@@ -56,6 +56,7 @@ use crate::{
 pub mod local_infile;
 pub mod opts;
 pub mod pool;
+pub mod query;
 pub mod query_result;
 pub mod queryable;
 pub mod stmt;
@@ -64,37 +65,44 @@ pub mod transaction;
 
 /// Mutable connection.
 #[derive(Debug)]
-pub enum ConnMut<'a> {
-    Mut(&'a mut Conn),
+pub enum ConnMut<'c, 't, 'tc> {
+    Mut(&'c mut Conn),
+    TxMut(&'t mut Transaction<'tc>),
     Owned(Conn),
     Pooled(PooledConn),
 }
 
-impl From<Conn> for ConnMut<'static> {
+impl From<Conn> for ConnMut<'static, 'static, 'static> {
     fn from(conn: Conn) -> Self {
         ConnMut::Owned(conn)
     }
 }
 
-impl From<PooledConn> for ConnMut<'static> {
+impl From<PooledConn> for ConnMut<'static, 'static, 'static> {
     fn from(conn: PooledConn) -> Self {
         ConnMut::Pooled(conn)
     }
 }
 
-impl<'a> From<&'a mut Conn> for ConnMut<'a> {
+impl<'a> From<&'a mut Conn> for ConnMut<'a, 'static, 'static> {
     fn from(conn: &'a mut Conn) -> Self {
         ConnMut::Mut(conn)
     }
 }
 
-impl<'a> From<&'a mut PooledConn> for ConnMut<'a> {
+impl<'a> From<&'a mut PooledConn> for ConnMut<'a, 'static, 'static> {
     fn from(conn: &'a mut PooledConn) -> Self {
         ConnMut::Mut(conn.as_mut())
     }
 }
 
-impl<'a> TryFrom<&Pool> for ConnMut<'static> {
+impl<'t, 'tc> From<&'t mut Transaction<'tc>> for ConnMut<'static, 't, 'tc> {
+    fn from(tx: &'t mut Transaction<'tc>) -> Self {
+        ConnMut::TxMut(tx)
+    }
+}
+
+impl TryFrom<&Pool> for ConnMut<'static, 'static, 'static> {
     type Error = Error;
 
     fn try_from(pool: &Pool) -> Result<Self> {
@@ -102,22 +110,24 @@ impl<'a> TryFrom<&Pool> for ConnMut<'static> {
     }
 }
 
-impl<'a> std::ops::Deref for ConnMut<'a> {
+impl Deref for ConnMut<'_, '_, '_> {
     type Target = Conn;
 
     fn deref(&self) -> &Conn {
         match self {
             ConnMut::Mut(conn) => &**conn,
+            ConnMut::TxMut(tx) => &*tx.conn,
             ConnMut::Owned(conn) => &conn,
             ConnMut::Pooled(conn) => conn.as_ref(),
         }
     }
 }
 
-impl<'a> std::ops::DerefMut for ConnMut<'a> {
+impl DerefMut for ConnMut<'_, '_, '_> {
     fn deref_mut(&mut self) -> &mut Conn {
         match self {
             ConnMut::Mut(ref mut conn) => &mut **conn,
+            ConnMut::TxMut(tx) => &mut *tx.conn,
             ConnMut::Owned(ref mut conn) => conn,
             ConnMut::Pooled(ref mut conn) => conn.as_mut(),
         }
@@ -962,10 +972,10 @@ impl Conn {
     }
 }
 
-impl crate::prelude::Queryable for Conn {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, Text>> {
+impl Queryable for Conn {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, '_, '_, Text>> {
         let meta = self._query(query.as_ref())?;
-        Ok(QueryResult::new(self.into(), meta))
+        Ok(QueryResult::new(ConnMut::Mut(self), meta))
     }
 
     fn prep<T: AsRef<str>>(&mut self, query: T) -> Result<Statement> {
@@ -982,14 +992,14 @@ impl crate::prelude::Queryable for Conn {
         Ok(())
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, Binary>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,
     {
         let statement = stmt.as_statement(self)?;
         let meta = self._execute(&*statement, params.into())?;
-        Ok(QueryResult::new(self.into(), meta))
+        Ok(QueryResult::new(ConnMut::Mut(self), meta))
     }
 }
 
@@ -1018,7 +1028,7 @@ mod test {
             prelude::*,
             test_misc::get_opts,
             time::Timespec,
-            Conn,
+            Conn, Pool,
             DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
             LocalInfileHandler, Opts, OptsBuilder, Params,
@@ -1053,6 +1063,93 @@ mod test {
             if crate::test_misc::test_ssl() {
                 assert!(!conn.is_insecure());
             }
+        }
+
+        #[test]
+        fn query_traits() -> Result<(), Box<dyn std::error::Error>> {
+            macro_rules! test_query {
+                ($conn : expr) => {
+                    "CREATE TEMPORARY TABLE tmp (a INT)"
+                        .run($conn)?;
+
+                    "INSERT INTO tmp (a) VALUES (?)"
+                        .with((42,))
+                        .run($conn)?;
+
+                    "INSERT INTO tmp (a) VALUES (?)"
+                        .with((43..=44).map(|x| (x,)))
+                        .batch($conn)?;
+
+                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1"
+                        .first($conn)?;
+                    assert_eq!(first, Some(42), "first text");
+
+                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1"
+                        .with(())
+                        .first($conn)?;
+                    assert_eq!(first, Some(42), "first bin");
+
+                    let count = "SELECT a FROM tmp"
+                        .run($conn)?
+                        .count();
+                    assert_eq!(count, 3, "run text");
+
+                    let count = "SELECT a FROM tmp"
+                        .with(())
+                        .run($conn)?
+                        .count();
+                    assert_eq!(count, 3, "run bin");
+
+                    let all: Vec<u8> = "SELECT a FROM tmp"
+                        .fetch($conn)?;
+                    assert_eq!(all, vec![42, 43, 44], "fetch text");
+
+                    let all: Vec<u8> = "SELECT a FROM tmp"
+                        .with(())
+                        .fetch($conn)?;
+                    assert_eq!(all, vec![42, 43, 44], "fetch bin");
+
+                    let mapped = "SELECT a FROM tmp"
+                        .map($conn, |x: u8| x + 1)?;
+                    assert_eq!(mapped, vec![43, 44, 45], "map text");
+
+                    let mapped = "SELECT a FROM tmp"
+                        .with(())
+                        .map($conn, |x: u8| x + 1)?;
+                    assert_eq!(mapped, vec![43, 44, 45], "map bin");
+
+                    let sum = "SELECT a FROM tmp"
+                        .fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                    assert_eq!(sum, 42 + 43 + 44, "fold text");
+
+                    let sum = "SELECT a FROM tmp"
+                        .with(())
+                        .fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                    assert_eq!(sum, 42 + 43 + 44, "fold bin");
+
+                    "DROP TABLE tmp"
+                        .run($conn)?;
+                }
+            }
+
+            let mut conn = Conn::new(get_opts())?;
+
+            let mut tx = conn.start_transaction(false, None, None)?;
+            test_query!(&mut tx);
+            tx.rollback()?;
+
+            test_query!(&mut conn);
+
+            let pool = Pool::new(get_opts())?;
+            let mut pooled_conn = pool.get_conn()?;
+
+            let mut tx = pool.start_transaction(false, None, None)?;
+            test_query!(&mut tx);
+            tx.rollback()?;
+
+            test_query!(&mut pooled_conn);
+
+            Ok(())
         }
 
         #[test]

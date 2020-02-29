@@ -13,14 +13,18 @@ use crate::{
     Statement
 };
 
+/// Something, that eventualy is a `Statement` in the context of a `T: Queryable`.
 pub trait AsStatement {
+    /// Make a statement out of `Self`.
     fn as_statement<Q: Queryable>(&self, queryable: &mut Q) -> Result<Cow<'_, Statement>>;
 }
 
 /// Queryable object.
 pub trait Queryable {
-    fn query_iter<Q: AsRef<str>>(&mut self, query: Q) -> Result<QueryResult<'_, Text>>;
+    /// Perfoms text query.
+    fn query_iter<Q: AsRef<str>>(&mut self, query: Q) -> Result<QueryResult<'_, '_, '_, Text>>;
 
+    /// Performst text query and collects the first result set.
     fn query<T, Q>(&mut self, query: Q) -> Result<Vec<T>>
     where
         Q: AsRef<str>,
@@ -29,6 +33,7 @@ pub trait Queryable {
         self.query_map(query, from_row)
     }
 
+    /// Performs text query and returns the firt row of the first result set.
     fn query_first<T, Q>(&mut self, query: Q) -> Result<Option<T>>
     where
         Q: AsRef<str>,
@@ -40,6 +45,7 @@ pub trait Queryable {
             .transpose()
     }
 
+    /// Performs text query and maps each row of the first result set.
     fn query_map<T, F, Q, U>(&mut self, query: Q, mut f: F) -> Result<Vec<U>>
     where
         Q: AsRef<str>,
@@ -52,6 +58,7 @@ pub trait Queryable {
         })
     }
 
+    /// Performs text query and folds the first result set to a single value.
     fn query_fold<T, F, Q, U>(&mut self, query: Q, init: U, mut f: F) -> Result<U>
     where
         Q: AsRef<str>,
@@ -63,6 +70,7 @@ pub trait Queryable {
             .try_fold(init, |acc, row: Result<T>| row.map(|row| f(acc, row)))
     }
 
+    /// Performs text query and drops the query result.
     fn query_drop<Q>(&mut self, query: Q) -> Result<()>
     where
         Q: AsRef<str>,
@@ -70,16 +78,19 @@ pub trait Queryable {
         self.query_iter(query).map(drop)
     }
 
+    /// Prepares the given `query` as a prepared statement.
     fn prep<Q: AsRef<str>>(&mut self, query: Q) -> Result<crate::Statement>;
 
     /// This function will close the given statement on the server side.
     fn close(&mut self, stmt: Statement) -> Result<()>;
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, Binary>>
+    /// Exectues the given `stmt` with the given `params`.
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>;
 
+    /// Prepares the given statement, and exectues it with each item in the given params iterator.
     fn exec_batch<S, P, I>(&mut self, stmt: S, params: I) -> Result<()>
     where
         Self: Sized,
@@ -95,6 +106,7 @@ pub trait Queryable {
         Ok(())
     }
 
+    /// Exectues the given `stmt` and collects the first result set.
     fn exec<T, S, P>(&mut self, stmt: S, params: P) -> Result<Vec<T>>
     where
         S: AsStatement,
@@ -104,6 +116,7 @@ pub trait Queryable {
         self.exec_map(stmt, params, crate::from_row)
     }
 
+    /// Exectues the given `stmt` and returns the first row of the first result set.
     fn exec_first<T, S, P>(&mut self, stmt: S, params: P) -> Result<Option<T>>
     where
         S: AsStatement,
@@ -116,6 +129,7 @@ pub trait Queryable {
             .transpose()
     }
 
+    /// Exectues the given `stmt` and maps each row of the first result set.
     fn exec_map<T, S, P, F, U>(&mut self, stmt: S, params: P, mut f: F) -> Result<Vec<U>>
     where
         S: AsStatement,
@@ -129,6 +143,7 @@ pub trait Queryable {
         })
     }
 
+    /// Exectues the given `stmt` and folds the first result set to a signel value.
     fn exec_fold<T, S, P, U, F>(&mut self, stmt: S, params: P, init: U, mut f: F) -> Result<U>
     where
         S: AsStatement,
@@ -141,6 +156,7 @@ pub trait Queryable {
         output
     }
 
+    /// Exectues the given `stmt` and drops the result.
     fn exec_drop<S, P>(&mut self, stmt: S, params: P) -> Result<()>
     where
         S: AsStatement,

@@ -34,14 +34,14 @@ impl fmt::Display for IsolationLevel {
 
 #[derive(Debug)]
 pub struct Transaction<'a> {
-    conn: ConnMut<'a>,
+    pub(crate) conn: ConnMut<'a, 'static, 'static>,
     committed: bool,
     rolled_back: bool,
     restore_local_infile_handler: Option<LocalInfileHandler>,
 }
 
-impl<'a> Transaction<'a> {
-    pub(crate) fn new(conn: ConnMut<'a>) -> Transaction<'a> {
+impl Transaction<'_> {
+    pub(crate) fn new<'a>(conn: ConnMut<'a, 'static, 'static>) -> Transaction<'a> {
         let handler = conn.local_infile_handler.clone();
         Transaction {
             conn,
@@ -74,7 +74,7 @@ impl<'a> Transaction<'a> {
 }
 
 impl<'a> Queryable for Transaction<'a> {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, Text>> {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, '_, '_, Text>> {
         self.conn.query_iter(query)
     }
 
@@ -86,7 +86,7 @@ impl<'a> Queryable for Transaction<'a> {
         self.conn.close(stmt)
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, Binary>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,

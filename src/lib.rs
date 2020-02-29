@@ -384,7 +384,6 @@
 //! # });
 //! ```
 //!
-//!
 //! ### `Params`
 //!
 //! Represents parameters of a prepared statement, but this type won't appear directly in your code
@@ -505,7 +504,7 @@
 //!
 //! ## Text protocol
 //!
-//! MySql text protocol is implemented in the set of `Conn::query*` methods. It's useful when your
+//! MySql text protocol is implemented in the set of `Queryable::query*` methods. It's useful when your
 //! query doesn't have parameters.
 //!
 //! **Note:** All values of a text protocol result set will be encoded as strings by the server,
@@ -523,6 +522,40 @@
 //! // Text protocol returns bytes even though the result of POW
 //! // is actually a floating point number.
 //! assert_eq!(val, Some(Value::Bytes("65536".as_bytes().to_vec())));
+//! # });
+//! ```
+//!
+//! ### The `TextQuery` trait.
+//!
+//! The `TextQuery` trait covers the set of `Queryable::query*` methods from the perspective
+//! of a query, i.e. `TextQuery` is something, that can be performed if suitable connection
+//! is given. Suitable connections are:
+//!
+//! *   `&Pool`
+//! *   `Conn`
+//! *   `PooledConn`
+//! *   `&mut Conn`
+//! *   `&mut PooledConn`
+//! *   `&mut Transaction`
+//!
+//! The unique characteristic of this trait, is that you can give away the connection
+//! and thus produce `QueryResult` that satisfies `'static`:
+//!
+//! ```rust
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! fn iter(pool: &Pool) -> Result<impl Iterator<Item=Result<u32>>> {
+//!     let result = "SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3".run(pool)?;
+//!     Ok(result.map(|row| row.map(from_row)))
+//! }
+//!
+//! let pool = Pool::new(get_opts())?;
+//!
+//! let it = iter(&pool)?;
+//!
+//! assert_eq!(it.collect::<Result<Vec<u32>>>()?, vec![1, 2, 3]);
 //! # });
 //! ```
 //!
@@ -549,8 +582,8 @@
 //!
 //! In MySql each prepared statement belongs to a particular connection and can't be executed
 //! on another connection. Trying to do so will lead to an error. The driver won't tie statement
-//! to a connection in any way, but one can look on to the connection id, that is stored
-//! in the `Statement` structure.
+//! to its connection in any way, but one can look on to the connection id, containe
+//!  in the `Statement` structure.
 //!
 //! ```rust
 //! # mysql::doctest_wrapper!(__result, {
@@ -627,6 +660,59 @@
 //! # });
 //! ```
 //!
+//! ### `BinQuery` and `BatchQuery` traits.
+//!
+//! `BinQuery` and `BatchQuery` traits covers the set of `Queryable::exec*` methods from
+//! the perspective of a query, i.e. `BinQuery` is something, that can be performed if suitable
+//! connection is given (see [`TextQuery`](#the-textquery-trat) section for the list
+//! of suitable connections).
+//!
+//! As with the [`TextQuery`](#the-textquery-trait) you can give away the connection and acquire
+//! `QueryResult` that satisfies `'static`.
+//!
+//! `BinQuery` is for prepared statements, and prepared statements requires a set of parameters,
+//! so `BinQuery` is implemented for `QueryWithParams` structure, that can be acquired, using
+//! `WithParams` trait.
+//!
+//! Example:
+//!
+//! ```rust
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let pool = Pool::new(get_opts())?;
+//!
+//! let result: Option<(u8, u8, u8)> = "SELECT ?, ?, ?"
+//!     .with((1, 2, 3)) // <- WithParams::with will construct an instance of QueryWithParams
+//!     .first(&pool)?;  // <- QueryWithParams is executed on the given pool
+//!
+//! assert_eq!(result.unwrap(), (1, 2, 3));
+//! # });
+//! ```
+//!
+//! The `BatchQuery` trait is a helper for batch statement execution. It's implemented for
+//! `QueryWithParams` where parameters is an iterator over parameters:
+//!
+//! ```rust
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let pool = Pool::new(get_opts())?;
+//! let mut conn = pool.get_conn()?;
+//!
+//! "CREATE TEMPORARY TABLE batch (x INT)".run(&mut conn)?;
+//! "INSERT INTO batch (x) VALUES (?)"
+//!     .with((0..3).map(|x| (x,))) // <- QueryWithParams constructed with an iterator
+//!     .batch(&mut conn)?;         // <- batch execution is preformed here
+//!
+//! let result: Vec<u8> = "SELECT x FROM batch".fetch(conn)?;
+//!
+//! assert_eq!(result, vec![0, 1, 2]);
+//! # });
+//! ```
+//!
 //! ### `Queryable`
 //!
 //! The `Queryable` trait defines common methods for `Conn`, `PooledConn` and `Transaction`.
@@ -646,7 +732,8 @@
 //! *   `{query|exec}_fold` - to fold the set of `T: FromRow` to a single value;
 //! *   `{query|exec}_drop` - to immediately drop the result.
 //!
-//! The trait also defines additional helper for a batch statement execution.
+//! The trait also defines the `exec_batch` function, which is a helper for batch statement
+//! execution.
 //!
 //! [crate docs]: https://docs.rs/mysql
 //! [mysql_common docs]: https://docs.rs/mysql_common
@@ -690,7 +777,9 @@ pub use crate::conn::opts::{Opts, OptsBuilder, DEFAULT_STMT_CACHE_SIZE};
 #[doc(inline)]
 pub use crate::conn::pool::{Pool, PooledConn};
 #[doc(inline)]
-pub use crate::conn::query_result::{Text, Binary, QueryResult, ResultSet};
+pub use crate::conn::query::QueryWithParams;
+#[doc(inline)]
+pub use crate::conn::query_result::{Text, Binary, QueryResult, ResultSet, SetColumns};
 #[doc(inline)]
 pub use crate::conn::stmt::Statement;
 #[doc(inline)]
@@ -719,6 +808,8 @@ pub use crate::myc::value::Value;
 pub mod prelude {
     #[doc(inline)]
     pub use crate::conn::queryable::{AsStatement, Queryable};
+    #[doc(inline)]
+    pub use crate::conn::query::{BatchQuery, BinQuery, TextQuery, WithParams};
     #[doc(inline)]
     pub use crate::myc::row::convert::FromRow;
     #[doc(inline)]

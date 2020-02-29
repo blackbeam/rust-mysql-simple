@@ -359,12 +359,12 @@ impl PooledConn {
         self.conn.take().unwrap()
     }
 
-    fn pooled_start_transaction<'a>(
+    fn pooled_start_transaction(
         mut self,
         consistent_snapshot: bool,
         isolation_level: Option<IsolationLevel>,
         readonly: Option<bool>,
-    ) -> MyResult<Transaction<'a>> {
+    ) -> MyResult<Transaction<'static>> {
         self.as_mut()
             ._start_transaction(consistent_snapshot, isolation_level, readonly)?;
         Ok(Transaction::new(self.into()))
@@ -382,7 +382,7 @@ impl PooledConn {
 }
 
 impl Queryable for PooledConn {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_, Text>> {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_, '_, '_, Text>> {
         self.conn.as_mut().unwrap().query_iter(query)
     }
 
@@ -394,7 +394,7 @@ impl Queryable for PooledConn {
         self.conn.as_mut().unwrap().close(stmt)
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_, Binary>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_, '_, '_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,
