@@ -9,8 +9,12 @@
 use std::fmt;
 
 use crate::{
-    conn::{query_result::{Binary, Text}, ConnMut}, prelude::*, LocalInfileHandler, Params,
-    QueryResult, Result, Statement,
+    conn::{
+        query_result::{Binary, Text},
+        ConnMut,
+    },
+    prelude::*,
+    LocalInfileHandler, Params, QueryResult, Result, Statement,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]

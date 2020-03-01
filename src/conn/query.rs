@@ -6,9 +6,14 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use std::{convert::TryInto};
+use std::convert::TryInto;
 
-use crate::{conn::{queryable::AsStatement, ConnMut}, from_row, prelude::FromRow, Result, Error, QueryResult, Binary, Params, Text};
+use crate::{
+    conn::{queryable::AsStatement, ConnMut},
+    from_row,
+    prelude::FromRow,
+    Binary, Error, Params, QueryResult, Result, Text,
+};
 
 /// MySql text query.
 ///
@@ -40,9 +45,12 @@ pub trait TextQuery: Sized {
     where
         C: TryInto<ConnMut<'a, 'b, 'c>>,
         Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
-        T: FromRow
+        T: FromRow,
     {
-        self.run(conn)?.next().map(|row| row.map(from_row)).transpose()
+        self.run(conn)?
+            .next()
+            .map(|row| row.map(from_row))
+            .transpose()
     }
 
     /// This methods corresponds to `Queryable::query`.
@@ -151,9 +159,12 @@ pub trait BinQuery: Sized {
     where
         C: TryInto<ConnMut<'a, 'b, 'c>>,
         Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
-        T: FromRow
+        T: FromRow,
     {
-        self.run(conn)?.next().map(|row| row.map(from_row)).transpose()
+        self.run(conn)?
+            .next()
+            .map(|row| row.map(from_row))
+            .transpose()
     }
 
     /// This methods corresponds to `Queryable::exec`.
@@ -161,7 +172,7 @@ pub trait BinQuery: Sized {
     where
         C: TryInto<ConnMut<'a, 'b, 'c>>,
         Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
-        T: FromRow
+        T: FromRow,
     {
         self.run(conn)?.map(|rrow| rrow.map(from_row)).collect()
     }
@@ -172,7 +183,7 @@ pub trait BinQuery: Sized {
         C: TryInto<ConnMut<'a, 'b, 'c>>,
         Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
         T: FromRow,
-        F: FnMut(U, T) -> U
+        F: FnMut(U, T) -> U,
     {
         for row in self.run(conn)? {
             init = next(init, from_row(row?));
@@ -187,7 +198,7 @@ pub trait BinQuery: Sized {
         C: TryInto<ConnMut<'a, 'b, 'c>>,
         Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
         T: FromRow,
-        F: FnMut(T) -> U
+        F: FnMut(T) -> U,
     {
         self.fold(conn, Vec::new(), |mut acc, row: T| {
             acc.push(map(row));
@@ -197,7 +208,9 @@ pub trait BinQuery: Sized {
 }
 
 impl<Q, P> BinQuery for QueryWithParams<Q, P>
-where Q: AsStatement, P: Into<Params>
+where
+    Q: AsStatement,
+    P: Into<Params>,
 {
     fn run<'a, 'b, 'c, C>(self, conn: C) -> Result<QueryResult<'a, 'b, 'c, Binary>>
     where
@@ -238,13 +251,16 @@ pub trait BatchQuery {
 }
 
 impl<Q, I, P> BatchQuery for QueryWithParams<Q, I>
-where Q: AsStatement, I: IntoIterator<Item=P>, P: Into<Params>
+where
+    Q: AsStatement,
+    I: IntoIterator<Item = P>,
+    P: Into<Params>,
 {
     /// This methods corresponds to `Queryable::exec_batch`.
     fn batch<'a, 'b, 'c: 'b, C>(self, conn: C) -> Result<()>
     where
         C: TryInto<ConnMut<'a, 'b, 'c>>,
-        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
     {
         let mut conn = conn.try_into()?;
         let statement = self.query.as_statement(&mut *conn)?;

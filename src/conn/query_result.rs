@@ -10,10 +10,7 @@ use mysql_common::{packets::OkPacket, row::new_row};
 
 use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
-use crate::{
-    conn::ConnMut,
-    Column, Conn, Error, Result, Row, Value,
-};
+use crate::{conn::ConnMut, Column, Conn, Error, Result, Row, Value};
 
 pub enum Or<A, B> {
     A(A),
@@ -119,7 +116,10 @@ pub struct QueryResult<'c, 't, 'tc, T: Protocol> {
 }
 
 impl<'c, 't, 'tc, T: Protocol> QueryResult<'c, 't, 'tc, T> {
-    fn from_state(conn: ConnMut<'c, 't, 'tc>, state: SetIteratorState) -> QueryResult<'c, 't, 'tc, T> {
+    fn from_state(
+        conn: ConnMut<'c, 't, 'tc>,
+        state: SetIteratorState,
+    ) -> QueryResult<'c, 't, 'tc, T> {
         QueryResult {
             conn,
             state,
@@ -213,7 +213,6 @@ impl<'c, 't, 'tc, T: Protocol> QueryResult<'c, 't, 'tc, T> {
             .and_then(|ok| ok.info_ref())
             .unwrap_or_default()
     }
-
 
     /// [Info] for the current result set.
     ///

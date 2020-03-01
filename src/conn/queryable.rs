@@ -9,8 +9,10 @@
 use std::borrow::Cow;
 
 use crate::{
-    conn::query_result::{Binary, Text}, from_row, prelude::FromRow, Params, QueryResult, Result,
-    Statement
+    conn::query_result::{Binary, Text},
+    from_row,
+    prelude::FromRow,
+    Params, QueryResult, Result, Statement,
 };
 
 /// Something, that eventualy is a `Statement` in the context of a `T: Queryable`.

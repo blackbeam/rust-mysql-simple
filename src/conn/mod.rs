@@ -26,7 +26,9 @@ use std::{
     collections::HashMap,
     convert::TryFrom,
     io::{self, Read, Write as _},
-    mem, ops::{Deref, DerefMut}, process,
+    mem,
+    ops::{Deref, DerefMut},
+    process,
     sync::Arc,
 };
 
@@ -1028,10 +1030,10 @@ mod test {
             prelude::*,
             test_misc::get_opts,
             time::Timespec,
-            Conn, Pool,
+            Conn,
             DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
-            LocalInfileHandler, Opts, OptsBuilder, Params,
+            LocalInfileHandler, Opts, OptsBuilder, Params, Pool,
             Value::{self, Bytes, Date, Float, Int, NULL},
         };
 
@@ -1069,57 +1071,39 @@ mod test {
         fn query_traits() -> Result<(), Box<dyn std::error::Error>> {
             macro_rules! test_query {
                 ($conn : expr) => {
-                    "CREATE TEMPORARY TABLE tmp (a INT)"
-                        .run($conn)?;
+                    "CREATE TEMPORARY TABLE tmp (a INT)".run($conn)?;
 
-                    "INSERT INTO tmp (a) VALUES (?)"
-                        .with((42,))
-                        .run($conn)?;
+                    "INSERT INTO tmp (a) VALUES (?)".with((42,)).run($conn)?;
 
                     "INSERT INTO tmp (a) VALUES (?)"
                         .with((43..=44).map(|x| (x,)))
                         .batch($conn)?;
 
-                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1"
-                        .first($conn)?;
+                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1".first($conn)?;
                     assert_eq!(first, Some(42), "first text");
 
-                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1"
-                        .with(())
-                        .first($conn)?;
+                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1".with(()).first($conn)?;
                     assert_eq!(first, Some(42), "first bin");
 
-                    let count = "SELECT a FROM tmp"
-                        .run($conn)?
-                        .count();
+                    let count = "SELECT a FROM tmp".run($conn)?.count();
                     assert_eq!(count, 3, "run text");
 
-                    let count = "SELECT a FROM tmp"
-                        .with(())
-                        .run($conn)?
-                        .count();
+                    let count = "SELECT a FROM tmp".with(()).run($conn)?.count();
                     assert_eq!(count, 3, "run bin");
 
-                    let all: Vec<u8> = "SELECT a FROM tmp"
-                        .fetch($conn)?;
+                    let all: Vec<u8> = "SELECT a FROM tmp".fetch($conn)?;
                     assert_eq!(all, vec![42, 43, 44], "fetch text");
 
-                    let all: Vec<u8> = "SELECT a FROM tmp"
-                        .with(())
-                        .fetch($conn)?;
+                    let all: Vec<u8> = "SELECT a FROM tmp".with(()).fetch($conn)?;
                     assert_eq!(all, vec![42, 43, 44], "fetch bin");
 
-                    let mapped = "SELECT a FROM tmp"
-                        .map($conn, |x: u8| x + 1)?;
+                    let mapped = "SELECT a FROM tmp".map($conn, |x: u8| x + 1)?;
                     assert_eq!(mapped, vec![43, 44, 45], "map text");
 
-                    let mapped = "SELECT a FROM tmp"
-                        .with(())
-                        .map($conn, |x: u8| x + 1)?;
+                    let mapped = "SELECT a FROM tmp".with(()).map($conn, |x: u8| x + 1)?;
                     assert_eq!(mapped, vec![43, 44, 45], "map bin");
 
-                    let sum = "SELECT a FROM tmp"
-                        .fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                    let sum = "SELECT a FROM tmp".fold($conn, 0_u8, |acc, x: u8| acc + x)?;
                     assert_eq!(sum, 42 + 43 + 44, "fold text");
 
                     let sum = "SELECT a FROM tmp"
@@ -1127,9 +1111,8 @@ mod test {
                         .fold($conn, 0_u8, |acc, x: u8| acc + x)?;
                     assert_eq!(sum, 42 + 43 + 44, "fold bin");
 
-                    "DROP TABLE tmp"
-                        .run($conn)?;
-                }
+                    "DROP TABLE tmp".run($conn)?;
+                };
             }
 
             let mut conn = Conn::new(get_opts())?;

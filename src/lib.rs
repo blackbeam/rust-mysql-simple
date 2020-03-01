@@ -779,7 +779,7 @@ pub use crate::conn::pool::{Pool, PooledConn};
 #[doc(inline)]
 pub use crate::conn::query::QueryWithParams;
 #[doc(inline)]
-pub use crate::conn::query_result::{Text, Binary, QueryResult, ResultSet, SetColumns};
+pub use crate::conn::query_result::{Binary, QueryResult, ResultSet, SetColumns, Text};
 #[doc(inline)]
 pub use crate::conn::stmt::Statement;
 #[doc(inline)]
@@ -807,9 +807,9 @@ pub use crate::myc::value::Value;
 
 pub mod prelude {
     #[doc(inline)]
-    pub use crate::conn::queryable::{AsStatement, Queryable};
-    #[doc(inline)]
     pub use crate::conn::query::{BatchQuery, BinQuery, TextQuery, WithParams};
+    #[doc(inline)]
+    pub use crate::conn::queryable::{AsStatement, Queryable};
     #[doc(inline)]
     pub use crate::myc::row::convert::FromRow;
     #[doc(inline)]
