@@ -373,7 +373,9 @@
 //! )?.unwrap();
 //!
 //! for column in row.columns_ref() {
+//!     // Cells in a row can be indexed by numeric index or by column name
 //!     let column_value = &row[column.name_str().as_ref()];
+//!
 //!     println!(
 //!         "Column {} of type {:?} with value {:?}",
 //!         column.name_str(),
