@@ -3,6 +3,9 @@ branches:
   only:
   - master
 clone_folder: c:\clone
+cache:
+  - 'C:\Users\appveyor\.cargo'
+  - 'target'
 environment:
   DATABASE_URL: mysql://root:Password12%21@127.0.0.1:3306/mysql
   matrix:
