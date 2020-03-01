@@ -632,7 +632,7 @@
 //! MySql itself doesn't have named parameters support, so it's implemented on the client side.
 //! One should use `:name` as a placeholder syntax for a named parameter.
 //!
-//! Named parameters may be repeated within the statement, e.g `SELECT :foo :foo` will require
+//! Named parameters may be repeated within the statement, e.g `SELECT :foo, :foo` will require
 //! a single named parameter `foo` that will be repeated on the corresponding positions during
 //! statement execution.
 //!
