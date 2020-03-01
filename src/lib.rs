@@ -1,4 +1,4 @@
-// Copyright (c) 2020 rust-mysql-common contributors
+// Copyright (c) 2020 rust-mysql-simple contributors
 //
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
@@ -373,7 +373,9 @@
 //! )?.unwrap();
 //!
 //! for column in row.columns_ref() {
+//!     // Cells in a row can be indexed by numeric index or by column name
 //!     let column_value = &row[column.name_str().as_ref()];
+//!
 //!     println!(
 //!         "Column {} of type {:?} with value {:?}",
 //!         column.name_str(),
@@ -383,7 +385,6 @@
 //! }
 //! # });
 //! ```
-//!
 //!
 //! ### `Params`
 //!
@@ -451,9 +452,9 @@
 //! ### `QueryResult`
 //!
 //! It's an iterator over rows of a query result with support of multi-result sets. It's intended
-//! for cases when you need full control during result set iteration. For other cases `Conn`
-//! provides a set of methods that will immediately consume the first result set and drop everything
-//! else.
+//! for cases when you need full control during result set iteration. For other cases
+//! [`Queryalbe`](#queryable) provides a set of methods that will immediately consume
+//! the first result set and drop everything else.
 //!
 //! This iterator is lazy so it won't read the result from server until you iterate over it.
 //! MySql protocol is strictly sequential, so `Conn` will be mutably borrowed until the result
@@ -470,31 +471,42 @@
 //! // This query will emit two result sets.
 //! let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
 //!
-//! let mut set = 0;
-//! while result.more_results_exists() {
-//!     println!("Result set columns: {:?}", result.columns_ref());
+//! let mut sets = 0;
+//! while let Some(result_set) = result.next_set() {
+//!     let result_set = result_set?;
+//!     sets += 1;
 //!
-//!     for row in result.by_ref() {
-//!         match set {
-//!             0 => {
+//!     println!("Result set columns: {:?}", result_set.columns());
+//!     println!(
+//!         "Result set meta: {}, {:?}, {} {}",
+//!         result_set.affected_rows(),
+//!         result_set.last_insert_id(),
+//!         result_set.warnings(),
+//!         result_set.info_str(),
+//!     );
+//!
+//!     for row in result_set {
+//!         match sets {
+//!             1 => {
 //!                 // First result set will contain two numbers.
 //!                 assert_eq!((1_u8, 2_u8), from_row(row?));
 //!             }
-//!             1 => {
+//!             2 => {
 //!                 // Second result set will contain a number and a float.
 //!                 assert_eq!((3_u8, 3.14), from_row(row?));
 //!             }
 //!             _ => unreachable!(),
 //!         }
 //!     }
-//!     set += 1;
 //! }
+//!
+//! assert_eq!(sets, 2);
 //! # });
 //! ```
 //!
 //! ## Text protocol
 //!
-//! MySql text protocol is implemented in the set of `Conn::query*` methods. It's useful when your
+//! MySql text protocol is implemented in the set of `Queryable::query*` methods. It's useful when your
 //! query doesn't have parameters.
 //!
 //! **Note:** All values of a text protocol result set will be encoded as strings by the server,
@@ -512,6 +524,40 @@
 //! // Text protocol returns bytes even though the result of POW
 //! // is actually a floating point number.
 //! assert_eq!(val, Some(Value::Bytes("65536".as_bytes().to_vec())));
+//! # });
+//! ```
+//!
+//! ### The `TextQuery` trait.
+//!
+//! The `TextQuery` trait covers the set of `Queryable::query*` methods from the perspective
+//! of a query, i.e. `TextQuery` is something, that can be performed if suitable connection
+//! is given. Suitable connections are:
+//!
+//! *   `&Pool`
+//! *   `Conn`
+//! *   `PooledConn`
+//! *   `&mut Conn`
+//! *   `&mut PooledConn`
+//! *   `&mut Transaction`
+//!
+//! The unique characteristic of this trait, is that you can give away the connection
+//! and thus produce `QueryResult` that satisfies `'static`:
+//!
+//! ```rust
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! fn iter(pool: &Pool) -> Result<impl Iterator<Item=Result<u32>>> {
+//!     let result = "SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3".run(pool)?;
+//!     Ok(result.map(|row| row.map(from_row)))
+//! }
+//!
+//! let pool = Pool::new(get_opts())?;
+//!
+//! let it = iter(&pool)?;
+//!
+//! assert_eq!(it.collect::<Result<Vec<u32>>>()?, vec![1, 2, 3]);
 //! # });
 //! ```
 //!
@@ -538,8 +584,8 @@
 //!
 //! In MySql each prepared statement belongs to a particular connection and can't be executed
 //! on another connection. Trying to do so will lead to an error. The driver won't tie statement
-//! to a connection in any way, but one can look on to the connection id, that is stored
-//! in the `Statement` structure.
+//! to its connection in any way, but one can look on to the connection id, containe
+//!  in the `Statement` structure.
 //!
 //! ```rust
 //! # mysql::doctest_wrapper!(__result, {
@@ -616,6 +662,59 @@
 //! # });
 //! ```
 //!
+//! ### `BinQuery` and `BatchQuery` traits.
+//!
+//! `BinQuery` and `BatchQuery` traits covers the set of `Queryable::exec*` methods from
+//! the perspective of a query, i.e. `BinQuery` is something, that can be performed if suitable
+//! connection is given (see [`TextQuery`](#the-textquery-trat) section for the list
+//! of suitable connections).
+//!
+//! As with the [`TextQuery`](#the-textquery-trait) you can give away the connection and acquire
+//! `QueryResult` that satisfies `'static`.
+//!
+//! `BinQuery` is for prepared statements, and prepared statements requires a set of parameters,
+//! so `BinQuery` is implemented for `QueryWithParams` structure, that can be acquired, using
+//! `WithParams` trait.
+//!
+//! Example:
+//!
+//! ```rust
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let pool = Pool::new(get_opts())?;
+//!
+//! let result: Option<(u8, u8, u8)> = "SELECT ?, ?, ?"
+//!     .with((1, 2, 3)) // <- WithParams::with will construct an instance of QueryWithParams
+//!     .first(&pool)?;  // <- QueryWithParams is executed on the given pool
+//!
+//! assert_eq!(result.unwrap(), (1, 2, 3));
+//! # });
+//! ```
+//!
+//! The `BatchQuery` trait is a helper for batch statement execution. It's implemented for
+//! `QueryWithParams` where parameters is an iterator over parameters:
+//!
+//! ```rust
+//! # mysql::doctest_wrapper!(__result, {
+//! use mysql::*;
+//! use mysql::prelude::*;
+//!
+//! let pool = Pool::new(get_opts())?;
+//! let mut conn = pool.get_conn()?;
+//!
+//! "CREATE TEMPORARY TABLE batch (x INT)".run(&mut conn)?;
+//! "INSERT INTO batch (x) VALUES (?)"
+//!     .with((0..3).map(|x| (x,))) // <- QueryWithParams constructed with an iterator
+//!     .batch(&mut conn)?;         // <- batch execution is preformed here
+//!
+//! let result: Vec<u8> = "SELECT x FROM batch".fetch(conn)?;
+//!
+//! assert_eq!(result, vec![0, 1, 2]);
+//! # });
+//! ```
+//!
 //! ### `Queryable`
 //!
 //! The `Queryable` trait defines common methods for `Conn`, `PooledConn` and `Transaction`.
@@ -635,7 +734,8 @@
 //! *   `{query|exec}_fold` - to fold the set of `T: FromRow` to a single value;
 //! *   `{query|exec}_drop` - to immediately drop the result.
 //!
-//! The trait also defines additional helper for a batch statement execution.
+//! The trait also defines the `exec_batch` function, which is a helper for batch statement
+//! execution.
 //!
 //! [crate docs]: https://docs.rs/mysql
 //! [mysql_common docs]: https://docs.rs/mysql_common
@@ -666,7 +766,6 @@ pub use crate::myc::uuid;
 mod conn;
 pub mod error;
 mod io;
-mod queryable;
 
 #[doc(inline)]
 pub use crate::myc::constants as consts;
@@ -680,7 +779,9 @@ pub use crate::conn::opts::{Opts, OptsBuilder, DEFAULT_STMT_CACHE_SIZE};
 #[doc(inline)]
 pub use crate::conn::pool::{Pool, PooledConn};
 #[doc(inline)]
-pub use crate::conn::query_result::QueryResult;
+pub use crate::conn::query::QueryWithParams;
+#[doc(inline)]
+pub use crate::conn::query_result::{Binary, QueryResult, ResultSet, SetColumns, Text};
 #[doc(inline)]
 pub use crate::conn::stmt::Statement;
 #[doc(inline)]
@@ -708,13 +809,15 @@ pub use crate::myc::value::Value;
 
 pub mod prelude {
     #[doc(inline)]
+    pub use crate::conn::query::{BatchQuery, BinQuery, TextQuery, WithParams};
+    #[doc(inline)]
+    pub use crate::conn::queryable::{AsStatement, Queryable};
+    #[doc(inline)]
     pub use crate::myc::row::convert::FromRow;
     #[doc(inline)]
     pub use crate::myc::row::ColumnIndex;
     #[doc(inline)]
     pub use crate::myc::value::convert::{ConvIr, FromValue, ToValue};
-    #[doc(inline)]
-    pub use crate::queryable::{AsStatement, Queryable};
 }
 
 #[doc(inline)]

@@ -1,4 +1,4 @@
-// Copyright (c) 2020 rust-mysql-common contributors
+// Copyright (c) 2020 rust-mysql-simple contributors
 //
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
@@ -9,8 +9,12 @@
 use std::fmt;
 
 use crate::{
-    conn::ConnRef, prelude::*, Conn, LocalInfileHandler, Params, PooledConn, QueryResult, Result,
-    Statement,
+    conn::{
+        query_result::{Binary, Text},
+        ConnMut,
+    },
+    prelude::*,
+    LocalInfileHandler, Params, QueryResult, Result, Statement,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -34,27 +38,17 @@ impl fmt::Display for IsolationLevel {
 
 #[derive(Debug)]
 pub struct Transaction<'a> {
-    conn: ConnRef<'a>,
+    pub(crate) conn: ConnMut<'a, 'static, 'static>,
     committed: bool,
     rolled_back: bool,
     restore_local_infile_handler: Option<LocalInfileHandler>,
 }
 
-impl<'a> Transaction<'a> {
-    pub(crate) fn new(conn: &'a mut Conn) -> Transaction<'a> {
+impl Transaction<'_> {
+    pub(crate) fn new<'a>(conn: ConnMut<'a, 'static, 'static>) -> Transaction<'a> {
         let handler = conn.local_infile_handler.clone();
         Transaction {
-            conn: ConnRef::ViaConnRef(conn),
-            committed: false,
-            rolled_back: false,
-            restore_local_infile_handler: handler,
-        }
-    }
-
-    pub(crate) fn new_pooled(conn: PooledConn) -> Transaction<'a> {
-        let handler = conn.as_ref().local_infile_handler.clone();
-        Transaction {
-            conn: ConnRef::ViaPooledConn(conn),
+            conn,
             committed: false,
             rolled_back: false,
             restore_local_infile_handler: handler,
@@ -84,7 +78,7 @@ impl<'a> Transaction<'a> {
 }
 
 impl<'a> Queryable for Transaction<'a> {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_>> {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, '_, '_, Text>> {
         self.conn.query_iter(query)
     }
 
@@ -96,7 +90,7 @@ impl<'a> Queryable for Transaction<'a> {
         self.conn.close(stmt)
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,

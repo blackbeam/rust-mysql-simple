@@ -1,4 +1,4 @@
-// Copyright (c) 2020 rust-mysql-common contributors
+// Copyright (c) 2020 rust-mysql-simple contributors
 //
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
@@ -24,6 +24,7 @@ use std::{
     borrow::Borrow,
     cmp,
     collections::HashMap,
+    convert::TryFrom,
     io::{self, Read, Write as _},
     mem,
     ops::{Deref, DerefMut},
@@ -34,6 +35,8 @@ use std::{
 use crate::{
     conn::{
         local_infile::LocalInfile,
+        pool::{Pool, PooledConn},
+        query_result::{Binary, Or, Text},
         stmt::{InnerStmt, Statement},
         stmt_cache::StmtCache,
         transaction::IsolationLevel,
@@ -47,19 +50,91 @@ use crate::{
         ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket,
         UnknownAuthPlugin, UnsupportedProtocol,
     },
-    Error::{DriverError, MySqlError},
-    LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result as MyResult, SslOpts,
-    Transaction,
+    Error::{self, DriverError, MySqlError},
+    LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, SslOpts, Transaction,
     Value::{self, Bytes, NULL},
 };
 
 pub mod local_infile;
 pub mod opts;
 pub mod pool;
+pub mod query;
 pub mod query_result;
+pub mod queryable;
 pub mod stmt;
 mod stmt_cache;
 pub mod transaction;
+
+/// Mutable connection.
+#[derive(Debug)]
+pub enum ConnMut<'c, 't, 'tc> {
+    Mut(&'c mut Conn),
+    TxMut(&'t mut Transaction<'tc>),
+    Owned(Conn),
+    Pooled(PooledConn),
+}
+
+impl From<Conn> for ConnMut<'static, 'static, 'static> {
+    fn from(conn: Conn) -> Self {
+        ConnMut::Owned(conn)
+    }
+}
+
+impl From<PooledConn> for ConnMut<'static, 'static, 'static> {
+    fn from(conn: PooledConn) -> Self {
+        ConnMut::Pooled(conn)
+    }
+}
+
+impl<'a> From<&'a mut Conn> for ConnMut<'a, 'static, 'static> {
+    fn from(conn: &'a mut Conn) -> Self {
+        ConnMut::Mut(conn)
+    }
+}
+
+impl<'a> From<&'a mut PooledConn> for ConnMut<'a, 'static, 'static> {
+    fn from(conn: &'a mut PooledConn) -> Self {
+        ConnMut::Mut(conn.as_mut())
+    }
+}
+
+impl<'t, 'tc> From<&'t mut Transaction<'tc>> for ConnMut<'static, 't, 'tc> {
+    fn from(tx: &'t mut Transaction<'tc>) -> Self {
+        ConnMut::TxMut(tx)
+    }
+}
+
+impl TryFrom<&Pool> for ConnMut<'static, 'static, 'static> {
+    type Error = Error;
+
+    fn try_from(pool: &Pool) -> Result<Self> {
+        pool.get_conn().map(From::from)
+    }
+}
+
+impl Deref for ConnMut<'_, '_, '_> {
+    type Target = Conn;
+
+    fn deref(&self) -> &Conn {
+        match self {
+            ConnMut::Mut(conn) => &**conn,
+            ConnMut::TxMut(tx) => &*tx.conn,
+            ConnMut::Owned(conn) => &conn,
+            ConnMut::Pooled(conn) => conn.as_ref(),
+        }
+    }
+}
+
+impl DerefMut for ConnMut<'_, '_, '_> {
+    fn deref_mut(&mut self) -> &mut Conn {
+        match self {
+            ConnMut::Mut(ref mut conn) => &mut **conn,
+            ConnMut::TxMut(tx) => &mut *tx.conn,
+            ConnMut::Owned(ref mut conn) => conn,
+            ConnMut::Pooled(ref mut conn) => conn.as_mut(),
+        }
+    }
+}
 
 /// Mysql connection.
 #[derive(Debug)]
@@ -140,7 +215,7 @@ impl Conn {
 
     /// Check the connection can be improved.
     #[allow(unused_assignments)]
-    fn can_improved(&mut self) -> MyResult<Option<Opts>> {
+    fn can_improved(&mut self) -> Result<Option<Opts>> {
         if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
             let mut socket = None;
             #[cfg(test)]
@@ -163,7 +238,7 @@ impl Conn {
     }
 
     /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Conn> {
+    pub fn new<T: Into<Opts>>(opts: T) -> Result<Conn> {
         let mut conn = Conn::empty(opts);
         conn.connect_stream()?;
         conn.connect()?;
@@ -187,7 +262,7 @@ impl Conn {
         Ok(conn)
     }
 
-    fn soft_reset(&mut self) -> MyResult<()> {
+    fn soft_reset(&mut self) -> Result<()> {
         self.write_command(Command::COM_RESET_CONNECTION, &[])?;
         self.read_packet().and_then(|pld| match pld[0] {
             0 => {
@@ -204,7 +279,7 @@ impl Conn {
         })
     }
 
-    fn hard_reset(&mut self) -> MyResult<()> {
+    fn hard_reset(&mut self) -> Result<()> {
         self.stream = None;
         self.stmt_cache.clear();
         self.capability_flags = CapabilityFlags::empty();
@@ -223,7 +298,7 @@ impl Conn {
     }
 
     /// Resets `MyConn` (drops state then reconnects).
-    pub fn reset(&mut self) -> MyResult<()> {
+    pub fn reset(&mut self) -> Result<()> {
         match (self.server_version, self.mariadb_server_version) {
             (Some(ref version), _) if *version > (5, 7, 3) => {
                 self.soft_reset().or_else(|_| self.hard_reset())
@@ -235,7 +310,7 @@ impl Conn {
         }
     }
 
-    fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> MyResult<()> {
+    fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
         let stream = self.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
         let stream = stream.make_secure(self.opts.get_host(), ssl_opts)?;
@@ -244,7 +319,7 @@ impl Conn {
         Ok(())
     }
 
-    fn connect_stream(&mut self) -> MyResult<()> {
+    fn connect_stream(&mut self) -> Result<()> {
         let read_timeout = self.opts.get_read_timeout().cloned();
         let write_timeout = self.opts.get_write_timeout().cloned();
         let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms();
@@ -275,7 +350,7 @@ impl Conn {
         Ok(())
     }
 
-    fn read_packet(&mut self) -> MyResult<Vec<u8>> {
+    fn read_packet(&mut self) -> Result<Vec<u8>> {
         let data = self.stream_mut().next().transpose()?.ok_or(io::Error::new(
             io::ErrorKind::BrokenPipe,
             "server disconnected",
@@ -290,11 +365,11 @@ impl Conn {
         }
     }
 
-    fn drop_packet(&mut self) -> MyResult<()> {
+    fn drop_packet(&mut self) -> Result<()> {
         self.read_packet().map(|_| ())
     }
 
-    fn write_packet<T: Into<Vec<u8>>>(&mut self, data: T) -> MyResult<()> {
+    fn write_packet<T: Into<Vec<u8>>>(&mut self, data: T) -> Result<()> {
         self.stream_mut().send(data.into())?;
         Ok(())
     }
@@ -328,7 +403,7 @@ impl Conn {
             .contains(StatusFlags::SERVER_MORE_RESULTS_EXISTS)
     }
 
-    fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> MyResult<()> {
+    fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> Result<()> {
         let nonce = auth_switch_request.plugin_data();
         let plugin_data = auth_switch_request
             .auth_plugin()
@@ -337,7 +412,7 @@ impl Conn {
         self.continue_auth(auth_switch_request.auth_plugin(), nonce, true)
     }
 
-    fn do_handshake(&mut self) -> MyResult<()> {
+    fn do_handshake(&mut self) -> Result<()> {
         let payload = self.read_packet()?;
         let handshake = parse_handshake_packet(payload.as_ref())?;
 
@@ -448,7 +523,7 @@ impl Conn {
         attrs
     }
 
-    fn do_ssl_request(&mut self) -> MyResult<()> {
+    fn do_ssl_request(&mut self) -> Result<()> {
         let ssl_request = SslRequest::new(self.get_client_flags());
         self.write_packet(ssl_request)
     }
@@ -457,7 +532,7 @@ impl Conn {
         &mut self,
         auth_plugin: &AuthPlugin<'_>,
         scramble_buf: Option<&[u8]>,
-    ) -> MyResult<()> {
+    ) -> Result<()> {
         let handshake_response = HandshakeResponse::new(
             &scramble_buf,
             self.server_version.unwrap_or((0, 0, 0)),
@@ -475,7 +550,7 @@ impl Conn {
         auth_plugin: &AuthPlugin<'_>,
         nonce: &[u8],
         auth_switched: bool,
-    ) -> MyResult<()> {
+    ) -> Result<()> {
         match auth_plugin {
             AuthPlugin::MysqlNativePassword => {
                 self.continue_mysql_native_password_auth(auth_switched)
@@ -490,7 +565,7 @@ impl Conn {
         }
     }
 
-    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> MyResult<()> {
+    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> Result<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
@@ -513,7 +588,7 @@ impl Conn {
         &mut self,
         nonce: &[u8],
         auth_switched: bool,
-    ) -> MyResult<()> {
+    ) -> Result<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
@@ -569,14 +644,14 @@ impl Conn {
         self.stream_mut().codec_mut().sync_seq_id();
     }
 
-    fn write_command_raw<T: Into<Vec<u8>>>(&mut self, body: T) -> MyResult<()> {
+    fn write_command_raw<T: Into<Vec<u8>>>(&mut self, body: T) -> Result<()> {
         let body = body.into();
         self.reset_seq_id();
         self.last_command = body[0];
         self.write_packet(body)
     }
 
-    fn write_command(&mut self, cmd: Command, data: &[u8]) -> MyResult<()> {
+    fn write_command(&mut self, cmd: Command, data: &[u8]) -> Result<()> {
         let mut body = Vec::with_capacity(1 + data.len());
         body.push(cmd as u8);
         body.extend_from_slice(data);
@@ -584,7 +659,7 @@ impl Conn {
         self.write_command_raw(body)
     }
 
-    fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> MyResult<()> {
+    fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> Result<()> {
         for (i, value) in params.into_iter().enumerate() {
             match value {
                 Bytes(bytes) => {
@@ -606,7 +681,11 @@ impl Conn {
         Ok(())
     }
 
-    fn _execute(&mut self, stmt: &Statement, params: Params) -> MyResult<Vec<Column>> {
+    fn _execute(
+        &mut self,
+        stmt: &Statement,
+        params: Params,
+    ) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         let exec_request = match params {
             Params::Empty => {
                 if stmt.num_params() != 0 {
@@ -650,7 +729,7 @@ impl Conn {
         consistent_snapshot: bool,
         isolation_level: Option<IsolationLevel>,
         readonly: Option<bool>,
-    ) -> MyResult<()> {
+    ) -> Result<()> {
         if let Some(i_level) = isolation_level {
             self.query_drop(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
         }
@@ -677,7 +756,7 @@ impl Conn {
         Ok(())
     }
 
-    fn send_local_infile(&mut self, file_name: &[u8]) -> MyResult<()> {
+    fn send_local_infile(&mut self, file_name: &[u8]) -> Result<OkPacket<'static>> {
         {
             let buffer_size = cmp::min(
                 MAX_PAYLOAD_LEN - 4,
@@ -700,14 +779,12 @@ impl Conn {
         }
         self.write_packet(Vec::new())?;
         let pld = self.read_packet()?;
-        if pld[0] == 0u8 {
-            let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
-            self.handle_ok(&ok);
-        }
-        Ok(())
+        let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+        self.handle_ok(&ok);
+        Ok(ok.into_owned())
     }
 
-    fn handle_result_set(&mut self) -> MyResult<Vec<Column>> {
+    fn handle_result_set(&mut self) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         if self.more_results_exists() {
             self.sync_seq_id();
         }
@@ -717,14 +794,14 @@ impl Conn {
             0x00 => {
                 let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
                 self.handle_ok(&ok);
-                Ok(Vec::new())
+                Ok(Or::B(ok.into_owned()))
             }
             0xfb => {
                 let mut reader = &pld[1..];
                 let mut file_name = Vec::with_capacity(reader.len());
                 reader.read_to_end(&mut file_name)?;
                 match self.send_local_infile(file_name.as_ref()) {
-                    Ok(_) => Ok(Vec::new()),
+                    Ok(ok) => Ok(Or::B(ok)),
                     Err(err) => Err(err),
                 }
             }
@@ -739,12 +816,12 @@ impl Conn {
                 // skip eof packet
                 self.read_packet()?;
                 self.has_results = column_count > 0;
-                Ok(columns)
+                Ok(Or::A(columns))
             }
         }
     }
 
-    fn _query(&mut self, query: &str) -> MyResult<Vec<Column>> {
+    fn _query(&mut self, query: &str) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
         self.write_command(Command::COM_QUERY, query.as_bytes())?;
         self.handle_result_set()
     }
@@ -774,12 +851,12 @@ impl Conn {
         consistent_snapshot: bool,
         isolation_level: Option<IsolationLevel>,
         readonly: Option<bool>,
-    ) -> MyResult<Transaction> {
+    ) -> Result<Transaction> {
         self._start_transaction(consistent_snapshot, isolation_level, readonly)?;
-        Ok(Transaction::new(self))
+        Ok(Transaction::new(self.into()))
     }
 
-    fn _true_prepare(&mut self, query: &str) -> MyResult<InnerStmt> {
+    fn _true_prepare(&mut self, query: &str) -> Result<InnerStmt> {
         self.write_command(Command::COM_STMT_PREPARE, query.as_bytes())?;
         let pld = self.read_packet()?;
         let mut stmt = InnerStmt::from_payload(pld.as_ref(), self.connection_id())?;
@@ -804,7 +881,7 @@ impl Conn {
         Ok(stmt)
     }
 
-    fn _prepare(&mut self, query: &str) -> MyResult<Arc<InnerStmt>> {
+    fn _prepare(&mut self, query: &str) -> Result<Arc<InnerStmt>> {
         if let Some(entry) = self.stmt_cache.by_query(query) {
             return Ok(entry.stmt.clone());
         }
@@ -821,7 +898,7 @@ impl Conn {
         Ok(inner_st)
     }
 
-    fn connect(&mut self) -> MyResult<()> {
+    fn connect(&mut self) -> Result<()> {
         if self.connected {
             return Ok(());
         }
@@ -843,11 +920,11 @@ impl Conn {
             })
     }
 
-    fn get_system_var(&mut self, name: &str) -> MyResult<Option<Value>> {
+    fn get_system_var(&mut self, name: &str) -> Result<Option<Value>> {
         self.query_first(format!("SELECT @@{}", name))
     }
 
-    fn next_bin(&mut self, columns: &[Column]) -> MyResult<Option<Vec<Value>>> {
+    fn next_bin(&mut self, columns: &[Column]) -> Result<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
@@ -862,7 +939,7 @@ impl Conn {
         Ok(Some(values))
     }
 
-    fn next_text(&mut self, col_count: usize) -> MyResult<Option<Vec<Value>>> {
+    fn next_text(&mut self, col_count: usize) -> Result<Option<Vec<Value>>> {
         if !self.has_results {
             return Ok(None);
         }
@@ -897,36 +974,34 @@ impl Conn {
     }
 }
 
-impl crate::prelude::Queryable for Conn {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_>> {
-        match self._query(query.as_ref()) {
-            Ok(columns) => Ok(QueryResult::new(self, columns, false)),
-            Err(err) => Err(err),
-        }
+impl Queryable for Conn {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, '_, '_, Text>> {
+        let meta = self._query(query.as_ref())?;
+        Ok(QueryResult::new(ConnMut::Mut(self), meta))
     }
 
-    fn prep<T: AsRef<str>>(&mut self, query: T) -> MyResult<Statement> {
+    fn prep<T: AsRef<str>>(&mut self, query: T) -> Result<Statement> {
         let query = query.as_ref();
         let (named_params, real_query) = parse_named_params(query)?;
         self._prepare(real_query.borrow())
             .map(|inner| Statement::new(inner, named_params))
     }
 
-    fn close(&mut self, stmt: Statement) -> MyResult<()> {
+    fn close(&mut self, stmt: Statement) -> Result<()> {
         self.stmt_cache.remove(stmt.id());
         let com_stmt_close = ComStmtClose::new(stmt.id());
         self.write_command_raw(com_stmt_close)?;
         Ok(())
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,
     {
         let statement = stmt.as_statement(self)?;
-        let columns = self._execute(&*statement, params.into())?;
-        Ok(QueryResult::new(self, columns, true))
+        let meta = self._execute(&*statement, params.into())?;
+        Ok(QueryResult::new(ConnMut::Mut(self), meta))
     }
 }
 
@@ -940,33 +1015,6 @@ impl Drop for Conn {
 
         if self.stream.is_some() {
             let _ = self.write_command(Command::COM_QUIT, &[]);
-        }
-    }
-}
-
-/// Possible ways to pass conn to a statement or transaction
-#[derive(Debug)]
-pub enum ConnRef<'a> {
-    ViaConnRef(&'a mut Conn),
-    ViaPooledConn(pool::PooledConn),
-}
-
-impl<'a> Deref for ConnRef<'a> {
-    type Target = Conn;
-
-    fn deref(&self) -> &Conn {
-        match *self {
-            ConnRef::ViaConnRef(ref conn_ref) => conn_ref,
-            ConnRef::ViaPooledConn(ref conn) => conn.as_ref(),
-        }
-    }
-}
-
-impl<'a> DerefMut for ConnRef<'a> {
-    fn deref_mut(&mut self) -> &mut Conn {
-        match *self {
-            ConnRef::ViaConnRef(ref mut conn_ref) => conn_ref,
-            ConnRef::ViaPooledConn(ref mut conn) => conn.as_mut(),
         }
     }
 }
@@ -985,7 +1033,7 @@ mod test {
             Conn,
             DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
-            LocalInfileHandler, Opts, OptsBuilder, Params,
+            LocalInfileHandler, Opts, OptsBuilder, Params, Pool,
             Value::{self, Bytes, Date, Float, Int, NULL},
         };
 
@@ -1017,6 +1065,74 @@ mod test {
             if crate::test_misc::test_ssl() {
                 assert!(!conn.is_insecure());
             }
+        }
+
+        #[test]
+        fn query_traits() -> Result<(), Box<dyn std::error::Error>> {
+            macro_rules! test_query {
+                ($conn : expr) => {
+                    "CREATE TEMPORARY TABLE tmp (a INT)".run($conn)?;
+
+                    "INSERT INTO tmp (a) VALUES (?)".with((42,)).run($conn)?;
+
+                    "INSERT INTO tmp (a) VALUES (?)"
+                        .with((43..=44).map(|x| (x,)))
+                        .batch($conn)?;
+
+                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1".first($conn)?;
+                    assert_eq!(first, Some(42), "first text");
+
+                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1".with(()).first($conn)?;
+                    assert_eq!(first, Some(42), "first bin");
+
+                    let count = "SELECT a FROM tmp".run($conn)?.count();
+                    assert_eq!(count, 3, "run text");
+
+                    let count = "SELECT a FROM tmp".with(()).run($conn)?.count();
+                    assert_eq!(count, 3, "run bin");
+
+                    let all: Vec<u8> = "SELECT a FROM tmp".fetch($conn)?;
+                    assert_eq!(all, vec![42, 43, 44], "fetch text");
+
+                    let all: Vec<u8> = "SELECT a FROM tmp".with(()).fetch($conn)?;
+                    assert_eq!(all, vec![42, 43, 44], "fetch bin");
+
+                    let mapped = "SELECT a FROM tmp".map($conn, |x: u8| x + 1)?;
+                    assert_eq!(mapped, vec![43, 44, 45], "map text");
+
+                    let mapped = "SELECT a FROM tmp".with(()).map($conn, |x: u8| x + 1)?;
+                    assert_eq!(mapped, vec![43, 44, 45], "map bin");
+
+                    let sum = "SELECT a FROM tmp".fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                    assert_eq!(sum, 42 + 43 + 44, "fold text");
+
+                    let sum = "SELECT a FROM tmp"
+                        .with(())
+                        .fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                    assert_eq!(sum, 42 + 43 + 44, "fold bin");
+
+                    "DROP TABLE tmp".run($conn)?;
+                };
+            }
+
+            let mut conn = Conn::new(get_opts())?;
+
+            let mut tx = conn.start_transaction(false, None, None)?;
+            test_query!(&mut tx);
+            tx.rollback()?;
+
+            test_query!(&mut conn);
+
+            let pool = Pool::new(get_opts())?;
+            let mut pooled_conn = pool.get_conn()?;
+
+            let mut tx = pool.start_transaction(false, None, None)?;
+            test_query!(&mut tx);
+            tx.rollback()?;
+
+            test_query!(&mut pooled_conn);
+
+            Ok(())
         }
 
         #[test]
@@ -1424,7 +1540,6 @@ mod test {
                     .map(|row| row.unwrap().unwrap().pop().unwrap())
                     .collect::<Vec<crate::Value>>();
                 assert_eq!(result_set, vec![Bytes(b"1".to_vec()), Bytes(b"2".to_vec())]);
-                assert!(query_result.more_results_exists());
                 let result_set = query_result
                     .by_ref()
                     .map(|row| row.unwrap().unwrap().pop().unwrap())
@@ -1433,11 +1548,9 @@ mod test {
             }
             let mut result = conn.query_iter("SELECT 1; SELECT 2; SELECT 3;").unwrap();
             let mut i = 0;
-            while {
+            while let Some(result_set) = result.next_set() {
                 i += 1;
-                result.more_results_exists()
-            } {
-                for row in result.by_ref() {
+                for row in result_set.unwrap() {
                     match i {
                         1 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"1".to_vec())]),
                         2 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"2".to_vec())]),
@@ -1446,7 +1559,7 @@ mod test {
                     }
                 }
             }
-            assert_eq!(i, 4);
+            assert_eq!(i, 3);
         }
 
         #[test]

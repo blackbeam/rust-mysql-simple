@@ -1,4 +1,4 @@
-// Copyright (c) 2020 rust-mysql-common contributors
+// Copyright (c) 2020 rust-mysql-simple contributors
 //
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
@@ -154,6 +154,12 @@ impl From<MySqlError> for Error {
 impl From<PacketCodecError> for Error {
     fn from(err: PacketCodecError) -> Self {
         Error::CodecError(err)
+    }
+}
+
+impl From<std::convert::Infallible> for Error {
+    fn from(err: std::convert::Infallible) -> Self {
+        match err {}
     }
 }
 
