@@ -108,6 +108,7 @@ impl<Q: AsRef<str>> TextQuery for Q {
 /// Representaion of a prepared statement query.
 ///
 /// See `BinQuery` for details.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryWithParams<Q, P> {
     pub query: Q,
     pub params: P,

@@ -12,6 +12,7 @@ use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
 use crate::{conn::ConnMut, Column, Conn, Error, Result, Row, Value};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Or<A, B> {
     A(A),
     B(B),
@@ -23,7 +24,7 @@ pub trait Protocol: 'static + Send + Sync {
 }
 
 /// Text result set marker.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Text;
 
 impl Protocol for Text {
@@ -33,7 +34,7 @@ impl Protocol for Text {
 }
 
 /// Binary result set marker.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Binary;
 
 impl Protocol for Binary {
@@ -312,7 +313,7 @@ impl<T: Protocol> Drop for ResultSet<'_, '_, '_, '_, T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SetColumns<'a> {
     inner: Option<&'a Arc<Vec<Column>>>,
 }
