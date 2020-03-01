@@ -180,7 +180,7 @@
 //! let pool = Pool::new(get_opts())?;
 //! let mut conn = pool.get_conn()?;
 //!
-//! let mut tx = conn.start_transaction(false, None, None)?;
+//! let mut tx = conn.start_transaction(TxOpts::default())?;
 //! tx.query_drop("CREATE TEMPORARY TABLE tmp (TEXT a)")?;
 //! tx.exec_drop("INSERT INTO tmp (a) VALUES (?)", ("foo",))?;
 //! let val: Option<String> = tx.query_first("SELECT a from tmp")?;
@@ -785,7 +785,7 @@ pub use crate::conn::query_result::{Binary, QueryResult, ResultSet, SetColumns, 
 #[doc(inline)]
 pub use crate::conn::stmt::Statement;
 #[doc(inline)]
-pub use crate::conn::transaction::{IsolationLevel, Transaction};
+pub use crate::conn::transaction::{AccessMode, IsolationLevel, Transaction, TxOpts};
 #[doc(inline)]
 pub use crate::conn::Conn;
 #[doc(inline)]

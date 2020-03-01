@@ -21,8 +21,8 @@ use crate::{
     conn::query_result::{Binary, Text},
     prelude::*,
     time::{Duration, SteadyTime},
-    Conn, DriverError, Error, IsolationLevel, LocalInfileHandler, Opts, Params, QueryResult,
-    Result as MyResult, Statement, Transaction,
+    Conn, DriverError, Error, LocalInfileHandler, Opts, Params, QueryResult, Result, Statement,
+    Transaction, TxOpts,
 };
 
 #[derive(Debug)]
@@ -32,7 +32,7 @@ struct InnerPool {
 }
 
 impl InnerPool {
-    fn new(min: usize, max: usize, opts: Opts) -> MyResult<InnerPool> {
+    fn new(min: usize, max: usize, opts: Opts) -> Result<InnerPool> {
         if min > max || max == 0 {
             return Err(Error::DriverError(DriverError::InvalidPoolConstraints));
         }
@@ -45,7 +45,7 @@ impl InnerPool {
         }
         Ok(pool)
     }
-    fn new_conn(&mut self) -> MyResult<()> {
+    fn new_conn(&mut self) -> Result<()> {
         match Conn::new(self.opts.clone()) {
             Ok(conn) => {
                 self.pool.push_back(conn);
@@ -112,7 +112,7 @@ impl Pool {
         stmt: Option<T>,
         timeout_ms: Option<u32>,
         call_ping: bool,
-    ) -> MyResult<PooledConn> {
+    ) -> Result<PooledConn> {
         let times = if let Some(timeout_ms) = timeout_ms {
             Some((
                 SteadyTime::now(),
@@ -181,12 +181,12 @@ impl Pool {
     }
 
     /// Creates new pool with `min = 10` and `max = 100`.
-    pub fn new<T: Into<Opts>>(opts: T) -> MyResult<Pool> {
+    pub fn new<T: Into<Opts>>(opts: T) -> Result<Pool> {
         Pool::new_manual(10, 100, opts)
     }
 
     /// Same as `new` but you can set `min` and `max`.
-    pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> MyResult<Pool> {
+    pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> Result<Pool> {
         let pool = InnerPool::new(min, max, opts.into())?;
         Ok(Pool {
             inner: Arc::new((Mutex::new(pool), Condvar::new())),
@@ -219,7 +219,7 @@ impl Pool {
     /// [`Conn::ping`](struct.Conn.html#method.ping) and will
     /// call [`Conn::reset`](struct.Conn.html#method.reset) if
     /// necessary.
-    pub fn get_conn(&self) -> MyResult<PooledConn> {
+    pub fn get_conn(&self) -> Result<PooledConn> {
         self._get_conn(None::<String>, None, true)
     }
 
@@ -228,24 +228,19 @@ impl Pool {
     /// # Failure
     /// This function will return `Error::DriverError(DriverError::Timeout)` if timeout was
     /// reached while waiting for new connection to become available.
-    pub fn try_get_conn(&self, timeout_ms: u32) -> MyResult<PooledConn> {
+    pub fn try_get_conn(&self, timeout_ms: u32) -> Result<PooledConn> {
         self._get_conn(None::<String>, Some(timeout_ms), true)
     }
 
     /// Shortcut for `pool.get_conn()?.start_transaction(..)`.
-    pub fn start_transaction(
-        &self,
-        consistent_snapshot: bool,
-        isolation_level: Option<IsolationLevel>,
-        readonly: Option<bool>,
-    ) -> MyResult<Transaction<'static>> {
+    pub fn start_transaction(&self, tx_opts: TxOpts) -> Result<Transaction<'static>> {
         let conn = self._get_conn(None::<String>, None, false)?;
-        let result = conn.pooled_start_transaction(consistent_snapshot, isolation_level, readonly);
+        let result = conn.pooled_start_transaction(tx_opts);
         match result {
             Ok(trans) => Ok(trans),
             Err(ref e) if e.is_connectivity_error() => {
                 let conn = self._get_conn(None::<String>, None, true)?;
-                conn.pooled_start_transaction(consistent_snapshot, isolation_level, readonly)
+                conn.pooled_start_transaction(tx_opts)
             }
             Err(e) => Err(e),
         }
@@ -329,17 +324,8 @@ impl Drop for PooledConn {
 impl PooledConn {
     /// Redirects to
     /// [`Conn#start_transaction`](struct.Conn.html#method.start_transaction)
-    pub fn start_transaction(
-        &mut self,
-        consistent_snapshot: bool,
-        isolation_level: Option<IsolationLevel>,
-        readonly: Option<bool>,
-    ) -> MyResult<Transaction> {
-        self.conn.as_mut().unwrap().start_transaction(
-            consistent_snapshot,
-            isolation_level,
-            readonly,
-        )
+    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction> {
+        self.conn.as_mut().unwrap().start_transaction(tx_opts)
     }
 
     /// Gives mutable reference to the wrapped
@@ -359,14 +345,8 @@ impl PooledConn {
         self.conn.take().unwrap()
     }
 
-    fn pooled_start_transaction(
-        mut self,
-        consistent_snapshot: bool,
-        isolation_level: Option<IsolationLevel>,
-        readonly: Option<bool>,
-    ) -> MyResult<Transaction<'static>> {
-        self.as_mut()
-            ._start_transaction(consistent_snapshot, isolation_level, readonly)?;
+    fn pooled_start_transaction(mut self, tx_opts: TxOpts) -> Result<Transaction<'static>> {
+        self.as_mut()._start_transaction(tx_opts)?;
         Ok(Transaction::new(self.into()))
     }
 
@@ -382,19 +362,19 @@ impl PooledConn {
 }
 
 impl Queryable for PooledConn {
-    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> MyResult<QueryResult<'_, '_, '_, Text>> {
+    fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, '_, '_, Text>> {
         self.conn.as_mut().unwrap().query_iter(query)
     }
 
-    fn prep<T: AsRef<str>>(&mut self, query: T) -> MyResult<Statement> {
+    fn prep<T: AsRef<str>>(&mut self, query: T) -> Result<Statement> {
         self.conn.as_mut().unwrap().prep(query)
     }
 
-    fn close(&mut self, stmt: Statement) -> Result<(), Error> {
+    fn close(&mut self, stmt: Statement) -> Result<()> {
         self.conn.as_mut().unwrap().close(stmt)
     }
 
-    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> MyResult<QueryResult<'_, '_, '_, Binary>>
+    fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>,
@@ -411,6 +391,7 @@ mod test {
 
         use crate::{
             from_value, prelude::*, test_misc::get_opts, DriverError, Error, OptsBuilder, Pool,
+            TxOpts,
         };
 
         #[test]
@@ -515,7 +496,7 @@ mod test {
 
             conn.exec_drop("KILL CONNECTION ?", (id,)).unwrap();
             thread::sleep(Duration::from_millis(250));
-            pool.start_transaction(false, None, None).unwrap();
+            pool.start_transaction(TxOpts::default()).unwrap();
         }
         #[test]
         fn should_execute_queryes_on_PooledConn() {
@@ -586,7 +567,7 @@ mod test {
                 .unwrap()
                 .query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
                 .unwrap();
-            pool.start_transaction(false, None, None)
+            pool.start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
@@ -601,7 +582,7 @@ mod test {
                     .unwrap(),
                 2_u8
             );
-            pool.start_transaction(false, None, None)
+            pool.start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
@@ -616,7 +597,7 @@ mod test {
                     .unwrap(),
                 2_u8
             );
-            pool.start_transaction(false, None, None)
+            pool.start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
@@ -632,7 +613,7 @@ mod test {
                 2_u8
             );
             let mut a = A { pool, x: 0 };
-            let transaction = a.pool.start_transaction(false, None, None).unwrap();
+            let transaction = a.pool.start_transaction(TxOpts::default()).unwrap();
             a.add();
         }
 
@@ -642,7 +623,7 @@ mod test {
             let mut conn = pool.get_conn().unwrap();
             conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
                 .unwrap();
-            conn.start_transaction(false, None, None)
+            conn.start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
@@ -653,7 +634,7 @@ mod test {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
-            conn.start_transaction(false, None, None)
+            conn.start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
@@ -664,7 +645,7 @@ mod test {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
-            conn.start_transaction(false, None, None)
+            conn.start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();

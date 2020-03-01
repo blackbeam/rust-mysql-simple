@@ -17,7 +17,60 @@ use crate::{
     LocalInfileHandler, Params, QueryResult, Result, Statement,
 };
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+/// MySql transaction options.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+pub struct TxOpts {
+    with_consistent_snapshot: bool,
+    isolation_level: Option<IsolationLevel>,
+    access_mode: Option<AccessMode>,
+}
+
+impl TxOpts {
+    /// Returns the value of the characteristic.
+    pub fn with_consistent_snapshot(&self) -> bool {
+        self.with_consistent_snapshot
+    }
+
+    /// Returns the access mode value.
+    pub fn access_mode(&self) -> Option<AccessMode> {
+        self.access_mode
+    }
+
+    /// Returns the isolation level value.
+    pub fn isolation_level(&self) -> Option<IsolationLevel> {
+        self.isolation_level
+    }
+
+    /// Turns on/off the `WITH CONSISTENT SNAPSHOT` tx characteristic (defaults to `false`).
+    pub fn set_with_consistent_snapshot(mut self, val: bool) -> Self {
+        self.with_consistent_snapshot = val;
+        self
+    }
+
+    /// Defines the transaction access mode (defaults to `None`, i.e unspecified).
+    pub fn set_access_mode(mut self, access_mode: Option<AccessMode>) -> Self {
+        self.access_mode = access_mode;
+        self
+    }
+
+    /// Defines the transaction isolation level (defaults to `None`, i.e. unspecified).
+    pub fn set_isolation_level(mut self, level: Option<IsolationLevel>) -> Self {
+        self.isolation_level = level;
+        self
+    }
+}
+
+/// MySql transaction access mode.
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
+#[repr(u8)]
+pub enum AccessMode {
+    ReadOnly,
+    ReadWrite,
+}
+
+/// MySql transaction isolation level.
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
+#[repr(u8)]
 pub enum IsolationLevel {
     ReadUncommitted,
     ReadCommitted,

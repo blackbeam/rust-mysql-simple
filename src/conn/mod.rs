@@ -39,7 +39,7 @@ use crate::{
         query_result::{Binary, Or, Text},
         stmt::{InnerStmt, Statement},
         stmt_cache::StmtCache,
-        transaction::IsolationLevel,
+        transaction::{AccessMode, TxOpts},
     },
     consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN},
     from_value, from_value_opt,
@@ -724,16 +724,11 @@ impl Conn {
         self.handle_result_set()
     }
 
-    fn _start_transaction(
-        &mut self,
-        consistent_snapshot: bool,
-        isolation_level: Option<IsolationLevel>,
-        readonly: Option<bool>,
-    ) -> Result<()> {
-        if let Some(i_level) = isolation_level {
+    fn _start_transaction(&mut self, tx_opts: TxOpts) -> Result<()> {
+        if let Some(i_level) = tx_opts.isolation_level() {
             self.query_drop(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
         }
-        if let Some(readonly) = readonly {
+        if let Some(mode) = tx_opts.access_mode() {
             let supported = match (self.server_version, self.mariadb_server_version) {
                 (Some(ref version), _) if *version >= (5, 6, 5) => true,
                 (_, Some(ref version)) if *version >= (10, 0, 0) => true,
@@ -742,13 +737,12 @@ impl Conn {
             if !supported {
                 return Err(DriverError(ReadOnlyTransNotSupported));
             }
-            if readonly {
-                self.query_drop("SET TRANSACTION READ ONLY")?;
-            } else {
-                self.query_drop("SET TRANSACTION READ WRITE")?;
+            match mode {
+                AccessMode::ReadOnly => self.query_drop("SET TRANSACTION READ ONLY")?,
+                AccessMode::ReadWrite => self.query_drop("SET TRANSACTION READ WRITE")?,
             }
         }
-        if consistent_snapshot {
+        if tx_opts.with_consistent_snapshot() {
             self.query_drop("START TRANSACTION WITH CONSISTENT SNAPSHOT")?;
         } else {
             self.query_drop("START TRANSACTION")?;
@@ -846,13 +840,8 @@ impl Conn {
 
     /// Starts new transaction with provided options.
     /// `readonly` is only available since MySQL 5.6.5.
-    pub fn start_transaction(
-        &mut self,
-        consistent_snapshot: bool,
-        isolation_level: Option<IsolationLevel>,
-        readonly: Option<bool>,
-    ) -> Result<Transaction> {
-        self._start_transaction(consistent_snapshot, isolation_level, readonly)?;
+    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction> {
+        self._start_transaction(tx_opts)?;
         Ok(Transaction::new(self.into()))
     }
 
@@ -1033,7 +1022,7 @@ mod test {
             Conn,
             DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
-            LocalInfileHandler, Opts, OptsBuilder, Params, Pool,
+            LocalInfileHandler, Opts, OptsBuilder, Params, Pool, TxOpts,
             Value::{self, Bytes, Date, Float, Int, NULL},
         };
 
@@ -1117,7 +1106,7 @@ mod test {
 
             let mut conn = Conn::new(get_opts())?;
 
-            let mut tx = conn.start_transaction(false, None, None)?;
+            let mut tx = conn.start_transaction(TxOpts::default())?;
             test_query!(&mut tx);
             tx.rollback()?;
 
@@ -1126,7 +1115,7 @@ mod test {
             let pool = Pool::new(get_opts())?;
             let mut pooled_conn = pool.get_conn()?;
 
-            let mut tx = pool.start_transaction(false, None, None)?;
+            let mut tx = pool.start_transaction(TxOpts::default())?;
             test_query!(&mut tx);
             tx.rollback()?;
 
@@ -1338,7 +1327,7 @@ mod test {
             conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
                 .unwrap();
             let _ = conn
-                .start_transaction(false, None, None)
+                .start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
@@ -1356,7 +1345,7 @@ mod test {
                 vec![Bytes(b"2".to_vec())]
             );
             let _ = conn
-                .start_transaction(false, None, None)
+                .start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO tbl2(a) VALUES(1)").unwrap_err();
                     Ok(())
@@ -1373,7 +1362,7 @@ mod test {
                 vec![Bytes(b"2".to_vec())]
             );
             let _ = conn
-                .start_transaction(false, None, None)
+                .start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
@@ -1390,7 +1379,7 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"2".to_vec())]
             );
-            let mut tx = conn.start_transaction(false, None, None).unwrap();
+            let mut tx = conn.start_transaction(TxOpts::default()).unwrap();
             tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (3,))
                 .unwrap();
             tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (4,))
@@ -1405,7 +1394,7 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"4".to_vec())]
             );
-            let mut tx = conn.start_transaction(false, None, None).unwrap();
+            let mut tx = conn.start_transaction(TxOpts::default()).unwrap();
             tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (5,))
                 .unwrap();
             tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (6,))
