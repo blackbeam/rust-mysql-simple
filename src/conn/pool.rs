@@ -20,7 +20,7 @@ use std::{
 use crate::{
     conn::query_result::{Binary, Text},
     prelude::*,
-    time::{Duration, SteadyTime},
+    time::{Duration, Instant},
     Conn, DriverError, Error, LocalInfileHandler, Opts, Params, QueryResult, Result, Statement,
     Transaction, TxOpts,
 };
@@ -115,7 +115,7 @@ impl Pool {
     ) -> Result<PooledConn> {
         let times = if let Some(timeout_ms) = timeout_ms {
             Some((
-                SteadyTime::now(),
+                Instant::now(),
                 Duration::milliseconds(timeout_ms.into()),
                 StdDuration::from_millis(timeout_ms.into()),
             ))
@@ -158,7 +158,7 @@ impl Pool {
                     self.count.fetch_add(1, Ordering::SeqCst);
                 } else {
                     pool = if let Some((start, timeout, std_timeout)) = times {
-                        if SteadyTime::now() - start > timeout {
+                        if Instant::now() - start > timeout {
                             return Err(DriverError::Timeout.into());
                         }
                         condvar.wait_timeout(pool, std_timeout)?.0
