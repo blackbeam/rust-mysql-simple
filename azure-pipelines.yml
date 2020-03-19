@@ -19,7 +19,7 @@ jobs:
     - bash: |
         sudo apt-get update
         sudo apt-get -y install mysql-server libmysqlclient-dev curl
-        service mysql start
+        sudo service mysql start
         mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -proot
       displayName: Install MySql
     - bash: |
