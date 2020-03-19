@@ -33,3 +33,33 @@ jobs:
       env:
         DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
       displayName: Run tests
+
+  - job: 'TestMySql'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      maxParallel: 10
+      matrix:
+        latest:
+          MYSQL_VERSION: "latest"
+        v80:
+          MYSQL_VERSION: "8.0"
+        v57:
+          MYSQL_VERSION: "5.7"
+        v56:
+          MYSQL_VERSION: "5.6"
+    steps:
+    - bash: |
+        sudo apt-get update
+        sudo apt-get install docker.io netcat grep
+        sudo systemctl start docker
+        docker --version
+        docker run --rm --name some-mysql -v /tmp:/tmp -d -p 3307:3306 -e MYSQL_ROOT_PASSWORD=password mysql:$(MYSQL_VERSION) --max-allowed-packet=36700160 --socket=/tmp/mysql.sock --local-infile
+        while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
+        SSL=false COMPRESS=false cargo test
+        SSL=true COMPRESS=false cargo test
+        SSL=false COMPRESS=true cargo test
+        SSL=true COMPRESS=true cargo test
+      env:
+        DATABASE_URL: mysql://root:root@127.0.0.1:3307/mysql
+      displayName: Run tests
