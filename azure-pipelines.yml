@@ -52,7 +52,7 @@ jobs:
     - bash: |
         sudo apt-get update
         sudo apt-get install docker.io netcat grep
-        systemctl unmask docker
+        sudo systemctl unmask docker
         sudo systemctl start docker
         docker --version
       displayName: Install docker
