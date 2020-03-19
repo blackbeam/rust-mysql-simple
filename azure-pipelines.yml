@@ -1,20 +1,32 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
 trigger:
 - master
 - ci-*
 
-pool:
-  vmImage: 'ubuntu-latest'
-
-steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
-
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+jobs:
+  - job: 'TestBasic'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      maxParallel: 10
+      matrix:
+        stable:
+          RUST_TOOLCHAIN: stable
+        beta:
+          RUST_TOOLCHAIN: beta
+        nightly:
+          RUST_TOOLCHAIN: nightly
+    steps:
+    - bash: |
+        sudo apt-get update
+        sudo apt-get -y install mysql-server libmysqlclient-dev curl
+        service mysql start
+        mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -proot
+      displayName: Install MySql
+    - bash: |
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
+      displayName: Install Rust
+    - bash: |
+        cargo test
+      env:
+        DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
+      displayName: Run tests
