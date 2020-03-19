@@ -52,10 +52,15 @@ jobs:
     - bash: |
         sudo apt-get update
         sudo apt-get install docker.io netcat grep
+        systemctl unmask docker
         sudo systemctl start docker
         docker --version
+      displayName: Install docker
+    - bash: |
         docker run --rm --name some-mysql -v /tmp:/tmp -d -p 3307:3306 -e MYSQL_ROOT_PASSWORD=password mysql:$(MYSQL_VERSION) --max-allowed-packet=36700160 --socket=/tmp/mysql.sock --local-infile
         while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
+      displayName: Run MySql
+    - bash: |
         SSL=false COMPRESS=false cargo test
         SSL=true COMPRESS=false cargo test
         SSL=false COMPRESS=true cargo test
