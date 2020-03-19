@@ -26,7 +26,10 @@ jobs:
         curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
       displayName: Install Rust
     - bash: |
-        cargo test
+        SSL=false COMPRESS=false cargo test
+        SSL=true COMPRESS=false cargo test
+        SSL=false COMPRESS=true cargo test
+        SSL=true COMPRESS=true cargo test
       env:
         DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
       displayName: Run tests
