@@ -60,12 +60,13 @@ jobs:
         docker run --rm --name some-mysql -v /tmp:/tmp -d -p 3307:3306 -e MYSQL_ROOT_PASSWORD=password mysql:$(MYSQL_VERSION) --max-allowed-packet=36700160 --socket=/tmp/mysql.sock --local-infile
         while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
         docker exec some-mysql mysql -uroot -ppassword --protocol=tcp -e "SELECT * FROM mysql.user"
+        docker exec some-mysql mysql -uroot -ppassword --protocol=tcp -e "GRANT ALL ON *.* TO 'root'@'%' IDENTIFIED BY PASSWORD '*2470C0C06DEE42FD1618BB99005ADCA2EC9D1E19'"
       displayName: Run MySql
     - bash: |
         SSL=false COMPRESS=false cargo test
-        SSL=true COMPRESS=false cargo test
+        if [[ "5.6" != "$(MYSQL_VERSION)" ]]; then SSL=true COMPRESS=false cargo test; fi
         SSL=false COMPRESS=true cargo test
-        SSL=true COMPRESS=true cargo test
+        if [[ "5.6" != "$(MYSQL_VERSION)" ]]; then SSL=true COMPRESS=true cargo test; fi
       env:
         DATABASE_URL: mysql://root:root@127.0.0.1:3307/mysql
       displayName: Run tests
