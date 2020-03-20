@@ -40,14 +40,12 @@ jobs:
     strategy:
       maxParallel: 10
       matrix:
-        latest:
-          MYSQL_VERSION: "latest"
         v80:
-          MYSQL_VERSION: "8.0"
+          DB_VERSION: "8.0"
         v57:
-          MYSQL_VERSION: "5.7"
+          DB_VERSION: "5.7"
         v56:
-          MYSQL_VERSION: "5.6"
+          DB_VERSION: "5.6"
     steps:
     - bash: |
         sudo apt-get update
@@ -57,20 +55,74 @@ jobs:
         docker --version
       displayName: Install docker
     - bash: |
-        docker run --rm --name some-mysql -v `pwd`:/root -p 3307:3306 -d -e MYSQL_ROOT_PASSWORD=password mysql:$(MYSQL_VERSION) --max-allowed-packet=36700160 --local-infile
+        docker run --rm --name container -v `pwd`:/root -p 3307:3306 -d -e MYSQL_ROOT_PASSWORD=password mysql:$(DB_VERSION) --max-allowed-packet=36700160 --local-infile
         while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
       displayName: Run MySql in Docker
     - bash: |
-        docker exec some-mysql bash -l -c "apt-get update"
-        docker exec some-mysql bash -l -c "apt-get install -y curl clang libssl-dev pkg-config"
-        docker exec some-mysql bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
+        docker exec container bash -l -c "apt-get update"
+        docker exec container bash -l -c "apt-get install -y curl clang libssl-dev pkg-config"
+        docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
       displayName: Install Rust in docker
     - bash: |
-        if [[ "5.6" != "$(MYSQL_VERSION)" ]]; then SSL=true; fi
-        docker exec some-mysql bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
-        docker exec some-mysql bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
-        docker exec some-mysql bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
-        docker exec some-mysql bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
+        if [[ "5.6" != "$(DB_VERSION)" ]]; then SSL=true; fi
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
+      env:
+        DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+      displayName: Run tests in Docker
+
+  - job: 'TestMariaDb'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      maxParallel: 10
+      matrix:
+        v105:
+          DB_VERSION: "10.5"
+        v104:
+          DB_VERSION: "10.4"
+        v103:
+          DB_VERSION: "10.3"
+        v102:
+          DB_VERSION: "10.2"
+        v101:
+          DB_VERSION: "10.1"
+    steps:
+    - bash: |
+        sudo apt-get update
+        sudo apt-get install docker.io netcat grep
+        sudo systemctl unmask docker
+        sudo systemctl start docker
+        docker --version
+      displayName: Install docker
+    - bash: |
+        docker run --rm -d \
+            --name container \
+            -v `pwd`:/root \
+            -p 3307:3306 \
+            -e MYSQL_ROOT_PASSWORD=password \
+            mariadb:$(DB_VERSION) \
+                --max-allowed-packet=36700160 \
+                --local-infile \
+                --performance-schema=on \
+                --ssl \
+                --ssl-ca=/root/tests/ca-cert.pem \
+                --ssl-cert=/root/tests/server-cert.pem \
+                --ssl-key=/root/tests/server-key.pem
+        while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
+      displayName: Run MariaDb in Docker
+    - bash: |
+        docker exec container bash -l -c "apt-get update"
+        docker exec container bash -l -c "apt-get install -y curl clang libssl-dev pkg-config"
+        docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
+      displayName: Install Rust in docker
+    - bash: |
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test"
       env:
         DATABASE_URL: mysql://root:password@127.0.0.1/mysql
       displayName: Run tests in Docker
