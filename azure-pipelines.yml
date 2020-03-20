@@ -57,7 +57,7 @@ jobs:
         docker --version
       displayName: Install docker
     - bash: |
-        docker run --rm --name some-mysql -v `pwd`:/root -d -e MYSQL_ROOT_PASSWORD=password mysql:$(MYSQL_VERSION) --max-allowed-packet=36700160 --local-infile
+        docker run --rm --name some-mysql -v `pwd`:/root -p 3307:3306 -d -e MYSQL_ROOT_PASSWORD=password mysql:$(MYSQL_VERSION) --max-allowed-packet=36700160 --local-infile
         while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
       displayName: Run MySql in Docker
     - bash: |
