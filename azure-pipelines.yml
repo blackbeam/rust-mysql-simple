@@ -57,16 +57,20 @@ jobs:
         docker --version
       displayName: Install docker
     - bash: |
-        docker run --rm --name some-mysql -v /tmp:/tmp -d -p 3307:3306 -e MYSQL_ROOT_PASSWORD=password mysql:$(MYSQL_VERSION) --max-allowed-packet=36700160 --socket=/tmp/mysql.sock --local-infile
+        docker run --rm --name some-mysql -v `pwd`:/root -d -e MYSQL_ROOT_PASSWORD=password mysql:$(MYSQL_VERSION) --max-allowed-packet=36700160 --local-infile
         while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
-        docker exec some-mysql mysql -uroot -ppassword --protocol=tcp -e "SELECT * FROM mysql.user"
-        docker exec some-mysql mysql -uroot -ppassword --protocol=tcp -e "GRANT ALL ON *.* TO 'root'@'%' IDENTIFIED BY PASSWORD '*2470C0C06DEE42FD1618BB99005ADCA2EC9D1E19'"
-      displayName: Run MySql
+      displayName: Run MySql in Docker
     - bash: |
-        SSL=false COMPRESS=false cargo test
-        if [[ "5.6" != "$(MYSQL_VERSION)" ]]; then SSL=true COMPRESS=false cargo test; fi
-        SSL=false COMPRESS=true cargo test
-        if [[ "5.6" != "$(MYSQL_VERSION)" ]]; then SSL=true COMPRESS=true cargo test; fi
+        docker exec some-mysql bash -l -c "apt-get update"
+        docker exec some-mysql bash -l -c "apt-get install -y curl clang libssl-dev pkg-config"
+        docker exec some-mysql bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
+      displayName: Install Rust in docker
+    - bash: |
+        if [[ "5.6" != "$(MYSQL_VERSION)" ]]; then SSL=true; fi
+        docker exec some-mysql bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
+        docker exec some-mysql bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
+        docker exec some-mysql bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
+        docker exec some-mysql bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
       env:
-        DATABASE_URL: mysql://root:root@127.0.0.1:3307/mysql
-      displayName: Run tests
+        DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+      displayName: Run tests in Docker
