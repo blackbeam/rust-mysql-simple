@@ -3,7 +3,7 @@ trigger:
 - ci-*
 
 jobs:
-  - job: 'TestBasic'
+  - job: 'TestBasicLinux'
     pool:
       vmImage: 'ubuntu-latest'
     strategy:
@@ -33,6 +33,36 @@ jobs:
       env:
         DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
       displayName: Run tests
+
+  - job: 'TestBasicMacOs'
+    pool:
+      vmImage: 'macOS-10.13'
+    strategy:
+      maxParallel: 10
+      matrix:
+        stable:
+          RUST_TOOLCHAIN: stable
+    steps:
+    - bash: |
+        brew update &&
+        brew install mysql &&
+        brew services start mysql &&
+        brew services stop mysql; sleep 3; brew services start mysql &&
+        sleep 2 &&
+        /usr/local/Cellar/mysql/8.0.19/bin/mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot
+      displayName: Install MySql
+    - bash: |
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN
+      displayName: Install rust (MacOs)
+    - bash: |
+        SSL=false COMPRESS=false cargo test
+        SSL=true COMPRESS=false cargo test
+        SSL=false COMPRESS=true cargo test
+        SSL=true COMPRESS=true cargo test
+      env:
+        DATABASE_URL: mysql://root@127.0.0.1/mysql
+      displayName: Run tests
+
 
   - job: 'TestMySql'
     pool:
