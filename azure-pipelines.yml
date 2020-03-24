@@ -24,7 +24,7 @@ jobs:
       displayName: Install MySql
     - bash: |
         curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
-        echo '##vso[task.setvariable variable=toolchain]$(RUST_TOOLCHAIN)'
+        echo '##vso[task.setvariable variable=toolchain;isOutput=true]$(RUST_TOOLCHAIN)'
       displayName: Install Rust
       name: installRust
     - bash: |
