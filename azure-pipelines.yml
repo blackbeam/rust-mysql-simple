@@ -1,0 +1,204 @@
+trigger:
+- master
+- ci-*
+
+jobs:
+  - job: 'TestBasicLinux'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      maxParallel: 10
+      matrix:
+        stable:
+          RUST_TOOLCHAIN: stable
+        beta:
+          RUST_TOOLCHAIN: beta
+        nightly:
+          RUST_TOOLCHAIN: nightly
+    steps:
+    - bash: |
+        sudo apt-get update
+        sudo apt-get -y install mysql-server libmysqlclient-dev curl
+        sudo service mysql start
+        mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -proot
+      displayName: Install MySql
+    - bash: |
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
+        echo '##vso[task.setvariable variable=toolchain;isOutput=true]$(RUST_TOOLCHAIN)'
+      displayName: Install Rust
+      name: installRust
+    - bash: |
+        rustup component add rustfmt
+        cargo fmt -- --check
+      condition: and(succeeded(), eq(variables['installRust.toolchain'], 'stable'))
+      displayName: cargo fmt
+    - bash: |
+        SSL=false COMPRESS=false cargo test
+        SSL=true COMPRESS=false cargo test
+        SSL=false COMPRESS=true cargo test
+        SSL=true COMPRESS=true cargo test
+      env:
+        RUST_BACKTRACE: 1
+        DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
+      displayName: Run tests
+
+  - job: 'TestBasicMacOs'
+    pool:
+      vmImage: 'macOS-10.15'
+    strategy:
+      maxParallel: 10
+      matrix:
+        stable:
+          RUST_TOOLCHAIN: stable
+    steps:
+    - bash: |
+        brew update
+        brew install mysql
+        brew services start mysql
+        brew services stop mysql
+        sleep 3
+        echo 'local_infile=1' >> /usr/local/etc/my.cnf
+        brew services start mysql
+        sleep 2
+        /usr/local/Cellar/mysql/*/bin/mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot
+      displayName: Install MySql
+    - bash: |
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN
+      displayName: Install rust (MacOs)
+    - bash: |
+        SSL=false COMPRESS=false cargo test
+        SSL=true COMPRESS=false cargo test
+        SSL=false COMPRESS=true cargo test
+        SSL=true COMPRESS=true cargo test
+      env:
+        RUST_BACKTRACE: 1
+        DATABASE_URL: mysql://root@127.0.0.1/mysql
+      displayName: Run tests
+
+  - job: 'TestBasicWindows'
+    pool:
+      vmImage: 'vs2017-win2016'
+    strategy:
+      maxParallel: 10
+      matrix:
+        stable:
+          RUST_TOOLCHAIN: stable
+    steps:
+    - script: |
+        choco install 7zip
+        mkdir C:\mysql
+        CD /D C:\mysql
+        curl -fsS --retry 3 --retry-connrefused -o mysql.msi https://cdn.mysql.com/archives/mysql-installer/mysql-installer-community-8.0.11.0.msi
+        msiexec /q /log install.txt /i mysql.msi datadir=C:\mysql installdir=C:\mysql
+        call "C:\Program Files (x86)\MySQL\MySQL Installer for Windows\MySQLInstallerConsole.exe" community install server;8.0.11;x64:*:port=3306;rootpasswd=password;servicename=MySQL -silent
+        netsh advfirewall firewall add rule name="Allow mysql" dir=in action=allow edge=yes remoteip=any protocol=TCP localport=80,8080,3306
+        "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -ppassword
+      displayName: Install MySql
+    - bash: |
+        rustup install $RUST_TOOLCHAIN
+      displayName: Install Rust (Windows)
+    - bash: |
+        SSL=false COMPRESS=false cargo test
+        SSL=true COMPRESS=false cargo test
+        SSL=false COMPRESS=true cargo test
+        SSL=true COMPRESS=true cargo test
+      env:
+        RUST_BACKTRACE: 1
+        DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+      displayName: Run tests
+
+
+  - job: 'TestMySql'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      maxParallel: 10
+      matrix:
+        v80:
+          DB_VERSION: "8.0"
+        v57:
+          DB_VERSION: "5.7"
+        v56:
+          DB_VERSION: "5.6"
+    steps:
+    - bash: |
+        sudo apt-get update
+        sudo apt-get install docker.io netcat grep
+        sudo systemctl unmask docker
+        sudo systemctl start docker
+        docker --version
+      displayName: Install docker
+    - bash: |
+        docker run --rm --name container -v `pwd`:/root -p 3307:3306 -d -e MYSQL_ROOT_PASSWORD=password mysql:$(DB_VERSION) --max-allowed-packet=36700160 --local-infile
+        while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
+      displayName: Run MySql in Docker
+    - bash: |
+        docker exec container bash -l -c "apt-get update"
+        docker exec container bash -l -c "apt-get install -y curl clang libssl-dev pkg-config"
+        docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
+      displayName: Install Rust in docker
+    - bash: |
+        if [[ "5.6" != "$(DB_VERSION)" ]]; then SSL=true; fi
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
+      env:
+        RUST_BACKTRACE: 1
+        DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+      displayName: Run tests in Docker
+
+  - job: 'TestMariaDb'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      maxParallel: 10
+      matrix:
+        v105:
+          DB_VERSION: "10.5"
+        v104:
+          DB_VERSION: "10.4"
+        v103:
+          DB_VERSION: "10.3"
+        v102:
+          DB_VERSION: "10.2"
+        v101:
+          DB_VERSION: "10.1"
+    steps:
+    - bash: |
+        sudo apt-get update
+        sudo apt-get install docker.io netcat grep
+        sudo systemctl unmask docker
+        sudo systemctl start docker
+        docker --version
+      displayName: Install docker
+    - bash: |
+        docker run --rm -d \
+            --name container \
+            -v `pwd`:/root \
+            -p 3307:3306 \
+            -e MYSQL_ROOT_PASSWORD=password \
+            mariadb:$(DB_VERSION) \
+                --max-allowed-packet=36700160 \
+                --local-infile \
+                --performance-schema=on \
+                --ssl \
+                --ssl-ca=/root/tests/ca-cert.pem \
+                --ssl-cert=/root/tests/server-cert.pem \
+                --ssl-key=/root/tests/server-key.pem
+        while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
+      displayName: Run MariaDb in Docker
+    - bash: |
+        docker exec container bash -l -c "apt-get update"
+        docker exec container bash -l -c "apt-get install -y curl clang libssl-dev pkg-config"
+        docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
+      displayName: Install Rust in docker
+    - bash: |
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test"
+        docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test"
+      env:
+        RUST_BACKTRACE: 1
+        DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+      displayName: Run tests in Docker
