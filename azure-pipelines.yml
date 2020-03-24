@@ -38,6 +38,7 @@ jobs:
         SSL=false COMPRESS=true cargo test
         SSL=true COMPRESS=true cargo test
       env:
+        RUST_BACKTRACE: 1
         DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
       displayName: Run tests
 
@@ -70,6 +71,7 @@ jobs:
         SSL=false COMPRESS=true cargo test
         SSL=true COMPRESS=true cargo test
       env:
+        RUST_BACKTRACE: 1
         DATABASE_URL: mysql://root@127.0.0.1/mysql
       displayName: Run tests
 
@@ -101,6 +103,7 @@ jobs:
         SSL=false COMPRESS=true cargo test
         SSL=true COMPRESS=true cargo test
       env:
+        RUST_BACKTRACE: 1
         DATABASE_URL: mysql://root:password@127.0.0.1/mysql
       displayName: Run tests
 
@@ -141,6 +144,7 @@ jobs:
         docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
         docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
       env:
+        RUST_BACKTRACE: 1
         DATABASE_URL: mysql://root:password@127.0.0.1/mysql
       displayName: Run tests in Docker
 
@@ -195,5 +199,6 @@ jobs:
         docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test"
         docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test"
       env:
+        RUST_BACKTRACE: 1
         DATABASE_URL: mysql://root:password@127.0.0.1/mysql
       displayName: Run tests in Docker
