@@ -1645,7 +1645,7 @@ mod test {
 
         #[test]
         fn should_bind_before_connect() {
-            let port = 27200 + (rand::random::<u16>() % 100);
+            let port = 28000 + (rand::random::<u16>() % 2000);
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
                 .ip_or_hostname(Some("127.0.0.1"))
@@ -1657,7 +1657,7 @@ mod test {
 
         #[test]
         fn should_bind_before_connect_with_timeout() {
-            let port = 27300 + (rand::random::<u16>() % 100);
+            let port = 30000 + (rand::random::<u16>() % 2000);
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
                 .ip_or_hostname(Some("127.0.0.1"))
