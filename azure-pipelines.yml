@@ -44,12 +44,15 @@ jobs:
           RUST_TOOLCHAIN: stable
     steps:
     - bash: |
-        brew update &&
-        brew install mysql &&
-        brew services start mysql &&
-        brew services stop mysql; sleep 3; brew services start mysql &&
-        sleep 2 &&
-        /usr/local/Cellar/mysql/8.0.19/bin/mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot
+        brew update
+        brew install mysql
+        brew services start mysql
+        brew services stop mysql
+        sleep 3
+        echo 'local_infile=1' >> /usr/local/etc/my.cnf
+        brew services start mysql
+        sleep 2
+        /usr/local/Cellar/mysql/*/bin/mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot
       displayName: Install MySql
     - bash: |
         curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN
