@@ -12,9 +12,10 @@ categories = ["database"]
 edition = "2018"
 build = "build.rs"
 
-[badges]
-appveyor = { repository = "blackbeam/rust-mysql-simple", branch = "master", service = "github" }
-travis-ci = { repository = "blackbeam/rust-mysql-simple", branch = "master" }
+[badges.azure-devops]
+build = "1"
+pipeline = "blackbeam.rust-mysql-simple"
+project = "aikorsky/mysql%20Rust"
 
 [lib]
 name = "mysql"
