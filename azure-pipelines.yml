@@ -66,6 +66,37 @@ jobs:
         DATABASE_URL: mysql://root@127.0.0.1/mysql
       displayName: Run tests
 
+  - job: 'TestBasicWindows'
+    pool:
+      vmImage: 'vs2017-win2016'
+    strategy:
+      maxParallel: 10
+      matrix:
+        stable:
+          RUST_TOOLCHAIN: stable
+    steps:
+    - script: |
+        choco install 7zip
+        mkdir C:\mysql
+        CD /D C:\mysql
+        curl -fsS --retry 3 --retry-connrefused -o mysql.msi https://cdn.mysql.com/archives/mysql-installer/mysql-installer-community-8.0.11.0.msi
+        msiexec /q /log install.txt /i mysql.msi datadir=C:\mysql installdir=C:\mysql
+        call "C:\Program Files (x86)\MySQL\MySQL Installer for Windows\MySQLInstallerConsole.exe" community install server;8.0.11;x64:*:port=3306;rootpasswd=password;servicename=MySQL -silent
+        netsh advfirewall firewall add rule name="Allow mysql" dir=in action=allow edge=yes remoteip=any protocol=TCP localport=80,8080,3306
+        "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -ppassword
+      displayName: Install MySql
+    - bash: |
+        rustup install $RUST_TOOLCHAIN
+      displayName: Install Rust (Windows)
+    - bash: |
+        SSL=false COMPRESS=false cargo test
+        SSL=true COMPRESS=false cargo test
+        SSL=false COMPRESS=true cargo test
+        SSL=true COMPRESS=true cargo test
+      env:
+        DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+      displayName: Run tests
+
 
   - job: 'TestMySql'
     pool:
