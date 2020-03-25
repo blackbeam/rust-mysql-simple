@@ -101,7 +101,7 @@ pub struct Transaction<'a> {
 
 impl Transaction<'_> {
     pub(crate) fn new<'a>(conn: ConnMut<'a, 'static, 'static>) -> Transaction<'a> {
-        let handler = conn.local_infile_handler.clone();
+        let handler = conn.0.local_infile_handler.clone();
         Transaction {
             conn,
             committed: false,
@@ -139,6 +139,7 @@ impl Transaction<'_> {
     /// Returns the last insert id of the last query, if any.
     pub fn last_insert_id(&self) -> Option<u64> {
         self.conn
+            .0
             .ok_packet
             .as_ref()
             .and_then(OkPacket::last_insert_id)
@@ -196,6 +197,6 @@ impl<'a> Drop for Transaction<'a> {
         if !self.committed && !self.rolled_back {
             let _ = self.conn.query_drop("ROLLBACK");
         }
-        self.conn.local_infile_handler = self.restore_local_infile_handler.take();
+        self.conn.0.local_infile_handler = self.restore_local_infile_handler.take();
     }
 }

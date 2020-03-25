@@ -136,9 +136,9 @@ impl DerefMut for ConnMut<'_, '_, '_> {
     }
 }
 
-/// Mysql connection.
+/// Connection internals.
 #[derive(Debug)]
-pub struct Conn {
+struct ConnInner {
     opts: Opts,
     stream: Option<MySyncFramed<Stream>>,
     stmt_cache: StmtCache,
@@ -156,73 +156,10 @@ pub struct Conn {
     local_infile_handler: Option<LocalInfileHandler>,
 }
 
-impl Conn {
-    /// Returns connection identifier.
-    pub fn connection_id(&self) -> u32 {
-        self.connection_id
-    }
-
-    /// Returns number of rows affected by the last query.
-    pub fn affected_rows(&self) -> u64 {
-        self.ok_packet
-            .as_ref()
-            .map(OkPacket::affected_rows)
-            .unwrap_or_default()
-    }
-
-    /// Returns last insert id of the last query.
-    ///
-    /// Returns zero if there was no last insert id.
-    pub fn last_insert_id(&self) -> u64 {
-        self.ok_packet
-            .as_ref()
-            .and_then(OkPacket::last_insert_id)
-            .unwrap_or_default()
-    }
-
-    /// Returns number of warnings, reported by the server.
-    pub fn warnings(&self) -> u16 {
-        self.ok_packet
-            .as_ref()
-            .map(OkPacket::warnings)
-            .unwrap_or_default()
-    }
-
-    /// [Info], reported by the server.
-    ///
-    /// Will be empty if not defined.
-    ///
-    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
-    pub fn info_ref(&self) -> &[u8] {
-        self.ok_packet
-            .as_ref()
-            .and_then(OkPacket::info_ref)
-            .unwrap_or_default()
-    }
-
-    /// [Info], reported by the server.
-    ///
-    /// Will be empty if not defined.
-    ///
-    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
-    pub fn info_str(&self) -> Cow<str> {
-        self.ok_packet
-            .as_ref()
-            .and_then(OkPacket::info_str)
-            .unwrap_or_default()
-    }
-
-    fn stream_ref(&self) -> &MySyncFramed<Stream> {
-        self.stream.as_ref().expect("incomplete connection")
-    }
-
-    fn stream_mut(&mut self) -> &mut MySyncFramed<Stream> {
-        self.stream.as_mut().expect("incomplete connection")
-    }
-
-    fn empty<T: Into<Opts>>(opts: T) -> Conn {
+impl ConnInner {
+    fn empty<T: Into<Opts>>(opts: T) -> Self {
         let opts = opts.into();
-        Conn {
+        ConnInner {
             stmt_cache: StmtCache::new(opts.get_stmt_cache_size()),
             opts,
             stream: None,
@@ -239,6 +176,80 @@ impl Conn {
             local_infile_handler: None,
         }
     }
+}
+
+/// Mysql connection.
+#[derive(Debug)]
+pub struct Conn(Box<ConnInner>);
+
+impl Conn {
+    /// Returns connection identifier.
+    pub fn connection_id(&self) -> u32 {
+        self.0.connection_id
+    }
+
+    /// Returns number of rows affected by the last query.
+    pub fn affected_rows(&self) -> u64 {
+        self.0
+            .ok_packet
+            .as_ref()
+            .map(OkPacket::affected_rows)
+            .unwrap_or_default()
+    }
+
+    /// Returns last insert id of the last query.
+    ///
+    /// Returns zero if there was no last insert id.
+    pub fn last_insert_id(&self) -> u64 {
+        self.0
+            .ok_packet
+            .as_ref()
+            .and_then(OkPacket::last_insert_id)
+            .unwrap_or_default()
+    }
+
+    /// Returns number of warnings, reported by the server.
+    pub fn warnings(&self) -> u16 {
+        self.0
+            .ok_packet
+            .as_ref()
+            .map(OkPacket::warnings)
+            .unwrap_or_default()
+    }
+
+    /// [Info], reported by the server.
+    ///
+    /// Will be empty if not defined.
+    ///
+    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
+    pub fn info_ref(&self) -> &[u8] {
+        self.0
+            .ok_packet
+            .as_ref()
+            .and_then(OkPacket::info_ref)
+            .unwrap_or_default()
+    }
+
+    /// [Info], reported by the server.
+    ///
+    /// Will be empty if not defined.
+    ///
+    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
+    pub fn info_str(&self) -> Cow<str> {
+        self.0
+            .ok_packet
+            .as_ref()
+            .and_then(OkPacket::info_str)
+            .unwrap_or_default()
+    }
+
+    fn stream_ref(&self) -> &MySyncFramed<Stream> {
+        self.0.stream.as_ref().expect("incomplete connection")
+    }
+
+    fn stream_mut(&mut self) -> &mut MySyncFramed<Stream> {
+        self.0.stream.as_mut().expect("incomplete connection")
+    }
 
     fn is_insecure(&self) -> bool {
         self.stream_ref().get_ref().is_insecure()
@@ -251,18 +262,18 @@ impl Conn {
     /// Check the connection can be improved.
     #[allow(unused_assignments)]
     fn can_improved(&mut self) -> Result<Option<Opts>> {
-        if self.opts.get_prefer_socket() && self.opts.addr_is_loopback() {
+        if self.0.opts.get_prefer_socket() && self.0.opts.addr_is_loopback() {
             let mut socket = None;
             #[cfg(test)]
             {
-                socket = self.opts.0.injected_socket.clone();
+                socket = self.0.opts.0.injected_socket.clone();
             }
             if socket.is_none() {
                 socket = self.get_system_var("socket")?.map(from_value::<String>);
             }
             if let Some(socket) = socket {
-                if self.opts.get_socket().is_none() {
-                    let socket_opts = OptsBuilder::from_opts(self.opts.clone());
+                if self.0.opts.get_socket().is_none() {
+                    let socket_opts = OptsBuilder::from_opts(self.0.opts.clone());
                     if !socket.is_empty() {
                         return Ok(Some(socket_opts.socket(Some(socket)).into()));
                     }
@@ -274,12 +285,12 @@ impl Conn {
 
     /// Creates new `Conn`.
     pub fn new<T: Into<Opts>>(opts: T) -> Result<Conn> {
-        let mut conn = Conn::empty(opts);
+        let mut conn = Conn(Box::new(ConnInner::empty(opts)));
         conn.connect_stream()?;
         conn.connect()?;
         let mut conn = {
             if let Some(new_opts) = conn.can_improved()? {
-                let mut improved_conn = Conn::empty(new_opts);
+                let mut improved_conn = Conn(Box::new(ConnInner::empty(new_opts)));
                 improved_conn
                     .connect_stream()
                     .and_then(|_| {
@@ -291,7 +302,7 @@ impl Conn {
                 conn
             }
         };
-        for cmd in conn.opts.get_init() {
+        for cmd in conn.0.opts.get_init() {
             conn.query_drop(cmd)?;
         }
         Ok(conn)
@@ -301,37 +312,37 @@ impl Conn {
         self.write_command(Command::COM_RESET_CONNECTION, &[])?;
         self.read_packet().and_then(|pld| match pld[0] {
             0 => {
-                let ok = parse_ok_packet(&*pld, self.capability_flags)?;
+                let ok = parse_ok_packet(&*pld, self.0.capability_flags)?;
                 self.handle_ok(&ok);
-                self.last_command = 0;
-                self.stmt_cache.clear();
+                self.0.last_command = 0;
+                self.0.stmt_cache.clear();
                 Ok(())
             }
             _ => {
-                let err = parse_err_packet(&*pld, self.capability_flags)?;
+                let err = parse_err_packet(&*pld, self.0.capability_flags)?;
                 Err(MySqlError(err.into()))
             }
         })
     }
 
     fn hard_reset(&mut self) -> Result<()> {
-        self.stream = None;
-        self.stmt_cache.clear();
-        self.capability_flags = CapabilityFlags::empty();
-        self.status_flags = StatusFlags::empty();
-        self.connection_id = 0;
-        self.character_set = 0;
-        self.ok_packet = None;
-        self.last_command = 0;
-        self.connected = false;
-        self.has_results = false;
+        self.0.stream = None;
+        self.0.stmt_cache.clear();
+        self.0.capability_flags = CapabilityFlags::empty();
+        self.0.status_flags = StatusFlags::empty();
+        self.0.connection_id = 0;
+        self.0.character_set = 0;
+        self.0.ok_packet = None;
+        self.0.last_command = 0;
+        self.0.connected = false;
+        self.0.has_results = false;
         self.connect_stream()?;
         self.connect()
     }
 
     /// Resets `MyConn` (drops state then reconnects).
     pub fn reset(&mut self) -> Result<()> {
-        match (self.server_version, self.mariadb_server_version) {
+        match (self.0.server_version, self.0.mariadb_server_version) {
             (Some(ref version), _) if *version > (5, 7, 3) => {
                 self.soft_reset().or_else(|_| self.hard_reset())
             }
@@ -343,26 +354,27 @@ impl Conn {
     }
 
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
-        let stream = self.stream.take().expect("incomplete conn");
+        let stream = self.0.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
-        let stream = stream.make_secure(self.opts.get_host(), ssl_opts)?;
+        let stream = stream.make_secure(self.0.opts.get_host(), ssl_opts)?;
         let stream = MySyncFramed::construct(in_buf, out_buf, codec, stream);
-        self.stream = Some(stream);
+        self.0.stream = Some(stream);
         Ok(())
     }
 
     fn connect_stream(&mut self) -> Result<()> {
-        let read_timeout = self.opts.get_read_timeout().cloned();
-        let write_timeout = self.opts.get_write_timeout().cloned();
-        let tcp_keepalive_time = self.opts.get_tcp_keepalive_time_ms();
-        let tcp_nodelay = self.opts.get_tcp_nodelay();
-        let tcp_connect_timeout = self.opts.get_tcp_connect_timeout();
-        let bind_address = self.opts.bind_address().cloned();
-        let stream = if let Some(socket) = self.opts.get_socket() {
+        let opts = &self.0.opts;
+        let read_timeout = opts.get_read_timeout().cloned();
+        let write_timeout = opts.get_write_timeout().cloned();
+        let tcp_keepalive_time = opts.get_tcp_keepalive_time_ms();
+        let tcp_nodelay = opts.get_tcp_nodelay();
+        let tcp_connect_timeout = opts.get_tcp_connect_timeout();
+        let bind_address = opts.bind_address().cloned();
+        let stream = if let Some(socket) = opts.get_socket() {
             Stream::connect_socket(&*socket, read_timeout, write_timeout)?
         } else {
-            let port = self.opts.get_tcp_port();
-            let ip_or_hostname = match self.opts.get_host() {
+            let port = opts.get_tcp_port();
+            let ip_or_hostname = match opts.get_host() {
                 url::Host::Domain(domain) => domain,
                 url::Host::Ipv4(ip) => ip.to_string(),
                 url::Host::Ipv6(ip) => ip.to_string(),
@@ -378,7 +390,7 @@ impl Conn {
                 bind_address,
             )?
         };
-        self.stream = Some(MySyncFramed::new(stream));
+        self.0.stream = Some(MySyncFramed::new(stream));
         Ok(())
     }
 
@@ -389,7 +401,7 @@ impl Conn {
         ))?;
         match data[0] {
             0xff => {
-                let error_packet = parse_err_packet(&*data, self.capability_flags)?;
+                let error_packet = parse_err_packet(&*data, self.0.capability_flags)?;
                 self.handle_err();
                 Err(MySqlError(error_packet.into()))
             }
@@ -407,26 +419,27 @@ impl Conn {
     }
 
     fn handle_handshake(&mut self, hp: &HandshakePacket<'_>) {
-        self.capability_flags = hp.capabilities() & self.get_client_flags();
-        self.status_flags = hp.status_flags();
-        self.connection_id = hp.connection_id();
-        self.character_set = hp.default_collation();
-        self.server_version = hp.server_version_parsed();
-        self.mariadb_server_version = hp.maria_db_server_version_parsed();
+        self.0.capability_flags = hp.capabilities() & self.get_client_flags();
+        self.0.status_flags = hp.status_flags();
+        self.0.connection_id = hp.connection_id();
+        self.0.character_set = hp.default_collation();
+        self.0.server_version = hp.server_version_parsed();
+        self.0.mariadb_server_version = hp.maria_db_server_version_parsed();
     }
 
     fn handle_ok(&mut self, op: &OkPacket<'_>) {
-        self.status_flags = op.status_flags();
-        self.ok_packet = Some(op.clone().into_owned());
+        self.0.status_flags = op.status_flags();
+        self.0.ok_packet = Some(op.clone().into_owned());
     }
 
     fn handle_err(&mut self) {
-        self.has_results = false;
-        self.ok_packet = None;
+        self.0.has_results = false;
+        self.0.ok_packet = None;
     }
 
     fn more_results_exists(&self) -> bool {
-        self.status_flags
+        self.0
+            .status_flags
             .contains(StatusFlags::SERVER_MORE_RESULTS_EXISTS)
     }
 
@@ -434,7 +447,7 @@ impl Conn {
         let nonce = auth_switch_request.plugin_data();
         let plugin_data = auth_switch_request
             .auth_plugin()
-            .gen_data(self.opts.get_pass(), nonce);
+            .gen_data(self.0.opts.get_pass(), nonce);
         self.write_packet(plugin_data.unwrap_or_else(Vec::new))?;
         self.continue_auth(auth_switch_request.auth_plugin(), nonce, true)
     }
@@ -459,7 +472,7 @@ impl Conn {
         self.handle_handshake(&handshake);
 
         if self.is_insecure() {
-            if let Some(ssl_opts) = self.opts.get_ssl_opts().cloned() {
+            if let Some(ssl_opts) = self.0.opts.get_ssl_opts().cloned() {
                 if !handshake
                     .capabilities()
                     .contains(CapabilityFlags::CLIENT_SSL)
@@ -482,12 +495,13 @@ impl Conn {
             Err(DriverError(UnknownAuthPlugin(plugin_name)))?
         }
 
-        let auth_data = auth_plugin.gen_data(self.opts.get_pass(), &*nonce);
+        let auth_data = auth_plugin.gen_data(self.0.opts.get_pass(), &*nonce);
         self.write_handshake_response(auth_plugin, auth_data.as_ref().map(AsRef::as_ref))?;
 
         self.continue_auth(auth_plugin, &*nonce, false)?;
 
         if self
+            .0
             .capability_flags
             .contains(CapabilityFlags::CLIENT_COMPRESS)
         {
@@ -514,19 +528,19 @@ impl Conn {
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PLUGIN_AUTH
             | CapabilityFlags::CLIENT_CONNECT_ATTRS
-            | (self.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
-        if self.opts.get_compress().is_some() {
+            | (self.0.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
+        if self.0.opts.get_compress().is_some() {
             client_flags.insert(CapabilityFlags::CLIENT_COMPRESS);
         }
-        if let Some(db_name) = self.opts.get_db_name() {
+        if let Some(db_name) = self.0.opts.get_db_name() {
             if !db_name.is_empty() {
                 client_flags.insert(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
             }
         }
-        if self.is_insecure() && self.opts.get_ssl_opts().is_some() {
+        if self.is_insecure() && self.0.opts.get_ssl_opts().is_some() {
             client_flags.insert(CapabilityFlags::CLIENT_SSL);
         }
-        client_flags | self.opts.get_additional_capabilities()
+        client_flags | self.0.opts.get_additional_capabilities()
     }
 
     fn connect_attrs(&self) -> HashMap<String, String> {
@@ -543,7 +557,7 @@ impl Conn {
         attrs.insert("_platform".into(), env!("CARGO_CFG_TARGET_ARCH").into());
         attrs.insert("program_name".into(), program_name.to_string());
 
-        for (name, value) in self.opts.get_connect_attrs().clone() {
+        for (name, value) in self.0.opts.get_connect_attrs().clone() {
             attrs.insert(name, value);
         }
 
@@ -562,11 +576,11 @@ impl Conn {
     ) -> Result<()> {
         let handshake_response = HandshakeResponse::new(
             &scramble_buf,
-            self.server_version.unwrap_or((0, 0, 0)),
-            self.opts.get_user(),
-            self.opts.get_db_name(),
+            self.0.server_version.unwrap_or((0, 0, 0)),
+            self.0.opts.get_user(),
+            self.0.opts.get_db_name(),
             auth_plugin,
-            self.capability_flags,
+            self.0.capability_flags,
             &self.connect_attrs(),
         );
         self.write_packet(handshake_response)
@@ -598,7 +612,7 @@ impl Conn {
         match payload[0] {
             // auth ok
             0x00 => {
-                let ok = parse_ok_packet(&*payload, self.capability_flags)?;
+                let ok = parse_ok_packet(&*payload, self.0.capability_flags)?;
                 self.handle_ok(&ok);
                 Ok(())
             }
@@ -626,20 +640,30 @@ impl Conn {
             0x01 => match payload[1] {
                 0x03 => {
                     let payload = self.read_packet()?;
-                    let ok = parse_ok_packet(&*payload, self.capability_flags)?;
+                    let ok = parse_ok_packet(&*payload, self.0.capability_flags)?;
                     self.handle_ok(&ok);
                     Ok(())
                 }
                 0x04 => {
                     if !self.is_insecure() || self.is_socket() {
-                        let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or_else(Vec::new);
+                        let mut pass = self
+                            .0
+                            .opts
+                            .get_pass()
+                            .map(Vec::from)
+                            .unwrap_or_else(Vec::new);
                         pass.push(0);
                         self.write_packet(pass)?;
                     } else {
                         self.write_packet(vec![0x02])?;
                         let payload = self.read_packet()?;
                         let key = &payload[1..];
-                        let mut pass = self.opts.get_pass().map(Vec::from).unwrap_or_else(Vec::new);
+                        let mut pass = self
+                            .0
+                            .opts
+                            .get_pass()
+                            .map(Vec::from)
+                            .unwrap_or_else(Vec::new);
                         pass.push(0);
                         for i in 0..pass.len() {
                             pass[i] ^= nonce[i % nonce.len()];
@@ -649,7 +673,7 @@ impl Conn {
                     }
 
                     let payload = self.read_packet()?;
-                    let ok = parse_ok_packet(&*payload, self.capability_flags)?;
+                    let ok = parse_ok_packet(&*payload, self.0.capability_flags)?;
                     self.handle_ok(&ok);
                     Ok(())
                 }
@@ -674,7 +698,7 @@ impl Conn {
     fn write_command_raw<T: Into<Vec<u8>>>(&mut self, body: T) -> Result<()> {
         let body = body.into();
         self.reset_seq_id();
-        self.last_command = body[0];
+        self.0.last_command = body[0];
         self.write_packet(body)
     }
 
@@ -756,7 +780,7 @@ impl Conn {
             self.query_drop(format!("SET TRANSACTION ISOLATION LEVEL {}", i_level))?;
         }
         if let Some(mode) = tx_opts.access_mode() {
-            let supported = match (self.server_version, self.mariadb_server_version) {
+            let supported = match (self.0.server_version, self.0.mariadb_server_version) {
                 (Some(ref version), _) if *version >= (5, 6, 5) => true,
                 (_, Some(ref version)) if *version >= (10, 0, 0) => true,
                 _ => false,
@@ -785,9 +809,10 @@ impl Conn {
             );
             let chunk = vec![0u8; buffer_size].into_boxed_slice();
             let maybe_handler = self
+                .0
                 .local_infile_handler
                 .clone()
-                .or_else(|| self.opts.get_local_infile_handler().cloned());
+                .or_else(|| self.0.opts.get_local_infile_handler().cloned());
             let mut local_infile = LocalInfile::new(io::Cursor::new(chunk), self);
             if let Some(handler) = maybe_handler {
                 // Unwrap won't panic because we have exclusive access to `self` and this
@@ -800,7 +825,7 @@ impl Conn {
         }
         self.write_packet(Vec::new())?;
         let pld = self.read_packet()?;
-        let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+        let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags)?;
         self.handle_ok(&ok);
         Ok(ok.into_owned())
     }
@@ -813,7 +838,7 @@ impl Conn {
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
-                let ok = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+                let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags)?;
                 self.handle_ok(&ok);
                 Ok(Or::B(ok.into_owned()))
             }
@@ -836,7 +861,7 @@ impl Conn {
                 }
                 // skip eof packet
                 self.read_packet()?;
-                self.has_results = column_count > 0;
+                self.0.has_results = column_count > 0;
                 Ok(Or::A(columns))
             }
         }
@@ -898,13 +923,14 @@ impl Conn {
     }
 
     fn _prepare(&mut self, query: &str) -> Result<Arc<InnerStmt>> {
-        if let Some(entry) = self.stmt_cache.by_query(query) {
+        if let Some(entry) = self.0.stmt_cache.by_query(query) {
             return Ok(entry.stmt.clone());
         }
 
         let inner_st = Arc::new(self._true_prepare(query)?);
 
         if let Some(old_stmt) = self
+            .0
             .stmt_cache
             .put(Arc::new(query.into()), inner_st.clone())
         {
@@ -915,7 +941,7 @@ impl Conn {
     }
 
     fn connect(&mut self) -> Result<()> {
-        if self.connected {
+        if self.0.connected {
             return Ok(());
         }
         self.do_handshake()
@@ -930,7 +956,7 @@ impl Conn {
                     Err(DriverError(SetupError))
                 } else {
                     self.stream_mut().codec_mut().max_allowed_packet = max_allowed_packet;
-                    self.connected = true;
+                    self.0.connected = true;
                     Ok(())
                 }
             })
@@ -941,13 +967,13 @@ impl Conn {
     }
 
     fn next_bin(&mut self, columns: &[Column]) -> Result<Option<Vec<Value>>> {
-        if !self.has_results {
+        if !self.0.has_results {
             return Ok(None);
         }
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
-            self.has_results = false;
-            let p = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+            self.0.has_results = false;
+            let p = parse_ok_packet(pld.as_ref(), self.0.capability_flags)?;
             self.handle_ok(&p);
             return Ok(None);
         }
@@ -956,13 +982,13 @@ impl Conn {
     }
 
     fn next_text(&mut self, col_count: usize) -> Result<Option<Vec<Value>>> {
-        if !self.has_results {
+        if !self.0.has_results {
             return Ok(None);
         }
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
-            self.has_results = false;
-            let p = parse_ok_packet(pld.as_ref(), self.capability_flags)?;
+            self.0.has_results = false;
+            let p = parse_ok_packet(pld.as_ref(), self.0.capability_flags)?;
             self.handle_ok(&p);
             return Ok(None);
         }
@@ -971,7 +997,7 @@ impl Conn {
     }
 
     fn has_stmt(&self, query: &str) -> bool {
-        self.stmt_cache.contains_query(query)
+        self.0.stmt_cache.contains_query(query)
     }
 
     /// Sets a callback to handle requests for local files. These are
@@ -981,11 +1007,12 @@ impl Conn {
     /// Specifying `None` will reset the handler to the one specified
     /// in the `Opts` for this connection.
     pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
-        self.local_infile_handler = handler;
+        self.0.local_infile_handler = handler;
     }
 
     pub fn no_backslash_escape(&self) -> bool {
-        self.status_flags
+        self.0
+            .status_flags
             .contains(StatusFlags::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
     }
 }
@@ -1004,7 +1031,7 @@ impl Queryable for Conn {
     }
 
     fn close(&mut self, stmt: Statement) -> Result<()> {
-        self.stmt_cache.remove(stmt.id());
+        self.0.stmt_cache.remove(stmt.id());
         let com_stmt_close = ComStmtClose::new(stmt.id());
         self.write_command_raw(com_stmt_close)?;
         Ok(())
@@ -1023,13 +1050,13 @@ impl Queryable for Conn {
 
 impl Drop for Conn {
     fn drop(&mut self) {
-        let stmt_cache = mem::replace(&mut self.stmt_cache, StmtCache::new(0));
+        let stmt_cache = mem::replace(&mut self.0.stmt_cache, StmtCache::new(0));
 
         for (_, entry) in stmt_cache.into_iter() {
             let _ = self.close(Statement::new(entry.stmt, None));
         }
 
-        if self.stream.is_some() {
+        if self.0.stream.is_some() {
             let _ = self.write_command(Command::COM_QUIT, &[]);
         }
     }
@@ -1075,7 +1102,7 @@ mod test {
             assert!(conn.ping());
 
             if crate::test_misc::test_compression() {
-                assert!(format!("{:?}", conn.stream).contains("Compression"));
+                assert!(format!("{:?}", conn.0.stream).contains("Compression"));
             }
 
             if crate::test_misc::test_ssl() {
@@ -1745,6 +1772,7 @@ mod test {
             assert_eq!(status.1, 3);
 
             let mut order = conn
+                .0
                 .stmt_cache
                 .iter()
                 .map(|(_, entry)| &**entry.query.0.as_ref())
@@ -1809,7 +1837,8 @@ mod test {
             let opts = OptsBuilder::from_opts(get_opts());
             let mut conn = Conn::new(opts).unwrap();
 
-            let support_connect_attrs = match (conn.server_version, conn.mariadb_server_version) {
+            let support_connect_attrs = match (conn.0.server_version, conn.0.mariadb_server_version)
+            {
                 (Some(ref version), _) if *version >= (5, 6, 0) => true,
                 (_, Some(ref version)) if *version >= (10, 0, 0) => true,
                 _ => false,
@@ -1880,22 +1909,22 @@ mod test {
     mod bench {
         use test;
 
-        use crate::{params, test_misc::get_opts, Conn, Value::NULL};
+        use crate::{params, prelude::*, test_misc::get_opts, Conn, Value::NULL};
 
         #[bench]
         fn simple_exec(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
-                let _ = conn.query("DO 1");
+                let _ = conn.query_drop("DO 1");
             })
         }
 
         #[bench]
         fn prepared_exec(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("DO 1").unwrap();
+            let stmt = conn.prep("DO 1").unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute(());
+                let _ = conn.exec_drop(&stmt, ()).unwrap();
             })
         }
 
@@ -1903,8 +1932,8 @@ mod test {
         fn prepare_and_exec(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
-                let mut stmt = conn.prepare("SELECT ?").unwrap();
-                let _ = stmt.execute((0,)).unwrap();
+                let stmt = conn.prep("SELECT ?").unwrap();
+                let _ = conn.exec_drop(&stmt, (0,)).unwrap();
             })
         }
 
@@ -1912,61 +1941,64 @@ mod test {
         fn simple_query_row(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
-                let _ = conn.query("SELECT 1");
+                let _ = conn.query_drop("SELECT 1").unwrap();
             })
         }
 
         #[bench]
         fn simple_prepared_query_row(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT 1").unwrap();
+            let stmt = conn.prep("SELECT 1").unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute(());
+                let _ = conn.exec_drop(&stmt, ()).unwrap();
             })
         }
 
         #[bench]
         fn simple_prepared_query_row_with_param(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT ?").unwrap();
+            let stmt = conn.prep("SELECT ?").unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute((0,));
+                let _ = conn.exec_drop(&stmt, (0,)).unwrap();
             })
         }
 
         #[bench]
         fn simple_prepared_query_row_with_named_param(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT :a").unwrap();
+            let stmt = conn.prep("SELECT :a").unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute(params! {"a" => 0});
+                let _ = conn.exec_drop(&stmt, params! {"a" => 0}).unwrap();
             })
         }
 
         #[bench]
         fn simple_prepared_query_row_with_5_params(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT ?, ?, ?, ?, ?").unwrap();
+            let stmt = conn.prep("SELECT ?, ?, ?, ?, ?").unwrap();
             let params = (42i8, b"123456".to_vec(), 1.618f64, NULL, 1i8);
             bencher.iter(|| {
-                let _ = stmt.execute(&params);
+                let _ = conn.exec_drop(&stmt, &params).unwrap();
             })
         }
 
         #[bench]
         fn simple_prepared_query_row_with_5_named_params(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn
-                .prepare("SELECT :one, :two, :three, :four, :five")
+            let stmt = conn
+                .prep("SELECT :one, :two, :three, :four, :five")
                 .unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute(params! {
-                    "one" => 42i8,
-                    "two" => b"123456",
-                    "three" => 1.618f64,
-                    "four" => NULL,
-                    "five" => 1i8,
-                });
+                let _ = conn.exec_drop(
+                    &stmt,
+                    params! {
+                        "one" => 42i8,
+                        "two" => b"123456",
+                        "three" => 1.618f64,
+                        "four" => NULL,
+                        "five" => 1i8,
+                    },
+                );
             })
         }
 
@@ -1974,30 +2006,30 @@ mod test {
         fn select_large_string(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
-                let _ = conn.query("SELECT REPEAT('A', 10000)");
+                let _ = conn.query_drop("SELECT REPEAT('A', 10000)").unwrap();
             })
         }
 
         #[bench]
         fn select_prepared_large_string(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            let mut stmt = conn.prepare("SELECT REPEAT('A', 10000)").unwrap();
+            let stmt = conn.prep("SELECT REPEAT('A', 10000)").unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute(());
+                let _ = conn.exec_drop(&stmt, ()).unwrap();
             })
         }
 
         #[bench]
         fn many_small_rows(bencher: &mut test::Bencher) {
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query("CREATE TEMPORARY TABLE mysql.x (id INT)")
+            conn.query_drop("CREATE TEMPORARY TABLE mysql.x (id INT)")
                 .unwrap();
             for _ in 0..512 {
-                conn.query("INSERT INTO mysql.x VALUES (256)").unwrap();
+                conn.query_drop("INSERT INTO mysql.x VALUES (256)").unwrap();
             }
-            let mut stmt = conn.prepare("SELECT * FROM mysql.x").unwrap();
+            let stmt = conn.prep("SELECT * FROM mysql.x").unwrap();
             bencher.iter(|| {
-                let _ = stmt.execute(());
+                let _ = conn.exec_drop(&stmt, ()).unwrap();
             });
         }
     }

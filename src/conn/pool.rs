@@ -664,21 +664,13 @@ mod test {
 
             use std::thread;
 
-            use crate::{test_misc::get_opts, Pool};
-
-            #[bench]
-            fn many_prepares(bencher: &mut test::Bencher) {
-                let pool = Pool::new(get_opts()).unwrap();
-                bencher.iter(|| {
-                    pool.prepare("SELECT 1").unwrap();
-                });
-            }
+            use crate::{prelude::*, test_misc::get_opts, Pool};
 
             #[bench]
             fn many_prepexecs(bencher: &mut test::Bencher) {
                 let pool = Pool::new(get_opts()).unwrap();
                 bencher.iter(|| {
-                    pool.prep_exec("SELECT 1", ()).unwrap();
+                    "SELECT 1".with(()).run(&pool).unwrap();
                 });
             }
 
@@ -692,11 +684,10 @@ mod test {
                         threads.push(thread::spawn(move || {
                             for _ in 0..250 {
                                 test::black_box(
-                                    pool.prep_exec(
-                                        "SELECT 1, 'hello world', 123.321, ?, ?, ?",
-                                        ("hello", "world", 65536),
-                                    )
-                                    .unwrap(),
+                                    "SELECT 1, 'hello world', 123.321, ?, ?, ?"
+                                        .with(("hello", "world", 65536))
+                                        .run(&pool)
+                                        .unwrap(),
                                 );
                             }
                         }));
@@ -718,11 +709,10 @@ mod test {
                         threads.push(thread::spawn(move || {
                             for _ in 0..250 {
                                 test::black_box(
-                                    pool.prep_exec(
-                                        "SELECT 1, 'hello world', 123.321, ?, ?, ?",
-                                        ("hello", "world", 65536),
-                                    )
-                                    .unwrap(),
+                                    "SELECT 1, 'hello world', 123.321, ?, ?, ?"
+                                        .with(("hello", "world", 65536))
+                                        .run(&pool)
+                                        .unwrap(),
                                 );
                             }
                         }));
