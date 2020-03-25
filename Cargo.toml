@@ -15,7 +15,7 @@ build = "build.rs"
 [badges.azure-devops]
 build = "1"
 pipeline = "blackbeam.rust-mysql-simple"
-project = "aikorsky/mysql%20Rust"
+project = "aikorsky/mysql Rust"
 
 [lib]
 name = "mysql"

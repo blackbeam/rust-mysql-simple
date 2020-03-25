@@ -1,5 +1,5 @@
 [![Crates.io](https://img.shields.io/crates/v/mysql.svg)](https://crates.io/crates/mysql)
-[![Build Status](https://dev.azure.com/aikorsky/mysql%20Rust/_apis/build/status/blackbeam.rust-mysql-simple)](https://dev.azure.com/aikorsky/mysql%20Rust/_build/latest?definitionId=1)
+[![Build Status](https://dev.azure.com/aikorsky/mysql%20Rust/_apis/build/status/blackbeam%2Erust%2Dmysql%2Dsimple)](https://dev.azure.com/aikorsky/mysql%20Rust/_build/latest?definitionId=1)
 
 # mysql
 
