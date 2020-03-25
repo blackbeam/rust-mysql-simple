@@ -6,7 +6,9 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use std::fmt;
+use mysql_common::packets::OkPacket;
+
+use std::{borrow::Cow, fmt};
 
 use crate::{
     conn::{
@@ -127,6 +129,42 @@ impl Transaction<'_> {
     /// Destructor of transaction will restore original handler.
     pub fn set_local_infile_handler(&mut self, handler: Option<LocalInfileHandler>) {
         self.conn.set_local_infile_handler(handler);
+    }
+
+    /// Returns the number of affected rows, reported by the server.
+    pub fn affected_rows(&self) -> u64 {
+        self.conn.affected_rows()
+    }
+
+    /// Returns the last insert id of the last query, if any.
+    pub fn last_insert_id(&self) -> Option<u64> {
+        self.conn
+            .ok_packet
+            .as_ref()
+            .and_then(OkPacket::last_insert_id)
+    }
+
+    /// Returns the warnings count, reported by the server.
+    pub fn warnings(&self) -> u16 {
+        self.conn.warnings()
+    }
+
+    /// [Info], reported by the server.
+    ///
+    /// Will be empty if not defined.
+    ///
+    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
+    pub fn info_ref(&self) -> &[u8] {
+        self.conn.info_ref()
+    }
+
+    /// [Info], reported by the server.
+    ///
+    /// Will be empty if not defined.
+    ///
+    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
+    pub fn info_str(&self) -> Cow<str> {
+        self.conn.info_str()
     }
 }
 

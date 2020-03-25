@@ -21,7 +21,7 @@ use mysql_common::{
 };
 
 use std::{
-    borrow::Borrow,
+    borrow::{Borrow, Cow},
     cmp,
     collections::HashMap,
     convert::TryFrom,
@@ -144,10 +144,8 @@ pub struct Conn {
     stmt_cache: StmtCache,
     server_version: Option<(u16, u16, u16)>,
     mariadb_server_version: Option<(u16, u16, u16)>,
-    affected_rows: u64,
-    last_insert_id: u64,
-    warnings: u16,
-    info: Option<Vec<u8>>,
+    /// Last Ok packet, if any.
+    ok_packet: Option<OkPacket<'static>>,
     capability_flags: CapabilityFlags,
     connection_id: u32,
     status_flags: StatusFlags,
@@ -166,12 +164,52 @@ impl Conn {
 
     /// Returns number of rows affected by the last query.
     pub fn affected_rows(&self) -> u64 {
-        self.affected_rows
+        self.ok_packet
+            .as_ref()
+            .map(OkPacket::affected_rows)
+            .unwrap_or_default()
     }
 
     /// Returns last insert id of the last query.
+    ///
+    /// Returns zero if there was no last insert id.
     pub fn last_insert_id(&self) -> u64 {
-        self.last_insert_id
+        self.ok_packet
+            .as_ref()
+            .and_then(OkPacket::last_insert_id)
+            .unwrap_or_default()
+    }
+
+    /// Returns number of warnings, reported by the server.
+    pub fn warnings(&self) -> u16 {
+        self.ok_packet
+            .as_ref()
+            .map(OkPacket::warnings)
+            .unwrap_or_default()
+    }
+
+    /// [Info], reported by the server.
+    ///
+    /// Will be empty if not defined.
+    ///
+    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
+    pub fn info_ref(&self) -> &[u8] {
+        self.ok_packet
+            .as_ref()
+            .and_then(OkPacket::info_ref)
+            .unwrap_or_default()
+    }
+
+    /// [Info], reported by the server.
+    ///
+    /// Will be empty if not defined.
+    ///
+    /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
+    pub fn info_str(&self) -> Cow<str> {
+        self.ok_packet
+            .as_ref()
+            .and_then(OkPacket::info_str)
+            .unwrap_or_default()
     }
 
     fn stream_ref(&self) -> &MySyncFramed<Stream> {
@@ -192,10 +230,7 @@ impl Conn {
             status_flags: StatusFlags::empty(),
             connection_id: 0u32,
             character_set: 0u8,
-            affected_rows: 0u64,
-            last_insert_id: 0u64,
-            warnings: 0,
-            info: None,
+            ok_packet: None,
             last_command: 0u8,
             connected: false,
             has_results: false,
@@ -286,10 +321,7 @@ impl Conn {
         self.status_flags = StatusFlags::empty();
         self.connection_id = 0;
         self.character_set = 0;
-        self.affected_rows = 0;
-        self.last_insert_id = 0;
-        self.warnings = 0;
-        self.info = None;
+        self.ok_packet = None;
         self.last_command = 0;
         self.connected = false;
         self.has_results = false;
@@ -384,18 +416,13 @@ impl Conn {
     }
 
     fn handle_ok(&mut self, op: &OkPacket<'_>) {
-        self.affected_rows = op.affected_rows();
-        self.last_insert_id = op.last_insert_id().unwrap_or(0);
         self.status_flags = op.status_flags();
-        self.warnings = op.warnings();
-        self.info = op.info_ref().map(Into::into);
+        self.ok_packet = Some(op.clone().into_owned());
     }
 
     fn handle_err(&mut self) {
         self.has_results = false;
-        self.last_insert_id = 0;
-        self.affected_rows = 0;
-        self.warnings = 0;
+        self.ok_packet = None;
     }
 
     fn more_results_exists(&self) -> bool {
@@ -1324,12 +1351,16 @@ mod test {
         #[test]
         fn should_start_commit_and_rollback_transactions() {
             let mut conn = Conn::new(get_opts()).unwrap();
-            conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
-                .unwrap();
+            conn.query_drop(
+                "CREATE TEMPORARY TABLE mysql.tbl(id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, a INT)",
+            )
+            .unwrap();
             let _ = conn
                 .start_transaction(TxOpts::default())
                 .and_then(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
+                    assert_eq!(t.last_insert_id(), Some(1));
+                    assert_eq!(t.affected_rows(), 1);
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.commit().unwrap();
                     Ok(())
@@ -1444,8 +1475,11 @@ mod test {
                  (`test` VARCHAR(255) NULL);",
             )
             .unwrap();
-            conn.query_drop("SELECT * FROM `mysql`.`test`;").unwrap();
+            conn.query_drop("INSERT INTO `mysql`.`test` (`test`) VALUES ('foo');")
+                .unwrap();
+            assert_eq!(conn.affected_rows(), 1);
             conn.reset().unwrap();
+            assert_eq!(conn.affected_rows(), 0);
             conn.query_drop("SELECT * FROM `mysql`.`test`;")
                 .unwrap_err();
         }
