@@ -6,11 +6,13 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use std::convert::TryInto;
+use mysql_common::row::convert::FromRowError;
+
+use std::{convert::TryInto, result::Result as StdResult};
 
 use crate::{
     conn::{queryable::AsStatement, ConnMut},
-    from_row,
+    from_row, from_row_opt,
     prelude::FromRow,
     Binary, Error, Params, QueryResult, Result, Text,
 };
@@ -53,6 +55,19 @@ pub trait TextQuery: Sized {
             .transpose()
     }
 
+    /// Same as [`TextQuery::first`] but useful when you not sure what your schema is.
+    fn first_opt<'a, 'b, 'c: 'b, T, C>(self, conn: C) -> Result<Option<StdResult<T, FromRowError>>>
+    where
+        C: TryInto<ConnMut<'a, 'b, 'c>>,
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
+        T: FromRow,
+    {
+        self.run(conn)?
+            .next()
+            .map(|row| row.map(from_row_opt))
+            .transpose()
+    }
+
     /// This methods corresponds to `Queryable::query`.
     fn fetch<'a, 'b, 'c: 'b, T, C>(self, conn: C) -> Result<Vec<T>>
     where
@@ -61,6 +76,16 @@ pub trait TextQuery: Sized {
         T: FromRow,
     {
         self.run(conn)?.map(|rrow| rrow.map(from_row)).collect()
+    }
+
+    /// Same as [`TextQuery::fetch`] but useful when you not sure what your schema is.
+    fn fetch_opt<'a, 'b, 'c: 'b, T, C>(self, conn: C) -> Result<Vec<StdResult<T, FromRowError>>>
+    where
+        C: TryInto<ConnMut<'a, 'b, 'c>>,
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
+        T: FromRow,
+    {
+        self.run(conn)?.map(|rrow| rrow.map(from_row_opt)).collect()
     }
 
     /// This methods corresponds to `Queryable::query_fold`.
@@ -78,6 +103,21 @@ pub trait TextQuery: Sized {
         Ok(init)
     }
 
+    /// Same as [`TextQuery::fold`] but useful when you not sure what your schema is.
+    fn fold_opt<'a, 'b, 'c: 'b, T, U, F, C>(self, conn: C, mut init: U, mut next: F) -> Result<U>
+    where
+        C: TryInto<ConnMut<'a, 'b, 'c>>,
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
+        T: FromRow,
+        F: FnMut(U, StdResult<T, FromRowError>) -> U,
+    {
+        for row in self.run(conn)? {
+            init = next(init, from_row_opt(row?));
+        }
+
+        Ok(init)
+    }
+
     /// This methods corresponds to `Queryable::query_map`.
     fn map<'a, 'b, 'c: 'b, T, U, F, C>(self, conn: C, mut map: F) -> Result<Vec<U>>
     where
@@ -90,6 +130,24 @@ pub trait TextQuery: Sized {
             acc.push(map(row));
             acc
         })
+    }
+
+    /// Same as [`TextQuery::map`] but useful when you not sure what your schema is.
+    fn map_opt<'a, 'b, 'c: 'b, T, U, F, C>(self, conn: C, mut map: F) -> Result<Vec<U>>
+    where
+        C: TryInto<ConnMut<'a, 'b, 'c>>,
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
+        T: FromRow,
+        F: FnMut(StdResult<T, FromRowError>) -> U,
+    {
+        self.fold_opt(
+            conn,
+            Vec::new(),
+            |mut acc, row: StdResult<T, FromRowError>| {
+                acc.push(map(row));
+                acc
+            },
+        )
     }
 }
 
@@ -168,6 +226,19 @@ pub trait BinQuery: Sized {
             .transpose()
     }
 
+    /// Same as [`BinQuery::first`] but useful when you not sure what your schema is.
+    fn first_opt<'a, 'b, 'c: 'b, T, C>(self, conn: C) -> Result<Option<StdResult<T, FromRowError>>>
+    where
+        C: TryInto<ConnMut<'a, 'b, 'c>>,
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
+        T: FromRow,
+    {
+        self.run(conn)?
+            .next()
+            .map(|row| row.map(from_row_opt))
+            .transpose()
+    }
+
     /// This methods corresponds to `Queryable::exec`.
     fn fetch<'a, 'b, 'c: 'b, T, C>(self, conn: C) -> Result<Vec<T>>
     where
@@ -176,6 +247,16 @@ pub trait BinQuery: Sized {
         T: FromRow,
     {
         self.run(conn)?.map(|rrow| rrow.map(from_row)).collect()
+    }
+
+    /// Same as [`BinQuery::fetch`] but useful when you not sure what your schema is.
+    fn fetch_opt<'a, 'b, 'c: 'b, T, C>(self, conn: C) -> Result<Vec<StdResult<T, FromRowError>>>
+    where
+        C: TryInto<ConnMut<'a, 'b, 'c>>,
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
+        T: FromRow,
+    {
+        self.run(conn)?.map(|rrow| rrow.map(from_row_opt)).collect()
     }
 
     /// This methods corresponds to `Queryable::exec_fold`.
@@ -193,6 +274,21 @@ pub trait BinQuery: Sized {
         Ok(init)
     }
 
+    /// Same as [`BinQuery::fold`] but useful when you not sure what your schema is.
+    fn fold_opt<'a, 'b, 'c: 'b, T, U, F, C>(self, conn: C, mut init: U, mut next: F) -> Result<U>
+    where
+        C: TryInto<ConnMut<'a, 'b, 'c>>,
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
+        T: FromRow,
+        F: FnMut(U, StdResult<T, FromRowError>) -> U,
+    {
+        for row in self.run(conn)? {
+            init = next(init, from_row_opt(row?));
+        }
+
+        Ok(init)
+    }
+
     /// This methods corresponds to `Queryable::exec_map`.
     fn map<'a, 'b, 'c: 'b, T, U, F, C>(self, conn: C, mut map: F) -> Result<Vec<U>>
     where
@@ -205,6 +301,24 @@ pub trait BinQuery: Sized {
             acc.push(map(row));
             acc
         })
+    }
+
+    /// Same as [`BinQuery::map`] but useful when you not sure what your schema is.
+    fn map_opt<'a, 'b, 'c: 'b, T, U, F, C>(self, conn: C, mut map: F) -> Result<Vec<U>>
+    where
+        C: TryInto<ConnMut<'a, 'b, 'c>>,
+        Error: From<<C as TryInto<ConnMut<'a, 'b, 'c>>>::Error>,
+        T: FromRow,
+        F: FnMut(StdResult<T, FromRowError>) -> U,
+    {
+        self.fold_opt(
+            conn,
+            Vec::new(),
+            |mut acc, row: StdResult<T, FromRowError>| {
+                acc.push(map(row));
+                acc
+            },
+        )
     }
 }
 

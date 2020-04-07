@@ -6,11 +6,13 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use std::borrow::Cow;
+use mysql_common::row::convert::FromRowError;
+
+use std::{borrow::Cow, result::Result as StdResult};
 
 use crate::{
     conn::query_result::{Binary, Text},
-    from_row,
+    from_row, from_row_opt,
     prelude::FromRow,
     Params, QueryResult, Result, Statement,
 };
@@ -35,6 +37,15 @@ pub trait Queryable {
         self.query_map(query, from_row)
     }
 
+    /// Same as [`Queryable::query`] but useful when you not sure what your schema is.
+    fn query_opt<T, Q>(&mut self, query: Q) -> Result<Vec<StdResult<T, FromRowError>>>
+    where
+        Q: AsRef<str>,
+        T: FromRow,
+    {
+        self.query_map(query, from_row_opt)
+    }
+
     /// Performs text query and returns the firt row of the first result set.
     fn query_first<T, Q>(&mut self, query: Q) -> Result<Option<T>>
     where
@@ -43,7 +54,19 @@ pub trait Queryable {
     {
         self.query_iter(query)?
             .next()
-            .map(|row| row.map(crate::from_row))
+            .map(|row| row.map(from_row))
+            .transpose()
+    }
+
+    /// Same as [`Queryable::query_first`] but useful when you not sure what your schema is.
+    fn query_first_opt<T, Q>(&mut self, query: Q) -> Result<Option<StdResult<T, FromRowError>>>
+    where
+        Q: AsRef<str>,
+        T: FromRow,
+    {
+        self.query_iter(query)?
+            .next()
+            .map(|row| row.map(from_row_opt))
             .transpose()
     }
 
@@ -60,6 +83,19 @@ pub trait Queryable {
         })
     }
 
+    /// Same as [`Queryable::query_map`] but useful when you not sure what your schema is.
+    fn query_map_opt<T, F, Q, U>(&mut self, query: Q, mut f: F) -> Result<Vec<U>>
+    where
+        Q: AsRef<str>,
+        T: FromRow,
+        F: FnMut(StdResult<T, FromRowError>) -> U,
+    {
+        self.query_fold_opt(query, Vec::new(), |mut acc, row| {
+            acc.push(f(row));
+            acc
+        })
+    }
+
     /// Performs text query and folds the first result set to a single value.
     fn query_fold<T, F, Q, U>(&mut self, query: Q, init: U, mut f: F) -> Result<U>
     where
@@ -70,6 +106,20 @@ pub trait Queryable {
         self.query_iter(query)?
             .map(|row| row.map(from_row::<T>))
             .try_fold(init, |acc, row: Result<T>| row.map(|row| f(acc, row)))
+    }
+
+    /// Same as [`Queryable::query_fold`] but useful when you not sure what your schema is.
+    fn query_fold_opt<T, F, Q, U>(&mut self, query: Q, init: U, mut f: F) -> Result<U>
+    where
+        Q: AsRef<str>,
+        T: FromRow,
+        F: FnMut(U, StdResult<T, FromRowError>) -> U,
+    {
+        self.query_iter(query)?
+            .map(|row| row.map(from_row_opt::<T>))
+            .try_fold(init, |acc, row: Result<StdResult<T, FromRowError>>| {
+                row.map(|row| f(acc, row))
+            })
     }
 
     /// Performs text query and drops the query result.
@@ -115,7 +165,17 @@ pub trait Queryable {
         P: Into<Params>,
         T: FromRow,
     {
-        self.exec_map(stmt, params, crate::from_row)
+        self.exec_map(stmt, params, from_row)
+    }
+
+    /// Same as [`Queryable::exec`] but useful when you not sure what your schema is.
+    fn exec_opt<T, S, P>(&mut self, stmt: S, params: P) -> Result<Vec<StdResult<T, FromRowError>>>
+    where
+        S: AsStatement,
+        P: Into<Params>,
+        T: FromRow,
+    {
+        self.exec_map(stmt, params, from_row_opt)
     }
 
     /// Exectues the given `stmt` and returns the first row of the first result set.
@@ -128,6 +188,23 @@ pub trait Queryable {
         self.exec_iter(stmt, params)?
             .next()
             .map(|row| row.map(crate::from_row))
+            .transpose()
+    }
+
+    /// Same as [`Queryable::exec_first`] but useful when you not sure what your schema is.
+    fn exec_first_opt<T, S, P>(
+        &mut self,
+        stmt: S,
+        params: P,
+    ) -> Result<Option<StdResult<T, FromRowError>>>
+    where
+        S: AsStatement,
+        P: Into<Params>,
+        T: FromRow,
+    {
+        self.exec_iter(stmt, params)?
+            .next()
+            .map(|row| row.map(from_row_opt))
             .transpose()
     }
 
@@ -145,6 +222,20 @@ pub trait Queryable {
         })
     }
 
+    /// Same as [`Queryable::exec_map`] but useful when you not sure what your schema is.
+    fn exec_map_opt<T, S, P, F, U>(&mut self, stmt: S, params: P, mut f: F) -> Result<Vec<U>>
+    where
+        S: AsStatement,
+        P: Into<Params>,
+        T: FromRow,
+        F: FnMut(StdResult<T, FromRowError>) -> U,
+    {
+        self.exec_fold_opt(stmt, params, Vec::new(), |mut acc, row| {
+            acc.push(f(row));
+            acc
+        })
+    }
+
     /// Exectues the given `stmt` and folds the first result set to a signel value.
     fn exec_fold<T, S, P, U, F>(&mut self, stmt: S, params: P, init: U, mut f: F) -> Result<U>
     where
@@ -155,6 +246,19 @@ pub trait Queryable {
     {
         let mut result = self.exec_iter(stmt, params)?;
         let output = result.try_fold(init, |init, row| row.map(|row| f(init, from_row(row))));
+        output
+    }
+
+    /// Same as [`Queryable::exec_fold`] but useful when you not sure what your schema is.
+    fn exec_fold_opt<T, S, P, U, F>(&mut self, stmt: S, params: P, init: U, mut f: F) -> Result<U>
+    where
+        S: AsStatement,
+        P: Into<Params>,
+        T: FromRow,
+        F: FnMut(U, StdResult<T, FromRowError>) -> U,
+    {
+        let mut result = self.exec_iter(stmt, params)?;
+        let output = result.try_fold(init, |init, row| row.map(|row| f(init, from_row_opt(row))));
         output
     }
 
