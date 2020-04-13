@@ -14,13 +14,12 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Condvar, Mutex,
     },
-    time::Duration as StdDuration,
+    time::{Duration, Instant},
 };
 
 use crate::{
     conn::query_result::{Binary, Text},
     prelude::*,
-    time::{Duration, SteadyTime},
     Conn, DriverError, Error, LocalInfileHandler, Opts, Params, QueryResult, Result, Statement,
     Transaction, TxOpts,
 };
@@ -115,9 +114,8 @@ impl Pool {
     ) -> Result<PooledConn> {
         let times = if let Some(timeout_ms) = timeout_ms {
             Some((
-                SteadyTime::now(),
-                Duration::milliseconds(timeout_ms.into()),
-                StdDuration::from_millis(timeout_ms.into()),
+                Instant::now(),
+                Duration::from_millis(timeout_ms.into()),
             ))
         } else {
             None
@@ -157,11 +155,11 @@ impl Pool {
                     pool.new_conn()?;
                     self.count.fetch_add(1, Ordering::SeqCst);
                 } else {
-                    pool = if let Some((start, timeout, std_timeout)) = times {
-                        if SteadyTime::now() - start > timeout {
+                    pool = if let Some((start, timeout)) = times {
+                        if start.elapsed() > timeout {
                             return Err(DriverError::Timeout.into());
                         }
-                        condvar.wait_timeout(pool, std_timeout)?.0
+                        condvar.wait_timeout(pool, timeout)?.0
                     } else {
                         condvar.wait(pool)?
                     }

@@ -320,6 +320,9 @@
 //!         println!("An unsigned integer: {}", from_value::<u64>(val))
 //!     }
 //!     Value::Float(..) => unreachable!("already tried"),
+//!     val @ Value::Double(..) => {
+//!         println!("A double precision float value: {}", from_value::<f64>(val))
+//!     }
 //!     val @ Value::Date(..) => {
 //!         use mysql::chrono::NaiveDateTime;
 //!         println!("A date value: {}", from_value::<NaiveDateTime>(val))
@@ -576,7 +579,7 @@
 //! let pool = Pool::new(get_opts())?;
 //! let val = pool.get_conn()?.exec_first("SELECT POW(?, ?)", (2, 16))?;
 //!
-//! assert_eq!(val, Some(Value::Float(65536.0)));
+//! assert_eq!(val, Some(Value::Double(65536.0)));
 //! # });
 //! ```
 //!

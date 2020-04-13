@@ -20,7 +20,7 @@ pub enum Or<A, B> {
 
 /// Result set kind.
 pub trait Protocol: 'static + Send + Sync {
-    fn next(conn: &mut Conn, columns: &Arc<Vec<Column>>) -> Result<Option<Vec<Value>>>;
+    fn next(conn: &mut Conn, columns: &Arc<[Column]>) -> Result<Option<Vec<Value>>>;
 }
 
 /// Text result set marker.
@@ -28,7 +28,7 @@ pub trait Protocol: 'static + Send + Sync {
 pub struct Text;
 
 impl Protocol for Text {
-    fn next(conn: &mut Conn, columns: &Arc<Vec<Column>>) -> Result<Option<Vec<Value>>> {
+    fn next(conn: &mut Conn, columns: &Arc<[Column]>) -> Result<Option<Vec<Value>>> {
         conn.next_text(columns.len())
     }
 }
@@ -38,7 +38,7 @@ impl Protocol for Text {
 pub struct Binary;
 
 impl Protocol for Binary {
-    fn next(conn: &mut Conn, columns: &Arc<Vec<Column>>) -> Result<Option<Vec<Value>>> {
+    fn next(conn: &mut Conn, columns: &Arc<[Column]>) -> Result<Option<Vec<Value>>> {
         conn.next_bin(columns)
     }
 }
@@ -47,7 +47,7 @@ impl Protocol for Binary {
 #[derive(Debug)]
 enum SetIteratorState {
     /// Iterator is in a non-empty set.
-    InSet(Arc<Vec<Column>>),
+    InSet(Arc<[Column]>),
     /// Iterator is in an empty set.
     InEmptySet(OkPacket<'static>),
     /// Iterator is in an errored result set.
@@ -67,7 +67,7 @@ impl SetIteratorState {
         }
     }
 
-    fn columns(&self) -> Option<&Arc<Vec<Column>>> {
+    fn columns(&self) -> Option<&Arc<[Column]>> {
         if let Self::InSet(ref cols) = self {
             Some(cols)
         } else {
@@ -315,7 +315,7 @@ impl<T: Protocol> Drop for ResultSet<'_, '_, '_, '_, T> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetColumns<'a> {
-    inner: Option<&'a Arc<Vec<Column>>>,
+    inner: Option<&'a Arc<[Column]>>,
 }
 
 impl<'a> SetColumns<'a> {

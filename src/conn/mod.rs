@@ -12,7 +12,7 @@ use mysql_common::{
     named_params::parse_named_params,
     packets::{
         column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
-        parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
+        parse_ok_packet, OkPacketKind, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
         ComStmtExecuteRequestBuilder, ComStmtSendLongData, HandshakePacket, HandshakeResponse,
         OkPacket, SslRequest,
     },
@@ -312,7 +312,7 @@ impl Conn {
         self.write_command(Command::COM_RESET_CONNECTION, &[])?;
         self.read_packet().and_then(|pld| match pld[0] {
             0 => {
-                let ok = parse_ok_packet(&*pld, self.0.capability_flags)?;
+                let ok = parse_ok_packet(&*pld, self.0.capability_flags, OkPacketKind::Other)?;
                 self.handle_ok(&ok);
                 self.0.last_command = 0;
                 self.0.stmt_cache.clear();
@@ -612,7 +612,7 @@ impl Conn {
         match payload[0] {
             // auth ok
             0x00 => {
-                let ok = parse_ok_packet(&*payload, self.0.capability_flags)?;
+                let ok = parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
                 self.handle_ok(&ok);
                 Ok(())
             }
@@ -640,7 +640,7 @@ impl Conn {
             0x01 => match payload[1] {
                 0x03 => {
                     let payload = self.read_packet()?;
-                    let ok = parse_ok_packet(&*payload, self.0.capability_flags)?;
+                    let ok = parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
                     self.handle_ok(&ok);
                     Ok(())
                 }
@@ -673,7 +673,7 @@ impl Conn {
                     }
 
                     let payload = self.read_packet()?;
-                    let ok = parse_ok_packet(&*payload, self.0.capability_flags)?;
+                    let ok = parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
                     self.handle_ok(&ok);
                     Ok(())
                 }
@@ -825,7 +825,7 @@ impl Conn {
         }
         self.write_packet(Vec::new())?;
         let pld = self.read_packet()?;
-        let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags)?;
+        let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::Other)?;
         self.handle_ok(&ok);
         Ok(ok.into_owned())
     }
@@ -838,7 +838,7 @@ impl Conn {
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
-                let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags)?;
+                let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::Other)?;
                 self.handle_ok(&ok);
                 Ok(Or::B(ok.into_owned()))
             }
@@ -973,7 +973,7 @@ impl Conn {
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
             self.0.has_results = false;
-            let p = parse_ok_packet(pld.as_ref(), self.0.capability_flags)?;
+            let p = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::ResultSetTerminator)?;
             self.handle_ok(&p);
             return Ok(None);
         }
@@ -988,7 +988,7 @@ impl Conn {
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
             self.0.has_results = false;
-            let p = parse_ok_packet(pld.as_ref(), self.0.capability_flags)?;
+            let p = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::ResultSetTerminator)?;
             self.handle_ok(&p);
             return Ok(None);
         }
@@ -1072,7 +1072,7 @@ mod test {
             from_row, from_value, params,
             prelude::*,
             test_misc::get_opts,
-            time::Timespec,
+            time::PrimitiveDateTime,
             Conn,
             DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
@@ -1303,7 +1303,7 @@ mod test {
         #[test]
         fn should_execute_statements_and_parse_results() {
             const CREATE_QUERY: &str = r"CREATE TEMPORARY TABLE
-                mysql.tbl (a TEXT, b INT, c INT UNSIGNED, d DATE, e DOUBLE)";
+                mysql.tbl (a TEXT, b INT, c INT UNSIGNED, d DATE, e FLOAT)";
             const INSERT_SMTM: &str = r"INSERT
                 INTO mysql.tbl (a, b, c, d, e)
                 VALUES (?, ?, ?, ?, ?)";
@@ -1315,9 +1315,9 @@ mod test {
                 Int(-123_i64),
                 Int(123_i64),
                 Date(2014_u16, 5_u8, 5_u8, 0_u8, 0_u8, 0_u8, 0_u32),
-                Float(123.123_f64),
+                Float(123.123_f32),
             );
-            let row2 = (Bytes(b"".to_vec()), NULL, NULL, NULL, Float(321.321_f64));
+            let row2 = (Bytes(b"".to_vec()), NULL, NULL, NULL, Float(321.321_f32));
 
             let mut conn = Conn::new(get_opts()).unwrap();
             conn.query_drop(CREATE_QUERY).unwrap();
@@ -1330,8 +1330,8 @@ mod test {
                     from_value::<String>(row1.0.clone()),
                     from_value::<i32>(row1.1.clone()),
                     from_value::<u32>(row1.2.clone()),
-                    from_value::<Timespec>(row1.3.clone()),
-                    from_value::<f64>(row1.4.clone()),
+                    from_value::<PrimitiveDateTime>(row1.3.clone()),
+                    from_value::<f32>(row1.4.clone()),
                 ),
             )
             .unwrap();
@@ -1342,7 +1342,7 @@ mod test {
                     row2.1.clone(),
                     row2.2.clone(),
                     row2.3.clone(),
-                    from_value::<f64>(row2.4.clone()),
+                    from_value::<f32>(row2.4.clone()),
                 ),
             )
             .unwrap();
