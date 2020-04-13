@@ -113,10 +113,7 @@ impl Pool {
         call_ping: bool,
     ) -> Result<PooledConn> {
         let times = if let Some(timeout_ms) = timeout_ms {
-            Some((
-                Instant::now(),
-                Duration::from_millis(timeout_ms.into()),
-            ))
+            Some((Instant::now(), Duration::from_millis(timeout_ms.into())))
         } else {
             None
         };

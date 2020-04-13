@@ -12,9 +12,9 @@ use mysql_common::{
     named_params::parse_named_params,
     packets::{
         column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
-        parse_ok_packet, OkPacketKind, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
+        parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
         ComStmtExecuteRequestBuilder, ComStmtSendLongData, HandshakePacket, HandshakeResponse,
-        OkPacket, SslRequest,
+        OkPacket, OkPacketKind, SslRequest,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed},
     value::{read_bin_values, read_text_values, ServerSide},
@@ -640,7 +640,8 @@ impl Conn {
             0x01 => match payload[1] {
                 0x03 => {
                     let payload = self.read_packet()?;
-                    let ok = parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
+                    let ok =
+                        parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
                     self.handle_ok(&ok);
                     Ok(())
                 }
@@ -673,7 +674,8 @@ impl Conn {
                     }
 
                     let payload = self.read_packet()?;
-                    let ok = parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
+                    let ok =
+                        parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
                     self.handle_ok(&ok);
                     Ok(())
                 }
@@ -838,7 +840,8 @@ impl Conn {
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
-                let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::Other)?;
+                let ok =
+                    parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::Other)?;
                 self.handle_ok(&ok);
                 Ok(Or::B(ok.into_owned()))
             }
@@ -973,7 +976,11 @@ impl Conn {
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
             self.0.has_results = false;
-            let p = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::ResultSetTerminator)?;
+            let p = parse_ok_packet(
+                pld.as_ref(),
+                self.0.capability_flags,
+                OkPacketKind::ResultSetTerminator,
+            )?;
             self.handle_ok(&p);
             return Ok(None);
         }
@@ -988,7 +995,11 @@ impl Conn {
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
             self.0.has_results = false;
-            let p = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::ResultSetTerminator)?;
+            let p = parse_ok_packet(
+                pld.as_ref(),
+                self.0.capability_flags,
+                OkPacketKind::ResultSetTerminator,
+            )?;
             self.handle_ok(&p);
             return Ok(None);
         }
@@ -1141,7 +1152,9 @@ mod test {
             let q = "SELECT b, c, d, e FROM mysql.issue";
             let result = conn.query_iter(q)?;
 
-            let loaded_structs = result.map(|row| crate::from_row::<(Vec<u8>, Vec<u8>, u64, Vec<u8>)>(row.unwrap())).collect::<Vec<_>>();
+            let loaded_structs = result
+                .map(|row| crate::from_row::<(Vec<u8>, Vec<u8>, u64, Vec<u8>)>(row.unwrap()))
+                .collect::<Vec<_>>();
 
             assert_eq!(loaded_structs.len(), 2);
 
