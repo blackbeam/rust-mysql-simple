@@ -1111,6 +1111,44 @@ mod test {
         }
 
         #[test]
+        fn mysql_async_issue_107() -> crate::Result<()> {
+            let mut conn = Conn::new(get_opts())?;
+            conn.query_drop(
+                r"CREATE TEMPORARY TABLE mysql.issue (
+                        a BIGINT(20) UNSIGNED,
+                        b VARBINARY(16),
+                        c BINARY(32),
+                        d BIGINT(20) UNSIGNED,
+                        e BINARY(32)
+                    )",
+            )?;
+            conn.query_drop(
+                r"INSERT INTO mysql.issue VALUES (
+                        0,
+                        0xC066F966B0860000,
+                        0x7939DA98E524C5F969FC2DE8D905FD9501EBC6F20001B0A9C941E0BE6D50CF44,
+                        0,
+                        ''
+                    ), (
+                        1,
+                        '',
+                        0x076311DF4D407B0854371BA13A5F3FB1A4555AC22B361375FD47B263F31822F2,
+                        0,
+                        ''
+                    )",
+            )?;
+
+            let q = "SELECT b, c, d, e FROM mysql.issue";
+            let result = conn.query_iter(q)?;
+
+            let loaded_structs = result.map(|row| crate::from_row::<(Vec<u8>, Vec<u8>, u64, Vec<u8>)>(row.unwrap())).collect::<Vec<_>>();
+
+            assert_eq!(loaded_structs.len(), 2);
+
+            Ok(())
+        }
+
+        #[test]
         fn query_traits() -> Result<(), Box<dyn std::error::Error>> {
             macro_rules! test_query {
                 ($conn : expr) => {
