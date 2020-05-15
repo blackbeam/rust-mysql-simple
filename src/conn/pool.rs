@@ -168,7 +168,10 @@ impl Pool {
         };
 
         if call_ping && self.check_health && !conn.ping() {
-            conn.reset()?;
+            if let Err(err) = conn.reset() {
+                self.count.fetch_sub(1, Ordering::SeqCst);
+                return Err(err);
+            }
         }
 
         Ok(PooledConn {
