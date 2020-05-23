@@ -141,13 +141,11 @@ impl Pool {
         let mut conn = if let Some(conn) = conn {
             conn
         } else {
-            let out_conn;
             let mut pool = inner_pool.lock()?;
             loop {
                 if let Some(conn) = pool.pool.pop_front() {
                     drop(pool);
-                    out_conn = Some(conn);
-                    break;
+                    break conn;
                 } else if self.count.load(Ordering::Relaxed) < self.max.load(Ordering::Relaxed) {
                     pool.new_conn()?;
                     self.count.fetch_add(1, Ordering::SeqCst);
@@ -162,11 +160,13 @@ impl Pool {
                     }
                 }
             }
-            out_conn.unwrap()
         };
 
         if call_ping && self.check_health && !conn.ping() {
-            conn.reset()?;
+            if let Err(err) = conn.reset() {
+                self.count.fetch_sub(1, Ordering::SeqCst);
+                return Err(err);
+            }
         }
 
         Ok(PooledConn {
