@@ -95,7 +95,7 @@
 //!     )?;
 //!
 //! // Let's make sure, that `payments` equals to `selected_payments`.
-//! // Mysql gives no guaranties on order of returned rows
+//! // Mysql gives no guarantees on order of returned rows
 //! // without `ORDER BY`, so assume we are lucky.
 //! assert_eq!(payments, selected_payments);
 //! println!("Yay!");
@@ -170,7 +170,7 @@
 //! ### `Transaction`
 //!
 //! It's a simple wrapper on top of a routine, that starts with `START TRANSACTION`
-//! and ends with `COMMIT` or `ROLBACK`.
+//! and ends with `COMMIT` or `ROLLBACK`.
 //!
 //! ```
 //! # mysql::doctest_wrapper!(__result, {
@@ -351,7 +351,8 @@
 //! *   `from_row(Row) -> T` - same as `from_value`, but for rows;
 //! *   `from_row_opt(Row) -> Option<T>` - same as `from_value_opt`, but for rows.
 //!
-//! [`Queryable`][#queryable] trait offers implicit conversion for rows of a query result,
+//! [`Queryable`](#queryable)
+//! trait offers implicit conversion for rows of a query result,
 //! that is based on this trait.
 //!
 //! ```
@@ -456,7 +457,7 @@
 //!
 //! It's an iterator over rows of a query result with support of multi-result sets. It's intended
 //! for cases when you need full control during result set iteration. For other cases
-//! [`Queryalbe`](#queryable) provides a set of methods that will immediately consume
+//! [`Queryable`](#queryable) provides a set of methods that will immediately consume
 //! the first result set and drop everything else.
 //!
 //! This iterator is lazy so it won't read the result from server until you iterate over it.
@@ -587,7 +588,7 @@
 //!
 //! In MySql each prepared statement belongs to a particular connection and can't be executed
 //! on another connection. Trying to do so will lead to an error. The driver won't tie statement
-//! to its connection in any way, but one can look on to the connection id, containe
+//! to its connection in any way, but one can look on to the connection id, contained
 //!  in the `Statement` structure.
 //!
 //! ```rust
@@ -723,13 +724,13 @@
 //! The `Queryable` trait defines common methods for `Conn`, `PooledConn` and `Transaction`.
 //! The set of basic methods consts of:
 //!
-//! *   `query_iter` - basic methods to execute text query and get `QueryRestul`;
+//! *   `query_iter` - basic methods to execute text query and get `QueryResult`;
 //! *   `prep` - basic method to prepare a statement;
 //! *   `exec_iter` - basic method to execute statement and get `QueryResult`;
 //! *   `close` - basic method to close the statement;
 //!
 //! The trait also defines the set of helper methods, that is based on basic methods.
-//! These methods will consume only the firt result set, other result sets will be dropped:
+//! These methods will consume only the first result set, other result sets will be dropped:
 //!
 //! *   `{query|exec}` - to collect the result into a `Vec<T: FromRow>`;
 //! *   `{query|exec}_first` - to get the first `T: FromRow`, if any;
