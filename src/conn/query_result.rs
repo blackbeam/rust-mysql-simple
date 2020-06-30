@@ -109,14 +109,14 @@ impl From<Or<Vec<Column>, OkPacket<'static>>> for SetIteratorState {
 /// *   over result sets (via `Self::next_set`)
 /// *   over rows of a current result set (via `Iterator` impl)
 #[derive(Debug)]
-pub struct QueryResult<'c, 't, 'tc, T: Protocol> {
+pub struct QueryResult<'c, 't, 'tc, T: crate::prelude::Protocol> {
     conn: ConnMut<'c, 't, 'tc>,
     state: SetIteratorState,
     set_index: usize,
     protocol: PhantomData<T>,
 }
 
-impl<'c, 't, 'tc, T: Protocol> QueryResult<'c, 't, 'tc, T> {
+impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     fn from_state(
         conn: ConnMut<'c, 't, 'tc>,
         state: SetIteratorState,
@@ -235,19 +235,19 @@ impl<'c, 't, 'tc, T: Protocol> QueryResult<'c, 't, 'tc, T> {
     }
 }
 
-impl<'c, 't, 'tc, T: Protocol> Drop for QueryResult<'c, 't, 'tc, T> {
+impl<'c, 't, 'tc, T: crate::prelude::Protocol> Drop for QueryResult<'c, 't, 'tc, T> {
     fn drop(&mut self) {
         while self.next_set().is_some() {}
     }
 }
 
 #[derive(Debug)]
-pub struct ResultSet<'a, 'b, 'c, 'd, T: Protocol> {
+pub struct ResultSet<'a, 'b, 'c, 'd, T: crate::prelude::Protocol> {
     set_index: usize,
     inner: &'d mut QueryResult<'a, 'b, 'c, T>,
 }
 
-impl<'a, 'b, 'c, T: Protocol> std::ops::Deref for ResultSet<'a, 'b, 'c, '_, T> {
+impl<'a, 'b, 'c, T: crate::prelude::Protocol> std::ops::Deref for ResultSet<'a, 'b, 'c, '_, T> {
     type Target = QueryResult<'a, 'b, 'c, T>;
 
     fn deref(&self) -> &Self::Target {
@@ -255,7 +255,7 @@ impl<'a, 'b, 'c, T: Protocol> std::ops::Deref for ResultSet<'a, 'b, 'c, '_, T> {
     }
 }
 
-impl<T: Protocol> Iterator for ResultSet<'_, '_, '_, '_, T> {
+impl<T: crate::prelude::Protocol> Iterator for ResultSet<'_, '_, '_, '_, T> {
     type Item = Result<Row>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -267,7 +267,7 @@ impl<T: Protocol> Iterator for ResultSet<'_, '_, '_, '_, T> {
     }
 }
 
-impl<T: Protocol> Iterator for QueryResult<'_, '_, '_, T> {
+impl<T: crate::prelude::Protocol> Iterator for QueryResult<'_, '_, '_, T> {
     type Item = Result<Row>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -307,7 +307,7 @@ impl<T: Protocol> Iterator for QueryResult<'_, '_, '_, T> {
     }
 }
 
-impl<T: Protocol> Drop for ResultSet<'_, '_, '_, '_, T> {
+impl<T: crate::prelude::Protocol> Drop for ResultSet<'_, '_, '_, '_, T> {
     fn drop(&mut self) {
         while self.next().is_some() {}
     }
