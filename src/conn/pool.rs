@@ -194,16 +194,12 @@ impl Pool {
     }
 
     /// A way to turn off searching for cached statement (on by default).
-    ///
-    /// If turned on, then calls to `Pool::{prepare, prep_exec, first_exec}` will search for cached
-    /// statement through all connections in the pool. Useless if the value of the `stmt_cache_size`
-    /// option is 0.
+    #[doc(hidden)]
     pub fn use_cache(&mut self, use_cache: bool) {
         self.use_cache = use_cache;
     }
 
-    /// A way to turn off connection health check on each call to `get_conn` and `prepare`
-    /// (`prep_exec` is not affected) (on by default).
+    /// A way to turn off connection health check on each call to `get_conn` (on by default).
     pub fn check_health(&mut self, check_health: bool) {
         self.check_health = check_health;
     }
