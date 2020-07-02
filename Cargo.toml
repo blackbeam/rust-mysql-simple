@@ -26,6 +26,7 @@ opt-level = 3
 
 [features]
 nightly = []
+native-tls-vendored = ["native-tls/vendored"]
 
 [dev-dependencies]
 lazy_static = "1.4.0"
