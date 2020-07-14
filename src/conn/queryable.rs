@@ -28,7 +28,7 @@ pub trait Queryable {
     /// Perfoms text query.
     fn query_iter<Q: AsRef<str>>(&mut self, query: Q) -> Result<QueryResult<'_, '_, '_, Text>>;
 
-    /// Performst text query and collects the first result set.
+    /// Performs text query and collects the first result set.
     fn query<T, Q>(&mut self, query: Q) -> Result<Vec<T>>
     where
         Q: AsRef<str>,
