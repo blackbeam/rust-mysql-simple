@@ -544,7 +544,6 @@ impl Conn {
     }
 
     fn connect_attrs(&self) -> HashMap<String, String> {
-
         let program_name = match self.0.opts.get_connect_attrs().get("program_name") {
             Some(program_name) => program_name.clone(),
             None => {
