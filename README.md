@@ -425,7 +425,7 @@ assert_eq!(structure, Deserialized(Example { foo: 42 }));
 
 It's an iterator over rows of a query result with support of multi-result sets. It's intended
 for cases when you need full control during result set iteration. For other cases
-[`Queryalbe`](#queryable) provides a set of methods that will immediately consume
+[`Queryable`](#queryable) provides a set of methods that will immediately consume
 the first result set and drop everything else.
 
 This iterator is lazy so it won't read the result from server until you iterate over it.
