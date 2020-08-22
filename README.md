@@ -158,7 +158,7 @@ and metadata for the last result set.
 #### `Transaction`
 
 It's a simple wrapper on top of a routine, that starts with `START TRANSACTION`
-and ends with `COMMIT` or `ROLBACK`.
+and ends with `COMMIT` or `ROLLBACK`.
 
 ```rust
 use mysql::*;
@@ -667,7 +667,7 @@ assert_eq!(result, vec![0, 1, 2]);
 The `Queryable` trait defines common methods for `Conn`, `PooledConn` and `Transaction`.
 The set of basic methods consts of:
 
-*   `query_iter` - basic methods to execute text query and get `QueryRestul`;
+*   `query_iter` - basic methods to execute text query and get `QueryResult`;
 *   `prep` - basic method to prepare a statement;
 *   `exec_iter` - basic method to execute statement and get `QueryResult`;
 *   `close` - basic method to close the statement;
