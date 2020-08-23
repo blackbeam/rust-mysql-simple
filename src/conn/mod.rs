@@ -1764,7 +1764,13 @@ mod test {
                 .bind_address(Some(([127, 0, 0, 1], port)));
             let conn = Conn::new(opts).unwrap();
             let debug_format: String = format!("{:?}", conn);
-            assert!(debug_format.contains(&*format!("addr: V4(127.0.0.1:{})", port)));
+            let expected_1 = format!("addr: V4(127.0.0.1:{})", port);
+            let expected_2 = format!("addr: 127.0.0.1:{}", port);
+            assert!(
+                debug_format.contains(&expected_1) || debug_format.contains(&expected_2),
+                "debug_format: {}",
+                debug_format
+            );
         }
 
         #[test]
@@ -1778,7 +1784,13 @@ mod test {
             let mut conn = Conn::new(opts).unwrap();
             assert!(conn.ping());
             let debug_format: String = format!("{:?}", conn);
-            assert!(debug_format.contains(&*format!("addr: V4(127.0.0.1:{})", port)));
+            let expected_1 = format!("addr: V4(127.0.0.1:{})", port);
+            let expected_2 = format!("addr: 127.0.0.1:{}", port);
+            assert!(
+                debug_format.contains(&expected_1) || debug_format.contains(&expected_2),
+                "debug_format: {}",
+                debug_format
+            );
         }
 
         #[test]
