@@ -362,13 +362,20 @@
 //!
 //! let mut conn = Conn::new(get_opts())?;
 //!
-//! // Single-column row can be converted to a singular value
+//! // Single-column row can be converted to a singular value:
 //! let val: Option<String> = conn.query_first("SELECT 'foo'")?;
 //! assert_eq!(val.unwrap(), "foo");
 //!
-//! // Example of a mutli-column row conversion to an inferred type.
+//! // Example of a mutli-column row conversion to an inferred type:
 //! let row = conn.query_first("SELECT 255, 256")?;
 //! assert_eq!(row, Some((255u8, 256u16)));
+//!
+//! // The FromRow trait does not support to-tuple conversion for rows with more than 12 columsn,
+//! // but you can do this by hand using row indexing or `Row::take` method:
+//! let row: Row = conn.exec_first("select 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12", ())?.unwrap();
+//! for i in 0..row.len() {
+//!     assert_eq!(row[i], Value::Int(i as i64));
+//! }
 //!
 //! // Some unknown row
 //! let row: Row = conn.query_first(
