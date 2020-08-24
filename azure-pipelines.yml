@@ -187,6 +187,9 @@ jobs:
                 --ssl-cert=/root/tests/server-cert.pem \
                 --ssl-key=/root/tests/server-key.pem
         while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
+        docker logs container
+        docker exec container bash -l -c "mysql -uroot -ppassword -e 'SHOW VARIABLES LIKE \"%ssl%\"'"
+        docker exec container bash -l -c "ls -la /root/tests"
       displayName: Run MariaDb in Docker
     - bash: |
         docker exec container bash -l -c "apt-get update"
