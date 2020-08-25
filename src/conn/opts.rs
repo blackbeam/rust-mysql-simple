@@ -424,19 +424,19 @@ impl Opts {
 /// Provides a way to build [`Opts`](struct.Opts.html).
 ///
 /// ```ignore
-/// let mut ssl_opts = SslOpts::new();
-/// ssl_opts.set_pkcs12_path("/foo/cert.p12")
-///         .set_root_ca_path("/foo/root_ca.der");
+/// let mut ssl_opts = SslOpts::default();
+/// ssl_opts = ssl_opts.with_pkcs12_path(Some(Path::new("/foo/cert.p12")))
+///         .with_root_ca_path(Some(Path::new("/foo/root_ca.der")));
 ///
 /// // You can create new default builder
 /// let mut builder = OptsBuilder::new();
-/// builder.ip_or_hostname(Some("foo"))
+/// builder = builder.ip_or_hostname(Some("foo"))
 ///        .db_name(Some("bar"))
 ///        .ssl_opts(Some(ssl_opts));
 ///
 /// // Or use existing T: Into<Opts>
-/// let mut builder = OptsBuilder::from_opts(existing_opts);
-/// builder.ip_or_hostname(Some("foo"))
+/// let builder = OptsBuilder::from_opts(existing_opts)
+///        .ip_or_hostname(Some("foo"))
 ///        .db_name(Some("bar"));
 /// ```
 ///
