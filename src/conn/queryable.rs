@@ -136,13 +136,13 @@ pub trait Queryable {
     /// This function will close the given statement on the server side.
     fn close(&mut self, stmt: Statement) -> Result<()>;
 
-    /// Exectues the given `stmt` with the given `params`.
+    /// Executes the given `stmt` with the given `params`.
     fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
     where
         S: AsStatement,
         P: Into<Params>;
 
-    /// Prepares the given statement, and exectues it with each item in the given params iterator.
+    /// Prepares the given statement, and executes it with each item in the given params iterator.
     fn exec_batch<S, P, I>(&mut self, stmt: S, params: I) -> Result<()>
     where
         Self: Sized,
@@ -158,7 +158,7 @@ pub trait Queryable {
         Ok(())
     }
 
-    /// Exectues the given `stmt` and collects the first result set.
+    /// Executes the given `stmt` and collects the first result set.
     fn exec<T, S, P>(&mut self, stmt: S, params: P) -> Result<Vec<T>>
     where
         S: AsStatement,
@@ -178,7 +178,7 @@ pub trait Queryable {
         self.exec_map(stmt, params, from_row_opt)
     }
 
-    /// Exectues the given `stmt` and returns the first row of the first result set.
+    /// Executes the given `stmt` and returns the first row of the first result set.
     fn exec_first<T, S, P>(&mut self, stmt: S, params: P) -> Result<Option<T>>
     where
         S: AsStatement,
@@ -208,7 +208,7 @@ pub trait Queryable {
             .transpose()
     }
 
-    /// Exectues the given `stmt` and maps each row of the first result set.
+    /// Executes the given `stmt` and maps each row of the first result set.
     fn exec_map<T, S, P, F, U>(&mut self, stmt: S, params: P, mut f: F) -> Result<Vec<U>>
     where
         S: AsStatement,
@@ -236,7 +236,7 @@ pub trait Queryable {
         })
     }
 
-    /// Exectues the given `stmt` and folds the first result set to a signel value.
+    /// Executes the given `stmt` and folds the first result set to a signel value.
     fn exec_fold<T, S, P, U, F>(&mut self, stmt: S, params: P, init: U, mut f: F) -> Result<U>
     where
         S: AsStatement,
@@ -262,7 +262,7 @@ pub trait Queryable {
         output
     }
 
-    /// Exectues the given `stmt` and drops the result.
+    /// Executes the given `stmt` and drops the result.
     fn exec_drop<S, P>(&mut self, stmt: S, params: P) -> Result<()>
     where
         S: AsStatement,
