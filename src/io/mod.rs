@@ -30,6 +30,7 @@ use crate::{
     },
     SslOpts,
 };
+use crate::conn::opts::CertificateFormat;
 
 mod tcp;
 
@@ -156,7 +157,10 @@ impl Stream {
                 let mut root_cert_der = vec![];
                 let mut root_cert_file = File::open(root_cert_path)?;
                 root_cert_file.read_to_end(&mut root_cert_der)?;
-                let root_cert = Certificate::from_der(&*root_cert_der)?;
+                let root_cert = match ssl_opts.root_cert_format().unwrap() {
+                    CertificateFormat::Der => Certificate::from_der(&*root_cert_der)?,
+                    CertificateFormat::Pem => Certificate::from_pem(&*root_cert_der)?,
+                };
                 builder.add_root_certificate(root_cert);
             }
             None => (),
