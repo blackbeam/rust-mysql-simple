@@ -22,6 +22,7 @@ use std::{
     time::Duration,
 };
 
+use crate::conn::opts::CertificateFormat;
 use crate::{
     error::{
         DriverError::{ConnectTimeout, CouldNotConnect},
@@ -30,7 +31,6 @@ use crate::{
     },
     SslOpts,
 };
-use crate::conn::opts::CertificateFormat;
 
 mod tcp;
 
