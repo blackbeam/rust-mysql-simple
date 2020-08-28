@@ -544,9 +544,14 @@ impl Conn {
     }
 
     fn connect_attrs(&self) -> HashMap<String, String> {
-        let arg0 = std::env::args_os().next();
-        let arg0 = arg0.as_ref().map(|x| x.to_string_lossy());
-        let program_name = arg0.unwrap_or("".into()).to_owned();
+        let program_name = match self.0.opts.get_connect_attrs().get("program_name") {
+            Some(program_name) => program_name.clone(),
+            None => {
+                let arg0 = std::env::args_os().next();
+                let arg0 = arg0.as_ref().map(|x| x.to_string_lossy());
+                arg0.unwrap_or("".into()).to_owned().to_string()
+            }
+        };
 
         let mut attrs = HashMap::new();
 
