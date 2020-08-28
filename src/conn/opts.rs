@@ -49,14 +49,11 @@ impl SslOpts {
         self
     }
 
-    /// Sets path to a der certificate of the root that connector will trust.
+    /// Sets path to a certificate of the root that connector will trust.
     ///
-    /// If you have a certificate in PEM format, you can translate it to der
-    /// using `openssl`:
-    ///
-    /// ```text
-    /// openssl x509 -outform der -in rootca.pem -out rootca.der
-    /// ```
+    /// Supported certificate formats are .der and .pem.
+    /// If you have multiple certificates in a .pem file, only the first one will
+    /// be loaded.
     pub fn with_root_cert_path<T: Into<Cow<'static, Path>>>(
         mut self,
         root_cert_path: Option<T>,
