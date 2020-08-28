@@ -22,7 +22,6 @@ use std::{
     time::Duration,
 };
 
-use crate::conn::opts::CertificateFormat;
 use crate::{
     error::{
         DriverError::{ConnectTimeout, CouldNotConnect},
@@ -154,13 +153,11 @@ impl Stream {
         let mut builder = TlsConnector::builder();
         match ssl_opts.root_cert_path() {
             Some(root_cert_path) => {
-                let mut root_cert_der = vec![];
+                let mut root_cert_data = vec![];
                 let mut root_cert_file = File::open(root_cert_path)?;
-                root_cert_file.read_to_end(&mut root_cert_der)?;
-                let root_cert = match ssl_opts.root_cert_format().unwrap() {
-                    CertificateFormat::Der => Certificate::from_der(&*root_cert_der)?,
-                    CertificateFormat::Pem => Certificate::from_pem(&*root_cert_der)?,
-                };
+                root_cert_file.read_to_end(&mut root_cert_data)?;
+                let root_cert = Certificate::from_pem(&*root_cert_data)
+                    .or_else(|_| Certificate::from_der(&*root_cert_data))?;
                 builder.add_root_certificate(root_cert);
             }
             None => (),

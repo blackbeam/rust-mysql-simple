@@ -25,7 +25,6 @@ pub struct SslOpts {
     pkcs12_path: Option<Cow<'static, Path>>,
     password: Option<Cow<'static, str>>,
     root_cert_path: Option<Cow<'static, Path>>,
-    root_cert_format: Option<CertificateFormat>,
     skip_domain_validation: bool,
     accept_invalid_certs: bool,
 }
@@ -50,33 +49,16 @@ impl SslOpts {
         self
     }
 
-    /// Sets path to a der certificate of the root that connector will trust.
+    /// Sets path to a certificate of the root that connector will trust.
     ///
-    /// If you have a certificate in PEM format, you can translate it to der
-    /// using `openssl`:
-    ///
-    /// ```text
-    /// openssl x509 -outform der -in rootca.pem -out rootca.der
-    /// ```
+    /// Supported certificate formats are .der and .pem.
+    /// If you have multiple certificates in a .pem file, only the first one will
+    /// be loaded.
     pub fn with_root_cert_path<T: Into<Cow<'static, Path>>>(
         mut self,
         root_cert_path: Option<T>,
     ) -> Self {
         self.root_cert_path = root_cert_path.map(Into::into);
-        self.root_cert_format = Some(CertificateFormat::Der);
-        self
-    }
-
-    /// Sets path to a pem certificate of the root that connector will trust.
-    ///
-    /// If you have multiple certificates in .pem file, only the first one will
-    /// be loaded.
-    pub fn with_pem_root_cert_path<T: Into<Cow<'static, Path>>>(
-        mut self,
-        root_cert_path: Option<T>,
-    ) -> Self {
-        self.root_cert_path = root_cert_path.map(Into::into);
-        self.root_cert_format = Some(CertificateFormat::Pem);
         self
     }
 
@@ -106,10 +88,6 @@ impl SslOpts {
         self.root_cert_path.as_ref().map(AsRef::as_ref)
     }
 
-    pub fn root_cert_format(&self) -> Option<CertificateFormat> {
-        self.root_cert_format.clone()
-    }
-
     pub fn skip_domain_validation(&self) -> bool {
         self.skip_domain_validation
     }
@@ -117,12 +95,6 @@ impl SslOpts {
     pub fn accept_invalid_certs(&self) -> bool {
         self.accept_invalid_certs
     }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum CertificateFormat {
-    Der,
-    Pem,
 }
 
 /// Options structure is quite large so we'll store it separately.
