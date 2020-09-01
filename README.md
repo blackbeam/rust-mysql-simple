@@ -1,3 +1,5 @@
+[![Gitter](https://badges.gitter.im/rust-mysql/community.svg)](https://gitter.im/rust-mysql/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+
 [![Crates.io](https://img.shields.io/crates/v/mysql.svg)](https://crates.io/crates/mysql)
 [![Build Status](https://dev.azure.com/aikorsky/mysql%20Rust/_apis/build/status/blackbeam%2Erust%2Dmysql%2Dsimple)](https://dev.azure.com/aikorsky/mysql%20Rust/_build/latest?definitionId=1)
 
@@ -300,6 +302,9 @@ match unknown_val {
         println!("An unsigned integer: {}", from_value::<u64>(val))
     }
     Value::Float(..) => unreachable!("already tried"),
+    val @ Value::Double(..) => {
+        println!("A double precision float value: {}", from_value::<f64>(val))
+    }
     val @ Value::Date(..) => {
         use mysql::chrono::NaiveDateTime;
         println!("A date value: {}", from_value::<NaiveDateTime>(val))
@@ -327,7 +332,8 @@ This conversion is based on the `FromValue` and so comes in two similar flavours
 *   `from_row(Row) -> T` - same as `from_value`, but for rows;
 *   `from_row_opt(Row) -> Option<T>` - same as `from_value_opt`, but for rows.
 
-[`Queryable`][#queryable] trait offers implicit conversion for rows of a query result,
+[`Queryable`](#queryable)
+trait offers implicit conversion for rows of a query result,
 that is based on this trait.
 
 ```rust
@@ -336,13 +342,20 @@ use mysql::prelude::*;
 
 let mut conn = Conn::new(get_opts())?;
 
-// Single-column row can be converted to a singular value
+// Single-column row can be converted to a singular value:
 let val: Option<String> = conn.query_first("SELECT 'foo'")?;
 assert_eq!(val.unwrap(), "foo");
 
-// Example of a mutli-column row conversion to an inferred type.
+// Example of a mutli-column row conversion to an inferred type:
 let row = conn.query_first("SELECT 255, 256")?;
 assert_eq!(row, Some((255u8, 256u16)));
+
+// The FromRow trait does not support to-tuple conversion for rows with more than 12 columns,
+// but you can do this by hand using row indexing or `Row::take` method:
+let row: Row = conn.exec_first("select 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12", ())?.unwrap();
+for i in 0..row.len() {
+    assert_eq!(row[i], Value::Int(i as i64));
+}
 
 // Some unknown row
 let row: Row = conn.query_first(
@@ -536,14 +549,14 @@ For example:
 let pool = Pool::new(get_opts())?;
 let val = pool.get_conn()?.exec_first("SELECT POW(?, ?)", (2, 16))?;
 
-assert_eq!(val, Some(Value::Float(65536.0)));
+assert_eq!(val, Some(Value::Double(65536.0)));
 ```
 
 #### Statements
 
 In MySql each prepared statement belongs to a particular connection and can't be executed
 on another connection. Trying to do so will lead to an error. The driver won't tie statement
-to its connection in any way, but one can look on to the connection id, containe
+to its connection in any way, but one can look on to the connection id, contained
  in the `Statement` structure.
 
 ```rust
@@ -673,7 +686,7 @@ The set of basic methods consts of:
 *   `close` - basic method to close the statement;
 
 The trait also defines the set of helper methods, that is based on basic methods.
-These methods will consume only the firt result set, other result sets will be dropped:
+These methods will consume only the first result set, other result sets will be dropped:
 
 *   `{query|exec}` - to collect the result into a `Vec<T: FromRow>`;
 *   `{query|exec}_first` - to get the first `T: FromRow`, if any;

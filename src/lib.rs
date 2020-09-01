@@ -95,7 +95,7 @@
 //!     )?;
 //!
 //! // Let's make sure, that `payments` equals to `selected_payments`.
-//! // Mysql gives no guarantees on order of returned rows
+//! // Mysql gives no guaranties on order of returned rows
 //! // without `ORDER BY`, so assume we are lucky.
 //! assert_eq!(payments, selected_payments);
 //! println!("Yay!");
@@ -370,7 +370,7 @@
 //! let row = conn.query_first("SELECT 255, 256")?;
 //! assert_eq!(row, Some((255u8, 256u16)));
 //!
-//! // The FromRow trait does not support to-tuple conversion for rows with more than 12 columsn,
+//! // The FromRow trait does not support to-tuple conversion for rows with more than 12 columns,
 //! // but you can do this by hand using row indexing or `Row::take` method:
 //! let row: Row = conn.exec_first("select 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12", ())?.unwrap();
 //! for i in 0..row.len() {
