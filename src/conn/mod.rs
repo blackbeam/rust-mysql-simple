@@ -1718,12 +1718,6 @@ mod test {
         }
 
         #[test]
-        #[should_panic]
-        fn should_panic_on_named_param_redefinition() {
-            let _: Params = params! {"a" => 1, "b" => 2, "a" => 3}.into();
-        }
-
-        #[test]
         fn should_handle_tcp_connect_timeout() {
             use crate::error::{DriverError::ConnectTimeout, Error::DriverError};
 
