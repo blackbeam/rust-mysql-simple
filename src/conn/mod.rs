@@ -395,7 +395,7 @@ impl Conn {
     }
 
     fn read_packet(&mut self) -> Result<Vec<u8>> {
-        let data = self.stream_mut().next().transpose()?.ok_or(io::Error::new(
+        let data = self.stream_mut().next().transpose()?.ok_or_else(|| io::Error::new(
             io::ErrorKind::BrokenPipe,
             "server disconnected",
         ))?;
@@ -492,7 +492,7 @@ impl Conn {
             .unwrap_or(&AuthPlugin::MysqlNativePassword);
         if let AuthPlugin::Other(ref name) = auth_plugin {
             let plugin_name = String::from_utf8_lossy(name).into();
-            Err(DriverError(UnknownAuthPlugin(plugin_name)))?
+            return Err(DriverError(UnknownAuthPlugin(plugin_name)));
         }
 
         let auth_data = auth_plugin.gen_data(self.0.opts.get_pass(), &*nonce);
@@ -549,7 +549,7 @@ impl Conn {
             None => {
                 let arg0 = std::env::args_os().next();
                 let arg0 = arg0.as_ref().map(|x| x.to_string_lossy());
-                arg0.unwrap_or("".into()).to_owned().to_string()
+                arg0.unwrap_or_else(|| "".into()).to_owned().to_string()
             }
         };
 
@@ -560,7 +560,7 @@ impl Conn {
         attrs.insert("_os".into(), env!("CARGO_CFG_TARGET_OS").into());
         attrs.insert("_pid".into(), process::id().to_string());
         attrs.insert("_platform".into(), env!("CARGO_CFG_TARGET_ARCH").into());
-        attrs.insert("program_name".into(), program_name.to_string());
+        attrs.insert("program_name".into(), program_name);
 
         for (name, value) in self.0.opts.get_connect_attrs().clone() {
             attrs.insert(name, value);
@@ -606,7 +606,7 @@ impl Conn {
             }
             AuthPlugin::Other(ref name) => {
                 let plugin_name = String::from_utf8_lossy(name).into();
-                Err(DriverError(UnknownAuthPlugin(plugin_name)))?
+                Err(DriverError(UnknownAuthPlugin(plugin_name)))
             }
         }
     }
@@ -718,21 +718,18 @@ impl Conn {
     }
 
     fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> Result<()> {
-        for (i, value) in params.into_iter().enumerate() {
-            match value {
-                Bytes(bytes) => {
-                    let chunks = bytes.chunks(MAX_PAYLOAD_LEN - 6);
-                    let chunks = chunks.chain(if bytes.is_empty() {
-                        Some(&[][..])
-                    } else {
-                        None
-                    });
-                    for chunk in chunks {
-                        let com = ComStmtSendLongData::new(stmt_id, i, chunk);
-                        self.write_command_raw(com)?;
-                    }
+        for (i, value) in params.iter().enumerate() {
+            if let Bytes(bytes) = value {
+                let chunks = bytes.chunks(MAX_PAYLOAD_LEN - 6);
+                let chunks = chunks.chain(if bytes.is_empty() {
+                    Some(&[][..])
+                } else {
+                    None
+                });
+                for chunk in chunks {
+                    let com = ComStmtSendLongData::new(stmt_id, i, chunk);
+                    self.write_command_raw(com)?;
                 }
-                _ => (),
             }
         }
 

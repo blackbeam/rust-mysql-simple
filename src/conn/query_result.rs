@@ -166,7 +166,7 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
 
         if let OnBoundary | Done = &self.state {
             debug_assert!(
-                self.conn.more_results_exists() == false,
+                !self.conn.more_results_exists(),
                 "the next state must be handled by the Iterator::next"
             );
 

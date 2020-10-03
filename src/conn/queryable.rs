@@ -245,8 +245,7 @@ pub trait Queryable {
         F: FnMut(U, T) -> U,
     {
         let mut result = self.exec_iter(stmt, params)?;
-        let output = result.try_fold(init, |init, row| row.map(|row| f(init, from_row(row))));
-        output
+        result.try_fold(init, |init, row| row.map(|row| f(init, from_row(row))))
     }
 
     /// Same as [`Queryable::exec_fold`] but useful when you not sure what your schema is.
@@ -258,8 +257,7 @@ pub trait Queryable {
         F: FnMut(U, StdResult<T, FromRowError>) -> U,
     {
         let mut result = self.exec_iter(stmt, params)?;
-        let output = result.try_fold(init, |init, row| row.map(|row| f(init, from_row_opt(row))));
-        output
+        result.try_fold(init, |init, row| row.map(|row| f(init, from_row_opt(row))))
     }
 
     /// Executes the given `stmt` and drops the result.

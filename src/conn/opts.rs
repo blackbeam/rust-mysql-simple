@@ -267,19 +267,19 @@ impl Opts {
     }
     /// Socket path on unix or pipe name on windows (defaults to `None`).
     pub fn get_socket(&self) -> Option<&str> {
-        self.0.socket.as_ref().map(|x| &**x)
+        self.0.socket.as_deref()
     }
     /// User (defaults to `None`).
     pub fn get_user(&self) -> Option<&str> {
-        self.0.user.as_ref().map(|x| &**x)
+        self.0.user.as_deref()
     }
     /// Password (defaults to `None`).
     pub fn get_pass(&self) -> Option<&str> {
-        self.0.pass.as_ref().map(|x| &**x)
+        self.0.pass.as_deref()
     }
     /// Database name (defaults to `None`).
     pub fn get_db_name(&self) -> Option<&str> {
-        self.0.db_name.as_ref().map(|x| &**x)
+        self.0.db_name.as_deref()
     }
 
     /// The timeout for each attempt to write to the server.
@@ -466,9 +466,8 @@ impl OptsBuilder {
     ///
     /// **Note:** IPv6 addresses must be given in square brackets, e.g. `[::1]`.
     pub fn ip_or_hostname<T: Into<String>>(mut self, ip_or_hostname: Option<T>) -> Self {
-        let new = ip_or_hostname.map(Into::into).unwrap_or("127.0.0.1".into());
+        let new = ip_or_hostname.map(Into::into).unwrap_or_else(|| "127.0.0.1".into());
         self.opts.0.ip_or_hostname = url::Host::parse(&new)
-            .map(|host| host.to_owned())
             .unwrap_or_else(|_| url::Host::Domain(new.to_owned()));
         self
     }
