@@ -395,10 +395,11 @@ impl Conn {
     }
 
     fn read_packet(&mut self) -> Result<Vec<u8>> {
-        let data = self.stream_mut().next().transpose()?.ok_or_else(|| io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "server disconnected",
-        ))?;
+        let data = self
+            .stream_mut()
+            .next()
+            .transpose()?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "server disconnected"))?;
         match data[0] {
             0xff => {
                 let error_packet = parse_err_packet(&*data, self.0.capability_flags)?;

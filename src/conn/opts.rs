@@ -466,9 +466,11 @@ impl OptsBuilder {
     ///
     /// **Note:** IPv6 addresses must be given in square brackets, e.g. `[::1]`.
     pub fn ip_or_hostname<T: Into<String>>(mut self, ip_or_hostname: Option<T>) -> Self {
-        let new = ip_or_hostname.map(Into::into).unwrap_or_else(|| "127.0.0.1".into());
-        self.opts.0.ip_or_hostname = url::Host::parse(&new)
-            .unwrap_or_else(|_| url::Host::Domain(new.to_owned()));
+        let new = ip_or_hostname
+            .map(Into::into)
+            .unwrap_or_else(|| "127.0.0.1".into());
+        self.opts.0.ip_or_hostname =
+            url::Host::parse(&new).unwrap_or_else(|_| url::Host::Domain(new.to_owned()));
         self
     }
 
