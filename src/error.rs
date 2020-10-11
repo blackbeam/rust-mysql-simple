@@ -165,7 +165,7 @@ impl From<PacketCodecError> for Error {
 
 impl From<std::convert::Infallible> for Error {
     fn from(err: std::convert::Infallible) -> Self {
-        match err { }
+        match err {}
     }
 }
 
@@ -195,12 +195,16 @@ impl From<native_tls::HandshakeError<std::net::TcpStream>> for Error {
 
 #[cfg(feature = "rustls")]
 impl From<rustls_connector::rustls::TLSError> for Error {
-    fn from(err: rustls_connector::rustls::TLSError) -> Error { Error::TlsError(err) }
+    fn from(err: rustls_connector::rustls::TLSError) -> Error {
+        Error::TlsError(err)
+    }
 }
 
 #[cfg(feature = "rustls")]
 impl From<rustls_connector::HandshakeError<std::net::TcpStream>> for Error {
-    fn from(err: rustls_connector::HandshakeError<std::net::TcpStream>) -> Error { Error::TlsHandshakeError(err) }
+    fn from(err: rustls_connector::HandshakeError<std::net::TcpStream>) -> Error {
+        Error::TlsHandshakeError(err)
+    }
 }
 
 impl From<UrlError> for Error {

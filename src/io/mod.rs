@@ -13,26 +13,17 @@ use named_pipe as np;
 #[cfg(feature = "native-tls")]
 use native_tls::{Certificate, Identity, TlsConnector, TlsStream};
 #[cfg(feature = "rustls")]
-use rustls_connector::{
-    TlsStream,
-    RustlsConnector,
-    RustlsConnectorConfig,
-};
+use rustls_connector::{RustlsConnector, RustlsConnectorConfig, TlsStream};
 
 #[cfg(unix)]
 use std::os::unix;
 use std::{
-    fmt,
-    io,
+    fmt, io,
     net::{self, SocketAddr},
     time::Duration,
 };
 #[cfg(feature = "native-tls")]
-use std::{
-    io::Read as _,
-    fs::File
-};
-
+use std::{fs::File, io::Read as _};
 
 use crate::{
     error::{
