@@ -58,8 +58,14 @@ pub enum Error {
     MySqlError(MySqlError),
     DriverError(DriverError),
     UrlError(UrlError),
+    #[cfg(feature = "native-tls")]
     TlsError(native_tls::Error),
+    #[cfg(feature = "native-tls")]
     TlsHandshakeError(native_tls::HandshakeError<std::net::TcpStream>),
+    #[cfg(feature = "rustls")]
+    TlsError(rustls_connector::rustls::TLSError),
+    #[cfg(feature = "rustls")]
+    TlsHandshakeError(rustls_connector::HandshakeError<std::net::TcpStream>),
     FromValueError(Value),
     FromRowError(Row),
 }
@@ -159,7 +165,7 @@ impl From<PacketCodecError> for Error {
 
 impl From<std::convert::Infallible> for Error {
     fn from(err: std::convert::Infallible) -> Self {
-        match err {}
+        match err { }
     }
 }
 
@@ -173,16 +179,28 @@ impl From<::nix::Error> for Error {
     }
 }
 
+#[cfg(feature = "native-tls")]
 impl From<native_tls::Error> for Error {
     fn from(err: native_tls::Error) -> Error {
         Error::TlsError(err)
     }
 }
 
+#[cfg(feature = "native-tls")]
 impl From<native_tls::HandshakeError<std::net::TcpStream>> for Error {
     fn from(err: native_tls::HandshakeError<std::net::TcpStream>) -> Error {
         Error::TlsHandshakeError(err)
     }
+}
+
+#[cfg(feature = "rustls")]
+impl From<rustls_connector::rustls::TLSError> for Error {
+    fn from(err: rustls_connector::rustls::TLSError) -> Error { Error::TlsError(err) }
+}
+
+#[cfg(feature = "rustls")]
+impl From<rustls_connector::HandshakeError<std::net::TcpStream>> for Error {
+    fn from(err: rustls_connector::HandshakeError<std::net::TcpStream>) -> Error { Error::TlsHandshakeError(err) }
 }
 
 impl From<UrlError> for Error {

@@ -25,6 +25,8 @@ path = "src/lib.rs"
 opt-level = 3
 
 [features]
+default = ["rustls"]
+rustls = ["rustls-connector"]
 nightly = []
 
 [dev-dependencies]
@@ -37,13 +39,14 @@ bufstream = "~0.1"
 io-enum = "0.2.1"
 lru = "0.6.0"
 mysql_common = "0.24.1"
-native-tls = "0.2.3"
 socket2 = "0.3.12"
 percent-encoding = "2.1.0"
 serde = "1"
 serde_json = "1"
 twox-hash = "1"
 url = "2.1"
+native-tls = { version = "0.2.3", optional = true }
+rustls-connector = { version = "0.12.0", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 named_pipe = "~0.4"
