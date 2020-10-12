@@ -13,8 +13,14 @@ use named_pipe as np;
 #[cfg(feature = "native-tls")]
 use native_tls::{Certificate, Identity, TlsConnector, TlsStream};
 #[cfg(feature = "rustls")]
-use rustls_connector::{RustlsConnector, RustlsConnectorConfig, TlsStream};
-
+use rustls_connector::{
+    rustls::{
+        Certificate, RootCertStore, ServerCertVerified, ServerCertVerifier, TLSError,
+        WebPKIVerifier,
+    },
+    webpki::DNSNameRef,
+    RustlsConnector, RustlsConnectorConfig, TlsStream,
+};
 #[cfg(unix)]
 use std::os::unix;
 use std::{
@@ -33,6 +39,7 @@ use crate::{
     },
     SslOpts,
 };
+use std::sync::Arc;
 
 mod tcp;
 
@@ -43,6 +50,41 @@ pub enum Stream {
     #[cfg(windows)]
     SocketStream(BufStream<np::PipeClient>),
     TcpStream(TcpStream),
+}
+
+#[cfg(feature = "rustls")]
+pub struct SqlTlsVerifier {
+    verify_hostname: bool,
+    verify_cert: bool,
+    webpki_verifier: WebPKIVerifier,
+}
+
+#[cfg(feature = "rustls")]
+impl SqlTlsVerifier {
+    fn new(verify_hostname: bool, verify_cert: bool) -> Self {
+        Self {
+            verify_hostname,
+            verify_cert,
+            webpki_verifier: WebPKIVerifier::new(),
+        }
+    }
+}
+
+#[cfg(feature = "rustls")]
+impl ServerCertVerifier for SqlTlsVerifier {
+    fn verify_server_cert(
+        &self,
+        roots: &RootCertStore,
+        presented_certs: &[Certificate],
+        dns_name: DNSNameRef,
+        ocsp_response: &[u8],
+    ) -> Result<ServerCertVerified, TLSError> {
+        if !self.verify_cert {
+            return Ok(ServerCertVerified::assertion());
+        }
+        self.webpki_verifier
+            .verify_server_cert(roots, presented_certs, dns_name, ocsp_response)
+    }
 }
 
 impl Stream {
@@ -187,7 +229,7 @@ impl Stream {
     }
 
     #[cfg(feature = "rustls")]
-    pub fn make_secure(self, host: url::Host, _ssl_opts: SslOpts) -> MyResult<Stream> {
+    pub fn make_secure(self, host: url::Host, ssl_opts: SslOpts) -> MyResult<Stream> {
         if self.is_socket() {
             // won't secure socket connection
             return Ok(self);
@@ -199,7 +241,13 @@ impl Stream {
             url::Host::Ipv6(ip) => ip.to_string(),
         };
 
-        let builder = RustlsConnectorConfig::new_with_native_certs()?;
+        let mut builder = RustlsConnectorConfig::new_with_native_certs()?;
+        builder
+            .dangerous()
+            .set_certificate_verifier(Arc::new(SqlTlsVerifier::new(
+                ssl_opts.skip_domain_validation(),
+                ssl_opts.accept_invalid_certs(),
+            )));
         let tls_connector: RustlsConnector = builder.into();
         match self {
             Stream::TcpStream(tcp_stream) => match tcp_stream {
@@ -226,8 +274,8 @@ pub enum TcpStream {
 impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            #[cfg(feature = "native-tls")]
-            TcpStream::Secure(ref s) => write!(f, "Secure stream {:?}", s),
+            //#[cfg(feature = "native-tls")]
+            //TcpStream::Secure(ref s) => write!(f, "Secure stream {:?}", s),
             #[cfg(feature = "rustls")]
             TcpStream::Secure(ref s) => write!(f, "Secure stream {:?}", s.get_ref().sock),
             TcpStream::Insecure(ref s) => write!(f, "Insecure stream {:?}", s),
