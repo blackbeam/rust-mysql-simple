@@ -155,9 +155,20 @@ impl Stream {
             let mut root_cert_data = vec![];
             let mut root_cert_file = File::open(root_cert_path)?;
             root_cert_file.read_to_end(&mut root_cert_data)?;
-            let root_cert = Certificate::from_pem(&*root_cert_data)
-                .or_else(|_| Certificate::from_der(&*root_cert_data))?;
-            builder.add_root_certificate(root_cert);
+
+            let root_certs = Certificate::from_der(&*root_cert_data)
+                .map(|x| vec![x])
+                .or_else(|_| {
+                    pem::parse_many(&*root_cert_data)
+                        .iter()
+                        .map(pem::encode)
+                        .map(|s| Certificate::from_pem(s.as_bytes()))
+                        .collect()
+                })?;
+
+            for root_cert in root_certs {
+                builder.add_root_certificate(root_cert);
+            }
         }
         if let Some(pkcs12_path) = ssl_opts.pkcs12_path() {
             let der = std::fs::read(pkcs12_path)?;
