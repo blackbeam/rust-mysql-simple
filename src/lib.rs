@@ -6,7 +6,7 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-//! This create offers:
+//! This crate offers:
 //!
 //! *   MySql database driver in pure rust;
 //! *   connection pool.
