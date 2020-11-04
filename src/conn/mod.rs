@@ -1090,7 +1090,7 @@ mod test {
             Conn,
             DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
-            LocalInfileHandler, Opts, OptsBuilder, Params, Pool, TxOpts,
+            LocalInfileHandler, Opts, OptsBuilder, Pool, TxOpts,
             Value::{self, Bytes, Date, Float, Int, NULL},
         };
 

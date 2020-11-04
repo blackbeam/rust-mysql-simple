@@ -423,7 +423,7 @@
 //!
 //! // More than 12 parameters:
 //! let row: Option<u8> = conn.exec_first(
-//!     "SELECT ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ?",
+//!     "SELECT CONVERT(? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ?, UNSIGNED)",
 //!     (0..16).collect::<Vec<_>>(),
 //! )?;
 //! assert_eq!(row.unwrap(), 120);
