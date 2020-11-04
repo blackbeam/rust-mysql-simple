@@ -446,7 +446,7 @@ mod test {
                 .unwrap()
                 .unwrap();
 
-            conn.exec_drop("KILL CONNECTION ?", (id,)).unwrap();
+            conn.query_drop(&*format!("KILL {}", id)).unwrap();
             thread::sleep(Duration::from_millis(250));
             pool.get_conn()
                 .unwrap()
@@ -466,7 +466,7 @@ mod test {
                 .unwrap()
                 .unwrap();
 
-            conn.exec_drop("KILL CONNECTION ?", (id,)).unwrap();
+            conn.query_drop(&*format!("KILL {}", id)).unwrap();
             thread::sleep(Duration::from_millis(250));
             pool.get_conn()
                 .unwrap()
@@ -485,7 +485,7 @@ mod test {
                 .unwrap()
                 .unwrap();
 
-            conn.exec_drop("KILL CONNECTION ?", (id,)).unwrap();
+            conn.query_drop(&*format!("KILL {}", id)).unwrap();
             thread::sleep(Duration::from_millis(250));
             pool.start_transaction(TxOpts::default()).unwrap();
         }

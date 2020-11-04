@@ -52,8 +52,7 @@ impl SslOpts {
     /// Sets path to a certificate of the root that connector will trust.
     ///
     /// Supported certificate formats are .der and .pem.
-    /// If you have multiple certificates in a .pem file, only the first one will
-    /// be loaded.
+    /// Multiple certs are allowed in .pem files.
     pub fn with_root_cert_path<T: Into<Cow<'static, Path>>>(
         mut self,
         root_cert_path: Option<T>,
