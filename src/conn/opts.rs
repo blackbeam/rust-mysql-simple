@@ -461,6 +461,13 @@ impl OptsBuilder {
         OptsBuilder { opts: opts.into() }
     }
 
+    /// Use a HashMap for creating creating an OptsBuilder instance
+    /// Login .cnf file parsing lib https://github.com/rjcortese/myloginrs returns a HashMap for client configs
+    /// **Note:** You do **not** have to use myloginrs lib.    
+    pub fn from_hash_map(mut self, client: HashMap<String, String>) -> Self {
+        self
+    }
+
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
     ///
     /// **Note:** IPv6 addresses must be given in square brackets, e.g. `[::1]`.
