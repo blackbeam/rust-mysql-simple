@@ -955,4 +955,33 @@ mod test {
         let opts = "mysql://localhost/foo?bar=baz";
         let _: Opts = opts.into();
     }
+
+    #[test]
+    fn should_read_hashmap_into_opts() {
+        use crate::OptsBuilder;
+        macro_rules!  map(
+            { $($key:expr => $value:expr), + }=> {
+                {
+                    let mut h = std::collections::HashMap::new();
+                    $(
+                        h.insert($key, $value);
+                    )+
+                    h
+                }
+            };
+        );
+
+        let cnf_map = map! {
+            "user".to_string() => "test".to_string(),
+            "password".to_string() => "password".to_string(),
+            "host".to_string() => "127.0.0.1".to_string(),
+            "port".to_string() => "8080".to_string()
+        };
+
+        let parsed_opts = OptsBuilder::new().from_hash_map(cnf_map);
+        assert_eq!(parsed_opts.opts.get_user(), Some("test"));
+        assert_eq!(parsed_opts.opts.get_pass(), Some("password"));
+        assert_eq!(parsed_opts.opts.get_ip_or_hostname(), "127.0.0.1");
+        assert_eq!(parsed_opts.opts.get_tcp_port(), 8080);
+    }
 }
