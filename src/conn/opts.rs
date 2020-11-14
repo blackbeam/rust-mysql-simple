@@ -461,10 +461,40 @@ impl OptsBuilder {
         OptsBuilder { opts: opts.into() }
     }
 
-    /// Use a HashMap for creating creating an OptsBuilder instance
+    /// Use a HashMap for creating creating an OptsBuilder instance:
+    /// ```ignore
+    /// OptsBuilder::new().from_has_map(client);
+    /// ```
+    /// `HashMap` key,value pairs:
+    /// - user = username
+    /// - password = password
+    /// - host = host name or ip address
+    /// - port = port, default is 3306
+    /// - socket = unix socket or pipe name(on windows) defaults to `None`
+    ///
     /// Login .cnf file parsing lib https://github.com/rjcortese/myloginrs returns a HashMap for client configs
+    ///
     /// **Note:** You do **not** have to use myloginrs lib.    
     pub fn from_hash_map(mut self, client: HashMap<String, String>) -> Self {
+        for (key, value) in client.iter() {
+            match key.as_str() {
+                "user" => self.opts.0.user = Some(value.to_string()),
+                "password" => self.opts.0.pass = Some(value.to_string()),
+                "host" => {
+                    let host = url::Host::parse(value)
+                        .unwrap_or_else(|_| url::Host::Domain(value.to_owned()));
+                    self.opts.0.ip_or_hostname = host;
+                }
+                "port" => {
+                    let parsed: u16 = value.parse::<u16>().unwrap_or(3306);
+                    self.opts.0.tcp_port = parsed;
+                }
+                "socket" => self.opts.0.socket = Some(value.to_string()),
+                _ => {
+                    //do nothing
+                }
+            }
+        }
         self
     }
 
