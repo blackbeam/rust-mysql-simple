@@ -475,7 +475,7 @@ impl OptsBuilder {
     /// Login .cnf file parsing lib https://github.com/rjcortese/myloginrs returns a HashMap for client configs
     ///
     /// **Note:** You do **not** have to use myloginrs lib.    
-    pub fn from_hash_map(mut self, client: HashMap<String, String>) -> Self {
+    pub fn from_hash_map(mut self, client: &HashMap<String, String>) -> Self {
         for (key, value) in client.iter() {
             match key.as_str() {
                 "user" => self.opts.0.user = Some(value.to_string()),
@@ -978,7 +978,7 @@ mod test {
             "port".to_string() => "8080".to_string()
         };
 
-        let parsed_opts = OptsBuilder::new().from_hash_map(cnf_map);
+        let parsed_opts = OptsBuilder::new().from_hash_map(&cnf_map);
         assert_eq!(parsed_opts.opts.get_user(), Some("test"));
         assert_eq!(parsed_opts.opts.get_pass(), Some("password"));
         assert_eq!(parsed_opts.opts.get_ip_or_hostname(), "127.0.0.1");
