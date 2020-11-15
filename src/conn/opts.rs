@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{consts::CapabilityFlags, LocalInfileHandler, UrlError};
+use crate::{consts::CapabilityFlags, Compression, LocalInfileHandler, UrlError};
 
 /// Default value for client side per-connection statement cache.
 pub const DEFAULT_STMT_CACHE_SIZE: usize = 32;
@@ -466,11 +466,17 @@ impl OptsBuilder {
     /// OptsBuilder::new().from_has_map(client);
     /// ```
     /// `HashMap` key,value pairs:
-    /// - user = username
-    /// - password = password
-    /// - host = host name or ip address
-    /// - port = port, default is 3306
-    /// - socket = unix socket or pipe name(on windows) defaults to `None`
+    /// - user = Username
+    /// - password = Password
+    /// - host = Host name or ip address
+    /// - port = Port, default is 3306
+    /// - socket = Unix socket or pipe name(on windows) defaults to `None`
+    /// - db_name = Database name (defaults to `None`).
+    /// - prefer_socket = Prefer socket connection (defaults to `true`)
+    /// - tcp_keepalive_time_ms = TCP keep alive time for mysql connection (defaults to `None`)
+    /// - compress = Compression level(defaults to `None`)
+    /// - tcp_connect_timeout_ms = Tcp connect timeout (defaults to `None`)
+    /// - stmt_cache_size = Number of prepared statements cached on the client side (per connection)
     ///
     /// Login .cnf file parsing lib https://github.com/rjcortese/myloginrs returns a HashMap for client configs
     ///
@@ -490,8 +496,43 @@ impl OptsBuilder {
                     self.opts.0.tcp_port = parsed;
                 }
                 "socket" => self.opts.0.socket = Some(value.to_string()),
+                "db_name" => self.opts.0.db_name = Some(value.to_string()),
+                "prefer_socket" => {
+                    //default to true like standard opts builder method
+                    self.opts.0.prefer_socket = value.parse::<bool>().unwrap_or(true)
+                }
+                "tcp_keepalive_time_ms" => {
+                    //if cannot parse, default to none
+                    self.opts.0.tcp_keepalive_time = match value.parse::<u32>() {
+                        Ok(val) => Some(val),
+                        _ => None,
+                    }
+                }
+                "compress" => match value.parse::<u32>() {
+                    Ok(val) => self.opts.0.compress = Some(Compression::new(val)),
+                    Err(_) => {
+                        //not an int
+                        match value.as_str() {
+                            "fast" => self.opts.0.compress = Some(Compression::fast()),
+                            "best" => self.opts.0.compress = Some(Compression::best()),
+                            "true" => self.opts.0.compress = Some(Compression::default()),
+                            _ => self.opts.0.compress = Some(Compression::none()), //default to none
+                        }
+                    }
+                },
+                "tcp_connect_timeout_ms" => {
+                    self.opts.0.tcp_connect_timeout = match value.parse::<u64>() {
+                        Ok(val) => Some(Duration::from_millis(val)),
+                        _ => None,
+                    }
+                }
+                "stmt_cache_size" => {
+                    self.opts.0.stmt_cache_size =
+                        value.parse::<usize>().unwrap_or(DEFAULT_STMT_CACHE_SIZE)
+                }
                 _ => {
-                    //do nothing
+                    //throw an error if there is an unrecognized param
+                    UrlError::UnknownParameter(key.to_string());
                 }
             }
         }
@@ -906,6 +947,7 @@ impl<S: AsRef<str>> From<S> for Opts {
 #[cfg(test)]
 mod test {
     use mysql_common::proto::codec::Compression;
+    use std::time::Duration;
 
     use super::{InnerOpts, Opts};
 
@@ -975,7 +1017,13 @@ mod test {
             "user".to_string() => "test".to_string(),
             "password".to_string() => "password".to_string(),
             "host".to_string() => "127.0.0.1".to_string(),
-            "port".to_string() => "8080".to_string()
+            "port".to_string() => "8080".to_string(),
+            "db_name".to_string() => "test_db".to_string(),
+            "prefer_socket".to_string() => "false".to_string(),
+            "tcp_keepalive_time_ms".to_string() => "5000".to_string(),
+            "compress".to_string() => "best".to_string(),
+            "tcp_connect_timeout_ms".to_string() => "1000".to_string(),
+            "stmt_cache_size".to_string() => "33".to_string()
         };
 
         let parsed_opts = OptsBuilder::new().from_hash_map(&cnf_map);
@@ -983,5 +1031,17 @@ mod test {
         assert_eq!(parsed_opts.opts.get_pass(), Some("password"));
         assert_eq!(parsed_opts.opts.get_ip_or_hostname(), "127.0.0.1");
         assert_eq!(parsed_opts.opts.get_tcp_port(), 8080);
+        assert_eq!(parsed_opts.opts.get_db_name(), Some("test_db"));
+        assert_eq!(parsed_opts.opts.get_prefer_socket(), false);
+        assert_eq!(parsed_opts.opts.get_tcp_keepalive_time_ms(), Some(5000));
+        assert_eq!(
+            parsed_opts.opts.get_compress(),
+            Some(crate::Compression::best())
+        );
+        assert_eq!(
+            parsed_opts.opts.get_tcp_connect_timeout(),
+            Some(Duration::from_millis(1000))
+        );
+        assert_eq!(parsed_opts.opts.get_stmt_cache_size(), 33);
     }
 }
