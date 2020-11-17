@@ -447,7 +447,7 @@ impl Opts {
 /// let connection_url = "mysql://root:password@localhost:3307/mysql?prefer_socket=false";
 /// let pool = my::Pool::new(connection_url).unwrap();
 /// ```
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct OptsBuilder {
     opts: Opts,
 }
@@ -491,21 +491,30 @@ impl OptsBuilder {
                         .unwrap_or_else(|_| url::Host::Domain(value.to_owned()));
                     self.opts.0.ip_or_hostname = host;
                 }
-                "port" => {
-                    let parsed: u16 = value.parse::<u16>().unwrap_or(3306);
-                    self.opts.0.tcp_port = parsed;
-                }
+                "port" => match value.parse::<u16>() {
+                    Ok(parsed) => self.opts.0.tcp_port = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 "socket" => self.opts.0.socket = Some(value.to_string()),
                 "db_name" => self.opts.0.db_name = Some(value.to_string()),
                 "prefer_socket" => {
                     //default to true like standard opts builder method
-                    self.opts.0.prefer_socket = value.parse::<bool>().unwrap_or(true)
+                    match value.parse::<bool>() {
+                        Ok(parsed) => self.opts.0.prefer_socket = parsed,
+                        Err(_) => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
+                    }
                 }
                 "tcp_keepalive_time_ms" => {
                     //if cannot parse, default to none
                     self.opts.0.tcp_keepalive_time = match value.parse::<u32>() {
                         Ok(val) => Some(val),
-                        _ => None,
+                        _ => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
                     }
                 }
                 "compress" => match value.parse::<u32>() {
@@ -516,20 +525,29 @@ impl OptsBuilder {
                             "fast" => self.opts.0.compress = Some(Compression::fast()),
                             "best" => self.opts.0.compress = Some(Compression::best()),
                             "true" => self.opts.0.compress = Some(Compression::default()),
-                            _ => self.opts.0.compress = Some(Compression::none()), //default to none
+                            _ => {
+                                return Err(UrlError::InvalidValue(
+                                    key.to_string(),
+                                    value.to_string(),
+                                )); //should not go below this due to catch all
+                            }
                         }
                     }
                 },
                 "tcp_connect_timeout_ms" => {
                     self.opts.0.tcp_connect_timeout = match value.parse::<u64>() {
                         Ok(val) => Some(Duration::from_millis(val)),
-                        _ => None,
+                        _ => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
                     }
                 }
-                "stmt_cache_size" => {
-                    self.opts.0.stmt_cache_size =
-                        value.parse::<usize>().unwrap_or(DEFAULT_STMT_CACHE_SIZE)
-                }
+                "stmt_cache_size" => match value.parse::<usize>() {
+                    Ok(parsed) => self.opts.0.stmt_cache_size = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 _ => {
                     //throw an error if there is an unrecognized param
                     UrlError::UnknownParameter(key.to_string());
@@ -1044,5 +1062,44 @@ mod test {
             Some(Duration::from_millis(1000))
         );
         assert_eq!(parsed_opts.opts.get_stmt_cache_size(), 33);
+    }
+
+    #[test]
+    fn should_have_url_err() {
+        use crate::OptsBuilder;
+        use crate::UrlError;
+        macro_rules!  map(
+            { $($key:expr => $value:expr), + }=> {
+                {
+                    let mut h = std::collections::HashMap::new();
+                    $(
+                        h.insert($key, $value);
+                    )+
+                    h
+                }
+            };
+        );
+
+        let cnf_map = map! {
+            "user".to_string() => "test".to_string(),
+            "password".to_string() => "password".to_string(),
+            "host".to_string() => "127.0.0.1".to_string(),
+            "port".to_string() => "NOTAPORT".to_string(),
+            "db_name".to_string() => "test_db".to_string(),
+            "prefer_socket".to_string() => "false".to_string(),
+            "tcp_keepalive_time_ms".to_string() => "5000".to_string(),
+            "compress".to_string() => "best".to_string(),
+            "tcp_connect_timeout_ms".to_string() => "1000".to_string(),
+            "stmt_cache_size".to_string() => "33".to_string()
+        };
+
+        let parsed = OptsBuilder::new().from_hash_map(&cnf_map);
+        assert_eq!(
+            parsed,
+            Err(UrlError::InvalidValue(
+                "port".to_string(),
+                "NOTAPORT".to_string()
+            ))
+        );
     }
 }
