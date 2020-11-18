@@ -461,7 +461,7 @@ impl OptsBuilder {
         OptsBuilder { opts: opts.into() }
     }
 
-    /// Use a HashMap for creating creating an OptsBuilder instance:
+    /// Use a HashMap for creating an OptsBuilder instance:
     /// ```ignore
     /// OptsBuilder::new().from_has_map(client);
     /// ```
