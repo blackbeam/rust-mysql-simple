@@ -5,7 +5,7 @@
 
 # mysql
 
-This create offers:
+This crate offers:
 
 *   MySql database driver in pure rust;
 *   connection pool.
@@ -401,7 +401,7 @@ assert_eq!(row.unwrap(), 0);
 
 // More than 12 parameters:
 let row: Option<u8> = conn.exec_first(
-    "SELECT ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ?",
+    "SELECT CONVERT(? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ? + ?, UNSIGNED)",
     (0..16).collect::<Vec<_>>(),
 )?;
 assert_eq!(row.unwrap(), 120);
