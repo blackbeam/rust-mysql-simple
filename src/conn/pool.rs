@@ -252,9 +252,9 @@ impl fmt::Debug for Pool {
 
 /// Pooled mysql connection which will return to the pool on `drop`.
 ///
-/// You should prefer using `prepare` or `prep_exec` instead of `query` where possible, except
-/// cases when statement has no params and when it has no return values or return values which
-/// evaluates to `Value::Bytes`.
+/// You should prefer using `prep` along `exec` instead of `query` from the Queryable trait where
+/// possible, except cases when statement has no params and when it has no return values or return
+/// values which evaluates to `Value::Bytes`.
 ///
 /// `query` is a part of mysql text protocol, so under the hood you will always receive
 /// `Value::Bytes` as a result and `from_value` will need to parse it if you want, for example, `i64`
