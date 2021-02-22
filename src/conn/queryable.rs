@@ -46,7 +46,7 @@ pub trait Queryable {
         self.query_map(query, from_row_opt)
     }
 
-    /// Performs text query and returns the firt row of the first result set.
+    /// Performs text query and returns the first row of the first result set.
     fn query_first<T, Q>(&mut self, query: Q) -> Result<Option<T>>
     where
         Q: AsRef<str>,
