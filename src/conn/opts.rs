@@ -463,7 +463,7 @@ impl OptsBuilder {
 
     /// Use a HashMap for creating an OptsBuilder instance:
     /// ```ignore
-    /// OptsBuilder::new().from_has_map(client);
+    /// OptsBuilder::new().from_hash_map(client);
     /// ```
     /// `HashMap` key,value pairs:
     /// - user = Username
