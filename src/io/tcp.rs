@@ -90,11 +90,8 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             .to_socket_addrs()?
             .fold(Err(err), |prev, sock_addr| {
                 prev.or_else(|_| {
-                    let socket = if sock_addr.is_ipv4() {
-                        Socket::new(Domain::ipv4(), Type::stream(), None)?
-                    } else {
-                        Socket::new(Domain::ipv6(), Type::stream(), None)?
-                    };
+                    let domain = Domain::for_address(sock_addr);
+                    let socket = Socket::new(domain, Type::STREAM, None)?;
                     if let Some(bind_address) = bind_address {
                         if bind_address.is_ipv4() == sock_addr.is_ipv4() {
                             socket.bind(&bind_address.into())?;
@@ -111,9 +108,13 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             .and_then(|socket| {
                 socket.set_read_timeout(read_timeout)?;
                 socket.set_write_timeout(write_timeout)?;
-                socket.set_keepalive(keepalive_time_ms.map(|x| Duration::from_millis(x as u64)))?;
+                if let Some(duration) = keepalive_time_ms {
+                    let conf = socket2::TcpKeepalive::new()
+                        .with_time(Duration::from_millis(duration as u64));
+                    socket.set_tcp_keepalive(&conf)?;
+                }
                 socket.set_nodelay(nodelay)?;
-                Ok(socket.into_tcp_stream())
+                Ok(TcpStream::from(socket))
             })
     }
 }
