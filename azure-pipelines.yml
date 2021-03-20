@@ -21,6 +21,7 @@ jobs:
           sudo apt-get -y install mysql-server libmysqlclient-dev curl
           sudo service mysql start
           mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -proot
+          mysql -e "SET GLOBAL local_infile = 1;" -uroot -proot
         displayName: Install MySql
       - bash: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
@@ -91,8 +92,16 @@ jobs:
           CD /D C:\mysql
           curl -fsS --retry 3 --retry-connrefused -o mysql.msi https://cdn.mysql.com/archives/mysql-installer/mysql-installer-community-8.0.11.0.msi
           msiexec /q /log install.txt /i mysql.msi datadir=C:\mysql installdir=C:\mysql
-          call "C:\Program Files (x86)\MySQL\MySQL Installer for Windows\MySQLInstallerConsole.exe" community install server;8.0.11;x64:*:port=3306;rootpasswd=password;servicename=MySQL -silent
+          call "C:\Program Files (x86)\MySQL\MySQL Installer for Windows\MySQLInstallerConsole.exe" community install server;8.0.11;x64:*:port=3306;enable_named_pipe=true;rootpasswd=password;servicename=MySQL -silent
           netsh advfirewall firewall add rule name="Allow mysql" dir=in action=allow edge=yes remoteip=any protocol=TCP localport=80,8080,3306
+          net stop MySQL
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld" --remove
+          echo [mysqld] >> C:\my.cnf
+          echo enable-named-pipe >> C:\my.cnf
+          echo socket=MYSQL >> C:\my.cnf
+          echo datadir=C:\\ProgramData\\MySQL\\MySQL Server 8.0\\Data\\ >> C:\my.cnf
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld" --install MySQL --defaults-file=C:\my.cnf
+          net start MySql
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -ppassword
         displayName: Install MySql
       - bash: |
