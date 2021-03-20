@@ -21,6 +21,7 @@ jobs:
           sudo apt-get -y install mysql-server libmysqlclient-dev curl
           sudo service mysql start
           mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -proot
+          mysql -e "SET GLOBAL local_infile = 1;" -uroot -proot
         displayName: Install MySql
       - bash: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
