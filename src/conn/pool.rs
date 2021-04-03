@@ -57,8 +57,8 @@ impl InnerPool {
 
 struct ArcedPool {
     inner: (Mutex<InnerPool>, Condvar),
-    min: AtomicUsize,
-    max: AtomicUsize,
+    min: usize,
+    max: usize,
     count: AtomicUsize,
 }
 
@@ -150,7 +150,7 @@ impl Pool {
                 if let Some(conn) = pool.pool.pop_front() {
                     drop(pool);
                     break conn;
-                } else if self.arced_pool.count.load(Ordering::Relaxed) < self.arced_pool.max.load(Ordering::Relaxed) {
+                } else if self.arced_pool.count.load(Ordering::Relaxed) < self.arced_pool.max {
                     pool.new_conn()?;
                     self.arced_pool.count.fetch_add(1, Ordering::SeqCst);
                 } else {
@@ -190,8 +190,8 @@ impl Pool {
         Ok(Pool {
             arced_pool: Arc::new(ArcedPool {
                 inner: (Mutex::new(pool), Condvar::new()),
-                min: AtomicUsize::new(min),
-                max: AtomicUsize::new(max),
+                min,
+                max,
                 count: AtomicUsize::new(min),
             }),
             use_cache: true,
@@ -249,8 +249,8 @@ impl fmt::Debug for Pool {
         write!(
             f,
             "Pool {{ min: {}, max: {}, count: {} }}",
-            self.arced_pool.min.load(Ordering::Relaxed),
-            self.arced_pool.max.load(Ordering::Relaxed),
+            self.arced_pool.min,
+            self.arced_pool.max,
             self.arced_pool.count.load(Ordering::Relaxed)
         )
     }
@@ -304,7 +304,7 @@ impl Deref for PooledConn {
 
 impl Drop for PooledConn {
     fn drop(&mut self) {
-        if self.pool.arced_pool.count.load(Ordering::Relaxed) > self.pool.arced_pool.max.load(Ordering::Relaxed)
+        if self.pool.arced_pool.count.load(Ordering::Relaxed) > self.pool.arced_pool.max
             || self.conn.is_none()
         {
             self.pool.arced_pool.count.fetch_sub(1, Ordering::SeqCst);
