@@ -34,7 +34,7 @@ serde_derive = "1"
 
 [dependencies]
 bufstream = "~0.1"
-io-enum = "0.2.1"
+io-enum = "1"
 lru = "0.6.0"
 mysql_common = "0.24.1"
 native-tls = "0.2.3"
