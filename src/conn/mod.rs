@@ -7,6 +7,7 @@
 // modified, or distributed except according to those terms.
 
 use mysql_common::{
+    constants::{UTF8MB4_GENERAL_CI, UTF8_GENERAL_CI},
     crypto,
     io::{ReadMysqlExt, WriteMysqlExt},
     named_params::parse_named_params,
@@ -18,7 +19,6 @@ use mysql_common::{
     },
     proto::{codec::Compression, sync_framed::MySyncFramed},
     value::{read_bin_values, read_text_values, ServerSide},
-    constants::{UTF8MB4_GENERAL_CI, UTF8_GENERAL_CI},
 };
 
 use std::{
@@ -524,10 +524,11 @@ impl Conn {
     ///
     /// Note that you will change the user for **this connection**.
     /// After release, this connection will be re-inserted into the pool with this user.
-    pub fn change_user<T: AsRef<str>>(&mut self,
-                                      user: T,
-                                      password: Option<T>,
-                                      database: Option<T>,
+    pub fn change_user<T: AsRef<str>>(
+        &mut self,
+        user: T,
+        password: Option<T>,
+        database: Option<T>,
     ) -> Result<()> {
         let empty = vec![];
 
@@ -536,21 +537,26 @@ impl Conn {
         body.extend_from_slice(user.as_ref().as_bytes());
         body.push(0);
 
-        let auth_plugin = AuthPlugin::from_bytes(
-            self.0.auth_plugin.as_ref().unwrap_or(&empty).as_slice()
-        );
+        let auth_plugin =
+            AuthPlugin::from_bytes(self.0.auth_plugin.as_ref().unwrap_or(&empty).as_slice());
 
         if let AuthPlugin::Other(ref name) = auth_plugin {
             let plugin_name = String::from_utf8_lossy(name).into();
             return Err(DriverError(UnknownAuthPlugin(plugin_name)));
         }
 
-        let auth_data = auth_plugin.gen_data(
-            password.as_ref().map(|p| p.as_ref()),
-            self.0.nonce.as_ref().unwrap_or(&empty).as_slice())
+        let auth_data = auth_plugin
+            .gen_data(
+                password.as_ref().map(|p| p.as_ref()),
+                self.0.nonce.as_ref().unwrap_or(&empty).as_slice(),
+            )
             .unwrap_or(vec![]);
 
-        if self.0.capability_flags.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
+        if self
+            .0
+            .capability_flags
+            .contains(CapabilityFlags::CLIENT_SECURE_CONNECTION)
+        {
             body.push(auth_data.len() as u8);
             body.extend_from_slice(auth_data.as_slice());
         } else {
@@ -558,7 +564,13 @@ impl Conn {
             body.push(0);
         }
 
-        body.extend_from_slice(database.as_ref().map(|d| d.as_ref()).unwrap_or("").as_bytes());
+        body.extend_from_slice(
+            database
+                .as_ref()
+                .map(|d| d.as_ref())
+                .unwrap_or("")
+                .as_bytes(),
+        );
         body.push(0);
 
         let collation = if self.0.server_version >= Some((5, 5, 3)) {
@@ -570,12 +582,21 @@ impl Conn {
         body.push(collation as u8);
         body.push((collation >> 8) as u8);
 
-        if self.0.capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
+        if self
+            .0
+            .capability_flags
+            .contains(CapabilityFlags::CLIENT_PLUGIN_AUTH)
+        {
             body.extend_from_slice(auth_plugin.as_bytes());
             body.push(0);
         }
-        if self.0.capability_flags.contains(CapabilityFlags::CLIENT_CONNECT_ATTRS) {
-            let len = self.connect_attrs()
+        if self
+            .0
+            .capability_flags
+            .contains(CapabilityFlags::CLIENT_CONNECT_ATTRS)
+        {
+            let len = self
+                .connect_attrs()
                 .iter()
                 .map(|(k, v)| {
                     mysql_common::misc::lenenc_str_len(k) + mysql_common::misc::lenenc_str_len(v)
@@ -611,11 +632,9 @@ impl Conn {
 
             self.0.stmt_cache.clear();
 
-            self.perform_auth_switch(
-                parse_auth_switch_request(response.as_slice())?)
+            self.perform_auth_switch(parse_auth_switch_request(response.as_slice())?)
         } else {
-            let error_packet = parse_err_packet(&*response,
-                                                self.0.capability_flags)?;
+            let error_packet = parse_err_packet(&*response, self.0.capability_flags)?;
             self.handle_err();
             Err(MySqlError(error_packet.into()))
         }

@@ -328,12 +328,16 @@ impl PooledConn {
     ///
     /// Note that you will change the user for **this connection**.
     /// After release, this connection will be re-inserted into the pool with this user.
-    pub fn change_user<T: AsRef<str>>(&mut self,
-                                      user: T,
-                                      password: Option<T>,
-                                      database: Option<T>
+    pub fn change_user<T: AsRef<str>>(
+        &mut self,
+        user: T,
+        password: Option<T>,
+        database: Option<T>,
     ) -> Result<()> {
-        self.conn.as_mut().unwrap().change_user(user, password, database)
+        self.conn
+            .as_mut()
+            .unwrap()
+            .change_user(user, password, database)
     }
 
     /// Gives mutable reference to the wrapped

@@ -295,7 +295,6 @@ impl Opts {
         self.0.db_name = Some(db_name.to_string());
     }
 
-
     /// The timeout for each attempt to write to the server.
     pub fn get_read_timeout(&self) -> Option<&Duration> {
         self.0.read_timeout.as_ref()
