@@ -272,14 +272,29 @@ impl Opts {
     pub fn get_user(&self) -> Option<&str> {
         self.0.user.as_deref()
     }
+    /// set user
+    pub fn set_user(&mut self, user: &str) {
+        self.0.user = Some(user.to_string());
+    }
     /// Password (defaults to `None`).
     pub fn get_pass(&self) -> Option<&str> {
         self.0.pass.as_deref()
     }
+    /// set password
+    pub fn set_pass(&mut self, password: &str) {
+        self.0.pass = Some(password.to_string());
+    }
+
     /// Database name (defaults to `None`).
     pub fn get_db_name(&self) -> Option<&str> {
         self.0.db_name.as_deref()
     }
+
+    /// Database name (defaults to `None`).
+    pub fn set_db_name(&mut self, db_name: &str) {
+        self.0.db_name = Some(db_name.to_string());
+    }
+
 
     /// The timeout for each attempt to write to the server.
     pub fn get_read_timeout(&self) -> Option<&Duration> {

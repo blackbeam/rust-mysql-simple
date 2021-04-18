@@ -8,7 +8,7 @@
 
 use mysql_common::{
     crypto,
-    io::ReadMysqlExt,
+    io::{ReadMysqlExt, WriteMysqlExt},
     named_params::parse_named_params,
     packets::{
         column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
@@ -18,6 +18,7 @@ use mysql_common::{
     },
     proto::{codec::Compression, sync_framed::MySyncFramed},
     value::{read_bin_values, read_text_values, ServerSide},
+    constants::{UTF8MB4_GENERAL_CI, UTF8_GENERAL_CI},
 };
 
 use std::{
@@ -154,6 +155,8 @@ struct ConnInner {
     connected: bool,
     has_results: bool,
     local_infile_handler: Option<LocalInfileHandler>,
+    nonce: Option<Vec<u8>>,
+    auth_plugin: Option<Vec<u8>>,
 }
 
 impl ConnInner {
@@ -174,6 +177,8 @@ impl ConnInner {
             server_version: None,
             mariadb_server_version: None,
             local_infile_handler: None,
+            nonce: None,
+            auth_plugin: None,
         }
     }
 }
@@ -509,7 +514,111 @@ impl Conn {
             self.switch_to_compressed();
         }
 
+        self.0.nonce = Some(Vec::from(nonce.as_slice().clone()));
+        self.0.auth_plugin = Some(Vec::from(auth_plugin.as_bytes().clone()));
+
         Ok(())
+    }
+
+    /// Changes the user for this connection by sending the command: [COM_CHANGE_USER](https://dev.mysql.com/doc/internals/en/com-change-user.html)
+    ///
+    /// Note that you will change the user for **this connection**.
+    /// After release, this connection will be re-inserted into the pool with this user.
+    pub fn change_user<T: AsRef<str>>(&mut self,
+                                      user: T,
+                                      password: Option<T>,
+                                      database: Option<T>,
+    ) -> Result<()> {
+        let empty = vec![];
+
+        let mut body: Vec<u8> = Vec::new();
+        body.push(Command::COM_CHANGE_USER as u8);
+        body.extend_from_slice(user.as_ref().as_bytes());
+        body.push(0);
+
+        let auth_plugin = AuthPlugin::from_bytes(
+            self.0.auth_plugin.as_ref().unwrap_or(&empty).as_slice()
+        );
+
+        if let AuthPlugin::Other(ref name) = auth_plugin {
+            let plugin_name = String::from_utf8_lossy(name).into();
+            return Err(DriverError(UnknownAuthPlugin(plugin_name)));
+        }
+
+        let auth_data = auth_plugin.gen_data(
+            password.as_ref().map(|p| p.as_ref()),
+            self.0.nonce.as_ref().unwrap_or(&empty).as_slice())
+            .unwrap_or(vec![]);
+
+        if self.0.capability_flags.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
+            body.push(auth_data.len() as u8);
+            body.extend_from_slice(auth_data.as_slice());
+        } else {
+            body.extend_from_slice(auth_data.as_slice());
+            body.push(0);
+        }
+
+        body.extend_from_slice(database.as_ref().map(|d| d.as_ref()).unwrap_or("").as_bytes());
+        body.push(0);
+
+        let collation = if self.0.server_version >= Some((5, 5, 3)) {
+            UTF8MB4_GENERAL_CI
+        } else {
+            UTF8_GENERAL_CI
+        };
+
+        body.push(collation as u8);
+        body.push((collation >> 8) as u8);
+
+        if self.0.capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
+            body.extend_from_slice(auth_plugin.as_bytes());
+            body.push(0);
+        }
+        if self.0.capability_flags.contains(CapabilityFlags::CLIENT_CONNECT_ATTRS) {
+            let len = self.connect_attrs()
+                .iter()
+                .map(|(k, v)| {
+                    mysql_common::misc::lenenc_str_len(k) + mysql_common::misc::lenenc_str_len(v)
+                })
+                .sum::<usize>();
+            body.write_lenenc_int(len as u64).expect("out of memory");
+
+            for (name, value) in &self.connect_attrs() {
+                body.write_lenenc_str(name.as_bytes())
+                    .expect("out of memory");
+                body.write_lenenc_str(value.as_bytes())
+                    .expect("out of memory");
+            }
+        }
+
+        self.write_command_raw(body)?;
+
+        let response = self.read_packet()?;
+        if response[0] == 0xfe {
+            self.0.opts.set_user(user.as_ref());
+
+            if let Some(db) = database.as_ref() {
+                self.0.opts.set_db_name(db.as_ref());
+            } else {
+                self.0.opts.set_db_name("");
+            }
+
+            if let Some(pass) = password.as_ref() {
+                self.0.opts.set_pass(pass.as_ref());
+            } else {
+                self.0.opts.set_pass("");
+            }
+
+            self.0.stmt_cache.clear();
+
+            self.perform_auth_switch(
+                parse_auth_switch_request(response.as_slice())?)
+        } else {
+            let error_packet = parse_err_packet(&*response,
+                                                self.0.capability_flags)?;
+            self.handle_err();
+            Err(MySqlError(error_packet.into()))
+        }
     }
 
     fn switch_to_compressed(&mut self) {

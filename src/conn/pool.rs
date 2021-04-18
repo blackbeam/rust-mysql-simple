@@ -319,6 +319,23 @@ impl PooledConn {
         self.conn.as_mut().unwrap().start_transaction(tx_opts)
     }
 
+    pub fn ping(&mut self) -> Result<()> {
+        self.conn.as_mut().unwrap().ping();
+        Ok(())
+    }
+
+    /// Changes the user for this connection by sending the command: [COM_CHANGE_USER](https://dev.mysql.com/doc/internals/en/com-change-user.html)
+    ///
+    /// Note that you will change the user for **this connection**.
+    /// After release, this connection will be re-inserted into the pool with this user.
+    pub fn change_user<T: AsRef<str>>(&mut self,
+                                      user: T,
+                                      password: Option<T>,
+                                      database: Option<T>
+    ) -> Result<()> {
+        self.conn.as_mut().unwrap().change_user(user, password, database)
+    }
+
     /// Gives mutable reference to the wrapped
     /// [`Conn`](struct.Conn.html).
     pub fn as_mut(&mut self) -> &mut Conn {
