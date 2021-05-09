@@ -6,18 +6,21 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
+use bytes::{Buf, BufMut};
 use mysql_common::{
+    constants::{DEFAULT_MAX_ALLOWED_PACKET, UTF8_GENERAL_CI},
     crypto,
-    io::ReadMysqlExt,
+    io::{ParseBuf, ReadMysqlExt},
     named_params::parse_named_params,
     packets::{
-        column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
-        parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
-        ComStmtExecuteRequestBuilder, ComStmtSendLongData, HandshakePacket, HandshakeResponse,
-        OkPacket, OkPacketKind, SslRequest,
+        AuthPlugin, AuthSwitchRequest, Column, ComStmtClose, ComStmtExecuteRequestBuilder,
+        ComStmtSendLongData, CommonOkPacket, ErrPacket, HandshakePacket, HandshakeResponse,
+        OkPacket, OkPacketDeserializer, OkPacketKind, ResultSetTerminator, SessionStateInfo,
+        SslRequest,
     },
-    proto::{codec::Compression, sync_framed::MySyncFramed},
-    value::{read_bin_values, read_text_values, ServerSide},
+    proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
+    row::{Row, RowDeserializer},
+    value::ServerSide,
 };
 
 use std::{
@@ -25,7 +28,7 @@ use std::{
     cmp,
     collections::HashMap,
     convert::TryFrom,
-    io::{self, Read, Write as _},
+    io::{self, Write as _},
     mem,
     ops::{Deref, DerefMut},
     process,
@@ -33,6 +36,7 @@ use std::{
 };
 
 use crate::{
+    buffer_pool::PooledBuf,
     conn::{
         local_infile::LocalInfile,
         pool::{Pool, PooledConn},
@@ -243,6 +247,15 @@ impl Conn {
             .unwrap_or_default()
     }
 
+    pub fn session_state_changes(&self) -> io::Result<Vec<SessionStateInfo<'_>>> {
+        self.0
+            .ok_packet
+            .as_ref()
+            .map(|ok| ok.session_state_info())
+            .transpose()
+            .map(Option::unwrap_or_default)
+    }
+
     fn stream_ref(&self) -> &MySyncFramed<Stream> {
         self.0.stream.as_ref().expect("incomplete connection")
     }
@@ -310,19 +323,11 @@ impl Conn {
 
     fn soft_reset(&mut self) -> Result<()> {
         self.write_command(Command::COM_RESET_CONNECTION, &[])?;
-        self.read_packet().and_then(|pld| match pld[0] {
-            0 => {
-                let ok = parse_ok_packet(&*pld, self.0.capability_flags, OkPacketKind::Other)?;
-                self.handle_ok(&ok);
-                self.0.last_command = 0;
-                self.0.stmt_cache.clear();
-                Ok(())
-            }
-            _ => {
-                let err = parse_err_packet(&*pld, self.0.capability_flags)?;
-                Err(MySqlError(err.into()))
-            }
-        })
+        let packet = self.read_packet()?;
+        self.handle_ok::<CommonOkPacket>(&packet)?;
+        self.0.last_command = 0;
+        self.0.stmt_cache.clear();
+        Ok(())
     }
 
     fn hard_reset(&mut self) -> Result<()> {
@@ -394,28 +399,44 @@ impl Conn {
         Ok(())
     }
 
-    fn read_packet(&mut self) -> Result<Vec<u8>> {
-        let data = self
-            .stream_mut()
-            .next()
-            .transpose()?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "server disconnected"))?;
-        match data[0] {
-            0xff => {
-                let error_packet = parse_err_packet(&*data, self.0.capability_flags)?;
-                self.handle_err();
-                Err(MySqlError(error_packet.into()))
+    fn read_packet(&mut self) -> Result<PooledBuf> {
+        loop {
+            let mut buffer = crate::BUFFER_POOL.get();
+            if !self.stream_mut().next_packet(buffer.as_mut())? {
+                return Err(
+                    io::Error::new(io::ErrorKind::BrokenPipe, "server disconnected").into(),
+                );
             }
-            _ => Ok(data),
+            match buffer[0] {
+                0xff => {
+                    match ParseBuf(&*buffer).parse(self.0.capability_flags)? {
+                        ErrPacket::Error(server_error) => {
+                            self.handle_err();
+                            return Err(MySqlError(From::from(server_error)));
+                        }
+                        ErrPacket::Progress(_progress_report) => {
+                            // TODO: Report progress
+                            continue;
+                        }
+                    }
+                }
+                _ => return Ok(buffer),
+            }
         }
     }
 
     fn drop_packet(&mut self) -> Result<()> {
-        self.read_packet().map(|_| ())
+        self.read_packet().map(drop)
     }
 
-    fn write_packet<T: Into<Vec<u8>>>(&mut self, data: T) -> Result<()> {
-        self.stream_mut().send(data.into())?;
+    fn write_struct<T: MySerialize>(&mut self, s: &T) -> Result<()> {
+        let mut buf = crate::BUFFER_POOL.get();
+        s.serialize(buf.as_mut());
+        self.write_packet(&mut &*buf)
+    }
+
+    fn write_packet<T: Buf>(&mut self, data: &mut T) -> Result<()> {
+        self.stream_mut().send(data)?;
         Ok(())
     }
 
@@ -428,9 +449,16 @@ impl Conn {
         self.0.mariadb_server_version = hp.maria_db_server_version_parsed();
     }
 
-    fn handle_ok(&mut self, op: &OkPacket<'_>) {
-        self.0.status_flags = op.status_flags();
-        self.0.ok_packet = Some(op.clone().into_owned());
+    fn handle_ok<'a, T: OkPacketKind>(
+        &mut self,
+        buffer: &'a PooledBuf,
+    ) -> crate::Result<OkPacket<'a>> {
+        let ok = ParseBuf(&**buffer)
+            .parse::<OkPacketDeserializer<T>>(self.0.capability_flags)?
+            .into_inner();
+        self.0.status_flags = ok.status_flags();
+        self.0.ok_packet = Some(ok.clone().into_owned());
+        Ok(ok)
     }
 
     fn handle_err(&mut self) {
@@ -449,13 +477,13 @@ impl Conn {
         let plugin_data = auth_switch_request
             .auth_plugin()
             .gen_data(self.0.opts.get_pass(), nonce);
-        self.write_packet(plugin_data.unwrap_or_else(Vec::new))?;
-        self.continue_auth(auth_switch_request.auth_plugin(), nonce, true)
+        self.write_packet(&mut plugin_data.as_deref().unwrap_or(b""))?;
+        self.continue_auth(&auth_switch_request.auth_plugin(), nonce, true)
     }
 
     fn do_handshake(&mut self) -> Result<()> {
         let payload = self.read_packet()?;
-        let handshake = parse_handshake_packet(payload.as_ref())?;
+        let handshake = ParseBuf(&*payload).parse::<HandshakePacket>(())?;
 
         if handshake.protocol_version() != 10u8 {
             return Err(DriverError(UnsupportedProtocol(
@@ -490,16 +518,15 @@ impl Conn {
 
         let auth_plugin = handshake
             .auth_plugin()
-            .unwrap_or(&AuthPlugin::MysqlNativePassword);
+            .unwrap_or(AuthPlugin::MysqlNativePassword);
         if let AuthPlugin::Other(ref name) = auth_plugin {
             let plugin_name = String::from_utf8_lossy(name).into();
             return Err(DriverError(UnknownAuthPlugin(plugin_name)));
         }
 
         let auth_data = auth_plugin.gen_data(self.0.opts.get_pass(), &*nonce);
-        self.write_handshake_response(auth_plugin, auth_data.as_ref().map(AsRef::as_ref))?;
-
-        self.continue_auth(auth_plugin, &*nonce, false)?;
+        self.write_handshake_response(&auth_plugin, auth_data.as_deref())?;
+        self.continue_auth(&auth_plugin, &*nonce, false)?;
 
         if self
             .0
@@ -571,8 +598,12 @@ impl Conn {
     }
 
     fn do_ssl_request(&mut self) -> Result<()> {
-        let ssl_request = SslRequest::new(self.get_client_flags());
-        self.write_packet(ssl_request)
+        let ssl_request = SslRequest::new(
+            self.get_client_flags(),
+            DEFAULT_MAX_ALLOWED_PACKET as u32,
+            UTF8_GENERAL_CI as u8,
+        );
+        self.write_struct(&ssl_request)
     }
 
     fn write_handshake_response(
@@ -581,15 +612,18 @@ impl Conn {
         scramble_buf: Option<&[u8]>,
     ) -> Result<()> {
         let handshake_response = HandshakeResponse::new(
-            &scramble_buf,
+            scramble_buf,
             self.0.server_version.unwrap_or((0, 0, 0)),
-            self.0.opts.get_user(),
-            self.0.opts.get_db_name(),
-            auth_plugin,
+            self.0.opts.get_user().map(str::as_bytes),
+            self.0.opts.get_db_name().map(str::as_bytes),
+            Some(auth_plugin.clone()),
             self.0.capability_flags,
-            &self.connect_attrs(),
+            Some(self.connect_attrs().clone()),
         );
-        self.write_packet(handshake_response)
+
+        let mut buf = crate::BUFFER_POOL.get();
+        handshake_response.serialize(buf.as_mut());
+        self.write_packet(&mut &*buf)
     }
 
     fn continue_auth(
@@ -617,14 +651,10 @@ impl Conn {
 
         match payload[0] {
             // auth ok
-            0x00 => {
-                let ok = parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
-                self.handle_ok(&ok);
-                Ok(())
-            }
+            0x00 => self.handle_ok::<CommonOkPacket>(&payload).map(drop),
             // auth switch
             0xfe if !auth_switched => {
-                let auth_switch_request = parse_auth_switch_request(&*payload)?;
+                let auth_switch_request = ParseBuf(&*payload).parse(())?;
                 self.perform_auth_switch(auth_switch_request)
             }
             _ => Err(DriverError(UnexpectedPacket)),
@@ -646,10 +676,7 @@ impl Conn {
             0x01 => match payload[1] {
                 0x03 => {
                     let payload = self.read_packet()?;
-                    let ok =
-                        parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
-                    self.handle_ok(&ok);
-                    Ok(())
+                    self.handle_ok::<CommonOkPacket>(&payload).map(drop)
                 }
                 0x04 => {
                     if !self.is_insecure() || self.is_socket() {
@@ -660,9 +687,9 @@ impl Conn {
                             .map(Vec::from)
                             .unwrap_or_else(Vec::new);
                         pass.push(0);
-                        self.write_packet(pass)?;
+                        self.write_packet(&mut pass.as_slice())?;
                     } else {
-                        self.write_packet(vec![0x02])?;
+                        self.write_packet(&mut &[0x02][..])?;
                         let payload = self.read_packet()?;
                         let key = &payload[1..];
                         let mut pass = self
@@ -676,19 +703,16 @@ impl Conn {
                             pass[i] ^= nonce[i % nonce.len()];
                         }
                         let encrypted_pass = crypto::encrypt(&*pass, key);
-                        self.write_packet(encrypted_pass)?;
+                        self.write_packet(&mut encrypted_pass.as_slice())?;
                     }
 
                     let payload = self.read_packet()?;
-                    let ok =
-                        parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
-                    self.handle_ok(&ok);
-                    Ok(())
+                    self.handle_ok::<CommonOkPacket>(&payload).map(drop)
                 }
                 _ => Err(DriverError(UnexpectedPacket)),
             },
             0xfe if !auth_switched => {
-                let auth_switch_request = parse_auth_switch_request(&*payload)?;
+                let auth_switch_request = ParseBuf(&*payload).parse(())?;
                 self.perform_auth_switch(auth_switch_request)
             }
             _ => Err(DriverError(UnexpectedPacket)),
@@ -703,19 +727,23 @@ impl Conn {
         self.stream_mut().codec_mut().sync_seq_id();
     }
 
-    fn write_command_raw<T: Into<Vec<u8>>>(&mut self, body: T) -> Result<()> {
-        let body = body.into();
+    fn write_command_raw<T: MySerialize>(&mut self, cmd: &T) -> Result<()> {
+        let mut buf = crate::BUFFER_POOL.get();
+        cmd.serialize(buf.as_mut());
         self.reset_seq_id();
-        self.0.last_command = body[0];
-        self.write_packet(body)
+        debug_assert!(buf.len() > 0);
+        self.0.last_command = buf[0];
+        self.write_packet(&mut &*buf)
     }
 
     fn write_command(&mut self, cmd: Command, data: &[u8]) -> Result<()> {
-        let mut body = Vec::with_capacity(1 + data.len());
-        body.push(cmd as u8);
-        body.extend_from_slice(data);
+        let mut buf = crate::BUFFER_POOL.get();
+        buf.as_mut().put_u8(cmd as u8);
+        buf.as_mut().extend_from_slice(data);
 
-        self.write_command_raw(body)
+        self.reset_seq_id();
+        self.0.last_command = buf[0];
+        self.write_packet(&mut &*buf)
     }
 
     fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> Result<()> {
@@ -728,8 +756,8 @@ impl Conn {
                     None
                 });
                 for chunk in chunks {
-                    let com = ComStmtSendLongData::new(stmt_id, i, chunk);
-                    self.write_command_raw(com)?;
+                    let cmd = ComStmtSendLongData::new(stmt_id, i as u16, Cow::Borrowed(chunk));
+                    self.write_command_raw(&cmd)?;
                 }
             }
         }
@@ -742,7 +770,7 @@ impl Conn {
         stmt: &Statement,
         params: Params,
     ) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
-        let exec_request = match params {
+        let exec_request = match &params {
             Params::Empty => {
                 if stmt.num_params() != 0 {
                     return Err(DriverError(MismatchedStmtParams(stmt.num_params(), 0)));
@@ -776,7 +804,7 @@ impl Conn {
                 return self._execute(stmt, params.into_positional(named_params)?);
             }
         };
-        self.write_command_raw(exec_request)?;
+        self.write_command_raw(&exec_request)?;
         self.handle_result_set()
     }
 
@@ -828,10 +856,9 @@ impl Conn {
             }
             local_infile.flush()?;
         }
-        self.write_packet(Vec::new())?;
-        let pld = self.read_packet()?;
-        let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::Other)?;
-        self.handle_ok(&ok);
+        self.write_packet(&mut &[][..])?;
+        let payload = self.read_packet()?;
+        let ok = self.handle_ok::<CommonOkPacket>(&payload)?;
         Ok(ok.into_owned())
     }
 
@@ -843,30 +870,24 @@ impl Conn {
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
-                let ok =
-                    parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::Other)?;
-                self.handle_ok(&ok);
+                let ok = self.handle_ok::<CommonOkPacket>(&pld)?;
                 Ok(Or::B(ok.into_owned()))
             }
-            0xfb => {
-                let mut reader = &pld[1..];
-                let mut file_name = Vec::with_capacity(reader.len());
-                reader.read_to_end(&mut file_name)?;
-                match self.send_local_infile(file_name.as_ref()) {
-                    Ok(ok) => Ok(Or::B(ok)),
-                    Err(err) => Err(err),
-                }
-            }
+            0xfb => match self.send_local_infile(&pld[1..]) {
+                Ok(ok) => Ok(Or::B(ok)),
+                Err(err) => Err(err),
+            },
             _ => {
                 let mut reader = &pld[..];
                 let column_count = reader.read_lenenc_int()?;
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
                 for _ in 0..column_count {
                     let pld = self.read_packet()?;
-                    columns.push(column_from_payload(pld)?);
+                    let column = ParseBuf(&*pld).parse(())?;
+                    columns.push(column);
                 }
                 // skip eof packet
-                self.read_packet()?;
+                self.drop_packet()?;
                 self.0.has_results = column_count > 0;
                 Ok(Or::A(columns))
             }
@@ -906,24 +927,24 @@ impl Conn {
     fn _true_prepare(&mut self, query: &str) -> Result<InnerStmt> {
         self.write_command(Command::COM_STMT_PREPARE, query.as_bytes())?;
         let pld = self.read_packet()?;
-        let mut stmt = InnerStmt::from_payload(pld.as_ref(), self.connection_id())?;
+        let mut stmt = ParseBuf(&*pld).parse::<InnerStmt>(self.connection_id())?;
         if stmt.num_params() > 0 {
             let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
             for _ in 0..stmt.num_params() {
                 let pld = self.read_packet()?;
-                params.push(column_from_payload(pld)?);
+                params.push(ParseBuf(&*pld).parse(())?);
             }
             stmt = stmt.with_params(Some(params));
-            self.read_packet()?;
+            self.drop_packet()?;
         }
         if stmt.num_columns() > 0 {
             let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns() as usize);
             for _ in 0..stmt.num_columns() {
                 let pld = self.read_packet()?;
-                columns.push(column_from_payload(pld)?);
+                columns.push(ParseBuf(&*pld).parse(())?);
             }
             stmt = stmt.with_columns(Some(columns));
-            self.read_packet()?;
+            self.drop_packet()?;
         }
         Ok(stmt)
     }
@@ -972,42 +993,32 @@ impl Conn {
         self.query_first(format!("SELECT @@{}", name))
     }
 
-    fn next_bin(&mut self, columns: &[Column]) -> Result<Option<Vec<Value>>> {
+    fn next_bin(&mut self, columns: Arc<[Column]>) -> Result<Option<Row>> {
         if !self.0.has_results {
             return Ok(None);
         }
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
             self.0.has_results = false;
-            let p = parse_ok_packet(
-                pld.as_ref(),
-                self.0.capability_flags,
-                OkPacketKind::ResultSetTerminator,
-            )?;
-            self.handle_ok(&p);
+            self.handle_ok::<ResultSetTerminator>(&pld)?;
             return Ok(None);
         }
-        let values = read_bin_values::<ServerSide>(&*pld, columns)?;
-        Ok(Some(values))
+        let row = ParseBuf(&*pld).parse::<RowDeserializer<ServerSide, Binary>>(columns)?;
+        Ok(Some(row.into()))
     }
 
-    fn next_text(&mut self, col_count: usize) -> Result<Option<Vec<Value>>> {
+    fn next_text(&mut self, columns: Arc<[Column]>) -> Result<Option<Row>> {
         if !self.0.has_results {
             return Ok(None);
         }
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
             self.0.has_results = false;
-            let p = parse_ok_packet(
-                pld.as_ref(),
-                self.0.capability_flags,
-                OkPacketKind::ResultSetTerminator,
-            )?;
-            self.handle_ok(&p);
+            self.handle_ok::<ResultSetTerminator>(&pld)?;
             return Ok(None);
         }
-        let values = read_text_values(&*pld, col_count)?;
-        Ok(Some(values))
+        let row = ParseBuf(&*pld).parse::<RowDeserializer<(), Text>>(columns)?;
+        Ok(Some(row.into()))
     }
 
     fn has_stmt(&self, query: &str) -> bool {
@@ -1046,9 +1057,8 @@ impl Queryable for Conn {
 
     fn close(&mut self, stmt: Statement) -> Result<()> {
         self.0.stmt_cache.remove(stmt.id());
-        let com_stmt_close = ComStmtClose::new(stmt.id());
-        self.write_command_raw(com_stmt_close)?;
-        Ok(())
+        let cmd = ComStmtClose::new(stmt.id());
+        self.write_command_raw(&cmd)
     }
 
     fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
@@ -1664,6 +1674,26 @@ mod test {
                 }
             }
             assert_eq!(i, 3);
+        }
+
+        #[test]
+        fn issue_273() {
+            let opts = OptsBuilder::from_opts(get_opts()).prefer_socket(false);
+            let mut conn = Conn::new(opts).unwrap();
+
+            "DROP FUNCTION IF EXISTS f1".run(&mut conn).unwrap();
+            r"CREATE DEFINER=`root`@`localhost` FUNCTION `f1`(p_arg INT, p_arg2 INT) RETURNS int
+            DETERMINISTIC
+            BEGIN
+                RETURN p_arg + p_arg2;
+            END"
+            .run(&mut conn)
+            .unwrap();
+
+            "SELECT f1(?, ?)"
+                .with((100u8, 100u8))
+                .run(&mut conn)
+                .unwrap();
         }
 
         #[test]

@@ -46,6 +46,8 @@ mysqld --no-defaults \
        --innodb_file_per_table=1 \
        --innodb_log_file_size=256M \
        --local-infile=ON \
+       --gtid_mode=ON \
+       --enforce_gtid_consistency=ON \
        --ssl \
        --ssl-ca=$(MYSQL_SSL_CA) \
        --ssl-cert=$(MYSQL_SSL_CERT) \

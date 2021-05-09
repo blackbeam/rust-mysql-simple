@@ -7,7 +7,7 @@
 // modified, or distributed except according to those terms.
 
 use mysql_common::{
-    named_params::MixedParamsError, packets::ErrPacket, params::MissingNamedParameterError,
+    named_params::MixedParamsError, packets, params::MissingNamedParameterError,
     proto::codec::error::PacketCodecError, row::convert::FromRowError,
     value::convert::FromValueError,
 };
@@ -17,8 +17,8 @@ use std::{error, fmt, io, result, sync};
 
 use crate::{Row, Value};
 
-impl<'a> From<ErrPacket<'a>> for MySqlError {
-    fn from(x: ErrPacket<'a>) -> MySqlError {
+impl<'a> From<packets::ServerError<'a>> for MySqlError {
+    fn from(x: packets::ServerError<'a>) -> MySqlError {
         MySqlError {
             state: x.sql_state_str().into_owned(),
             code: x.error_code(),

@@ -760,6 +760,8 @@
 #[cfg(feature = "nightly")]
 extern crate test;
 
+use std::sync::Arc;
+
 use mysql_common as myc;
 pub extern crate serde;
 pub extern crate serde_json;
@@ -774,12 +776,16 @@ pub use crate::myc::time;
 /// Reexport of `uuid` crate.
 pub use crate::myc::uuid;
 
+mod buffer_pool;
 mod conn;
 pub mod error;
 mod io;
 
 #[doc(inline)]
 pub use crate::myc::constants as consts;
+
+#[doc(inline)]
+pub use crate::myc::packets::{session_state_change, SessionStateInfo};
 
 #[doc(inline)]
 pub use crate::conn::local_infile::{LocalInfile, LocalInfileHandler};
@@ -838,6 +844,9 @@ pub mod prelude {
 
 #[doc(inline)]
 pub use crate::myc::params;
+
+static BUFFER_POOL: once_cell::sync::Lazy<Arc<crate::buffer_pool::BufferPool>> =
+    once_cell::sync::Lazy::new(|| Default::default());
 
 #[doc(hidden)]
 #[macro_export]
