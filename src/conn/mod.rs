@@ -1211,47 +1211,47 @@ mod test {
         fn query_traits() -> Result<(), Box<dyn std::error::Error>> {
             macro_rules! test_query {
                 ($conn : expr) => {
-                    "CREATE TEMPORARY TABLE tmp (a INT)".run($conn)?;
+                    "CREATE TABLE tmplak (a INT)".run($conn)?;
 
-                    "INSERT INTO tmp (a) VALUES (?)".with((42,)).run($conn)?;
+                    "INSERT INTO tmplak (a) VALUES (?)".with((42,)).run($conn)?;
 
-                    "INSERT INTO tmp (a) VALUES (?)"
+                    "INSERT INTO tmplak (a) VALUES (?)"
                         .with((43..=44).map(|x| (x,)))
                         .batch($conn)?;
 
-                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1".first($conn)?;
+                    let first: Option<u8> = "SELECT a FROM tmplak LIMIT 1".first($conn)?;
                     assert_eq!(first, Some(42), "first text");
 
-                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1".with(()).first($conn)?;
+                    let first: Option<u8> = "SELECT a FROM tmplak LIMIT 1".with(()).first($conn)?;
                     assert_eq!(first, Some(42), "first bin");
 
-                    let count = "SELECT a FROM tmp".run($conn)?.count();
+                    let count = "SELECT a FROM tmplak".run($conn)?.count();
                     assert_eq!(count, 3, "run text");
 
-                    let count = "SELECT a FROM tmp".with(()).run($conn)?.count();
+                    let count = "SELECT a FROM tmplak".with(()).run($conn)?.count();
                     assert_eq!(count, 3, "run bin");
 
-                    let all: Vec<u8> = "SELECT a FROM tmp".fetch($conn)?;
+                    let all: Vec<u8> = "SELECT a FROM tmplak".fetch($conn)?;
                     assert_eq!(all, vec![42, 43, 44], "fetch text");
 
-                    let all: Vec<u8> = "SELECT a FROM tmp".with(()).fetch($conn)?;
+                    let all: Vec<u8> = "SELECT a FROM tmplak".with(()).fetch($conn)?;
                     assert_eq!(all, vec![42, 43, 44], "fetch bin");
 
-                    let mapped = "SELECT a FROM tmp".map($conn, |x: u8| x + 1)?;
+                    let mapped = "SELECT a FROM tmplak".map($conn, |x: u8| x + 1)?;
                     assert_eq!(mapped, vec![43, 44, 45], "map text");
 
-                    let mapped = "SELECT a FROM tmp".with(()).map($conn, |x: u8| x + 1)?;
+                    let mapped = "SELECT a FROM tmplak".with(()).map($conn, |x: u8| x + 1)?;
                     assert_eq!(mapped, vec![43, 44, 45], "map bin");
 
-                    let sum = "SELECT a FROM tmp".fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                    let sum = "SELECT a FROM tmplak".fold($conn, 0_u8, |acc, x: u8| acc + x)?;
                     assert_eq!(sum, 42 + 43 + 44, "fold text");
 
-                    let sum = "SELECT a FROM tmp"
+                    let sum = "SELECT a FROM tmplak"
                         .with(())
                         .fold($conn, 0_u8, |acc, x: u8| acc + x)?;
                     assert_eq!(sum, 42 + 43 + 44, "fold bin");
 
-                    "DROP TABLE tmp".run($conn)?;
+                    "DROP TABLE tmplak".run($conn)?;
                 };
             }
 
@@ -2051,23 +2051,29 @@ mod test {
 
             fn get_conn() -> crate::Result<(Conn, Vec<u8>, u64)> {
                 let mut conn = Conn::new(get_opts())?;
-                let gtid_mode: String = "SELECT @@GLOBAL.GTID_MODE".first(&mut conn)?.unwrap();
 
-                if gtid_mode != "ON" {
-                    panic!(
-                        "GTID_MODE is disabled \
-                    (enable using --gtid_mode=ON --enforce_gtid_consistency=ON)"
-                    );
+                if let Ok(Some(gtid_mode)) =
+                    "SELECT @@GLOBAL.GTID_MODE".first::<String, _>(&mut conn)
+                {
+                    if !gtid_mode.starts_with("ON") {
+                        panic!(
+                            "GTID_MODE is disabled \
+                                (enable using --gtid_mode=ON --enforce_gtid_consistency=ON)"
+                        );
+                    }
                 }
 
-                let (filename, position, _enc): (_, _, crate::Value) =
-                    "SHOW BINARY LOGS".first(&mut conn)?.unwrap();
+                let row: crate::Row = "SHOW BINARY LOGS".first(&mut conn)?.unwrap();
+                let filename = row.get(0).unwrap();
+                let position = row.get(1).unwrap();
+
                 gen_dummy_data().unwrap();
                 Ok((conn, filename, position))
             }
 
             // iterate using COM_BINLOG_DUMP
             let (conn, filename, pos) = get_conn().unwrap();
+            let is_mariadb = conn.0.mariadb_server_version.is_some();
 
             let binlog_stream = conn
                 .get_binlog_stream(BinlogRequest::new(12).with_filename(filename).with_pos(pos))
@@ -2103,47 +2109,49 @@ mod test {
             }
             assert!(events_num > 0);
 
-            // iterate using COM_BINLOG_DUMP_GTID
-            let (conn, filename, pos) = get_conn().unwrap();
+            if !is_mariadb {
+                // iterate using COM_BINLOG_DUMP_GTID
+                let (conn, filename, pos) = get_conn().unwrap();
 
-            let binlog_stream = conn
-                .get_binlog_stream(
-                    BinlogRequest::new(13)
-                        .with_use_gtid(true)
-                        .with_filename(filename)
-                        .with_pos(pos),
-                )
-                .unwrap();
+                let binlog_stream = conn
+                    .get_binlog_stream(
+                        BinlogRequest::new(13)
+                            .with_use_gtid(true)
+                            .with_filename(filename)
+                            .with_pos(pos),
+                    )
+                    .unwrap();
 
-            let mut events_num = 0;
-            let (tx, rx) = sync_channel(0);
-            spawn(move || {
-                for event in binlog_stream {
-                    tx.send(event).unwrap();
-                }
-            });
-            let mut tmes = HashMap::new();
-            while let Ok(event) = rx.recv_timeout(Duration::from_secs(1)) {
-                let event = event.unwrap();
-                events_num += 1;
-
-                // assert that event type is known
-                event.header().event_type().unwrap();
-
-                // iterate over rows of an event
-                match event.read_data()?.unwrap() {
-                    EventData::TableMapEvent(tme) => {
-                        tmes.insert(tme.table_id(), tme.into_owned());
+                let mut events_num = 0;
+                let (tx, rx) = sync_channel(0);
+                spawn(move || {
+                    for event in binlog_stream {
+                        tx.send(event).unwrap();
                     }
-                    EventData::RowsEvent(re) => {
-                        for row in re.rows(&tmes[&re.table_id()]) {
-                            row.unwrap();
+                });
+                let mut tmes = HashMap::new();
+                while let Ok(event) = rx.recv_timeout(Duration::from_secs(1)) {
+                    let event = event.unwrap();
+                    events_num += 1;
+
+                    // assert that event type is known
+                    event.header().event_type().unwrap();
+
+                    // iterate over rows of an event
+                    match event.read_data()?.unwrap() {
+                        EventData::TableMapEvent(tme) => {
+                            tmes.insert(tme.table_id(), tme.into_owned());
                         }
+                        EventData::RowsEvent(re) => {
+                            for row in re.rows(&tmes[&re.table_id()]) {
+                                row.unwrap();
+                            }
+                        }
+                        _ => (),
                     }
-                    _ => (),
                 }
+                assert!(events_num > 0);
             }
-            assert!(events_num > 0);
 
             // iterate using COM_BINLOG_DUMP with BINLOG_DUMP_NON_BLOCK flag
             let (conn, filename, pos) = get_conn().unwrap();

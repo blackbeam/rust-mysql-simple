@@ -22,6 +22,12 @@ jobs:
           sudo service mysql start
           mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -proot
           mysql -e "SET GLOBAL local_infile = 1;" -uroot -proot
+          mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot -proot
+          mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot -proot
+          mysql -e "SET @@GLOBAL.GTID_MODE = OFF_PERMISSIVE;" -uroot -proot
+          mysql -e "SET @@GLOBAL.GTID_MODE = ON_PERMISSIVE;" -uroot -proot
+          mysql -e "SET @@GLOBAL.GTID_MODE = ON;" -uroot -proot
+          mysql -e "PURGE BINARY LOGS BEFORE now();" -uroot -proot
         displayName: Install MySql
       - bash: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
@@ -61,8 +67,14 @@ jobs:
           echo 'local_infile=1' >> /usr/local/etc/my.cnf
           echo 'socket=/tmp/mysql.sock' >> /usr/local/etc/my.cnf
           brew services start mysql
+          mysql --version
           sleep 5
           /usr/local/Cellar/mysql/*/bin/mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = OFF_PERMISSIVE;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = ON_PERMISSIVE;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = ON;" -uroot
         displayName: Install MySql
       - bash: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN
@@ -103,6 +115,11 @@ jobs:
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld" --install MySQL --defaults-file=C:\my.cnf
           net start MySql
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.GTID_MODE = OFF_PERMISSIVE;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.GTID_MODE = ON_PERMISSIVE;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.GTID_MODE = ON;" -uroot -ppassword
         displayName: Install MySql
       - bash: |
           rustup install $RUST_TOOLCHAIN
@@ -138,7 +155,7 @@ jobs:
           docker --version
         displayName: Install docker
       - bash: |
-          docker run --rm --name container -v `pwd`:/root -p 3307:3306 -d -e MYSQL_ROOT_PASSWORD=password mysql:$(DB_VERSION) --max-allowed-packet=36700160 --local-infile
+          docker run -d --name container -v `pwd`:/root -p 3307:3306 -e MYSQL_ROOT_PASSWORD=password mysql:$(DB_VERSION) --max-allowed-packet=36700160 --local-infile --log-bin=mysql-bin --log-slave-updates --gtid_mode=ON --enforce_gtid_consistency=ON --server-id=1
           while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
         displayName: Run MySql in Docker
       - bash: |
@@ -191,13 +208,15 @@ jobs:
                   --max-allowed-packet=36700160 \
                   --local-infile \
                   --performance-schema=on \
+                  --log-bin=mysql-bin --gtid-domain-id=1 \
                   --ssl \
                   --ssl-ca=/root/tests/ca-cert.pem \
                   --ssl-cert=/root/tests/server-cert.pem \
-                  --ssl-key=/root/tests/server-key.pem
+                  --ssl-key=/root/tests/server-key.pem &
           while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
           docker logs container
           docker exec container bash -l -c "mysql -uroot -ppassword -e 'SHOW VARIABLES LIKE \"%ssl%\"'"
+          docker exec container bash -l -c "mysql -uroot -ppassword -e 'SET GLOBAL server_id = 1;'"
           docker exec container bash -l -c "ls -la /root/tests"
         displayName: Run MariaDb in Docker
       - bash: |
