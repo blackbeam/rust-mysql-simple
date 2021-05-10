@@ -13,10 +13,10 @@ use mysql_common::{
     io::{ParseBuf, ReadMysqlExt},
     named_params::parse_named_params,
     packets::{
-        AuthPlugin, AuthSwitchRequest, Column, ComStmtClose, ComStmtExecuteRequestBuilder,
-        ComStmtSendLongData, CommonOkPacket, ErrPacket, HandshakePacket, HandshakeResponse,
-        OkPacket, OkPacketDeserializer, OkPacketKind, ResultSetTerminator, SessionStateInfo,
-        SslRequest,
+        binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
+        ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
+        HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
+        ResultSetTerminator, SessionStateInfo, SslRequest,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
     row::{Row, RowDeserializer},
@@ -59,6 +59,9 @@ use crate::{
     Value::{self, Bytes, NULL},
 };
 
+use self::binlog_stream::BinlogStream;
+
+pub mod binlog_stream;
 pub mod local_infile;
 pub mod opts;
 pub mod pool;
@@ -1040,6 +1043,34 @@ impl Conn {
             .status_flags
             .contains(StatusFlags::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
     }
+
+    fn register_as_slave(&mut self, server_id: u32) -> Result<()> {
+        use mysql_common::packets::ComRegisterSlave;
+
+        self.query_drop("SET @master_binlog_checksum='ALL'")?;
+        self.write_command_raw(&ComRegisterSlave::new(server_id))?;
+
+        // Server will respond with OK.
+        self.read_packet()?;
+
+        Ok(())
+    }
+
+    fn request_binlog(&mut self, request: BinlogRequest<'_>) -> Result<()> {
+        self.register_as_slave(request.server_id())?;
+        self.write_command_raw(&request.as_cmd())?;
+        Ok(())
+    }
+
+    /// Turns this connection into a binlog stream.
+    ///
+    /// You can use `SHOW BINARY LOGS` to get the current logfile and position from the master.
+    /// If the request's `filename` is empty, the server will send the binlog-stream
+    /// of the first known binlog.
+    pub fn get_binlog_stream(mut self, request: BinlogRequest<'_>) -> Result<BinlogStream> {
+        self.request_binlog(request)?;
+        Ok(BinlogStream::new(self))
+    }
 }
 
 impl Queryable for Conn {
@@ -1091,6 +1122,8 @@ impl Drop for Conn {
 mod test {
     mod my_conn {
         use std::{collections::HashMap, io::Write, iter, process};
+
+        use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
 
         use crate::{
             from_row, from_value, params,
@@ -1992,6 +2025,148 @@ mod test {
                 expected_values.push(("program_name", "my program name"));
                 assert_connect_attrs(&mut conn, &expected_values);
             }
+        }
+
+        #[test]
+        fn should_read_binlog() -> crate::Result<()> {
+            use std::{
+                collections::HashMap, sync::mpsc::sync_channel, thread::spawn, time::Duration,
+            };
+
+            fn gen_dummy_data() -> crate::Result<()> {
+                let mut conn = Conn::new(get_opts())?;
+
+                "CREATE TABLE IF NOT EXISTS customers (customer_id int not null)".run(&mut conn)?;
+
+                for i in 0_u8..100 {
+                    "INSERT INTO customers(customer_id) VALUES (?)"
+                        .with((i,))
+                        .run(&mut conn)?;
+                }
+
+                "DROP TABLE customers".run(&mut conn)?;
+
+                Ok(())
+            }
+
+            fn get_conn() -> crate::Result<(Conn, Vec<u8>, u64)> {
+                let mut conn = Conn::new(get_opts())?;
+                let gtid_mode: String = "SELECT @@GLOBAL.GTID_MODE".first(&mut conn)?.unwrap();
+
+                if gtid_mode != "ON" {
+                    panic!(
+                        "GTID_MODE is disabled \
+                    (enable using --gtid_mode=ON --enforce_gtid_consistency=ON)"
+                    );
+                }
+
+                let (filename, position, _enc): (_, _, crate::Value) =
+                    "SHOW BINARY LOGS".first(&mut conn)?.unwrap();
+                gen_dummy_data().unwrap();
+                Ok((conn, filename, position))
+            }
+
+            // iterate using COM_BINLOG_DUMP
+            let (conn, filename, pos) = get_conn().unwrap();
+
+            let binlog_stream = conn
+                .get_binlog_stream(BinlogRequest::new(12).with_filename(filename).with_pos(pos))
+                .unwrap();
+
+            let mut events_num = 0;
+            let (tx, rx) = sync_channel(0);
+            spawn(move || {
+                for event in binlog_stream {
+                    tx.send(event).unwrap();
+                }
+            });
+            let mut tmes = HashMap::new();
+            while let Ok(event) = rx.recv_timeout(Duration::from_secs(1)) {
+                let event = event.unwrap();
+                events_num += 1;
+
+                // assert that event type is known
+                event.header().event_type().unwrap();
+
+                // iterate over rows of an event
+                match event.read_data()?.unwrap() {
+                    EventData::TableMapEvent(tme) => {
+                        tmes.insert(tme.table_id(), tme.into_owned());
+                    }
+                    EventData::RowsEvent(re) => {
+                        for row in re.rows(&tmes[&re.table_id()]) {
+                            row.unwrap();
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            assert!(events_num > 0);
+
+            // iterate using COM_BINLOG_DUMP_GTID
+            let (conn, filename, pos) = get_conn().unwrap();
+
+            let binlog_stream = conn
+                .get_binlog_stream(
+                    BinlogRequest::new(13)
+                        .with_use_gtid(true)
+                        .with_filename(filename)
+                        .with_pos(pos),
+                )
+                .unwrap();
+
+            let mut events_num = 0;
+            let (tx, rx) = sync_channel(0);
+            spawn(move || {
+                for event in binlog_stream {
+                    tx.send(event).unwrap();
+                }
+            });
+            let mut tmes = HashMap::new();
+            while let Ok(event) = rx.recv_timeout(Duration::from_secs(1)) {
+                let event = event.unwrap();
+                events_num += 1;
+
+                // assert that event type is known
+                event.header().event_type().unwrap();
+
+                // iterate over rows of an event
+                match event.read_data()?.unwrap() {
+                    EventData::TableMapEvent(tme) => {
+                        tmes.insert(tme.table_id(), tme.into_owned());
+                    }
+                    EventData::RowsEvent(re) => {
+                        for row in re.rows(&tmes[&re.table_id()]) {
+                            row.unwrap();
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            assert!(events_num > 0);
+
+            // iterate using COM_BINLOG_DUMP with BINLOG_DUMP_NON_BLOCK flag
+            let (conn, filename, pos) = get_conn().unwrap();
+
+            let mut binlog_stream = conn
+                .get_binlog_stream(
+                    BinlogRequest::new(14)
+                        .with_filename(filename)
+                        .with_pos(pos)
+                        .with_flags(crate::BinlogDumpFlags::BINLOG_DUMP_NON_BLOCK),
+                )
+                .unwrap();
+
+            events_num = 0;
+            while let Some(event) = binlog_stream.next() {
+                let event = event.unwrap();
+                events_num += 1;
+                event.header().event_type().unwrap();
+                event.read_data()?;
+            }
+            assert!(events_num > 0);
+
+            Ok(())
         }
     }
 

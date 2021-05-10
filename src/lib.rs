@@ -785,6 +785,17 @@ mod io;
 pub use crate::myc::constants as consts;
 
 #[doc(inline)]
+pub use crate::myc::packets::{binlog_request::BinlogRequest, BinlogDumpFlags};
+
+pub mod binlog {
+    #[doc(inline)]
+    pub use crate::myc::binlog::consts::*;
+
+    #[doc(inline)]
+    pub use crate::myc::binlog::{events, jsonb, jsondiff, row, value};
+}
+
+#[doc(inline)]
 pub use crate::myc::packets::{session_state_change, SessionStateInfo};
 
 #[doc(inline)]
@@ -804,7 +815,7 @@ pub use crate::conn::stmt::Statement;
 #[doc(inline)]
 pub use crate::conn::transaction::{AccessMode, IsolationLevel, Transaction, TxOpts};
 #[doc(inline)]
-pub use crate::conn::Conn;
+pub use crate::conn::{binlog_stream::BinlogStream, Conn};
 #[doc(inline)]
 pub use crate::error::{DriverError, Error, MySqlError, Result, ServerError, UrlError};
 #[doc(inline)]
