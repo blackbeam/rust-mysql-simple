@@ -241,6 +241,7 @@ pub enum DriverError {
     NamedParamsForPositionalQuery,
     MixedParams,
     UnknownAuthPlugin(String),
+    OldMysqlPasswordDisabled,
 }
 
 impl error::Error for DriverError {
@@ -297,6 +298,12 @@ impl fmt::Display for DriverError {
             ),
             DriverError::UnknownAuthPlugin(ref name) => {
                 write!(f, "Unknown authentication protocol: `{}`", name)
+            }
+            DriverError::OldMysqlPasswordDisabled => {
+                write!(
+                    f,
+                    "`old_mysql_password` plugin is insecure and disabled by default",
+                )
             }
         }
     }

@@ -6,12 +6,11 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use percent_encoding::{percent_decode, percent_decode_str};
+use percent_encoding::percent_decode;
 use url::Url;
 
 use std::{
-    borrow::Cow, collections::HashMap, hash::Hash, net::SocketAddr, path::Path, str::FromStr,
-    time::Duration,
+    borrow::Cow, collections::HashMap, hash::Hash, net::SocketAddr, path::Path, time::Duration,
 };
 
 use crate::{consts::CapabilityFlags, Compression, LocalInfileHandler, UrlError};
@@ -198,6 +197,11 @@ pub(crate) struct InnerOpts {
     /// Connect attributes
     connect_attrs: HashMap<String, String>,
 
+    /// Disables `mysql_old_password` plugin (defaults to `true`).
+    ///
+    /// Available via `secure_auth` connection url parameter.
+    secure_auth: bool,
+
     /// For tests only
     #[cfg(test)]
     pub injected_socket: Option<String>,
@@ -226,6 +230,7 @@ impl Default for InnerOpts {
             compress: None,
             additional_capabilities: CapabilityFlags::empty(),
             connect_attrs: HashMap::new(),
+            secure_auth: true,
             #[cfg(test)]
             injected_socket: None,
         }
@@ -309,10 +314,6 @@ impl Opts {
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
     pub fn get_ssl_opts(&self) -> Option<&SslOpts> {
         self.0.ssl_opts.as_ref()
-    }
-
-    fn set_prefer_socket(&mut self, val: bool) {
-        self.0.prefer_socket = val;
     }
 
     /// Whether `TCP_NODELAY` will be set for mysql connection.
@@ -415,6 +416,13 @@ impl Opts {
     pub fn get_connect_attrs(&self) -> &HashMap<String, String> {
         &self.0.connect_attrs
     }
+
+    /// Disables `mysql_old_password` plugin (defaults to `true`).
+    ///
+    /// Available via `secure_auth` connection url parameter.
+    pub fn get_secure_auth(&self) -> bool {
+        self.0.secure_auth
+    }
 }
 
 /// Provides a way to build [`Opts`](struct.Opts.html).
@@ -477,10 +485,11 @@ impl OptsBuilder {
     /// - compress = Compression level(defaults to `None`)
     /// - tcp_connect_timeout_ms = Tcp connect timeout (defaults to `None`)
     /// - stmt_cache_size = Number of prepared statements cached on the client side (per connection)
+    /// - secure_auth = Disable `mysql_old_password` auth plugin
     ///
     /// Login .cnf file parsing lib https://github.com/rjcortese/myloginrs returns a HashMap for client configs
     ///
-    /// **Note:** You do **not** have to use myloginrs lib.    
+    /// **Note:** You do **not** have to use myloginrs lib.
     pub fn from_hash_map(mut self, client: &HashMap<String, String>) -> Result<Self, UrlError> {
         for (key, value) in client.iter() {
             match key.as_str() {
@@ -508,6 +517,12 @@ impl OptsBuilder {
                         }
                     }
                 }
+                "secure_auth" => match value.parse::<bool>() {
+                    Ok(parsed) => self.opts.0.secure_auth = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 "tcp_keepalive_time_ms" => {
                     //if cannot parse, default to none
                     self.opts.0.tcp_keepalive_time = match value.parse::<u32>() {
@@ -550,7 +565,7 @@ impl OptsBuilder {
                 },
                 _ => {
                     //throw an error if there is an unrecognized param
-                    UrlError::UnknownParameter(key.to_string());
+                    return Err(UrlError::UnknownParameter(key.to_string()));
                 }
             }
         }
@@ -796,6 +811,14 @@ impl OptsBuilder {
         }
         self
     }
+
+    /// Disables `mysql_old_password` plugin (defaults to `true`).
+    ///
+    /// Available via `secure_auth` connection url parameter.
+    pub fn secure_auth(mut self, secure_auth: bool) -> Self {
+        self.opts.0.secure_auth = secure_auth;
+        self
+    }
 }
 
 impl From<OptsBuilder> for Opts {
@@ -883,83 +906,11 @@ fn from_url_basic(url_str: &str) -> Result<(Opts, Vec<(String, String)>), UrlErr
 }
 
 fn from_url(url: &str) -> Result<Opts, UrlError> {
-    let (mut opts, query_pairs) = from_url_basic(url)?;
-    for (key, value) in query_pairs {
-        if key == "prefer_socket" {
-            if value == "true" {
-                opts.set_prefer_socket(true);
-            } else if value == "false" {
-                opts.set_prefer_socket(false);
-            } else {
-                return Err(UrlError::InvalidValue("prefer_socket".into(), value));
-            }
-        } else if key == "tcp_keepalive_time_ms" {
-            match u32::from_str(&*value) {
-                Ok(tcp_keepalive_time_ms) => {
-                    opts.0.tcp_keepalive_time = Some(tcp_keepalive_time_ms);
-                }
-                _ => {
-                    return Err(UrlError::InvalidValue(
-                        "tcp_keepalive_time_ms".into(),
-                        value,
-                    ));
-                }
-            }
-        } else if key == "tcp_connect_timeout_ms" {
-            match u64::from_str(&*value) {
-                Ok(tcp_connect_timeout_ms) => {
-                    opts.0.tcp_connect_timeout =
-                        Some(Duration::from_millis(tcp_connect_timeout_ms));
-                }
-                _ => {
-                    return Err(UrlError::InvalidValue(
-                        "tcp_connect_timeout_ms".into(),
-                        value,
-                    ));
-                }
-            }
-        } else if key == "stmt_cache_size" {
-            match usize::from_str(&*value) {
-                Ok(stmt_cache_size) => {
-                    opts.0.stmt_cache_size = stmt_cache_size;
-                }
-                _ => {
-                    return Err(UrlError::InvalidValue("stmt_cache_size".into(), value));
-                }
-            }
-        } else if key == "compress" {
-            if value == "true" {
-                opts.0.compress = Some(crate::Compression::default());
-            } else if value == "fast" {
-                opts.0.compress = Some(crate::Compression::fast());
-            } else if value == "best" {
-                opts.0.compress = Some(crate::Compression::best());
-            } else if value.len() == 1 && 0x30 <= value.as_bytes()[0] && value.as_bytes()[0] <= 0x39
-            {
-                opts.0.compress =
-                    Some(crate::Compression::new((value.as_bytes()[0] - 0x30) as u32));
-            } else {
-                return Err(UrlError::InvalidValue("compress".into(), value));
-            }
-        } else if key == "socket" {
-            let socket = percent_decode_str(&*value).decode_utf8_lossy().into_owned();
-            if !socket.is_empty() {
-                opts.0.socket = Some(socket);
-            }
-        } else {
-            return Err(UrlError::UnknownParameter(key));
-        }
-    }
-    Ok(opts)
-}
-
-impl<S: AsRef<str>> From<S> for Opts {
-    fn from(url: S) -> Opts {
-        match from_url(url.as_ref()) {
-            Ok(opts) => opts,
-            Err(err) => panic!("{}", err),
-        }
-    }
+    let (opts, query_pairs) = from_url_basic(url)?;
+    let hash_map = query_pairs.into_iter().collect::<HashMap<String, String>>();
+    OptsBuilder::from_opts(opts)
+        .from_hash_map(&hash_map)
+        .map(Into::into)
 }
 
 #[cfg(test)]
@@ -971,7 +922,7 @@ mod test {
 
     #[test]
     fn should_report_empty_url_database_as_none() {
-        let opt = Opts::from("mysql://localhost/");
+        let opt = Opts::from_url("mysql://localhost/").unwrap();
         assert_eq!(opt.get_db_name(), None);
     }
 
@@ -991,7 +942,7 @@ mod test {
                 compress: Some(Compression::new(8)),
                 ..InnerOpts::default()
             })),
-            opts.into()
+            Opts::from_url(opts).unwrap(),
         );
     }
 
@@ -999,21 +950,21 @@ mod test {
     #[should_panic]
     fn should_panic_on_invalid_url() {
         let opts = "42";
-        let _: Opts = opts.into();
+        Opts::from_url(opts).unwrap();
     }
 
     #[test]
     #[should_panic]
     fn should_panic_on_invalid_scheme() {
         let opts = "postgres://localhost";
-        let _: Opts = opts.into();
+        Opts::from_url(opts).unwrap();
     }
 
     #[test]
     #[should_panic]
     fn should_panic_on_unknown_query_param() {
         let opts = "mysql://localhost/foo?bar=baz";
-        let _: Opts = opts.into();
+        Opts::from_url(opts).unwrap();
     }
 
     #[test]

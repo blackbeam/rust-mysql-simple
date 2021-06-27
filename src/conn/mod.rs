@@ -11,12 +11,13 @@ use mysql_common::{
     constants::{DEFAULT_MAX_ALLOWED_PACKET, UTF8_GENERAL_CI},
     crypto,
     io::{ParseBuf, ReadMysqlExt},
+    misc::raw::Either,
     named_params::parse_named_params,
     packets::{
         binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
         ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
         HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
-        ResultSetTerminator, SessionStateInfo, SslRequest,
+        OldAuthSwitchRequest, ResultSetTerminator, SessionStateInfo, SslRequest,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
     row::{Row, RowDeserializer},
@@ -50,8 +51,8 @@ use crate::{
     io::Stream,
     prelude::*,
     DriverError::{
-        MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
-        ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket,
+        MismatchedStmtParams, NamedParamsForPositionalQuery, OldMysqlPasswordDisabled,
+        Protocol41NotSet, ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket,
         UnknownAuthPlugin, UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
@@ -476,11 +477,22 @@ impl Conn {
     }
 
     fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> Result<()> {
+        if matches!(
+            auth_switch_request.auth_plugin(),
+            AuthPlugin::MysqlOldPassword
+        ) {
+            if self.0.opts.get_secure_auth() {
+                return Err(DriverError(OldMysqlPasswordDisabled));
+            }
+        }
+
         let nonce = auth_switch_request.plugin_data();
         let plugin_data = auth_switch_request
             .auth_plugin()
-            .gen_data(self.0.opts.get_pass(), nonce);
-        self.write_packet(&mut plugin_data.as_deref().unwrap_or(b""))?;
+            .gen_data(self.0.opts.get_pass(), nonce)
+            .map(Either::Left)
+            .unwrap_or_else(|| Either::Right([]));
+        self.write_struct(&plugin_data)?;
         self.continue_auth(&auth_switch_request.auth_plugin(), nonce, true)
     }
 
@@ -636,11 +648,13 @@ impl Conn {
         auth_switched: bool,
     ) -> Result<()> {
         match auth_plugin {
-            AuthPlugin::MysqlNativePassword => {
-                self.continue_mysql_native_password_auth(auth_switched)
-            }
             AuthPlugin::CachingSha2Password => {
-                self.continue_caching_sha2_password_auth(nonce, auth_switched)
+                self.continue_caching_sha2_password_auth(nonce, auth_switched)?;
+                Ok(())
+            }
+            AuthPlugin::MysqlNativePassword | AuthPlugin::MysqlOldPassword => {
+                self.continue_mysql_native_password_auth(nonce, auth_switched)?;
+                Ok(())
             }
             AuthPlugin::Other(ref name) => {
                 let plugin_name = String::from_utf8_lossy(name).into();
@@ -649,7 +663,11 @@ impl Conn {
         }
     }
 
-    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> Result<()> {
+    fn continue_mysql_native_password_auth(
+        &mut self,
+        nonce: &[u8],
+        auth_switched: bool,
+    ) -> Result<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
@@ -657,8 +675,14 @@ impl Conn {
             0x00 => self.handle_ok::<CommonOkPacket>(&payload).map(drop),
             // auth switch
             0xfe if !auth_switched => {
-                let auth_switch_request = ParseBuf(&*payload).parse(())?;
-                self.perform_auth_switch(auth_switch_request)
+                let auth_switch = if payload.len() > 1 {
+                    ParseBuf(&*payload).parse(())?
+                } else {
+                    let _ = ParseBuf(&*payload).parse::<OldAuthSwitchRequest>(())?;
+                    // we'll map OldAuthSwitchRequest to an AuthSwitchRequest with mysql_old_password plugin.
+                    AuthSwitchRequest::new("mysql_old_password".as_bytes(), nonce)
+                };
+                self.perform_auth_switch(auth_switch)
             }
             _ => Err(DriverError(UnexpectedPacket)),
         }
@@ -800,11 +824,11 @@ impl Conn {
                 body
             }
             Params::Named(_) => {
-                if stmt.named_params.is_none() {
+                if let Some(named_params) = stmt.named_params.as_ref() {
+                    return self._execute(stmt, params.into_positional(named_params)?);
+                } else {
                     return Err(DriverError(NamedParamsForPositionalQuery));
                 }
-                let named_params = stmt.named_params.as_ref().unwrap();
-                return self._execute(stmt, params.into_positional(named_params)?);
             }
         };
         self.write_command_raw(&exec_request)?;
@@ -830,7 +854,8 @@ impl Conn {
             }
         }
         if tx_opts.with_consistent_snapshot() {
-            self.query_drop("START TRANSACTION WITH CONSISTENT SNAPSHOT")?;
+            self.query_drop("START TRANSACTION WITH CONSISTENT SNAPSHOT")
+                .unwrap();
         } else {
             self.query_drop("START TRANSACTION")?;
         };
@@ -854,7 +879,7 @@ impl Conn {
                 // Unwrap won't panic because we have exclusive access to `self` and this
                 // method is not re-entrant, because `LocalInfile` does not expose the
                 // connection.
-                let handler_fn = &mut *handler.0.lock().unwrap();
+                let handler_fn = &mut *handler.0.lock()?;
                 handler_fn(file_name, &mut local_infile)?;
             }
             local_infile.flush()?;

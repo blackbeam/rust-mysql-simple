@@ -895,8 +895,9 @@ macro_rules! def_get_opts {
 
         pub fn get_opts() -> $crate::OptsBuilder {
             let database_url = $crate::def_database_url!();
-            let mut builder = $crate::OptsBuilder::from_opts(&*database_url)
-                .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+            let mut builder =
+                $crate::OptsBuilder::from_opts($crate::Opts::from_url(&*database_url).unwrap())
+                    .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
             if test_compression() {
                 builder = builder.compress(Some(Default::default()));
             }
