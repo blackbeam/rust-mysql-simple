@@ -6,11 +6,13 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use mysql_common::{packets::OkPacket, row::new_row};
+pub use mysql_common::proto::{Binary, Text};
+
+use mysql_common::packets::OkPacket;
 
 use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
-use crate::{conn::ConnMut, Column, Conn, Error, Result, Row, Value};
+use crate::{conn::ConnMut, Column, Conn, Error, Result, Row};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Or<A, B> {
@@ -20,25 +22,17 @@ pub enum Or<A, B> {
 
 /// Result set kind.
 pub trait Protocol: 'static + Send + Sync {
-    fn next(conn: &mut Conn, columns: &Arc<[Column]>) -> Result<Option<Vec<Value>>>;
+    fn next(conn: &mut Conn, columns: Arc<[Column]>) -> Result<Option<Row>>;
 }
 
-/// Text result set marker.
-#[derive(Debug, Clone, Copy)]
-pub struct Text;
-
 impl Protocol for Text {
-    fn next(conn: &mut Conn, columns: &Arc<[Column]>) -> Result<Option<Vec<Value>>> {
-        conn.next_text(columns.len())
+    fn next(conn: &mut Conn, columns: Arc<[Column]>) -> Result<Option<Row>> {
+        conn.next_text(columns)
     }
 }
 
-/// Binary result set marker.
-#[derive(Debug, Clone, Copy)]
-pub struct Binary;
-
 impl Protocol for Binary {
-    fn next(conn: &mut Conn, columns: &Arc<[Column]>) -> Result<Option<Vec<Value>>> {
+    fn next(conn: &mut Conn, columns: Arc<[Column]>) -> Result<Option<Row>> {
         conn.next_bin(columns)
     }
 }
@@ -276,10 +270,10 @@ impl<T: crate::prelude::Protocol> Iterator for QueryResult<'_, '_, '_, T> {
         let state = std::mem::replace(&mut self.state, OnBoundary);
 
         match state {
-            InSet(cols) => match T::next(&mut *self.conn, &cols) {
-                Ok(Some(vals)) => {
+            InSet(cols) => match T::next(&mut *self.conn, cols.clone()) {
+                Ok(Some(row)) => {
                     self.state = InSet(cols.clone());
-                    Some(Ok(new_row(vals, cols)))
+                    Some(Ok(row))
                 }
                 Ok(None) => {
                     self.handle_next();

@@ -6,18 +6,22 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
+use bytes::{Buf, BufMut};
 use mysql_common::{
+    constants::{DEFAULT_MAX_ALLOWED_PACKET, UTF8_GENERAL_CI},
     crypto,
-    io::ReadMysqlExt,
+    io::{ParseBuf, ReadMysqlExt},
+    misc::raw::Either,
     named_params::parse_named_params,
     packets::{
-        column_from_payload, parse_auth_switch_request, parse_err_packet, parse_handshake_packet,
-        parse_ok_packet, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
-        ComStmtExecuteRequestBuilder, ComStmtSendLongData, HandshakePacket, HandshakeResponse,
-        OkPacket, OkPacketKind, SslRequest,
+        binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
+        ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
+        HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
+        OldAuthSwitchRequest, ResultSetTerminator, SessionStateInfo, SslRequest,
     },
-    proto::{codec::Compression, sync_framed::MySyncFramed},
-    value::{read_bin_values, read_text_values, ServerSide},
+    proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
+    row::{Row, RowDeserializer},
+    value::ServerSide,
 };
 
 use std::{
@@ -25,7 +29,7 @@ use std::{
     cmp,
     collections::HashMap,
     convert::TryFrom,
-    io::{self, Read, Write as _},
+    io::{self, Write as _},
     mem,
     ops::{Deref, DerefMut},
     process,
@@ -33,6 +37,7 @@ use std::{
 };
 
 use crate::{
+    buffer_pool::PooledBuf,
     conn::{
         local_infile::LocalInfile,
         pool::{Pool, PooledConn},
@@ -46,8 +51,8 @@ use crate::{
     io::Stream,
     prelude::*,
     DriverError::{
-        MismatchedStmtParams, NamedParamsForPositionalQuery, Protocol41NotSet,
-        ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket,
+        MismatchedStmtParams, NamedParamsForPositionalQuery, OldMysqlPasswordDisabled,
+        Protocol41NotSet, ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket,
         UnknownAuthPlugin, UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
@@ -55,6 +60,9 @@ use crate::{
     Value::{self, Bytes, NULL},
 };
 
+use self::binlog_stream::BinlogStream;
+
+pub mod binlog_stream;
 pub mod local_infile;
 pub mod opts;
 pub mod pool;
@@ -243,6 +251,15 @@ impl Conn {
             .unwrap_or_default()
     }
 
+    pub fn session_state_changes(&self) -> io::Result<Vec<SessionStateInfo<'_>>> {
+        self.0
+            .ok_packet
+            .as_ref()
+            .map(|ok| ok.session_state_info())
+            .transpose()
+            .map(Option::unwrap_or_default)
+    }
+
     fn stream_ref(&self) -> &MySyncFramed<Stream> {
         self.0.stream.as_ref().expect("incomplete connection")
     }
@@ -310,19 +327,11 @@ impl Conn {
 
     fn soft_reset(&mut self) -> Result<()> {
         self.write_command(Command::COM_RESET_CONNECTION, &[])?;
-        self.read_packet().and_then(|pld| match pld[0] {
-            0 => {
-                let ok = parse_ok_packet(&*pld, self.0.capability_flags, OkPacketKind::Other)?;
-                self.handle_ok(&ok);
-                self.0.last_command = 0;
-                self.0.stmt_cache.clear();
-                Ok(())
-            }
-            _ => {
-                let err = parse_err_packet(&*pld, self.0.capability_flags)?;
-                Err(MySqlError(err.into()))
-            }
-        })
+        let packet = self.read_packet()?;
+        self.handle_ok::<CommonOkPacket>(&packet)?;
+        self.0.last_command = 0;
+        self.0.stmt_cache.clear();
+        Ok(())
     }
 
     fn hard_reset(&mut self) -> Result<()> {
@@ -394,28 +403,44 @@ impl Conn {
         Ok(())
     }
 
-    fn read_packet(&mut self) -> Result<Vec<u8>> {
-        let data = self
-            .stream_mut()
-            .next()
-            .transpose()?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "server disconnected"))?;
-        match data[0] {
-            0xff => {
-                let error_packet = parse_err_packet(&*data, self.0.capability_flags)?;
-                self.handle_err();
-                Err(MySqlError(error_packet.into()))
+    fn read_packet(&mut self) -> Result<PooledBuf> {
+        loop {
+            let mut buffer = crate::BUFFER_POOL.get();
+            if !self.stream_mut().next_packet(buffer.as_mut())? {
+                return Err(
+                    io::Error::new(io::ErrorKind::BrokenPipe, "server disconnected").into(),
+                );
             }
-            _ => Ok(data),
+            match buffer[0] {
+                0xff => {
+                    match ParseBuf(&*buffer).parse(self.0.capability_flags)? {
+                        ErrPacket::Error(server_error) => {
+                            self.handle_err();
+                            return Err(MySqlError(From::from(server_error)));
+                        }
+                        ErrPacket::Progress(_progress_report) => {
+                            // TODO: Report progress
+                            continue;
+                        }
+                    }
+                }
+                _ => return Ok(buffer),
+            }
         }
     }
 
     fn drop_packet(&mut self) -> Result<()> {
-        self.read_packet().map(|_| ())
+        self.read_packet().map(drop)
     }
 
-    fn write_packet<T: Into<Vec<u8>>>(&mut self, data: T) -> Result<()> {
-        self.stream_mut().send(data.into())?;
+    fn write_struct<T: MySerialize>(&mut self, s: &T) -> Result<()> {
+        let mut buf = crate::BUFFER_POOL.get();
+        s.serialize(buf.as_mut());
+        self.write_packet(&mut &*buf)
+    }
+
+    fn write_packet<T: Buf>(&mut self, data: &mut T) -> Result<()> {
+        self.stream_mut().send(data)?;
         Ok(())
     }
 
@@ -428,9 +453,16 @@ impl Conn {
         self.0.mariadb_server_version = hp.maria_db_server_version_parsed();
     }
 
-    fn handle_ok(&mut self, op: &OkPacket<'_>) {
-        self.0.status_flags = op.status_flags();
-        self.0.ok_packet = Some(op.clone().into_owned());
+    fn handle_ok<'a, T: OkPacketKind>(
+        &mut self,
+        buffer: &'a PooledBuf,
+    ) -> crate::Result<OkPacket<'a>> {
+        let ok = ParseBuf(&**buffer)
+            .parse::<OkPacketDeserializer<T>>(self.0.capability_flags)?
+            .into_inner();
+        self.0.status_flags = ok.status_flags();
+        self.0.ok_packet = Some(ok.clone().into_owned());
+        Ok(ok)
     }
 
     fn handle_err(&mut self) {
@@ -445,17 +477,28 @@ impl Conn {
     }
 
     fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> Result<()> {
+        if matches!(
+            auth_switch_request.auth_plugin(),
+            AuthPlugin::MysqlOldPassword
+        ) {
+            if self.0.opts.get_secure_auth() {
+                return Err(DriverError(OldMysqlPasswordDisabled));
+            }
+        }
+
         let nonce = auth_switch_request.plugin_data();
         let plugin_data = auth_switch_request
             .auth_plugin()
-            .gen_data(self.0.opts.get_pass(), nonce);
-        self.write_packet(plugin_data.unwrap_or_else(Vec::new))?;
-        self.continue_auth(auth_switch_request.auth_plugin(), nonce, true)
+            .gen_data(self.0.opts.get_pass(), nonce)
+            .map(Either::Left)
+            .unwrap_or_else(|| Either::Right([]));
+        self.write_struct(&plugin_data)?;
+        self.continue_auth(&auth_switch_request.auth_plugin(), nonce, true)
     }
 
     fn do_handshake(&mut self) -> Result<()> {
         let payload = self.read_packet()?;
-        let handshake = parse_handshake_packet(payload.as_ref())?;
+        let handshake = ParseBuf(&*payload).parse::<HandshakePacket>(())?;
 
         if handshake.protocol_version() != 10u8 {
             return Err(DriverError(UnsupportedProtocol(
@@ -490,16 +533,15 @@ impl Conn {
 
         let auth_plugin = handshake
             .auth_plugin()
-            .unwrap_or(&AuthPlugin::MysqlNativePassword);
+            .unwrap_or(AuthPlugin::MysqlNativePassword);
         if let AuthPlugin::Other(ref name) = auth_plugin {
             let plugin_name = String::from_utf8_lossy(name).into();
             return Err(DriverError(UnknownAuthPlugin(plugin_name)));
         }
 
         let auth_data = auth_plugin.gen_data(self.0.opts.get_pass(), &*nonce);
-        self.write_handshake_response(auth_plugin, auth_data.as_ref().map(AsRef::as_ref))?;
-
-        self.continue_auth(auth_plugin, &*nonce, false)?;
+        self.write_handshake_response(&auth_plugin, auth_data.as_deref())?;
+        self.continue_auth(&auth_plugin, &*nonce, false)?;
 
         if self
             .0
@@ -571,8 +613,12 @@ impl Conn {
     }
 
     fn do_ssl_request(&mut self) -> Result<()> {
-        let ssl_request = SslRequest::new(self.get_client_flags());
-        self.write_packet(ssl_request)
+        let ssl_request = SslRequest::new(
+            self.get_client_flags(),
+            DEFAULT_MAX_ALLOWED_PACKET as u32,
+            UTF8_GENERAL_CI as u8,
+        );
+        self.write_struct(&ssl_request)
     }
 
     fn write_handshake_response(
@@ -581,15 +627,18 @@ impl Conn {
         scramble_buf: Option<&[u8]>,
     ) -> Result<()> {
         let handshake_response = HandshakeResponse::new(
-            &scramble_buf,
+            scramble_buf,
             self.0.server_version.unwrap_or((0, 0, 0)),
-            self.0.opts.get_user(),
-            self.0.opts.get_db_name(),
-            auth_plugin,
+            self.0.opts.get_user().map(str::as_bytes),
+            self.0.opts.get_db_name().map(str::as_bytes),
+            Some(auth_plugin.clone()),
             self.0.capability_flags,
-            &self.connect_attrs(),
+            Some(self.connect_attrs().clone()),
         );
-        self.write_packet(handshake_response)
+
+        let mut buf = crate::BUFFER_POOL.get();
+        handshake_response.serialize(buf.as_mut());
+        self.write_packet(&mut &*buf)
     }
 
     fn continue_auth(
@@ -599,11 +648,13 @@ impl Conn {
         auth_switched: bool,
     ) -> Result<()> {
         match auth_plugin {
-            AuthPlugin::MysqlNativePassword => {
-                self.continue_mysql_native_password_auth(auth_switched)
-            }
             AuthPlugin::CachingSha2Password => {
-                self.continue_caching_sha2_password_auth(nonce, auth_switched)
+                self.continue_caching_sha2_password_auth(nonce, auth_switched)?;
+                Ok(())
+            }
+            AuthPlugin::MysqlNativePassword | AuthPlugin::MysqlOldPassword => {
+                self.continue_mysql_native_password_auth(nonce, auth_switched)?;
+                Ok(())
             }
             AuthPlugin::Other(ref name) => {
                 let plugin_name = String::from_utf8_lossy(name).into();
@@ -612,20 +663,26 @@ impl Conn {
         }
     }
 
-    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> Result<()> {
+    fn continue_mysql_native_password_auth(
+        &mut self,
+        nonce: &[u8],
+        auth_switched: bool,
+    ) -> Result<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
             // auth ok
-            0x00 => {
-                let ok = parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
-                self.handle_ok(&ok);
-                Ok(())
-            }
+            0x00 => self.handle_ok::<CommonOkPacket>(&payload).map(drop),
             // auth switch
             0xfe if !auth_switched => {
-                let auth_switch_request = parse_auth_switch_request(&*payload)?;
-                self.perform_auth_switch(auth_switch_request)
+                let auth_switch = if payload.len() > 1 {
+                    ParseBuf(&*payload).parse(())?
+                } else {
+                    let _ = ParseBuf(&*payload).parse::<OldAuthSwitchRequest>(())?;
+                    // we'll map OldAuthSwitchRequest to an AuthSwitchRequest with mysql_old_password plugin.
+                    AuthSwitchRequest::new("mysql_old_password".as_bytes(), nonce)
+                };
+                self.perform_auth_switch(auth_switch)
             }
             _ => Err(DriverError(UnexpectedPacket)),
         }
@@ -646,10 +703,7 @@ impl Conn {
             0x01 => match payload[1] {
                 0x03 => {
                     let payload = self.read_packet()?;
-                    let ok =
-                        parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
-                    self.handle_ok(&ok);
-                    Ok(())
+                    self.handle_ok::<CommonOkPacket>(&payload).map(drop)
                 }
                 0x04 => {
                     if !self.is_insecure() || self.is_socket() {
@@ -660,9 +714,9 @@ impl Conn {
                             .map(Vec::from)
                             .unwrap_or_else(Vec::new);
                         pass.push(0);
-                        self.write_packet(pass)?;
+                        self.write_packet(&mut pass.as_slice())?;
                     } else {
-                        self.write_packet(vec![0x02])?;
+                        self.write_packet(&mut &[0x02][..])?;
                         let payload = self.read_packet()?;
                         let key = &payload[1..];
                         let mut pass = self
@@ -676,19 +730,16 @@ impl Conn {
                             pass[i] ^= nonce[i % nonce.len()];
                         }
                         let encrypted_pass = crypto::encrypt(&*pass, key);
-                        self.write_packet(encrypted_pass)?;
+                        self.write_packet(&mut encrypted_pass.as_slice())?;
                     }
 
                     let payload = self.read_packet()?;
-                    let ok =
-                        parse_ok_packet(&*payload, self.0.capability_flags, OkPacketKind::Other)?;
-                    self.handle_ok(&ok);
-                    Ok(())
+                    self.handle_ok::<CommonOkPacket>(&payload).map(drop)
                 }
                 _ => Err(DriverError(UnexpectedPacket)),
             },
             0xfe if !auth_switched => {
-                let auth_switch_request = parse_auth_switch_request(&*payload)?;
+                let auth_switch_request = ParseBuf(&*payload).parse(())?;
                 self.perform_auth_switch(auth_switch_request)
             }
             _ => Err(DriverError(UnexpectedPacket)),
@@ -703,19 +754,23 @@ impl Conn {
         self.stream_mut().codec_mut().sync_seq_id();
     }
 
-    fn write_command_raw<T: Into<Vec<u8>>>(&mut self, body: T) -> Result<()> {
-        let body = body.into();
+    fn write_command_raw<T: MySerialize>(&mut self, cmd: &T) -> Result<()> {
+        let mut buf = crate::BUFFER_POOL.get();
+        cmd.serialize(buf.as_mut());
         self.reset_seq_id();
-        self.0.last_command = body[0];
-        self.write_packet(body)
+        debug_assert!(buf.len() > 0);
+        self.0.last_command = buf[0];
+        self.write_packet(&mut &*buf)
     }
 
     fn write_command(&mut self, cmd: Command, data: &[u8]) -> Result<()> {
-        let mut body = Vec::with_capacity(1 + data.len());
-        body.push(cmd as u8);
-        body.extend_from_slice(data);
+        let mut buf = crate::BUFFER_POOL.get();
+        buf.as_mut().put_u8(cmd as u8);
+        buf.as_mut().extend_from_slice(data);
 
-        self.write_command_raw(body)
+        self.reset_seq_id();
+        self.0.last_command = buf[0];
+        self.write_packet(&mut &*buf)
     }
 
     fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> Result<()> {
@@ -728,8 +783,8 @@ impl Conn {
                     None
                 });
                 for chunk in chunks {
-                    let com = ComStmtSendLongData::new(stmt_id, i, chunk);
-                    self.write_command_raw(com)?;
+                    let cmd = ComStmtSendLongData::new(stmt_id, i as u16, Cow::Borrowed(chunk));
+                    self.write_command_raw(&cmd)?;
                 }
             }
         }
@@ -742,7 +797,7 @@ impl Conn {
         stmt: &Statement,
         params: Params,
     ) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
-        let exec_request = match params {
+        let exec_request = match &params {
             Params::Empty => {
                 if stmt.num_params() != 0 {
                     return Err(DriverError(MismatchedStmtParams(stmt.num_params(), 0)));
@@ -769,14 +824,14 @@ impl Conn {
                 body
             }
             Params::Named(_) => {
-                if stmt.named_params.is_none() {
+                if let Some(named_params) = stmt.named_params.as_ref() {
+                    return self._execute(stmt, params.into_positional(named_params)?);
+                } else {
                     return Err(DriverError(NamedParamsForPositionalQuery));
                 }
-                let named_params = stmt.named_params.as_ref().unwrap();
-                return self._execute(stmt, params.into_positional(named_params)?);
             }
         };
-        self.write_command_raw(exec_request)?;
+        self.write_command_raw(&exec_request)?;
         self.handle_result_set()
     }
 
@@ -799,7 +854,8 @@ impl Conn {
             }
         }
         if tx_opts.with_consistent_snapshot() {
-            self.query_drop("START TRANSACTION WITH CONSISTENT SNAPSHOT")?;
+            self.query_drop("START TRANSACTION WITH CONSISTENT SNAPSHOT")
+                .unwrap();
         } else {
             self.query_drop("START TRANSACTION")?;
         };
@@ -823,15 +879,14 @@ impl Conn {
                 // Unwrap won't panic because we have exclusive access to `self` and this
                 // method is not re-entrant, because `LocalInfile` does not expose the
                 // connection.
-                let handler_fn = &mut *handler.0.lock().unwrap();
+                let handler_fn = &mut *handler.0.lock()?;
                 handler_fn(file_name, &mut local_infile)?;
             }
             local_infile.flush()?;
         }
-        self.write_packet(Vec::new())?;
-        let pld = self.read_packet()?;
-        let ok = parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::Other)?;
-        self.handle_ok(&ok);
+        self.write_packet(&mut &[][..])?;
+        let payload = self.read_packet()?;
+        let ok = self.handle_ok::<CommonOkPacket>(&payload)?;
         Ok(ok.into_owned())
     }
 
@@ -843,30 +898,24 @@ impl Conn {
         let pld = self.read_packet()?;
         match pld[0] {
             0x00 => {
-                let ok =
-                    parse_ok_packet(pld.as_ref(), self.0.capability_flags, OkPacketKind::Other)?;
-                self.handle_ok(&ok);
+                let ok = self.handle_ok::<CommonOkPacket>(&pld)?;
                 Ok(Or::B(ok.into_owned()))
             }
-            0xfb => {
-                let mut reader = &pld[1..];
-                let mut file_name = Vec::with_capacity(reader.len());
-                reader.read_to_end(&mut file_name)?;
-                match self.send_local_infile(file_name.as_ref()) {
-                    Ok(ok) => Ok(Or::B(ok)),
-                    Err(err) => Err(err),
-                }
-            }
+            0xfb => match self.send_local_infile(&pld[1..]) {
+                Ok(ok) => Ok(Or::B(ok)),
+                Err(err) => Err(err),
+            },
             _ => {
                 let mut reader = &pld[..];
                 let column_count = reader.read_lenenc_int()?;
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
                 for _ in 0..column_count {
                     let pld = self.read_packet()?;
-                    columns.push(column_from_payload(pld)?);
+                    let column = ParseBuf(&*pld).parse(())?;
+                    columns.push(column);
                 }
                 // skip eof packet
-                self.read_packet()?;
+                self.drop_packet()?;
                 self.0.has_results = column_count > 0;
                 Ok(Or::A(columns))
             }
@@ -906,24 +955,24 @@ impl Conn {
     fn _true_prepare(&mut self, query: &str) -> Result<InnerStmt> {
         self.write_command(Command::COM_STMT_PREPARE, query.as_bytes())?;
         let pld = self.read_packet()?;
-        let mut stmt = InnerStmt::from_payload(pld.as_ref(), self.connection_id())?;
+        let mut stmt = ParseBuf(&*pld).parse::<InnerStmt>(self.connection_id())?;
         if stmt.num_params() > 0 {
             let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
             for _ in 0..stmt.num_params() {
                 let pld = self.read_packet()?;
-                params.push(column_from_payload(pld)?);
+                params.push(ParseBuf(&*pld).parse(())?);
             }
             stmt = stmt.with_params(Some(params));
-            self.read_packet()?;
+            self.drop_packet()?;
         }
         if stmt.num_columns() > 0 {
             let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns() as usize);
             for _ in 0..stmt.num_columns() {
                 let pld = self.read_packet()?;
-                columns.push(column_from_payload(pld)?);
+                columns.push(ParseBuf(&*pld).parse(())?);
             }
             stmt = stmt.with_columns(Some(columns));
-            self.read_packet()?;
+            self.drop_packet()?;
         }
         Ok(stmt)
     }
@@ -972,42 +1021,32 @@ impl Conn {
         self.query_first(format!("SELECT @@{}", name))
     }
 
-    fn next_bin(&mut self, columns: &[Column]) -> Result<Option<Vec<Value>>> {
+    fn next_bin(&mut self, columns: Arc<[Column]>) -> Result<Option<Row>> {
         if !self.0.has_results {
             return Ok(None);
         }
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
             self.0.has_results = false;
-            let p = parse_ok_packet(
-                pld.as_ref(),
-                self.0.capability_flags,
-                OkPacketKind::ResultSetTerminator,
-            )?;
-            self.handle_ok(&p);
+            self.handle_ok::<ResultSetTerminator>(&pld)?;
             return Ok(None);
         }
-        let values = read_bin_values::<ServerSide>(&*pld, columns)?;
-        Ok(Some(values))
+        let row = ParseBuf(&*pld).parse::<RowDeserializer<ServerSide, Binary>>(columns)?;
+        Ok(Some(row.into()))
     }
 
-    fn next_text(&mut self, col_count: usize) -> Result<Option<Vec<Value>>> {
+    fn next_text(&mut self, columns: Arc<[Column]>) -> Result<Option<Row>> {
         if !self.0.has_results {
             return Ok(None);
         }
         let pld = self.read_packet()?;
         if pld[0] == 0xfe && pld.len() < 0xfe {
             self.0.has_results = false;
-            let p = parse_ok_packet(
-                pld.as_ref(),
-                self.0.capability_flags,
-                OkPacketKind::ResultSetTerminator,
-            )?;
-            self.handle_ok(&p);
+            self.handle_ok::<ResultSetTerminator>(&pld)?;
             return Ok(None);
         }
-        let values = read_text_values(&*pld, col_count)?;
-        Ok(Some(values))
+        let row = ParseBuf(&*pld).parse::<RowDeserializer<(), Text>>(columns)?;
+        Ok(Some(row.into()))
     }
 
     fn has_stmt(&self, query: &str) -> bool {
@@ -1029,6 +1068,34 @@ impl Conn {
             .status_flags
             .contains(StatusFlags::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
     }
+
+    fn register_as_slave(&mut self, server_id: u32) -> Result<()> {
+        use mysql_common::packets::ComRegisterSlave;
+
+        self.query_drop("SET @master_binlog_checksum='ALL'")?;
+        self.write_command_raw(&ComRegisterSlave::new(server_id))?;
+
+        // Server will respond with OK.
+        self.read_packet()?;
+
+        Ok(())
+    }
+
+    fn request_binlog(&mut self, request: BinlogRequest<'_>) -> Result<()> {
+        self.register_as_slave(request.server_id())?;
+        self.write_command_raw(&request.as_cmd())?;
+        Ok(())
+    }
+
+    /// Turns this connection into a binlog stream.
+    ///
+    /// You can use `SHOW BINARY LOGS` to get the current logfile and position from the master.
+    /// If the request's `filename` is empty, the server will send the binlog-stream
+    /// of the first known binlog.
+    pub fn get_binlog_stream(mut self, request: BinlogRequest<'_>) -> Result<BinlogStream> {
+        self.request_binlog(request)?;
+        Ok(BinlogStream::new(self))
+    }
 }
 
 impl Queryable for Conn {
@@ -1046,9 +1113,8 @@ impl Queryable for Conn {
 
     fn close(&mut self, stmt: Statement) -> Result<()> {
         self.0.stmt_cache.remove(stmt.id());
-        let com_stmt_close = ComStmtClose::new(stmt.id());
-        self.write_command_raw(com_stmt_close)?;
-        Ok(())
+        let cmd = ComStmtClose::new(stmt.id());
+        self.write_command_raw(&cmd)
     }
 
     fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
@@ -1081,6 +1147,8 @@ impl Drop for Conn {
 mod test {
     mod my_conn {
         use std::{collections::HashMap, io::Write, iter, process};
+
+        use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
 
         use crate::{
             from_row, from_value, params,
@@ -1168,47 +1236,47 @@ mod test {
         fn query_traits() -> Result<(), Box<dyn std::error::Error>> {
             macro_rules! test_query {
                 ($conn : expr) => {
-                    "CREATE TEMPORARY TABLE tmp (a INT)".run($conn)?;
+                    "CREATE TABLE tmplak (a INT)".run($conn)?;
 
-                    "INSERT INTO tmp (a) VALUES (?)".with((42,)).run($conn)?;
+                    "INSERT INTO tmplak (a) VALUES (?)".with((42,)).run($conn)?;
 
-                    "INSERT INTO tmp (a) VALUES (?)"
+                    "INSERT INTO tmplak (a) VALUES (?)"
                         .with((43..=44).map(|x| (x,)))
                         .batch($conn)?;
 
-                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1".first($conn)?;
+                    let first: Option<u8> = "SELECT a FROM tmplak LIMIT 1".first($conn)?;
                     assert_eq!(first, Some(42), "first text");
 
-                    let first: Option<u8> = "SELECT a FROM tmp LIMIT 1".with(()).first($conn)?;
+                    let first: Option<u8> = "SELECT a FROM tmplak LIMIT 1".with(()).first($conn)?;
                     assert_eq!(first, Some(42), "first bin");
 
-                    let count = "SELECT a FROM tmp".run($conn)?.count();
+                    let count = "SELECT a FROM tmplak".run($conn)?.count();
                     assert_eq!(count, 3, "run text");
 
-                    let count = "SELECT a FROM tmp".with(()).run($conn)?.count();
+                    let count = "SELECT a FROM tmplak".with(()).run($conn)?.count();
                     assert_eq!(count, 3, "run bin");
 
-                    let all: Vec<u8> = "SELECT a FROM tmp".fetch($conn)?;
+                    let all: Vec<u8> = "SELECT a FROM tmplak".fetch($conn)?;
                     assert_eq!(all, vec![42, 43, 44], "fetch text");
 
-                    let all: Vec<u8> = "SELECT a FROM tmp".with(()).fetch($conn)?;
+                    let all: Vec<u8> = "SELECT a FROM tmplak".with(()).fetch($conn)?;
                     assert_eq!(all, vec![42, 43, 44], "fetch bin");
 
-                    let mapped = "SELECT a FROM tmp".map($conn, |x: u8| x + 1)?;
+                    let mapped = "SELECT a FROM tmplak".map($conn, |x: u8| x + 1)?;
                     assert_eq!(mapped, vec![43, 44, 45], "map text");
 
-                    let mapped = "SELECT a FROM tmp".with(()).map($conn, |x: u8| x + 1)?;
+                    let mapped = "SELECT a FROM tmplak".with(()).map($conn, |x: u8| x + 1)?;
                     assert_eq!(mapped, vec![43, 44, 45], "map bin");
 
-                    let sum = "SELECT a FROM tmp".fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                    let sum = "SELECT a FROM tmplak".fold($conn, 0_u8, |acc, x: u8| acc + x)?;
                     assert_eq!(sum, 42 + 43 + 44, "fold text");
 
-                    let sum = "SELECT a FROM tmp"
+                    let sum = "SELECT a FROM tmplak"
                         .with(())
                         .fold($conn, 0_u8, |acc, x: u8| acc + x)?;
                     assert_eq!(sum, 42 + 43 + 44, "fold bin");
 
-                    "DROP TABLE tmp".run($conn)?;
+                    "DROP TABLE tmplak".run($conn)?;
                 };
             }
 
@@ -1667,6 +1735,26 @@ mod test {
         }
 
         #[test]
+        fn issue_273() {
+            let opts = OptsBuilder::from_opts(get_opts()).prefer_socket(false);
+            let mut conn = Conn::new(opts).unwrap();
+
+            "DROP FUNCTION IF EXISTS f1".run(&mut conn).unwrap();
+            r"CREATE DEFINER=`root`@`localhost` FUNCTION `f1`(p_arg INT, p_arg2 INT) RETURNS int
+            DETERMINISTIC
+            BEGIN
+                RETURN p_arg + p_arg2;
+            END"
+            .run(&mut conn)
+            .unwrap();
+
+            "SELECT f1(?, ?)"
+                .with((100u8, 100u8))
+                .run(&mut conn)
+                .unwrap();
+        }
+
+        #[test]
         fn should_work_with_named_params() {
             let mut conn = Conn::new(get_opts()).unwrap();
             {
@@ -1962,6 +2050,156 @@ mod test {
                 expected_values.push(("program_name", "my program name"));
                 assert_connect_attrs(&mut conn, &expected_values);
             }
+        }
+
+        #[test]
+        fn should_read_binlog() -> crate::Result<()> {
+            use std::{
+                collections::HashMap, sync::mpsc::sync_channel, thread::spawn, time::Duration,
+            };
+
+            fn gen_dummy_data() -> crate::Result<()> {
+                let mut conn = Conn::new(get_opts())?;
+
+                "CREATE TABLE IF NOT EXISTS customers (customer_id int not null)".run(&mut conn)?;
+
+                for i in 0_u8..100 {
+                    "INSERT INTO customers(customer_id) VALUES (?)"
+                        .with((i,))
+                        .run(&mut conn)?;
+                }
+
+                "DROP TABLE customers".run(&mut conn)?;
+
+                Ok(())
+            }
+
+            fn get_conn() -> crate::Result<(Conn, Vec<u8>, u64)> {
+                let mut conn = Conn::new(get_opts())?;
+
+                if let Ok(Some(gtid_mode)) =
+                    "SELECT @@GLOBAL.GTID_MODE".first::<String, _>(&mut conn)
+                {
+                    if !gtid_mode.starts_with("ON") {
+                        panic!(
+                            "GTID_MODE is disabled \
+                                (enable using --gtid_mode=ON --enforce_gtid_consistency=ON)"
+                        );
+                    }
+                }
+
+                let row: crate::Row = "SHOW BINARY LOGS".first(&mut conn)?.unwrap();
+                let filename = row.get(0).unwrap();
+                let position = row.get(1).unwrap();
+
+                gen_dummy_data().unwrap();
+                Ok((conn, filename, position))
+            }
+
+            // iterate using COM_BINLOG_DUMP
+            let (conn, filename, pos) = get_conn().unwrap();
+            let is_mariadb = conn.0.mariadb_server_version.is_some();
+
+            let binlog_stream = conn
+                .get_binlog_stream(BinlogRequest::new(12).with_filename(filename).with_pos(pos))
+                .unwrap();
+
+            let mut events_num = 0;
+            let (tx, rx) = sync_channel(0);
+            spawn(move || {
+                for event in binlog_stream {
+                    tx.send(event).unwrap();
+                }
+            });
+            let mut tmes = HashMap::new();
+            while let Ok(event) = rx.recv_timeout(Duration::from_secs(1)) {
+                let event = event.unwrap();
+                events_num += 1;
+
+                // assert that event type is known
+                event.header().event_type().unwrap();
+
+                // iterate over rows of an event
+                match event.read_data()?.unwrap() {
+                    EventData::TableMapEvent(tme) => {
+                        tmes.insert(tme.table_id(), tme.into_owned());
+                    }
+                    EventData::RowsEvent(re) => {
+                        for row in re.rows(&tmes[&re.table_id()]) {
+                            row.unwrap();
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            assert!(events_num > 0);
+
+            if !is_mariadb {
+                // iterate using COM_BINLOG_DUMP_GTID
+                let (conn, filename, pos) = get_conn().unwrap();
+
+                let binlog_stream = conn
+                    .get_binlog_stream(
+                        BinlogRequest::new(13)
+                            .with_use_gtid(true)
+                            .with_filename(filename)
+                            .with_pos(pos),
+                    )
+                    .unwrap();
+
+                let mut events_num = 0;
+                let (tx, rx) = sync_channel(0);
+                spawn(move || {
+                    for event in binlog_stream {
+                        tx.send(event).unwrap();
+                    }
+                });
+                let mut tmes = HashMap::new();
+                while let Ok(event) = rx.recv_timeout(Duration::from_secs(1)) {
+                    let event = event.unwrap();
+                    events_num += 1;
+
+                    // assert that event type is known
+                    event.header().event_type().unwrap();
+
+                    // iterate over rows of an event
+                    match event.read_data()?.unwrap() {
+                        EventData::TableMapEvent(tme) => {
+                            tmes.insert(tme.table_id(), tme.into_owned());
+                        }
+                        EventData::RowsEvent(re) => {
+                            for row in re.rows(&tmes[&re.table_id()]) {
+                                row.unwrap();
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                assert!(events_num > 0);
+            }
+
+            // iterate using COM_BINLOG_DUMP with BINLOG_DUMP_NON_BLOCK flag
+            let (conn, filename, pos) = get_conn().unwrap();
+
+            let mut binlog_stream = conn
+                .get_binlog_stream(
+                    BinlogRequest::new(14)
+                        .with_filename(filename)
+                        .with_pos(pos)
+                        .with_flags(crate::BinlogDumpFlags::BINLOG_DUMP_NON_BLOCK),
+                )
+                .unwrap();
+
+            events_num = 0;
+            while let Some(event) = binlog_stream.next() {
+                let event = event.unwrap();
+                events_num += 1;
+                event.header().event_type().unwrap();
+                event.read_data()?;
+            }
+            assert!(events_num > 0);
+
+            Ok(())
         }
     }
 

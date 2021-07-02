@@ -319,6 +319,14 @@ impl PooledConn {
         self.conn.as_mut().unwrap().start_transaction(tx_opts)
     }
 
+    /// Turns this connection into a binlog stream (see [`Conn::get_binlog_stream`]).
+    pub fn get_binlog_stream(
+        mut self,
+        request: crate::BinlogRequest<'_>,
+    ) -> Result<crate::BinlogStream> {
+        self.conn.take().unwrap().get_binlog_stream(request)
+    }
+
     /// Gives mutable reference to the wrapped
     /// [`Conn`](struct.Conn.html).
     pub fn as_mut(&mut self) -> &mut Conn {

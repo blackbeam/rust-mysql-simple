@@ -760,6 +760,8 @@
 #[cfg(feature = "nightly")]
 extern crate test;
 
+use std::sync::Arc;
+
 use mysql_common as myc;
 pub extern crate serde;
 pub extern crate serde_json;
@@ -774,12 +776,27 @@ pub use crate::myc::time;
 /// Reexport of `uuid` crate.
 pub use crate::myc::uuid;
 
+mod buffer_pool;
 mod conn;
 pub mod error;
 mod io;
 
 #[doc(inline)]
 pub use crate::myc::constants as consts;
+
+#[doc(inline)]
+pub use crate::myc::packets::{binlog_request::BinlogRequest, BinlogDumpFlags};
+
+pub mod binlog {
+    #[doc(inline)]
+    pub use crate::myc::binlog::consts::*;
+
+    #[doc(inline)]
+    pub use crate::myc::binlog::{events, jsonb, jsondiff, row, value};
+}
+
+#[doc(inline)]
+pub use crate::myc::packets::{session_state_change, SessionStateInfo};
 
 #[doc(inline)]
 pub use crate::conn::local_infile::{LocalInfile, LocalInfileHandler};
@@ -798,7 +815,7 @@ pub use crate::conn::stmt::Statement;
 #[doc(inline)]
 pub use crate::conn::transaction::{AccessMode, IsolationLevel, Transaction, TxOpts};
 #[doc(inline)]
-pub use crate::conn::Conn;
+pub use crate::conn::{binlog_stream::BinlogStream, Conn};
 #[doc(inline)]
 pub use crate::error::{DriverError, Error, MySqlError, Result, ServerError, UrlError};
 #[doc(inline)]
@@ -839,6 +856,9 @@ pub mod prelude {
 #[doc(inline)]
 pub use crate::myc::params;
 
+static BUFFER_POOL: once_cell::sync::Lazy<Arc<crate::buffer_pool::BufferPool>> =
+    once_cell::sync::Lazy::new(|| Default::default());
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! def_database_url {
@@ -875,8 +895,9 @@ macro_rules! def_get_opts {
 
         pub fn get_opts() -> $crate::OptsBuilder {
             let database_url = $crate::def_database_url!();
-            let mut builder = $crate::OptsBuilder::from_opts(&*database_url)
-                .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+            let mut builder =
+                $crate::OptsBuilder::from_opts($crate::Opts::from_url(&*database_url).unwrap())
+                    .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
             if test_compression() {
                 builder = builder.compress(Some(Default::default()));
             }
