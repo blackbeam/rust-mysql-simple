@@ -50,8 +50,8 @@ struct Payment {
 }
 
 let url = "mysql://root:password@localhost:3307/db_name";
-
-let pool = Pool::new(url)?;
+let opts = Opts::from_url(url)?;
+let pool = Pool::new(opts)?;
 
 let mut conn = pool.get_conn()?;
 
