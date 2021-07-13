@@ -158,18 +158,20 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     pub fn next_set<'d>(&'d mut self) -> Option<Result<ResultSet<'c, 't, 'tc, 'd, T>>> {
         use SetIteratorState::*;
 
-        if let OnBoundary | Done = &self.state {
-            debug_assert!(
-                !self.conn.more_results_exists(),
-                "the next state must be handled by the Iterator::next"
-            );
+        match &self.state {
+            OnBoundary | Done => {
+                debug_assert!(
+                    !self.conn.more_results_exists(),
+                    "the next state must be handled by the Iterator::next"
+                );
 
-            None
-        } else {
-            Some(Ok(ResultSet {
+                None
+            }
+            Errored(_) => None,
+            _ => Some(Ok(ResultSet {
                 set_index: self.set_index,
                 inner: self,
-            }))
+            })),
         }
     }
 
