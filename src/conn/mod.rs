@@ -466,6 +466,7 @@ impl Conn {
     }
 
     fn handle_err(&mut self) {
+        self.0.status_flags = StatusFlags::empty();
         self.0.has_results = false;
         self.0.ok_packet = None;
     }
@@ -1146,9 +1147,16 @@ impl Drop for Conn {
 #[allow(non_snake_case)]
 mod test {
     mod my_conn {
-        use std::{collections::HashMap, io::Write, iter, process};
+        use std::{
+            collections::HashMap, io::Write, iter, process, sync::mpsc::sync_channel,
+            time::Duration,
+        };
 
-        use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
+        use mysql_common::{
+            binlog::events::EventData, packets::binlog_request::BinlogRequest,
+            value::json::Serialized,
+        };
+        use serde_json::json;
 
         use crate::{
             from_row, from_value, params,
@@ -1752,6 +1760,35 @@ mod test {
                 .with((100u8, 100u8))
                 .run(&mut conn)
                 .unwrap();
+        }
+
+        #[test]
+        fn issue_285() {
+            let (tx, rx) = sync_channel::<()>(0);
+
+            let handle = std::thread::spawn(move || {
+                let mut conn = Conn::new(get_opts()).unwrap();
+                const INVALID_SQL: &str = r#"
+                CREATE TEMPORARY TABLE IF NOT EXISTS `user_details` (
+                    `user_id` int(11) NOT NULL AUTO_INCREMENT,
+                    `username` varchar(255) DEFAULT NULL,
+                    `first_name` varchar(50) DEFAULT NULL,
+                    `last_name` varchar(50) DEFAULT NULL,
+                    PRIMARY KEY (`user_id`)
+                );
+
+                INSERT INTO `user_details` (`user_id`, `username`, `first_name`, `last_name`)
+                VALUES (1, 'rogers63', 'david')
+                "#;
+
+                conn.query_iter(INVALID_SQL).unwrap();
+                tx.send(()).unwrap();
+            });
+
+            match rx.recv_timeout(Duration::from_secs(100_000)) {
+                Ok(_) => handle.join().unwrap(),
+                Err(_) => panic!("test failed"),
+            }
         }
 
         #[test]

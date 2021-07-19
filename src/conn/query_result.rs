@@ -136,12 +136,10 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     ///
     /// **Requires:** `self.state == OnBoundary`
     fn handle_next(&mut self) {
-        if cfg!(debug_assertions) {
-            if let SetIteratorState::OnBoundary = self.state {
-            } else {
-                panic!("self.state == OnBoundary");
-            }
-        }
+        debug_assert!(
+            matches!(self.state, SetIteratorState::OnBoundary),
+            "self.state != OnBoundary"
+        );
 
         if self.conn.more_results_exists() {
             match self.conn.handle_result_set() {

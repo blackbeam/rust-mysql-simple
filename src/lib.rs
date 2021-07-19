@@ -756,7 +756,7 @@
 #![crate_name = "mysql"]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
-#![cfg_attr(feature = "nightly", feature(test, const_fn))]
+#![cfg_attr(feature = "nightly", feature(test))]
 #[cfg(feature = "nightly")]
 extern crate test;
 
