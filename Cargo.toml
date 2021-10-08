@@ -53,5 +53,4 @@ named_pipe = "~0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-nix = "0.21.0"
-
+nix = "0.23.0"
