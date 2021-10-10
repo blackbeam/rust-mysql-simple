@@ -165,11 +165,8 @@ impl From<std::convert::Infallible> for Error {
 
 #[cfg(unix)]
 impl From<::nix::Error> for Error {
-    fn from(x: ::nix::Error) -> Error {
-        match x {
-            ::nix::Error::Sys(errno) => Error::from(io::Error::from_raw_os_error(errno as i32)),
-            _ => Error::from(io::Error::new(io::ErrorKind::Other, x)),
-        }
+    fn from(errno: ::nix::Error) -> Error {
+        Error::from(io::Error::from_raw_os_error(errno as i32))
     }
 }
 
