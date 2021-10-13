@@ -8,7 +8,6 @@
 
 use bytes::{Buf, BufMut};
 use mysql_common::{
-    constants::{DEFAULT_MAX_ALLOWED_PACKET, UTF8_GENERAL_CI},
     crypto,
     io::{ParseBuf, ReadMysqlExt},
     misc::raw::Either,
@@ -17,12 +16,20 @@ use mysql_common::{
         binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
         ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
         HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
-        OldAuthSwitchRequest, ResultSetTerminator, SessionStateInfo, SslRequest,
+        OldAuthSwitchRequest, ResultSetTerminator, SessionStateInfo,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
     row::{Row, RowDeserializer},
     value::ServerSide,
 };
+
+#[cfg(feature = "native-tls")]
+use mysql_common::{
+    constants::{DEFAULT_MAX_ALLOWED_PACKET, UTF8_GENERAL_CI},
+    packets::SslRequest
+};
+
+
 
 use std::{
     borrow::{Borrow, Cow},
@@ -52,13 +59,19 @@ use crate::{
     prelude::*,
     DriverError::{
         MismatchedStmtParams, NamedParamsForPositionalQuery, OldMysqlPasswordDisabled,
-        Protocol41NotSet, ReadOnlyTransNotSupported, SetupError, TlsNotSupported, UnexpectedPacket,
+        Protocol41NotSet, ReadOnlyTransNotSupported, SetupError, UnexpectedPacket,
         UnknownAuthPlugin, UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
-    LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, SslOpts, Transaction,
+    LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Transaction,
     Value::{self, Bytes, NULL},
 };
+
+
+#[cfg(feature = "native-tls")]
+use crate::DriverError::TlsNotSupported;
+#[cfg(feature = "native-tls")]
+use crate::SslOpts;
 
 use self::binlog_stream::BinlogStream;
 
@@ -362,6 +375,7 @@ impl Conn {
         }
     }
 
+    #[cfg(feature = "native-tls")]
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
         let stream = self.0.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
@@ -516,6 +530,7 @@ impl Conn {
 
         self.handle_handshake(&handshake);
 
+        #[cfg(feature = "native-tls")]
         if self.is_insecure() {
             if let Some(ssl_opts) = self.0.opts.get_ssl_opts().cloned() {
                 if !handshake
@@ -613,6 +628,7 @@ impl Conn {
         attrs
     }
 
+    #[cfg(feature = "native-tls")]
     fn do_ssl_request(&mut self) -> Result<()> {
         let ssl_request = SslRequest::new(
             self.get_client_flags(),

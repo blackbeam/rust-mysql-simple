@@ -58,7 +58,9 @@ pub enum Error {
     MySqlError(MySqlError),
     DriverError(DriverError),
     UrlError(UrlError),
+    #[cfg(feature = "native-tls")]
     TlsError(native_tls::Error),
+    #[cfg(feature = "native-tls")]
     TlsHandshakeError(native_tls::HandshakeError<std::net::TcpStream>),
     FromValueError(Value),
     FromRowError(Row),
@@ -68,11 +70,11 @@ impl Error {
     #[doc(hidden)]
     pub fn is_connectivity_error(&self) -> bool {
         match self {
+            #[cfg(feature = "native-tls")]
+            Error::TlsError(_) | Error::TlsHandshakeError(_) => true,
             Error::IoError(_)
             | Error::DriverError(_)
-            | Error::CodecError(_)
-            | Error::TlsHandshakeError(_)
-            | Error::TlsError(_) => true,
+            | Error::CodecError(_) => true,
             Error::MySqlError(_)
             | Error::UrlError(_)
             | Error::FromValueError(_)
@@ -89,7 +91,9 @@ impl error::Error for Error {
             Error::MySqlError(_) => "MySql server error",
             Error::DriverError(_) => "driver error",
             Error::UrlError(_) => "url error",
+            #[cfg(feature = "native-tls")]
             Error::TlsError(_) => "tls error",
+            #[cfg(feature = "native-tls")]
             Error::TlsHandshakeError(_) => "tls handshake error",
             Error::FromRowError(_) => "from row conversion error",
             Error::FromValueError(_) => "from value conversion error",
@@ -102,7 +106,9 @@ impl error::Error for Error {
             Error::DriverError(ref err) => Some(err),
             Error::MySqlError(ref err) => Some(err),
             Error::UrlError(ref err) => Some(err),
+            #[cfg(feature = "native-tls")]
             Error::TlsError(ref err) => Some(err),
+            #[cfg(feature = "native-tls")]
             Error::TlsHandshakeError(ref err) => Some(err),
             _ => None,
         }
@@ -170,12 +176,14 @@ impl From<::nix::Error> for Error {
     }
 }
 
+#[cfg(feature = "native-tls")]
 impl From<native_tls::Error> for Error {
     fn from(err: native_tls::Error) -> Error {
         Error::TlsError(err)
     }
 }
 
+#[cfg(feature = "native-tls")]
 impl From<native_tls::HandshakeError<std::net::TcpStream>> for Error {
     fn from(err: native_tls::HandshakeError<std::net::TcpStream>) -> Error {
         Error::TlsHandshakeError(err)
@@ -202,7 +210,9 @@ impl fmt::Display for Error {
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
             Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
+            #[cfg(feature = "native-tls")]
             Error::TlsError(ref err) => write!(f, "TlsError {{ {} }}", err),
+            #[cfg(feature = "native-tls")]
             Error::TlsHandshakeError(ref err) => write!(f, "TlsHandshakeError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
@@ -229,6 +239,7 @@ pub enum DriverError {
     MismatchedStmtParams(u16, usize),
     InvalidPoolConstraints,
     SetupError,
+    #[cfg(feature = "native-tls")]
     TlsNotSupported,
     CouldNotParseVersion,
     ReadOnlyTransNotSupported,
@@ -271,6 +282,7 @@ impl fmt::Display for DriverError {
             ),
             DriverError::InvalidPoolConstraints => write!(f, "Invalid pool constraints"),
             DriverError::SetupError => write!(f, "Could not setup connection"),
+            #[cfg(feature = "native-tls")]
             DriverError::TlsNotSupported => write!(
                 f,
                 "Client requires secure connection but server \
