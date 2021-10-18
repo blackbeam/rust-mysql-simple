@@ -10,17 +10,24 @@ use bufstream::BufStream;
 use io_enum::*;
 #[cfg(windows)]
 use named_pipe as np;
+#[cfg(feature = "native-tls")]
 use native_tls::{Certificate, Identity, TlsConnector, TlsStream};
 
 #[cfg(unix)]
 use std::os::unix;
 use std::{
     fmt,
-    fs::File,
-    io::{self, Read as _},
+    io,
     net::{self, SocketAddr},
     time::Duration,
 };
+
+#[cfg(feature = "native-tls")]
+use std::{
+    fs::File,
+    io::Read as _
+};
+
 
 use crate::{
     error::{
@@ -28,8 +35,10 @@ use crate::{
         Error::DriverError,
         Result as MyResult,
     },
-    SslOpts,
 };
+
+#[cfg(feature = "native-tls")]
+use crate::SslOpts;
 
 mod tcp;
 
@@ -138,6 +147,7 @@ impl Stream {
         }
     }
 
+    #[cfg(feature = "native-tls")]
     pub fn make_secure(self, host: url::Host, ssl_opts: SslOpts) -> MyResult<Stream> {
         if self.is_socket() {
             // won't secure socket connection
@@ -149,6 +159,7 @@ impl Stream {
             url::Host::Ipv4(ip) => ip.to_string(),
             url::Host::Ipv6(ip) => ip.to_string(),
         };
+
 
         let mut builder = TlsConnector::builder();
         if let Some(root_cert_path) = ssl_opts.root_cert_path() {
@@ -196,6 +207,7 @@ impl Stream {
 
 #[derive(Read, Write)]
 pub enum TcpStream {
+    #[cfg(feature = "native-tls")]
     Secure(BufStream<TlsStream<net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
 }
@@ -203,6 +215,7 @@ pub enum TcpStream {
 impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
+            #[cfg(feature = "native-tls")]
             TcpStream::Secure(ref s) => write!(f, "Secure stream {:?}", s),
             TcpStream::Insecure(ref s) => write!(f, "Insecure stream {:?}", s),
         }
