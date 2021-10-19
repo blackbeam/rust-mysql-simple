@@ -1,0 +1,75 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 3 (0x3)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C=RU, ST=Moscos, L=Moscow, O=FSI RSL, OU=rust-mysql-simple test ca, CN=rust_mysql_simple/emailAddress=root_email@root.localhost
+        Validity
+            Not Before: Oct 19 10:01:04 2021 GMT
+            Not After : Sep 25 10:01:04 2121 GMT
+        Subject: C=RU, ST=Moscow region, O=FSI RSL, OU=rust-mysql-simple test client cert, CN=localhost
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                RSA Public-Key: (2048 bit)
+                Modulus:
+                    00:a0:70:84:f2:9c:20:06:fb:9d:0b:8d:e5:0f:73:
+                    fe:41:ba:a5:1f:ae:8b:ae:36:f5:30:9f:2b:91:2f:
+                    b8:24:81:52:68:a2:2f:57:7d:87:21:e5:c6:86:4d:
+                    e8:69:0e:82:1a:8f:84:f2:74:a2:4e:83:f8:ee:cf:
+                    46:bc:d9:3c:e8:01:85:2e:9b:cc:6d:05:52:96:23:
+                    f1:94:41:ab:9a:25:5c:3f:2c:ac:98:2f:45:98:76:
+                    84:5b:af:17:40:a4:8c:c6:dc:1f:e3:f3:43:0b:58:
+                    2c:23:09:d3:e2:37:e6:cc:5f:15:2d:a4:d0:08:b0:
+                    fd:28:fa:fe:a3:fc:1a:46:5d:dc:1c:bd:cf:d6:a3:
+                    27:82:eb:58:b0:69:ac:96:96:39:5f:d4:56:f4:2d:
+                    00:c2:43:ff:f9:d4:97:9a:e7:05:5b:b0:5a:b8:af:
+                    9f:f4:e9:57:38:a9:68:64:ac:35:dc:16:34:6a:34:
+                    f7:af:3e:83:27:e2:ca:fe:a6:00:bc:03:34:16:39:
+                    79:c2:37:d5:44:6a:a8:39:33:73:ce:2c:66:6c:a2:
+                    ea:74:07:6d:f2:fc:d7:9a:a0:10:98:cc:be:83:a5:
+                    b8:0b:66:6b:fa:0a:10:e6:ae:66:3e:bb:cf:49:c4:
+                    b8:ba:ec:22:2d:be:e9:09:4a:8f:81:af:7d:af:28:
+                    90:8b
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Subject Alternative Name: 
+                IP Address:127.0.0.1, DNS:localhost
+    Signature Algorithm: sha256WithRSAEncryption
+         4b:4b:2f:02:29:c5:32:32:6a:ce:3a:c6:fd:f4:b7:77:f9:59:
+         94:4d:35:21:01:dc:09:4d:ad:3d:ff:13:f3:23:4e:82:e6:07:
+         54:25:b3:f6:f9:83:80:d5:55:12:d1:7f:d6:21:f5:22:24:05:
+         3e:03:43:97:2b:81:bf:ce:01:54:5e:38:fa:fe:66:d2:4f:03:
+         bf:bd:e1:2c:50:5f:39:dc:5c:4f:bc:7b:5b:d1:2a:d1:dc:aa:
+         3b:e0:0c:9d:1b:6f:d4:5c:b8:ae:95:09:a1:6e:e2:f8:44:0f:
+         65:f1:a2:e0:be:fb:4e:bf:c7:3a:e5:70:9b:23:dd:54:99:01:
+         05:f0:15:a3:67:e2:cf:a5:1b:7a:44:76:f2:64:70:31:f0:ef:
+         34:40:6e:86:ef:be:81:a6:f7:34:46:ca:b9:76:8d:0c:dc:2c:
+         b0:50:81:7f:ba:cb:42:27:a3:15:c7:89:91:58:ea:39:74:32:
+         2c:7b:16:22:8e:14:8c:05:61:58:c7:9d:f6:9f:16:5a:df:1f:
+         fd:f9:1e:2b:68:73:1c:60:7b:c8:df:d3:e3:6a:d0:1f:29:74:
+         c4:98:a4:1d:5a:0d:4d:2f:0f:03:dd:5e:a8:03:da:4a:6e:12:
+         6b:65:e9:13:e0:c4:10:d1:85:c6:48:8e:eb:2e:52:c4:6f:ab:
+         c4:ce:b2:65
+-----BEGIN CERTIFICATE-----
+MIIDvzCCAqegAwIBAgIBAzANBgkqhkiG9w0BAQsFADCBqzELMAkGA1UEBhMCUlUx
+DzANBgNVBAgMBk1vc2NvczEPMA0GA1UEBwwGTW9zY293MRAwDgYDVQQKDAdGU0kg
+UlNMMSIwIAYDVQQLDBlydXN0LW15c3FsLXNpbXBsZSB0ZXN0IGNhMRowGAYDVQQD
+DBFydXN0X215c3FsX3NpbXBsZTEoMCYGCSqGSIb3DQEJARYZcm9vdF9lbWFpbEBy
+b290LmxvY2FsaG9zdDAgFw0yMTEwMTkxMDAxMDRaGA8yMTIxMDkyNTEwMDEwNFow
+eDELMAkGA1UEBhMCUlUxFjAUBgNVBAgMDU1vc2NvdyByZWdpb24xEDAOBgNVBAoM
+B0ZTSSBSU0wxKzApBgNVBAsMInJ1c3QtbXlzcWwtc2ltcGxlIHRlc3QgY2xpZW50
+IGNlcnQxEjAQBgNVBAMMCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQADggEP
+ADCCAQoCggEBAKBwhPKcIAb7nQuN5Q9z/kG6pR+ui6429TCfK5EvuCSBUmiiL1d9
+hyHlxoZN6GkOghqPhPJ0ok6D+O7PRrzZPOgBhS6bzG0FUpYj8ZRBq5olXD8srJgv
+RZh2hFuvF0CkjMbcH+PzQwtYLCMJ0+I35sxfFS2k0Aiw/Sj6/qP8GkZd3By9z9aj
+J4LrWLBprJaWOV/UVvQtAMJD//nUl5rnBVuwWrivn/TpVzipaGSsNdwWNGo0968+
+gyfiyv6mALwDNBY5ecI31URqqDkzc84sZmyi6nQHbfL815qgEJjMvoOluAtma/oK
+EOauZj67z0nEuLrsIi2+6QlKj4Gvfa8okIsCAwEAAaMeMBwwGgYDVR0RBBMwEYcE
+fwAAAYIJbG9jYWxob3N0MA0GCSqGSIb3DQEBCwUAA4IBAQBLSy8CKcUyMmrOOsb9
+9Ld3+VmUTTUhAdwJTa09/xPzI06C5gdUJbP2+YOA1VUS0X/WIfUiJAU+A0OXK4G/
+zgFUXjj6/mbSTwO/veEsUF853FxPvHtb0SrR3Ko74AydG2/UXLiulQmhbuL4RA9l
+8aLgvvtOv8c65XCbI91UmQEF8BWjZ+LPpRt6RHbyZHAx8O80QG6G776Bpvc0Rsq5
+do0M3CywUIF/ustCJ6MVx4mRWOo5dDIsexYijhSMBWFYx532nxZa3x/9+R4raHMc
+YHvI39PjatAfKXTEmKQdWg1NLw8D3V6oA9pKbhJrZekT4MQQ0YXGSI7rLlLEb6vE
+zrJl
+-----END CERTIFICATE-----

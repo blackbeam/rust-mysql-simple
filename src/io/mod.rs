@@ -10,37 +10,23 @@ use bufstream::BufStream;
 use io_enum::*;
 #[cfg(windows)]
 use named_pipe as np;
-#[cfg(feature = "native-tls")]
-use native_tls::{Certificate, Identity, TlsConnector, TlsStream};
 
 #[cfg(unix)]
 use std::os::unix;
 use std::{
-    fmt,
-    io,
+    fmt, io,
     net::{self, SocketAddr},
     time::Duration,
 };
 
-#[cfg(feature = "native-tls")]
-use std::{
-    fs::File,
-    io::Read as _
+use crate::error::{
+    DriverError::{ConnectTimeout, CouldNotConnect},
+    Error::DriverError,
+    Result as MyResult,
 };
-
-
-use crate::{
-    error::{
-        DriverError::{ConnectTimeout, CouldNotConnect},
-        Error::DriverError,
-        Result as MyResult,
-    },
-};
-
-#[cfg(feature = "native-tls")]
-use crate::SslOpts;
 
 mod tcp;
+mod tls;
 
 #[derive(Debug, Read, Write)]
 pub enum Stream {
@@ -147,68 +133,21 @@ impl Stream {
         }
     }
 
-    #[cfg(feature = "native-tls")]
-    pub fn make_secure(self, host: url::Host, ssl_opts: SslOpts) -> MyResult<Stream> {
-        if self.is_socket() {
-            // won't secure socket connection
-            return Ok(self);
-        }
-
-        let domain = match host {
-            url::Host::Domain(domain) => domain,
-            url::Host::Ipv4(ip) => ip.to_string(),
-            url::Host::Ipv6(ip) => ip.to_string(),
-        };
-
-
-        let mut builder = TlsConnector::builder();
-        if let Some(root_cert_path) = ssl_opts.root_cert_path() {
-            let mut root_cert_data = vec![];
-            let mut root_cert_file = File::open(root_cert_path)?;
-            root_cert_file.read_to_end(&mut root_cert_data)?;
-
-            let root_certs = Certificate::from_der(&*root_cert_data)
-                .map(|x| vec![x])
-                .or_else(|_| {
-                    pem::parse_many(&*root_cert_data)
-                        .iter()
-                        .map(pem::encode)
-                        .map(|s| Certificate::from_pem(s.as_bytes()))
-                        .collect()
-                })?;
-
-            for root_cert in root_certs {
-                builder.add_root_certificate(root_cert);
-            }
-        }
-        if let Some(pkcs12_path) = ssl_opts.pkcs12_path() {
-            let der = std::fs::read(pkcs12_path)?;
-            let identity = Identity::from_pkcs12(&*der, ssl_opts.password().unwrap_or(""))?;
-            builder.identity(identity);
-        }
-        builder.danger_accept_invalid_hostnames(ssl_opts.skip_domain_validation());
-        builder.danger_accept_invalid_certs(ssl_opts.accept_invalid_certs());
-        let tls_connector = builder.build()?;
-        match self {
-            Stream::TcpStream(tcp_stream) => match tcp_stream {
-                TcpStream::Insecure(insecure_stream) => {
-                    let inner = insecure_stream.into_inner().map_err(io::Error::from)?;
-                    let secure_stream = tls_connector.connect(&domain, inner)?;
-                    Ok(Stream::TcpStream(TcpStream::Secure(BufStream::new(
-                        secure_stream,
-                    ))))
-                }
-                TcpStream::Secure(_) => Ok(Stream::TcpStream(tcp_stream)),
-            },
-            _ => unreachable!(),
-        }
+    #[cfg(all(not(feature = "native-tls"), not(feature = "rustls")))]
+    pub fn make_secure(self, _host: url::Host, _ssl_opts: crate::SslOpts) -> MyResult<Stream> {
+        panic!(
+            "Client had asked for TLS connection but TLS support is disabled. \
+            Please enable one of the following features: [\"native-tls\", \"rustls\"]"
+        )
     }
 }
 
 #[derive(Read, Write)]
 pub enum TcpStream {
     #[cfg(feature = "native-tls")]
-    Secure(BufStream<TlsStream<net::TcpStream>>),
+    Secure(BufStream<native_tls::TlsStream<net::TcpStream>>),
+    #[cfg(feature = "rustls")]
+    Secure(BufStream<rustls::StreamOwned<rustls::ClientConnection, net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
 }
 
@@ -216,6 +155,8 @@ impl fmt::Debug for TcpStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             #[cfg(feature = "native-tls")]
+            TcpStream::Secure(ref s) => write!(f, "Secure stream {:?}", s),
+            #[cfg(feature = "rustls")]
             TcpStream::Secure(ref s) => write!(f, "Secure stream {:?}", s),
             TcpStream::Insecure(ref s) => write!(f, "Insecure stream {:?}", s),
         }

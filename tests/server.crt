@@ -1,0 +1,75 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 2 (0x2)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C=RU, ST=Moscos, L=Moscow, O=FSI RSL, OU=rust-mysql-simple test ca, CN=rust_mysql_simple/emailAddress=root_email@root.localhost
+        Validity
+            Not Before: Oct 19 10:00:49 2021 GMT
+            Not After : Sep 25 10:00:49 2121 GMT
+        Subject: C=RU, ST=Moscow region, O=FSI RSL, OU=rust-mysql-simple test server cert, CN=localhost
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                RSA Public-Key: (2048 bit)
+                Modulus:
+                    00:db:b8:b9:2c:9d:44:bc:c0:b2:e3:26:c7:5e:91:
+                    74:1f:61:4f:d8:4e:e4:02:11:d7:12:04:be:1d:d5:
+                    e5:45:c0:65:16:e6:7a:3d:45:da:9a:ad:2d:37:ad:
+                    16:4e:84:40:70:2a:13:d2:c0:92:a2:cb:b0:11:98:
+                    83:75:f9:47:0c:4f:75:35:8f:9c:d4:8a:ae:a0:e3:
+                    ae:bc:b4:8d:d9:91:b7:14:29:d8:23:86:6a:8d:77:
+                    a1:d3:78:3d:f2:bd:e3:3e:26:93:79:7e:ea:38:1a:
+                    4f:f4:4c:68:19:e5:55:8b:bc:5c:d8:8f:0b:94:ea:
+                    7a:64:70:cd:a4:86:ca:05:a3:8f:6e:6d:64:e0:71:
+                    a9:c5:fb:2d:f4:94:83:cf:3b:c6:1a:c7:f4:2b:df:
+                    53:f4:0a:4c:50:10:5b:9d:45:17:f4:86:2e:2e:52:
+                    2d:b1:58:95:42:46:45:74:8f:c5:67:cd:ad:8e:42:
+                    4c:7c:a3:a4:ce:79:c8:0b:a5:ce:3e:94:d9:37:ee:
+                    fc:18:3d:da:92:74:6e:cc:e4:3a:0b:64:69:9f:d5:
+                    7f:b8:9a:fb:d9:ed:f3:7f:39:84:c0:af:e3:3f:e0:
+                    77:d6:d9:b2:e3:56:62:a5:1b:87:d4:60:7c:c6:88:
+                    53:10:a7:72:95:1c:a4:c9:dd:9a:09:e6:ea:65:2b:
+                    3e:53
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Subject Alternative Name: 
+                IP Address:127.0.0.1, DNS:localhost
+    Signature Algorithm: sha256WithRSAEncryption
+         49:30:ef:c5:99:00:50:bb:5e:09:35:ad:d1:dd:10:21:a7:43:
+         7d:5c:da:05:80:0b:45:1e:79:db:88:fc:ec:a8:41:c2:15:83:
+         27:98:4f:47:44:58:4f:56:84:53:5b:c8:15:3c:82:14:57:d5:
+         e2:4f:49:b9:1c:4b:45:59:79:6d:a7:95:7d:e0:1c:1a:2e:20:
+         23:e4:ee:ac:46:1c:09:45:3f:96:bc:68:09:c0:e1:99:9a:7e:
+         51:1e:1a:e5:48:4f:dd:1a:32:1b:ec:6c:17:f4:35:e8:c7:0b:
+         bb:1c:2f:48:cf:8c:26:96:46:c4:44:f9:d6:25:44:0b:ee:78:
+         1b:81:40:4f:db:ea:51:53:7c:03:aa:3a:23:d1:73:d2:3c:f5:
+         33:ae:85:83:b7:63:0c:89:f8:9b:02:64:df:73:9f:5b:45:47:
+         05:fb:86:ed:14:35:e3:90:a8:12:32:5a:7a:05:7e:f8:7d:68:
+         2c:a6:ad:d4:5d:59:34:53:e0:a2:33:1b:ee:d9:c5:0f:68:31:
+         4b:88:6d:00:f6:bf:23:18:62:0d:5c:de:ba:e7:31:24:c0:13:
+         26:4c:85:5d:d6:76:0e:e5:1d:0f:50:52:09:75:c1:58:b5:0c:
+         d1:0e:12:bf:9b:f6:32:89:b4:cd:05:54:a0:dc:46:ba:8e:bd:
+         ce:9b:27:6b
+-----BEGIN CERTIFICATE-----
+MIIDvzCCAqegAwIBAgIBAjANBgkqhkiG9w0BAQsFADCBqzELMAkGA1UEBhMCUlUx
+DzANBgNVBAgMBk1vc2NvczEPMA0GA1UEBwwGTW9zY293MRAwDgYDVQQKDAdGU0kg
+UlNMMSIwIAYDVQQLDBlydXN0LW15c3FsLXNpbXBsZSB0ZXN0IGNhMRowGAYDVQQD
+DBFydXN0X215c3FsX3NpbXBsZTEoMCYGCSqGSIb3DQEJARYZcm9vdF9lbWFpbEBy
+b290LmxvY2FsaG9zdDAgFw0yMTEwMTkxMDAwNDlaGA8yMTIxMDkyNTEwMDA0OVow
+eDELMAkGA1UEBhMCUlUxFjAUBgNVBAgMDU1vc2NvdyByZWdpb24xEDAOBgNVBAoM
+B0ZTSSBSU0wxKzApBgNVBAsMInJ1c3QtbXlzcWwtc2ltcGxlIHRlc3Qgc2VydmVy
+IGNlcnQxEjAQBgNVBAMMCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQADggEP
+ADCCAQoCggEBANu4uSydRLzAsuMmx16RdB9hT9hO5AIR1xIEvh3V5UXAZRbmej1F
+2pqtLTetFk6EQHAqE9LAkqLLsBGYg3X5RwxPdTWPnNSKrqDjrry0jdmRtxQp2COG
+ao13odN4PfK94z4mk3l+6jgaT/RMaBnlVYu8XNiPC5TqemRwzaSGygWjj25tZOBx
+qcX7LfSUg887xhrH9CvfU/QKTFAQW51FF/SGLi5SLbFYlUJGRXSPxWfNrY5CTHyj
+pM55yAulzj6U2Tfu/Bg92pJ0bszkOgtkaZ/Vf7ia+9nt8385hMCv4z/gd9bZsuNW
+YqUbh9RgfMaIUxCncpUcpMndmgnm6mUrPlMCAwEAAaMeMBwwGgYDVR0RBBMwEYcE
+fwAAAYIJbG9jYWxob3N0MA0GCSqGSIb3DQEBCwUAA4IBAQBJMO/FmQBQu14JNa3R
+3RAhp0N9XNoFgAtFHnnbiPzsqEHCFYMnmE9HRFhPVoRTW8gVPIIUV9XiT0m5HEtF
+WXltp5V94BwaLiAj5O6sRhwJRT+WvGgJwOGZmn5RHhrlSE/dGjIb7GwX9DXoxwu7
+HC9Iz4wmlkbERPnWJUQL7ngbgUBP2+pRU3wDqjoj0XPSPPUzroWDt2MMifibAmTf
+c59bRUcF+4btFDXjkKgSMlp6BX74fWgspq3UXVk0U+CiMxvu2cUPaDFLiG0A9r8j
+GGINXN665zEkwBMmTIVd1nYO5R0PUFIJdcFYtQzRDhK/m/YyibTNBVSg3Ea6jr3O
+mydr
+-----END CERTIFICATE-----
