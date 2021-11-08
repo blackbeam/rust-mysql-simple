@@ -16,25 +16,18 @@ use native_tls::{Certificate, Identity, TlsConnector, TlsStream};
 #[cfg(unix)]
 use std::os::unix;
 use std::{
-    fmt,
-    io,
+    fmt, io,
     net::{self, SocketAddr},
     time::Duration,
 };
 
 #[cfg(feature = "native-tls")]
-use std::{
-    fs::File,
-    io::Read as _
-};
+use std::{fs::File, io::Read as _};
 
-
-use crate::{
-    error::{
-        DriverError::{ConnectTimeout, CouldNotConnect},
-        Error::DriverError,
-        Result as MyResult,
-    },
+use crate::error::{
+    DriverError::{ConnectTimeout, CouldNotConnect},
+    Error::DriverError,
+    Result as MyResult,
 };
 
 #[cfg(feature = "native-tls")]
@@ -160,7 +153,6 @@ impl Stream {
             url::Host::Ipv6(ip) => ip.to_string(),
         };
 
-
         let mut builder = TlsConnector::builder();
         if let Some(root_cert_path) = ssl_opts.root_cert_path() {
             let mut root_cert_data = vec![];
@@ -172,7 +164,7 @@ impl Stream {
                 .or_else(|_| {
                     pem::parse_many(&*root_cert_data)
                         .iter()
-                        .map(pem::encode)
+                        .map(|x| pem::encode_many(x))
                         .map(|s| Certificate::from_pem(s.as_bytes()))
                         .collect()
                 })?;
