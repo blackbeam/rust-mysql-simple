@@ -795,6 +795,10 @@ pub mod binlog {
     pub use crate::myc::binlog::{events, jsonb, jsondiff, row, value};
 }
 
+#[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+#[doc(inline)]
+pub use crate::conn::opts::ClientIdentity;
+
 #[doc(inline)]
 pub use crate::myc::packets::{session_state_change, SessionStateInfo};
 
@@ -874,7 +878,7 @@ macro_rules! def_database_url {
             }
             url
         } else {
-            "mysql://root:password@127.0.0.1:3307/mysql".into()
+            "mysql://root:password@localhost:3307/mysql".into()
         }
     };
 }

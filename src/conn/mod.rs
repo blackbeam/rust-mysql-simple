@@ -23,13 +23,10 @@ use mysql_common::{
     value::ServerSide,
 };
 
-#[cfg(feature = "native-tls")]
 use mysql_common::{
     constants::{DEFAULT_MAX_ALLOWED_PACKET, UTF8_GENERAL_CI},
-    packets::SslRequest
+    packets::SslRequest,
 };
-
-
 
 use std::{
     borrow::{Borrow, Cow},
@@ -67,10 +64,7 @@ use crate::{
     Value::{self, Bytes, NULL},
 };
 
-
-#[cfg(feature = "native-tls")]
 use crate::DriverError::TlsNotSupported;
-#[cfg(feature = "native-tls")]
 use crate::SslOpts;
 
 use self::binlog_stream::BinlogStream;
@@ -375,7 +369,6 @@ impl Conn {
         }
     }
 
-    #[cfg(feature = "native-tls")]
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
         let stream = self.0.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
@@ -530,7 +523,6 @@ impl Conn {
 
         self.handle_handshake(&handshake);
 
-        #[cfg(feature = "native-tls")]
         if self.is_insecure() {
             if let Some(ssl_opts) = self.0.opts.get_ssl_opts().cloned() {
                 if !handshake
@@ -628,7 +620,6 @@ impl Conn {
         attrs
     }
 
-    #[cfg(feature = "native-tls")]
     fn do_ssl_request(&mut self) -> Result<()> {
         let ssl_request = SslRequest::new(
             self.get_client_flags(),
@@ -1168,11 +1159,7 @@ mod test {
             time::Duration,
         };
 
-        use mysql_common::{
-            binlog::events::EventData, packets::binlog_request::BinlogRequest,
-            value::json::Serialized,
-        };
-        use serde_json::json;
+        use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
 
         use crate::{
             from_row, from_value, params,
@@ -1898,7 +1885,7 @@ mod test {
             let port = 28000 + (rand::random::<u16>() % 2000);
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
-                .ip_or_hostname(Some("127.0.0.1"))
+                .ip_or_hostname(Some("localhost"))
                 .bind_address(Some(([127, 0, 0, 1], port)));
             let conn = Conn::new(opts).unwrap();
             let debug_format: String = format!("{:?}", conn);
@@ -1916,7 +1903,7 @@ mod test {
             let port = 30000 + (rand::random::<u16>() % 2000);
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
-                .ip_or_hostname(Some("127.0.0.1"))
+                .ip_or_hostname(Some("localhost"))
                 .bind_address(Some(([127, 0, 0, 1], port)))
                 .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
             let mut conn = Conn::new(opts).unwrap();

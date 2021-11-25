@@ -44,6 +44,12 @@ jobs:
           SSL=true COMPRESS=false cargo test
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
+
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls
+
+          SSL=false COMPRESS=true cargo test --no-default-features
+          SSL=false COMPRESS=false cargo test --no-default-features
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
@@ -84,6 +90,12 @@ jobs:
           SSL=true COMPRESS=false cargo test
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
+
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls
+
+          SSL=false COMPRESS=true cargo test --no-default-features
+          SSL=false COMPRESS=false cargo test --no-default-features
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root@127.0.0.1/mysql
@@ -129,6 +141,12 @@ jobs:
           SSL=true COMPRESS=false cargo test
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
+
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls
+
+          SSL=false COMPRESS=true cargo test --no-default-features
+          SSL=false COMPRESS=false cargo test --no-default-features
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@127.0.0.1/mysql
@@ -173,6 +191,12 @@ jobs:
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
+
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls"
+
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features"
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@127.0.0.1/mysql
@@ -235,6 +259,12 @@ jobs:
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test"
+
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls"
+
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features"
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@127.0.0.1/mysql
