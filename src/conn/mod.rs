@@ -537,7 +537,15 @@ impl Conn {
             }
         }
 
-        let nonce = handshake.nonce();
+        // Handshake scramble is always 21 bytes length (20 + zero terminator)
+        let nonce = {
+            let mut nonce = Vec::from(handshake.scramble_1_ref());
+            nonce.extend_from_slice(handshake.scramble_2_ref().unwrap_or(&[][..]));
+            // Trim zero terminator. Fill with zeroes if nonce
+            // is somehow smaller than 20 bytes (this matches the server behavior).
+            nonce.resize(20, 0);
+            nonce
+        };
 
         let auth_plugin = handshake
             .auth_plugin()
@@ -1160,12 +1168,12 @@ mod test {
         };
 
         use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
+        use time::PrimitiveDateTime;
 
         use crate::{
             from_row, from_value, params,
             prelude::*,
             test_misc::get_opts,
-            time::PrimitiveDateTime,
             Conn,
             DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,

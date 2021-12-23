@@ -324,8 +324,8 @@
 //!         println!("A double precision float value: {}", from_value::<f64>(val))
 //!     }
 //!     val @ Value::Date(..) => {
-//!         use mysql::chrono::NaiveDateTime;
-//!         println!("A date value: {}", from_value::<NaiveDateTime>(val))
+//!         use time::PrimitiveDateTime;
+//!         println!("A date value: {}", from_value::<PrimitiveDateTime>(val))
 //!     }
 //!     val @ Value::Time(..) => {
 //!         use std::time::Duration;
@@ -768,13 +768,6 @@ pub extern crate serde_json;
 #[cfg(test)]
 #[macro_use]
 extern crate serde_derive;
-
-/// Reexport of `chrono` crate.
-pub use crate::myc::chrono;
-/// Reexport of `time` crate.
-pub use crate::myc::time;
-/// Reexport of `uuid` crate.
-pub use crate::myc::uuid;
 
 mod buffer_pool;
 mod conn;

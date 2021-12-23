@@ -36,6 +36,7 @@ impl Stream {
                 .map(|x| vec![x])
                 .or_else(|_| {
                     pem::parse_many(&*root_cert_data)
+                        .unwrap_or_default()
                         .iter()
                         .map(pem::encode)
                         .map(|s| Certificate::from_pem(s.as_bytes()))
