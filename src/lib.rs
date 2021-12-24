@@ -19,6 +19,11 @@
 //! *   MySql binary protocol support, i.e. support of prepared statements and binary result sets;
 //! *   support of multi-result sets;
 //! *   support of named parameters for prepared statements;
+//!
+//!     Named parameters uses the following naming convention:
+//!
+//!     * parameter name must start with either `_` or `a..z` and may continue with `_`, `a..z` and `0..9`
+//!
 //! *   optional per-connection cache of prepared statements;
 //! *   support of MySql packets larger than 2^24;
 //! *   support of Unix sockets and Windows named pipes;

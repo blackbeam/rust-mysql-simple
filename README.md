@@ -18,6 +18,11 @@ Features:
 *   MySql binary protocol support, i.e. support of prepared statements and binary result sets;
 *   support of multi-result sets;
 *   support of named parameters for prepared statements;
+
+    Named parameters uses the following naming convention:
+
+    * parameter name must start with either `_` or `a..z` and may continue with `_`, `a..z` and `0..9`
+
 *   optional per-connection cache of prepared statements;
 *   support of MySql packets larger than 2^24;
 *   support of Unix sockets and Windows named pipes;
@@ -50,8 +55,8 @@ struct Payment {
 }
 
 let url = "mysql://root:password@localhost:3307/db_name";
-let opts = Opts::from_url(url)?;
-let pool = Pool::new(opts)?;
+
+let pool = Pool::new(url)?;
 
 let mut conn = pool.get_conn()?;
 
@@ -306,8 +311,8 @@ match unknown_val {
         println!("A double precision float value: {}", from_value::<f64>(val))
     }
     val @ Value::Date(..) => {
-        use mysql::chrono::NaiveDateTime;
-        println!("A date value: {}", from_value::<NaiveDateTime>(val))
+        use time::PrimitiveDateTime;
+        println!("A date value: {}", from_value::<PrimitiveDateTime>(val))
     }
     val @ Value::Time(..) => {
         use std::time::Duration;

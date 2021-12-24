@@ -481,7 +481,7 @@ impl OptsBuilder {
     /// - stmt_cache_size = Number of prepared statements cached on the client side (per connection)
     /// - secure_auth = Disable `mysql_old_password` auth plugin
     ///
-    /// Login .cnf file parsing lib https://github.com/rjcortese/myloginrs returns a HashMap for client configs
+    /// Login .cnf file parsing lib <https://github.com/rjcortese/myloginrs> returns a HashMap for client configs
     ///
     /// **Note:** You do **not** have to use myloginrs lib.
     pub fn from_hash_map(mut self, client: &HashMap<String, String>) -> Result<Self, UrlError> {
