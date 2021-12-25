@@ -460,7 +460,7 @@ let mut conn = Conn::new(get_opts())?;
 let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
 
 let mut sets = 0;
-while let Some(result_set) = result.next_set() {
+while let Some(result_set) = result.current_set() {
     let result_set = result_set?;
     sets += 1;
 

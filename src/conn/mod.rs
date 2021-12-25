@@ -1703,6 +1703,19 @@ mod test {
             )
             .unwrap();
             conn.exec_drop("SELECT * FROM TEST_TABLE", ()).unwrap();
+
+            let mut query_result = conn
+                .query_iter(
+                    r"
+                SELECT * FROM TEST_TABLE;
+                INSERT INTO TEST_TABLE (name) VALUES ('one');
+                DO 0;",
+                )
+                .unwrap();
+
+            while let Some(result) = query_result.current_set() {
+                result.affected_rows();
+            }
         }
 
         #[test]
@@ -1739,9 +1752,9 @@ mod test {
             }
             let mut result = conn.query_iter("SELECT 1; SELECT 2; SELECT 3;").unwrap();
             let mut i = 0;
-            while let Some(result_set) = result.next_set() {
+            while let Some(result_set) = result.current_set() {
                 i += 1;
-                for row in result_set.unwrap() {
+                for row in result_set {
                     match i {
                         1 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"1".to_vec())]),
                         2 => assert_eq!(row.unwrap().unwrap(), vec![Bytes(b"2".to_vec())]),

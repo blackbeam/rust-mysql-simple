@@ -100,7 +100,7 @@ impl From<Or<Vec<Column>, OkPacket<'static>>> for SetIteratorState {
 /// Response to a query or statement execution.
 ///
 /// It is an iterator:
-/// *   over result sets (via `Self::next_set`)
+/// *   over result sets (via `Self::current_set`)
 /// *   over rows of a current result set (via `Iterator` impl)
 #[derive(Debug)]
 pub struct QueryResult<'c, 't, 'tc, T: crate::prelude::Protocol> {
@@ -153,7 +153,9 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     }
 
     /// Returns an iterator over the current result set.
-    pub fn next_set<'d>(&'d mut self) -> Option<Result<ResultSet<'c, 't, 'tc, 'd, T>>> {
+    ///
+    /// Subsequent call will return the next result set and so on.
+    pub fn current_set<'d>(&'d mut self) -> Option<ResultSet<'c, 't, 'tc, 'd, T>> {
         use SetIteratorState::*;
 
         if let OnBoundary | Done = &self.state {
@@ -164,10 +166,10 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
 
             None
         } else {
-            Some(Ok(ResultSet {
+            Some(ResultSet {
                 set_index: self.set_index,
                 inner: self,
-            }))
+            })
         }
     }
 
@@ -229,7 +231,7 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
 
 impl<'c, 't, 'tc, T: crate::prelude::Protocol> Drop for QueryResult<'c, 't, 'tc, T> {
     fn drop(&mut self) {
-        while self.next_set().is_some() {}
+        while self.current_set().is_some() {}
     }
 }
 

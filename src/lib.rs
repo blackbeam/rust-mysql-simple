@@ -488,8 +488,7 @@
 //! let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
 //!
 //! let mut sets = 0;
-//! while let Some(result_set) = result.next_set() {
-//!     let result_set = result_set?;
+//! while let Some(result_set) = result.current_set() {
 //!     sets += 1;
 //!
 //!     println!("Result set columns: {:?}", result_set.columns());
