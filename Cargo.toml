@@ -46,6 +46,7 @@ time = "0.3"
 [dependencies]
 bufstream = "~0.1"
 bytes = "1.0.1"
+crossbeam = "0.8.1"
 io-enum = "1.0.0"
 flate2 = { version = "1.0", default-features = false }
 lru = "0.7"
