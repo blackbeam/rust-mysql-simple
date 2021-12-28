@@ -6,7 +6,7 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use socket2::{Domain, Socket, Type};
+use socket2::{Domain, SockAddr, Socket, Type};
 
 use std::{
     io,
@@ -86,35 +86,67 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             "could not connect to any address with specified bind address"
         };
         let err = io::Error::new(io::ErrorKind::Other, err_msg);
-        address
-            .to_socket_addrs()?
-            .fold(Err(err), |prev, sock_addr| {
-                prev.or_else(|_| {
-                    let domain = Domain::for_address(sock_addr);
+
+        let addrs = address.to_socket_addrs()?.collect::<Vec<_>>();
+
+        let socket = if let Some(bind_address) = bind_address {
+            let fold_fun = |prev, sock_addr: &SocketAddr| match prev {
+                Ok(socket) => Ok(socket),
+                Err(_) => {
+                    let domain = Domain::for_address(*sock_addr);
                     let socket = Socket::new(domain, Type::STREAM, None)?;
-                    if let Some(bind_address) = bind_address {
-                        if bind_address.is_ipv4() == sock_addr.is_ipv4() {
-                            socket.bind(&bind_address.into())?;
-                        }
-                    }
+                    socket.bind(&bind_address.into())?;
                     if let Some(connect_timeout) = connect_timeout {
-                        socket.connect_timeout(&sock_addr.into(), connect_timeout)?;
+                        socket.connect_timeout(&SockAddr::from(*sock_addr), connect_timeout)?;
                     } else {
-                        socket.connect(&sock_addr.into())?;
+                        socket.connect(&SockAddr::from(*sock_addr))?;
                     }
                     Ok(socket)
-                })
-            })
-            .and_then(|socket| {
-                socket.set_read_timeout(read_timeout)?;
-                socket.set_write_timeout(write_timeout)?;
-                if let Some(duration) = keepalive_time_ms {
-                    let conf = socket2::TcpKeepalive::new()
-                        .with_time(Duration::from_millis(duration as u64));
-                    socket.set_tcp_keepalive(&conf)?;
                 }
-                socket.set_nodelay(nodelay)?;
-                Ok(TcpStream::from(socket))
-            })
+            };
+
+            if bind_address.is_ipv4() {
+                // client wants to bind to ipv4, so let's look for ipv4 addresses first
+                addrs
+                    .iter()
+                    .filter(|x| x.is_ipv4())
+                    .fold(Err(err), fold_fun)
+                    .or_else(|e| addrs.iter().filter(|x| x.is_ipv6()).fold(Err(e), fold_fun))
+            } else {
+                // client wants to bind to ipv6, so let's look for ipv6 addresses first
+                addrs
+                    .iter()
+                    .filter(|x| x.is_ipv6())
+                    .fold(Err(err), fold_fun)
+                    .or_else(|e| addrs.iter().filter(|x| x.is_ipv4()).fold(Err(e), fold_fun))
+            }
+        } else {
+            // no bind address
+            addrs
+                .into_iter()
+                .fold(Err(err), |prev, sock_addr| match prev {
+                    Ok(socket) => Ok(socket),
+                    Err(_) => {
+                        let domain = Domain::for_address(sock_addr);
+                        let socket = Socket::new(domain, Type::STREAM, None)?;
+                        if let Some(connect_timeout) = connect_timeout {
+                            socket.connect_timeout(&sock_addr.into(), connect_timeout)?;
+                        } else {
+                            socket.connect(&sock_addr.into())?;
+                        }
+                        Ok(socket)
+                    }
+                })
+        }?;
+
+        socket.set_read_timeout(read_timeout)?;
+        socket.set_write_timeout(write_timeout)?;
+        if let Some(duration) = keepalive_time_ms {
+            let conf =
+                socket2::TcpKeepalive::new().with_time(Duration::from_millis(duration as u64));
+            socket.set_tcp_keepalive(&conf)?;
+        }
+        socket.set_nodelay(nodelay)?;
+        Ok(TcpStream::from(socket))
     }
 }

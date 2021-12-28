@@ -1,6 +1,6 @@
 [package]
 name = "mysql"
-version = "21.0.2"
+version = "22.0.0"
 authors = ["blackbeam"]
 description = "Mysql client library implemented in rust"
 license = "MIT/Apache-2.0"
@@ -9,7 +9,7 @@ repository = "https://github.com/blackbeam/rust-mysql-simple"
 keywords = ["database", "sql"]
 exclude = ["tests/*", ".*", "Makefile"]
 categories = ["database"]
-edition = "2018"
+edition = "2021"
 build = "build.rs"
 
 [badges.azure-devops]
@@ -27,7 +27,10 @@ debug = true
 [features]
 default = [
     "native-tls",
+
+    # It is necessary to choose one of `flate2` backends.
     "flate2/zlib",
+
     "mysql_common/bigdecimal03",
     "mysql_common/rust_decimal",
     "mysql_common/time03",
@@ -46,6 +49,7 @@ time = "0.3"
 [dependencies]
 bufstream = "~0.1"
 bytes = "1.0.1"
+crossbeam = "0.8.1"
 io-enum = "1.0.0"
 flate2 = { version = "1.0", default-features = false }
 lru = "0.7"

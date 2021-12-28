@@ -52,7 +52,7 @@ jobs:
           SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
+          DATABASE_URL: mysql://root:root@localhost:3306/mysql
         displayName: Run tests
 
   - job: "TestBasicMacOs"
@@ -98,7 +98,7 @@ jobs:
           SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root@127.0.0.1/mysql
+          DATABASE_URL: mysql://root@localhost/mysql
         displayName: Run tests
 
   - job: "TestBasicWindows"
@@ -149,7 +149,7 @@ jobs:
           SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+          DATABASE_URL: mysql://root:password@localhost/mysql
         displayName: Run tests
 
   - job: "TestMySql"
@@ -186,7 +186,7 @@ jobs:
           docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
         displayName: Install Rust in docker
       - bash: |
-          if [[ "5.6" != "$(DB_VERSION)" ]]; then SSL=true; else DATABASE_URL="mysql://root2:password@127.0.0.1/mysql?secure_auth=false"; fi
+          if [[ "5.6" != "$(DB_VERSION)" ]]; then SSL=true; else DATABASE_URL="mysql://root2:password@localhost/mysql?secure_auth=false"; fi
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
@@ -199,7 +199,7 @@ jobs:
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03"
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+          DATABASE_URL: mysql://root:password@localhost/mysql
         displayName: Run tests in Docker
 
   - job: "TestMariaDb"
@@ -267,5 +267,5 @@ jobs:
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03"
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+          DATABASE_URL: mysql://root:password@localhost/mysql
         displayName: Run tests in Docker

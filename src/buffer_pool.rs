@@ -6,63 +6,65 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use std::{
-    mem::replace,
-    ops::Deref,
-    sync::{Arc, Mutex},
-};
+use crossbeam::queue::ArrayQueue;
+
+use std::{mem::replace, ops::Deref, sync::Arc};
+
+const DEFAULT_MYSQL_BUFFER_POOL_CAP: usize = 128;
+const DEFAULT_MYSQL_BUFFER_SIZE_CAP: usize = 4 * 1024 * 1024;
 
 #[derive(Debug)]
-pub struct BufferPool {
-    pool_cap: usize,
+struct Inner {
     buffer_cap: usize,
-    pool: Mutex<Vec<Vec<u8>>>,
+    pool: ArrayQueue<Vec<u8>>,
 }
 
-impl BufferPool {
-    pub fn new() -> Self {
-        let pool_cap = std::env::var("MYSQL_BUFFER_POOL_CAP")
-            .ok()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(128_usize);
-
-        let buffer_cap = std::env::var("MYSQL_BUFFER_SIZE_CAP")
-            .ok()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(4 * 1024 * 1024);
-
-        Self {
-            pool: Default::default(),
-            pool_cap,
-            buffer_cap,
-        }
-    }
-
-    pub fn get(self: &Arc<Self>) -> PooledBuf {
-        let mut buf = self.pool.lock().unwrap().pop().unwrap_or_default();
+impl Inner {
+    fn get(self: &Arc<Self>) -> PooledBuf {
+        let mut buf = self.pool.pop().unwrap_or_default();
 
         // SAFETY:
         // 1. OK – 0 is always within capacity
         // 2. OK - nothing to initialize
         unsafe { buf.set_len(0) }
 
-        PooledBuf(buf, self.clone())
+        PooledBuf(buf, Some(self.clone()))
     }
 
-    fn put(self: &Arc<Self>, mut buf: Vec<u8>) {
-        if buf.len() > self.buffer_cap {
-            // TODO: until `Vec::shrink_to` stabilization
+    fn put(&self, mut buf: Vec<u8>) {
+        buf.shrink_to(self.buffer_cap);
+        let _ = self.pool.push(buf);
+    }
+}
 
-            // SAFETY:
-            // 1. OK – new_len <= capacity
-            // 2. OK - 0..new_len is initialized
-            unsafe { buf.set_len(self.buffer_cap) }
-            buf.shrink_to_fit();
-        }
+/// Smart pointer to a buffer pool.
+#[derive(Debug, Clone)]
+pub struct BufferPool(Option<Arc<Inner>>);
 
-        let mut pool = self.pool.lock().unwrap();
-        if pool.len() < self.pool_cap {
-            pool.push(buf);
+impl BufferPool {
+    pub fn new() -> Self {
+        let pool_cap = std::env::var("RUST_MYSQL_BUFFER_POOL_CAP")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(DEFAULT_MYSQL_BUFFER_POOL_CAP);
+
+        let buffer_cap = std::env::var("RUST_MYSQL_BUFFER_SIZE_CAP")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(DEFAULT_MYSQL_BUFFER_SIZE_CAP);
+
+        Self((pool_cap > 0).then(|| {
+            Arc::new(Inner {
+                buffer_cap,
+                pool: ArrayQueue::new(pool_cap),
+            })
+        }))
+    }
+
+    pub fn get(self: &Arc<Self>) -> PooledBuf {
+        match self.0 {
+            Some(ref inner) => inner.get(),
+            None => PooledBuf(Vec::new(), None),
         }
     }
 }
@@ -74,7 +76,7 @@ impl Default for BufferPool {
 }
 
 #[derive(Debug)]
-pub struct PooledBuf(Vec<u8>, Arc<BufferPool>);
+pub struct PooledBuf(Vec<u8>, Option<Arc<Inner>>);
 
 impl AsMut<Vec<u8>> for PooledBuf {
     fn as_mut(&mut self) -> &mut Vec<u8> {
@@ -92,6 +94,8 @@ impl Deref for PooledBuf {
 
 impl Drop for PooledBuf {
     fn drop(&mut self) {
-        self.1.put(replace(&mut self.0, vec![]))
+        if let Some(ref inner) = self.1 {
+            inner.put(replace(&mut self.0, vec![]));
+        }
     }
 }
