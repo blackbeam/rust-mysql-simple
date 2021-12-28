@@ -18,13 +18,8 @@
 //! *   MySql text protocol support, i.e. support of simple text queries and text result sets;
 //! *   MySql binary protocol support, i.e. support of prepared statements and binary result sets;
 //! *   support of multi-result sets;
-//! *   support of named parameters for prepared statements;
-//!
-//!     Named parameters uses the following naming convention:
-//!
-//!     * parameter name must start with either `_` or `a..z` and may continue with `_`, `a..z` and `0..9`
-//!
-//! *   optional per-connection cache of prepared statements;
+//! *   support of named parameters for prepared statements (see the [Named Parameters](#named-parameters) section);
+//! *   optional per-connection cache of prepared statements (see the [Statement Cache](#statement-cache) section);
 //! *   buffer pool (see the [Buffer Pool](#buffer-pool) section);
 //! *   support of MySql packets larger than 2^24;
 //! *   support of Unix sockets and Windows named pipes;
@@ -646,13 +641,17 @@
 //! ### Named parameters
 //!
 //! MySql itself doesn't have named parameters support, so it's implemented on the client side.
-//! One should use `:name` as a placeholder syntax for a named parameter.
+//! One should use `:name` as a placeholder syntax for a named parameter. Named parameters uses
+//! the following naming convention:
+//!
+//! * parameter name must start with either `_` or `a..z`
+//! * parameter name may continue with `_`, `a..z` and `0..9`
 //!
 //! Named parameters may be repeated within the statement, e.g `SELECT :foo, :foo` will require
 //! a single named parameter `foo` that will be repeated on the corresponding positions during
 //! statement execution.
 //!
-//! One should use the `params!` macro to build a parameters for execution.
+//! One should use the `params!` macro to build parameters for execution.
 //!
 //! **Note:** Positional and named parameters can't be mixed within the single statement.
 //!
