@@ -25,6 +25,7 @@
 //!     * parameter name must start with either `_` or `a..z` and may continue with `_`, `a..z` and `0..9`
 //!
 //! *   optional per-connection cache of prepared statements;
+//! *   buffer pool (see the [Buffer Pool](#buffer-pool) section);
 //! *   support of MySql packets larger than 2^24;
 //! *   support of Unix sockets and Windows named pipes;
 //! *   support of custom LOCAL INFILE handlers;
@@ -676,6 +677,23 @@
 //! assert_eq!((13, foo, 13), val_13);
 //! # });
 //! ```
+//!
+//! ### Buffer pool
+//!
+//! Crate uses the global lock-free buffer pool for the purpose of IO and data serialization/deserialization,
+//! that helps to avoid allocations for basic scenarios. You can control it's characteristics using
+//! the following environment variables:
+//!
+//! *   `RUST_MYSQL_BUFFER_POOL_CAP` (defaults to 128) – controls the pool capacity. Dropped buffer will
+//!     be immediately deallocated if the pool is full.
+//!
+//!     **Note:** it might be the case, that you don't need the pooling (say you are using jemalloc).
+//!     It's possible to disable the pool by setting the `RUST_MYSQL_BUFFER_POOL_CAP` environment
+//!     variable to `0`.
+//!
+//! *   `RUST_MYSQL_BUFFER_SIZE_CAP` (defaults to 4MiB) – controls the maximum capacity of a buffer
+//!     stored in the pool. Capacity of a dropped buffer will be shrinked to this value when buffer
+//!     is returning to the pool.
 //!
 //! ### `BinQuery` and `BatchQuery` traits.
 //!
