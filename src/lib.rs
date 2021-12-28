@@ -797,9 +797,6 @@
 //! [max_prepared_stmt_count]: https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_max_prepared_stmt_count
 //!
 
-#![crate_name = "mysql"]
-#![crate_type = "rlib"]
-#![crate_type = "dylib"]
 #![cfg_attr(feature = "nightly", feature(test))]
 #[cfg(feature = "nightly")]
 extern crate test;
