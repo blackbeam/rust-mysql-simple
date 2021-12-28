@@ -17,13 +17,9 @@ Features:
 *   MySql text protocol support, i.e. support of simple text queries and text result sets;
 *   MySql binary protocol support, i.e. support of prepared statements and binary result sets;
 *   support of multi-result sets;
-*   support of named parameters for prepared statements;
-
-    Named parameters uses the following naming convention:
-
-    * parameter name must start with either `_` or `a..z` and may continue with `_`, `a..z` and `0..9`
-
-*   optional per-connection cache of prepared statements;
+*   support of named parameters for prepared statements (see the [Named Parameters](#named-parameters) section);
+*   optional per-connection cache of prepared statements (see the [Statement Cache](#statement-cache) section);
+*   buffer pool (see the [Buffer Pool](#buffer-pool) section);
 *   support of MySql packets larger than 2^24;
 *   support of Unix sockets and Windows named pipes;
 *   support of custom LOCAL INFILE handlers;
@@ -461,7 +457,6 @@ let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
 
 let mut sets = 0;
 while let Some(result_set) = result.current_set() {
-    let result_set = result_set?;
     sets += 1;
 
     println!("Result set columns: {:?}", result_set.columns());
@@ -603,13 +598,17 @@ Statement cache is completely disabled if `stmt_cache_size` is zero.
 #### Named parameters
 
 MySql itself doesn't have named parameters support, so it's implemented on the client side.
-One should use `:name` as a placeholder syntax for a named parameter.
+One should use `:name` as a placeholder syntax for a named parameter. Named parameters uses
+the following naming convention:
+
+* parameter name must start with either `_` or `a..z`
+* parameter name may continue with `_`, `a..z` and `0..9`
 
 Named parameters may be repeated within the statement, e.g `SELECT :foo, :foo` will require
 a single named parameter `foo` that will be repeated on the corresponding positions during
 statement execution.
 
-One should use the `params!` macro to build a parameters for execution.
+One should use the `params!` macro to build parameters for execution.
 
 **Note:** Positional and named parameters can't be mixed within the single statement.
 
@@ -630,6 +629,23 @@ let val_42 = conn.exec_first(&stmt, params! { foo, "bar" => 13 })?.unwrap();
 assert_eq!((foo, 13, foo), val_42);
 assert_eq!((13, foo, 13), val_13);
 ```
+
+#### Buffer pool
+
+Crate uses the global lock-free buffer pool for the purpose of IO and data serialization/deserialization,
+that helps to avoid allocations for basic scenarios. You can control it's characteristics using
+the following environment variables:
+
+*   `RUST_MYSQL_BUFFER_POOL_CAP` (defaults to 128) – controls the pool capacity. Dropped buffer will
+    be immediately deallocated if the pool is full.
+
+    **Note:** it might be the case, that you don't need the pooling (say you are using jemalloc).
+    It's possible to disable the pool by setting the `RUST_MYSQL_BUFFER_POOL_CAP` environment
+    variable to `0`.
+
+*   `RUST_MYSQL_BUFFER_SIZE_CAP` (defaults to 4MiB) – controls the maximum capacity of a buffer
+    stored in the pool. Capacity of a dropped buffer will be shrinked to this value when buffer
+    is returning to the pool.
 
 #### `BinQuery` and `BatchQuery` traits.
 
