@@ -27,7 +27,10 @@ debug = true
 [features]
 default = [
     "native-tls",
+
+    # It is necessary to choose one of `flate2` backends.
     "flate2/zlib",
+
     "mysql_common/bigdecimal03",
     "mysql_common/rust_decimal",
     "mysql_common/time03",
