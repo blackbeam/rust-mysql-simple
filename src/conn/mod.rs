@@ -41,7 +41,7 @@ use std::{
 };
 
 use crate::{
-    buffer_pool::PooledBuf,
+    buffer_pool::{get_buffer, Buffer},
     conn::{
         local_infile::LocalInfile,
         pool::{Pool, PooledConn},
@@ -410,9 +410,9 @@ impl Conn {
         Ok(())
     }
 
-    fn read_packet(&mut self) -> Result<PooledBuf> {
+    fn read_packet(&mut self) -> Result<Buffer> {
         loop {
-            let mut buffer = crate::BUFFER_POOL.get();
+            let mut buffer = get_buffer();
             if !self.stream_mut().next_packet(buffer.as_mut())? {
                 return Err(
                     io::Error::new(io::ErrorKind::BrokenPipe, "server disconnected").into(),
@@ -441,7 +441,7 @@ impl Conn {
     }
 
     fn write_struct<T: MySerialize>(&mut self, s: &T) -> Result<()> {
-        let mut buf = crate::BUFFER_POOL.get();
+        let mut buf = get_buffer();
         s.serialize(buf.as_mut());
         self.write_packet(&mut &*buf)
     }
@@ -462,7 +462,7 @@ impl Conn {
 
     fn handle_ok<'a, T: OkPacketKind>(
         &mut self,
-        buffer: &'a PooledBuf,
+        buffer: &'a Buffer,
     ) -> crate::Result<OkPacket<'a>> {
         let ok = ParseBuf(&**buffer)
             .parse::<OkPacketDeserializer<T>>(self.0.capability_flags)?
@@ -652,7 +652,7 @@ impl Conn {
             Some(self.connect_attrs().clone()),
         );
 
-        let mut buf = crate::BUFFER_POOL.get();
+        let mut buf = get_buffer();
         handshake_response.serialize(buf.as_mut());
         self.write_packet(&mut &*buf)
     }
@@ -771,7 +771,7 @@ impl Conn {
     }
 
     fn write_command_raw<T: MySerialize>(&mut self, cmd: &T) -> Result<()> {
-        let mut buf = crate::BUFFER_POOL.get();
+        let mut buf = get_buffer();
         cmd.serialize(buf.as_mut());
         self.reset_seq_id();
         debug_assert!(buf.len() > 0);
@@ -780,7 +780,7 @@ impl Conn {
     }
 
     fn write_command(&mut self, cmd: Command, data: &[u8]) -> Result<()> {
-        let mut buf = crate::BUFFER_POOL.get();
+        let mut buf = get_buffer();
         buf.as_mut().put_u8(cmd as u8);
         buf.as_mut().extend_from_slice(data);
 
@@ -1713,7 +1713,7 @@ mod test {
                 )
                 .unwrap();
 
-            while let Some(result) = query_result.current_set() {
+            while let Some(result) = query_result.iter() {
                 result.affected_rows();
             }
         }
@@ -1752,7 +1752,7 @@ mod test {
             }
             let mut result = conn.query_iter("SELECT 1; SELECT 2; SELECT 3;").unwrap();
             let mut i = 0;
-            while let Some(result_set) = result.current_set() {
+            while let Some(result_set) = result.iter() {
                 i += 1;
                 for row in result_set {
                     match i {

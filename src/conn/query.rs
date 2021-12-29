@@ -384,7 +384,7 @@ where
             let params = params.into();
             let meta = conn._execute(&*statement, params)?;
             let mut query_result = QueryResult::<Binary>::new((&mut *conn).into(), meta);
-            while let Some(result_set) = query_result.current_set() {
+            while let Some(result_set) = query_result.iter() {
                 for row in result_set {
                     row?;
                 }

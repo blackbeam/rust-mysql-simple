@@ -1,17 +1,19 @@
-// Copyright (c) 2021 Anatoly Ikorsky
-//
-// Licensed under the Apache License, Version 2.0
-// <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0> or the MIT
-// license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. All files in the project carrying such notice may not be copied,
-// modified, or distributed except according to those terms.
+#![cfg(feature = "buffer-pool")]
 
 use crossbeam::queue::ArrayQueue;
+use once_cell::sync::Lazy;
 
 use std::{mem::replace, ops::Deref, sync::Arc};
 
 const DEFAULT_MYSQL_BUFFER_POOL_CAP: usize = 128;
 const DEFAULT_MYSQL_BUFFER_SIZE_CAP: usize = 4 * 1024 * 1024;
+
+static BUFFER_POOL: Lazy<Arc<BufferPool>> = Lazy::new(|| Default::default());
+
+#[inline(always)]
+pub fn get_buffer() -> Buffer {
+    BUFFER_POOL.get()
+}
 
 #[derive(Debug)]
 struct Inner {
@@ -20,7 +22,7 @@ struct Inner {
 }
 
 impl Inner {
-    fn get(self: &Arc<Self>) -> PooledBuf {
+    fn get(self: &Arc<Self>) -> Buffer {
         let mut buf = self.pool.pop().unwrap_or_default();
 
         // SAFETY:
@@ -28,7 +30,7 @@ impl Inner {
         // 2. OK - nothing to initialize
         unsafe { buf.set_len(0) }
 
-        PooledBuf(buf, Some(self.clone()))
+        Buffer(buf, Some(self.clone()))
     }
 
     fn put(&self, mut buf: Vec<u8>) {
@@ -61,10 +63,10 @@ impl BufferPool {
         }))
     }
 
-    pub fn get(self: &Arc<Self>) -> PooledBuf {
+    pub fn get(self: &Arc<Self>) -> Buffer {
         match self.0 {
             Some(ref inner) => inner.get(),
-            None => PooledBuf(Vec::new(), None),
+            None => Buffer(Vec::new(), None),
         }
     }
 }
@@ -76,15 +78,15 @@ impl Default for BufferPool {
 }
 
 #[derive(Debug)]
-pub struct PooledBuf(Vec<u8>, Option<Arc<Inner>>);
+pub struct Buffer(Vec<u8>, Option<Arc<Inner>>);
 
-impl AsMut<Vec<u8>> for PooledBuf {
+impl AsMut<Vec<u8>> for Buffer {
     fn as_mut(&mut self) -> &mut Vec<u8> {
         &mut self.0
     }
 }
 
-impl Deref for PooledBuf {
+impl Deref for Buffer {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -92,7 +94,7 @@ impl Deref for PooledBuf {
     }
 }
 
-impl Drop for PooledBuf {
+impl Drop for Buffer {
     fn drop(&mut self) {
         if let Some(ref inner) = self.1 {
             inner.put(replace(&mut self.0, vec![]));

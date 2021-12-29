@@ -99,6 +99,44 @@ assert_eq!(payments, selected_payments);
 println!("Yay!");
 ```
 
+### Crate Features
+
+* crate's features:
+
+    *   **native-tls** (enabled by default) – specifies `native-tls` as the TLS backend
+        (see the [SSL Support](#ssl-support) section)
+    *   **rustls-tls** (disabled by default) – specifies `rustls` as the TLS backend
+        (see the [SSL Support](#ssl-support) section)
+    *   **buffer-pool** (enabled by default) – enables buffer pooling
+        (see the [Buffer Pool](#buffer-pool) section)
+
+* external features enabled by default:
+
+    * for the `flate2` crate (please consult `flate2` crate documentation for available features):
+
+        *   **flate2/zlib** (necessary) – `zlib` backend is chosed by default.
+
+    * for the `mysql_common` crate (please consult `mysql_common` crate documentation for available features):
+
+        *   **mysql_common/bigdecimal03** – the `bigdecimal03` is enabled by default
+        *   **mysql_common/rust_decimal** – the `rust_decimal` is enabled by default
+        *   **mysql_common/time03** – the `time03` is enabled by default
+        *   **mysql_common/uuid** – the `uuid` is enabled by default
+        *   **mysql_common/frunk** – the `frunk` is enabled by default
+
+Please note, that you'll need to reenable external features if you are using `no-default-features = true`:
+
+```toml
+[dependencies]
+# Lets say that we want to use the `rustls-tls` feature:
+mysql = { version = "*", no-default-features = true, features = ["rustls-tls", "buffer-pool"] }
+# Previous line disables default mysql features,
+# so now we have to choose the flate2 backend (this is necessary),
+# as well as the desired set of mysql_common features:
+flate2 = { version = "*", no-default-features = true, features = ["zlib"] }
+mysql_common = { version = "*", no-default-features = true, features = ["bigdecimal03", "time03", "uuid"]}
+```
+
 ### API Documentation
 
 Please refer to the [crate docs].
@@ -435,7 +473,7 @@ let structure: Deserialized<Example> = from_value(value);
 assert_eq!(structure, Deserialized(Example { foo: 42 }));
 ```
 
-#### `QueryResult`
+#### [`QueryResult`]
 
 It's an iterator over rows of a query result with support of multi-result sets. It's intended
 for cases when you need full control during result set iteration. For other cases
@@ -444,7 +482,7 @@ the first result set and drop everything else.
 
 This iterator is lazy so it won't read the result from server until you iterate over it.
 MySql protocol is strictly sequential, so `Conn` will be mutably borrowed until the result
-is fully consumed.
+is fully consumed (please also look at [`QueryResult::iter`] docs).
 
 ```rust
 use mysql::*;
@@ -456,7 +494,7 @@ let mut conn = Conn::new(get_opts())?;
 let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
 
 let mut sets = 0;
-while let Some(result_set) = result.current_set() {
+while let Some(result_set) = result.iter() {
     sets += 1;
 
     println!("Result set columns: {:?}", result_set.columns());
@@ -637,15 +675,14 @@ that helps to avoid allocations for basic scenarios. You can control it's charac
 the following environment variables:
 
 *   `RUST_MYSQL_BUFFER_POOL_CAP` (defaults to 128) – controls the pool capacity. Dropped buffer will
-    be immediately deallocated if the pool is full.
-
-    **Note:** it might be the case, that you don't need the pooling (say you are using jemalloc).
-    It's possible to disable the pool by setting the `RUST_MYSQL_BUFFER_POOL_CAP` environment
-    variable to `0`.
+    be immediately deallocated if the pool is full. Set it to `0` to disable the pool at runtime.
 
 *   `RUST_MYSQL_BUFFER_SIZE_CAP` (defaults to 4MiB) – controls the maximum capacity of a buffer
     stored in the pool. Capacity of a dropped buffer will be shrinked to this value when buffer
-    is returning to the pool.
+    is returned to the pool.
+
+To completely disable the pool (say you are using jemalloc) please remove the `buffer-pool` feature
+from the set of default crate features (see the [Crate Features](#crate-features) section).
 
 #### `BinQuery` and `BatchQuery` traits.
 
@@ -725,17 +762,9 @@ SSL support comes in two flavors:
 1.  Based on **native-tls** – this is the default option, that usually works without pitfalls
     (see the `native-tls` crate feature).
 2.  Based on **rustls** – TLS backend written in Rust. Please use the `rustls-tls` crate feature
-    to enable:
+    to enable it (see the [Crate Features](#crate-features) section).
 
-    ```toml
-    [dependencies]
-    mysql = { version = "*", no-default-features = true, features = ["rustls-tls"] }
-    # Please note, that the previous line disables default mysql features,
-    # so now we have to choose the flate2 backend (this is necessary):
-    flate2 = { version = "1.0", no-default-features = true, features = ["zlib"] }
-    ```
-
-    Please also note a few things about this backend:
+    Please also note a few things about **rustls**:
 
     *   it will fail if you'll try to connect to the server by its IP address, hostname is required;
     *   it, most likely, won't work on windows, at least with default server certs, generated by the
