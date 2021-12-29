@@ -1713,7 +1713,7 @@ mod test {
                 )
                 .unwrap();
 
-            while let Some(result) = query_result.current_set() {
+            while let Some(result) = query_result.iter() {
                 result.affected_rows();
             }
         }
@@ -1752,7 +1752,7 @@ mod test {
             }
             let mut result = conn.query_iter("SELECT 1; SELECT 2; SELECT 3;").unwrap();
             let mut i = 0;
-            while let Some(result_set) = result.current_set() {
+            while let Some(result_set) = result.iter() {
                 i += 1;
                 for row in result_set {
                     match i {

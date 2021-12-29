@@ -153,9 +153,68 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     }
 
     /// Returns an iterator over the current result set.
+    #[deprecated = "Please use QueryResult::iter"]
+    pub fn next_set<'d>(&'d mut self) -> Option<ResultSet<'c, 't, 'tc, 'd, T>> {
+        self.iter()
+    }
+
+    /// Returns an iterator over the current result set.
     ///
-    /// Subsequent call will return the next result set and so on.
-    pub fn current_set<'d>(&'d mut self) -> Option<ResultSet<'c, 't, 'tc, 'd, T>> {
+    /// The returned iterator will be consumed either by the caller
+    /// or implicitly by the `ResultSet::drop`. This operation
+    /// will advance `self` to the next result set (if any).
+    ///
+    /// The following code describes the behavior:
+    ///
+    /// ```rust
+    /// # mysql::doctest_wrapper!(__result, {
+    /// # use mysql::*;
+    /// # use mysql::prelude::*;
+    /// # let pool = Pool::new(get_opts())?;
+    /// # let mut conn = pool.get_conn()?;
+    /// # conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(id INT NOT NULL PRIMARY KEY)")?;
+    ///
+    /// let mut query_result = conn.query_iter("\
+    ///     INSERT INTO mysql.tbl (id) VALUES (3, 4);\
+    ///     SELECT * FROM mysql.tbl;
+    ///     UPDATE mysql.tbl SET id = id + 1;")?;
+    ///
+    /// // query_result is on the first result set at the moment
+    /// {
+    ///     assert_eq!(query_result.affected_rows(), 2);
+    ///     assert_eq!(query_result.last_insert_id(), Some(4));
+    ///
+    ///     let first_result_set = query_result.iter().unwrap();
+    ///     assert_eq!(first_result_set.affected_rows(), 2);
+    ///     assert_eq!(first_result_set.last_insert_id(), Some(4));
+    /// }
+    ///
+    /// // the first result set is now dropped, so query_result is on the second result set
+    /// {
+    ///     assert_eq!(query_result.affected_rows(), 0);
+    ///     assert_eq!(query_result.last_insert_id(), None);
+    ///     
+    ///     let mut second_result_set = query_result.iter().unwrap();
+    ///
+    ///     let first_row = second_result_set.next().unwrap().unwrap();
+    ///     assert_eq!(from_row::<u8>(first_row), 3_u8);
+    ///     let second_row = second_result_set.next().unwrap().unwrap();
+    ///     assert_eq!(from_row::<u8>(second_row), 4_u8);
+    ///
+    ///     assert!(second_result_set.next().is_none());
+    ///
+    ///     // second_result_set is consumed but still represents the second result set
+    ///     assert_eq!(second_result_set.affected_rows(), 0);
+    /// }
+    ///
+    /// // the second result set is now dropped, so query_result is on the third result set
+    /// assert_eq!(query_result.affected_rows(), 2);
+    ///
+    /// // QueryResult::drop simply does the following:
+    /// while query_result.iter().is_some() {}
+    /// # });
+    /// ```
+    pub fn iter<'d>(&'d mut self) -> Option<ResultSet<'c, 't, 'tc, 'd, T>> {
         use SetIteratorState::*;
 
         if let OnBoundary | Done = &self.state {
@@ -231,7 +290,7 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
 
 impl<'c, 't, 'tc, T: crate::prelude::Protocol> Drop for QueryResult<'c, 't, 'tc, T> {
     fn drop(&mut self) {
-        while self.current_set().is_some() {}
+        while self.iter().is_some() {}
     }
 }
 

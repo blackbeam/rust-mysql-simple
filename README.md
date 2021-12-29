@@ -435,7 +435,7 @@ let structure: Deserialized<Example> = from_value(value);
 assert_eq!(structure, Deserialized(Example { foo: 42 }));
 ```
 
-#### `QueryResult`
+#### [`QueryResult`]
 
 It's an iterator over rows of a query result with support of multi-result sets. It's intended
 for cases when you need full control during result set iteration. For other cases
@@ -444,7 +444,7 @@ the first result set and drop everything else.
 
 This iterator is lazy so it won't read the result from server until you iterate over it.
 MySql protocol is strictly sequential, so `Conn` will be mutably borrowed until the result
-is fully consumed.
+is fully consumed (please also look at [`QueryResult::iter`] docs).
 
 ```rust
 use mysql::*;
@@ -456,7 +456,7 @@ let mut conn = Conn::new(get_opts())?;
 let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
 
 let mut sets = 0;
-while let Some(result_set) = result.current_set() {
+while let Some(result_set) = result.iter() {
     sets += 1;
 
     println!("Result set columns: {:?}", result_set.columns());
