@@ -31,13 +31,18 @@ default = [
     # It is necessary to choose one of `flate2` backends.
     "flate2/zlib",
 
+    # set of enabled-by-default mysql_common features
     "mysql_common/bigdecimal03",
     "mysql_common/rust_decimal",
     "mysql_common/time03",
     "mysql_common/uuid",
     "mysql_common/frunk",
+
+    # use global buffer pool by default
+    "buffer-pool",
 ]
 rustls-tls = ["rustls", "webpki", "webpki-roots", "rustls-pemfile"]
+buffer-pool = []
 nightly = []
 
 [dev-dependencies]
