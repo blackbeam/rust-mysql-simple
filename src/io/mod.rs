@@ -96,6 +96,7 @@ impl Stream {
         read_timeout: Option<Duration>,
         write_timeout: Option<Duration>,
         tcp_keepalive_time: Option<u32>,
+        #[cfg(target_os = "linux")] tcp_user_timeout: Option<u32>,
         nodelay: bool,
         tcp_connect_timeout: Option<Duration>,
         bind_address: Option<SocketAddr>,
@@ -108,6 +109,8 @@ impl Stream {
             .keepalive_time_ms(tcp_keepalive_time)
             .nodelay(nodelay)
             .bind_address(bind_address);
+        #[cfg(target_os = "linux")]
+        builder.user_timeout(tcp_user_timeout);
         builder
             .connect()
             .map(|stream| Stream::TcpStream(TcpStream::Insecure(BufStream::new(stream))))

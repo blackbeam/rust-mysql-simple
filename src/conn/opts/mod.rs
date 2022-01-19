@@ -134,6 +134,10 @@ pub(crate) struct InnerOpts {
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     tcp_keepalive_time: Option<u32>,
 
+    /// TCP_USER_TIMEOUT time for mysql connection.
+    #[cfg(target_os = "linux")]
+    tcp_user_timeout: Option<u32>,
+
     /// Commands to execute on each new database connection.
     init: Vec<String>,
 
@@ -216,6 +220,8 @@ impl Default for InnerOpts {
             init: vec![],
             ssl_opts: None,
             tcp_keepalive_time: None,
+            #[cfg(target_os = "linux")]
+            tcp_user_timeout: None,
             tcp_nodelay: true,
             local_infile_handler: None,
             tcp_connect_timeout: None,
@@ -318,6 +324,12 @@ impl Opts {
     /// TCP keep alive time for mysql connection.
     pub fn get_tcp_keepalive_time_ms(&self) -> Option<u32> {
         self.0.tcp_keepalive_time
+    }
+
+    /// TCP_USER_TIMEOUT time for mysql connection.
+    #[cfg(target_os = "linux")]
+    pub fn get_tcp_user_timeout_ms(&self) -> Option<u32> {
+        self.0.tcp_user_timeout
     }
 
     /// Callback to handle requests for local files.
@@ -476,6 +488,7 @@ impl OptsBuilder {
     /// - db_name = Database name (defaults to `None`).
     /// - prefer_socket = Prefer socket connection (defaults to `true`)
     /// - tcp_keepalive_time_ms = TCP keep alive time for mysql connection (defaults to `None`)
+    /// - tcp_user_timeout = TCP_USER_TIMEOUT time for mysql connection (defaults to `None`)
     /// - compress = Compression level(defaults to `None`)
     /// - tcp_connect_timeout_ms = Tcp connect timeout (defaults to `None`)
     /// - stmt_cache_size = Number of prepared statements cached on the client side (per connection)
@@ -520,6 +533,16 @@ impl OptsBuilder {
                 "tcp_keepalive_time_ms" => {
                     //if cannot parse, default to none
                     self.opts.0.tcp_keepalive_time = match value.parse::<u32>() {
+                        Ok(val) => Some(val),
+                        _ => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                "tcp_user_timeout" => {
+                    //if cannot parse, default to none
+                    self.opts.0.tcp_user_timeout = match value.parse::<u32>() {
                         Ok(val) => Some(val),
                         _ => {
                             return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
@@ -634,6 +657,16 @@ impl OptsBuilder {
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     pub fn tcp_keepalive_time_ms(mut self, tcp_keepalive_time_ms: Option<u32>) -> Self {
         self.opts.0.tcp_keepalive_time = tcp_keepalive_time_ms;
+        self
+    }
+
+    /// TCP_USER_TIMEOUT for mysql connection (defaults to `None`). Available as
+    /// `tcp_user_timeout` url parameter.
+    ///
+    /// Can be defined using `tcp_user_timeout` connection url parameter.
+    #[cfg(target_os = "linux")]
+    pub fn tcp_user_timeout(mut self, tcp_user_timeout: Option<u32>) -> Self {
+        self.opts.0.tcp_user_timeout = tcp_user_timeout;
         self
     }
 
@@ -922,7 +955,15 @@ mod test {
 
     #[test]
     fn should_convert_url_into_opts() {
-        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000&socket=%2Ftmp%2Fmysql.sock&compress=8";
+        #[cfg(target_os = "linux")]
+        let tcp_user_timeout = "&tcp_user_timeout=6000";
+        #[cfg(not(target_os = "linux"))]
+        let tcp_user_timeout = "";
+
+        let opts = format!(
+            "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000{}&socket=%2Ftmp%2Fmysql.sock&compress=8",
+            tcp_user_timeout,
+        );
         assert_eq!(
             Opts(Box::new(InnerOpts {
                 user: Some("us r".to_string()),
@@ -932,11 +973,13 @@ mod test {
                 db_name: Some("db-name".to_string()),
                 prefer_socket: false,
                 tcp_keepalive_time: Some(5000),
+                #[cfg(target_os = "linux")]
+                tcp_user_timeout: Some(6000),
                 socket: Some("/tmp/mysql.sock".into()),
                 compress: Some(Compression::new(8)),
                 ..InnerOpts::default()
             })),
-            Opts::from_url(opts).unwrap(),
+            Opts::from_url(&opts).unwrap(),
         );
     }
 

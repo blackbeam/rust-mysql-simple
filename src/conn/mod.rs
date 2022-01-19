@@ -386,6 +386,8 @@ impl Conn {
         let read_timeout = opts.get_read_timeout().cloned();
         let write_timeout = opts.get_write_timeout().cloned();
         let tcp_keepalive_time = opts.get_tcp_keepalive_time_ms();
+        #[cfg(target_os = "linux")]
+        let tcp_user_timeout = opts.get_tcp_user_timeout_ms();
         let tcp_nodelay = opts.get_tcp_nodelay();
         let tcp_connect_timeout = opts.get_tcp_connect_timeout();
         let bind_address = opts.bind_address().cloned();
@@ -404,6 +406,8 @@ impl Conn {
                 read_timeout,
                 write_timeout,
                 tcp_keepalive_time,
+                #[cfg(target_os = "linux")]
+                tcp_user_timeout,
                 tcp_nodelay,
                 tcp_connect_timeout,
                 bind_address,
