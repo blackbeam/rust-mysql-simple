@@ -40,6 +40,9 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, RawFd};
+
 use crate::{
     buffer_pool::{get_buffer, Buffer},
     conn::{
@@ -1111,6 +1114,13 @@ impl Conn {
     pub fn get_binlog_stream(mut self, request: BinlogRequest<'_>) -> Result<BinlogStream> {
         self.request_binlog(request)?;
         Ok(BinlogStream::new(self))
+    }
+}
+
+#[cfg(unix)]
+impl AsRawFd for Conn {
+    fn as_raw_fd(&self) -> RawFd {
+        self.stream_ref().get_ref().as_raw_fd()
     }
 }
 

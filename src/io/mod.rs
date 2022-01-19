@@ -12,7 +12,10 @@ use io_enum::*;
 use named_pipe as np;
 
 #[cfg(unix)]
-use std::os::unix;
+use std::os::{
+    unix,
+    unix::io::{AsRawFd, RawFd},
+};
 use std::{
     fmt, io,
     net::{self, SocketAddr},
@@ -142,6 +145,16 @@ impl Stream {
     }
 }
 
+#[cfg(unix)]
+impl AsRawFd for Stream {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            Stream::SocketStream(stream) => stream.get_ref().as_raw_fd(),
+            Stream::TcpStream(stream) => stream.as_raw_fd(),
+        }
+    }
+}
+
 #[derive(Read, Write)]
 pub enum TcpStream {
     #[cfg(feature = "native-tls")]
@@ -149,6 +162,19 @@ pub enum TcpStream {
     #[cfg(feature = "rustls")]
     Secure(BufStream<rustls::StreamOwned<rustls::ClientConnection, net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
+}
+
+#[cfg(unix)]
+impl AsRawFd for TcpStream {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            #[cfg(feature = "native-tls")]
+            TcpStream::Secure(stream) => stream.get_ref().get_ref().as_raw_fd(),
+            #[cfg(feature = "rustls")]
+            TcpStream::Secure(stream) => stream.get_ref().get_ref().as_raw_fd(),
+            TcpStream::Insecure(stream) => stream.get_ref().as_raw_fd(),
+        }
+    }
 }
 
 impl fmt::Debug for TcpStream {
