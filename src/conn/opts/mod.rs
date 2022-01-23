@@ -135,6 +135,8 @@ pub(crate) struct InnerOpts {
     tcp_keepalive_time: Option<u32>,
 
     /// TCP_USER_TIMEOUT time for mysql connection.
+    ///
+    /// Can be defined using `tcp_user_timeout_ms` connection url parameter.
     #[cfg(target_os = "linux")]
     tcp_user_timeout: Option<u32>,
 
@@ -488,7 +490,7 @@ impl OptsBuilder {
     /// - db_name = Database name (defaults to `None`).
     /// - prefer_socket = Prefer socket connection (defaults to `true`)
     /// - tcp_keepalive_time_ms = TCP keep alive time for mysql connection (defaults to `None`)
-    /// - tcp_user_timeout = TCP_USER_TIMEOUT time for mysql connection (defaults to `None`)
+    /// - tcp_user_timeout_ms = TCP_USER_TIMEOUT time for mysql connection (defaults to `None`)
     /// - compress = Compression level(defaults to `None`)
     /// - tcp_connect_timeout_ms = Tcp connect timeout (defaults to `None`)
     /// - stmt_cache_size = Number of prepared statements cached on the client side (per connection)
@@ -540,8 +542,7 @@ impl OptsBuilder {
                     }
                 }
                 #[cfg(target_os = "linux")]
-                "tcp_user_timeout" => {
-                    //if cannot parse, default to none
+                "tcp_user_timeout_ms" => {
                     self.opts.0.tcp_user_timeout = match value.parse::<u32>() {
                         Ok(val) => Some(val),
                         _ => {
@@ -661,12 +662,12 @@ impl OptsBuilder {
     }
 
     /// TCP_USER_TIMEOUT for mysql connection (defaults to `None`). Available as
-    /// `tcp_user_timeout` url parameter.
+    /// `tcp_user_timeout_ms` url parameter.
     ///
-    /// Can be defined using `tcp_user_timeout` connection url parameter.
+    /// Can be defined using `tcp_user_timeout_ms` connection url parameter.
     #[cfg(target_os = "linux")]
-    pub fn tcp_user_timeout(mut self, tcp_user_timeout: Option<u32>) -> Self {
-        self.opts.0.tcp_user_timeout = tcp_user_timeout;
+    pub fn tcp_user_timeout_ms(mut self, tcp_user_timeout_ms: Option<u32>) -> Self {
+        self.opts.0.tcp_user_timeout = tcp_user_timeout_ms;
         self
     }
 
@@ -956,7 +957,7 @@ mod test {
     #[test]
     fn should_convert_url_into_opts() {
         #[cfg(target_os = "linux")]
-        let tcp_user_timeout = "&tcp_user_timeout=6000";
+        let tcp_user_timeout = "&tcp_user_timeout_ms=6000";
         #[cfg(not(target_os = "linux"))]
         let tcp_user_timeout = "";
 
