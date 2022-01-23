@@ -410,16 +410,19 @@ impl Conn {
         Ok(())
     }
 
+    fn raw_read_packet(&mut self, buffer: &mut Vec<u8>) -> Result<()> {
+        if !self.stream_mut().next_packet(buffer)? {
+            Err(Error::server_disconnected())
+        } else {
+            Ok(())
+        }
+    }
+
     fn read_packet(&mut self) -> Result<Buffer> {
         loop {
             let mut buffer = get_buffer();
-            if !self.stream_mut().next_packet(buffer.as_mut())? {
-                return Err(
-                    io::Error::new(io::ErrorKind::BrokenPipe, "server disconnected").into(),
-                );
-            }
-            match buffer[0] {
-                0xff => {
+            match self.raw_read_packet(buffer.as_mut()) {
+                Ok(()) if buffer.first() == Some(&0xff) => {
                     match ParseBuf(&*buffer).parse(self.0.capability_flags)? {
                         ErrPacket::Error(server_error) => {
                             self.handle_err();
@@ -431,7 +434,11 @@ impl Conn {
                         }
                     }
                 }
-                _ => return Ok(buffer),
+                Ok(()) => return Ok(buffer),
+                Err(e) => {
+                    self.handle_err();
+                    return Err(e);
+                }
             }
         }
     }
@@ -1163,7 +1170,11 @@ impl Drop for Conn {
 mod test {
     mod my_conn {
         use std::{
-            collections::HashMap, io::Write, iter, process, sync::mpsc::sync_channel,
+            collections::HashMap,
+            io::Write,
+            iter, process,
+            sync::mpsc::{channel, sync_channel},
+            thread::spawn,
             time::Duration,
         };
 
@@ -1686,6 +1697,27 @@ mod test {
             if conn.is_insecure() {
                 assert!(conn.is_socket());
             }
+        }
+
+        /// QueryResult::drop hangs on connectivity errors (see [blackbeam/rust-mysql-simple#306][1]).
+        ///
+        /// [1]: https://github.com/blackbeam/rust-mysql-simple/issues/306
+        #[test]
+        fn issue_306() {
+            let (tx, rx) = channel::<()>();
+            let handle = spawn(move || {
+                let mut c1 = Conn::new(get_opts()).unwrap();
+                let c1_id = c1.connection_id();
+                let mut c2 = Conn::new(get_opts()).unwrap();
+                let query_result = c1.query_iter("DO 1; SELECT SLEEP(1); DO 2;").unwrap();
+                c2.query_drop(format!("KILL {c1_id}")).unwrap();
+                drop(c2);
+                drop(query_result);
+                tx.send(()).unwrap();
+            });
+            std::thread::sleep(Duration::from_secs(2));
+            assert!(rx.try_recv().is_ok());
+            handle.join().unwrap();
         }
 
         #[test]

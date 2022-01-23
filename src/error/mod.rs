@@ -79,6 +79,14 @@ impl Error {
             | Error::FromRowError(_) => false,
         }
     }
+
+    #[doc(hidden)]
+    pub fn server_disconnected() -> Self {
+        Error::IoError(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "server disconnected",
+        ))
+    }
 }
 
 impl error::Error for Error {
