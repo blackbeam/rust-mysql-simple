@@ -21,12 +21,20 @@ pub struct MyTcpBuilder<T> {
     read_timeout: Option<Duration>,
     write_timeout: Option<Duration>,
     keepalive_time_ms: Option<u32>,
+    #[cfg(target_os = "linux")]
+    user_timeout: Option<u32>,
     nodelay: bool,
 }
 
 impl<T: ToSocketAddrs> MyTcpBuilder<T> {
     pub fn keepalive_time_ms(&mut self, keepalive_time_ms: Option<u32>) -> &mut Self {
         self.keepalive_time_ms = keepalive_time_ms;
+        self
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn user_timeout(&mut self, user_timeout: Option<u32>) -> &mut Self {
+        self.user_timeout = user_timeout;
         self
     }
 
@@ -66,6 +74,8 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             read_timeout: None,
             write_timeout: None,
             keepalive_time_ms: None,
+            #[cfg(target_os = "linux")]
+            user_timeout: None,
             nodelay: true,
         }
     }
@@ -78,6 +88,8 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             read_timeout,
             write_timeout,
             keepalive_time_ms,
+            #[cfg(target_os = "linux")]
+            user_timeout,
             nodelay,
         } = self;
         let err_msg = if bind_address.is_none() {
@@ -145,6 +157,23 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             let conf =
                 socket2::TcpKeepalive::new().with_time(Duration::from_millis(duration as u64));
             socket.set_tcp_keepalive(&conf)?;
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(timeout) = user_timeout {
+            use std::os::unix::io::AsRawFd;
+            let fd = socket.as_raw_fd();
+            unsafe {
+                if libc::setsockopt(
+                    fd,
+                    libc::SOL_TCP,
+                    libc::TCP_USER_TIMEOUT,
+                    &timeout as *const _ as *const libc::c_void,
+                    std::mem::size_of_val(&timeout) as libc::socklen_t,
+                ) != 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+            }
         }
         socket.set_nodelay(nodelay)?;
         Ok(TcpStream::from(socket))

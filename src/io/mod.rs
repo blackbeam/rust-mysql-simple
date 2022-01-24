@@ -12,7 +12,10 @@ use io_enum::*;
 use named_pipe as np;
 
 #[cfg(unix)]
-use std::os::unix;
+use std::os::{
+    unix,
+    unix::io::{AsRawFd, RawFd},
+};
 use std::{
     fmt, io,
     net::{self, SocketAddr},
@@ -93,6 +96,7 @@ impl Stream {
         read_timeout: Option<Duration>,
         write_timeout: Option<Duration>,
         tcp_keepalive_time: Option<u32>,
+        #[cfg(target_os = "linux")] tcp_user_timeout: Option<u32>,
         nodelay: bool,
         tcp_connect_timeout: Option<Duration>,
         bind_address: Option<SocketAddr>,
@@ -105,6 +109,8 @@ impl Stream {
             .keepalive_time_ms(tcp_keepalive_time)
             .nodelay(nodelay)
             .bind_address(bind_address);
+        #[cfg(target_os = "linux")]
+        builder.user_timeout(tcp_user_timeout);
         builder
             .connect()
             .map(|stream| Stream::TcpStream(TcpStream::Insecure(BufStream::new(stream))))
@@ -142,6 +148,16 @@ impl Stream {
     }
 }
 
+#[cfg(unix)]
+impl AsRawFd for Stream {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            Stream::SocketStream(stream) => stream.get_ref().as_raw_fd(),
+            Stream::TcpStream(stream) => stream.as_raw_fd(),
+        }
+    }
+}
+
 #[derive(Read, Write)]
 pub enum TcpStream {
     #[cfg(feature = "native-tls")]
@@ -149,6 +165,19 @@ pub enum TcpStream {
     #[cfg(feature = "rustls")]
     Secure(BufStream<rustls::StreamOwned<rustls::ClientConnection, net::TcpStream>>),
     Insecure(BufStream<net::TcpStream>),
+}
+
+#[cfg(unix)]
+impl AsRawFd for TcpStream {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            #[cfg(feature = "native-tls")]
+            TcpStream::Secure(stream) => stream.get_ref().get_ref().as_raw_fd(),
+            #[cfg(feature = "rustls")]
+            TcpStream::Secure(stream) => stream.get_ref().get_ref().as_raw_fd(),
+            TcpStream::Insecure(stream) => stream.get_ref().as_raw_fd(),
+        }
+    }
 }
 
 impl fmt::Debug for TcpStream {
