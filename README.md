@@ -196,6 +196,8 @@ let _ = Conn::new(opts)?;
 This structure represents an active MySql connection. It also holds statement cache
 and metadata for the last result set.
 
+Conn's destructor will gracefully disconnect it from the server.
+
 #### `Transaction`
 
 It's a simple wrapper on top of a routine, that starts with `START TRANSACTION`
