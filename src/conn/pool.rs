@@ -623,6 +623,24 @@ mod test {
         }
 
         #[test]
+        fn should_reuse_connections() -> crate::Result<()> {
+            let pool = Pool::new_manual(1, 1, get_opts())?;
+            let mut conn = pool.get_conn()?;
+
+            let server_version = conn.server_version();
+            let connection_id = conn.connection_id();
+
+            for _ in 0..16 {
+                drop(conn);
+                conn = pool.get_conn()?;
+                println!("CONN connection_id={}", conn.connection_id());
+                assert!(conn.connection_id() == connection_id || server_version < (5, 7, 2));
+            }
+
+            Ok(())
+        }
+
+        #[test]
         fn should_start_transaction_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut conn = pool.get_conn().unwrap();

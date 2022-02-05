@@ -201,6 +201,11 @@ impl ConnInner {
 pub struct Conn(Box<ConnInner>);
 
 impl Conn {
+    /// Returns version number reported by the server.
+    pub fn server_version(&self) -> (u16, u16, u16) {
+        self.0.server_version.unwrap()
+    }
+
     /// Returns connection identifier.
     pub fn connection_id(&self) -> u32 {
         self.0.connection_id
