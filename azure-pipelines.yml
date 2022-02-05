@@ -152,6 +152,28 @@ jobs:
           DATABASE_URL: mysql://root:password@localhost/mysql
         displayName: Run tests
 
+  - job: "TestTiDB"
+    pool:
+      vmImage: "ubuntu-latest"
+    strategy:
+      matrix:
+        v5.3.0:
+          DB_VERSION: "v5.3.0"
+        v5.0.6:
+          DB_VERSION: "v5.0.6"
+    steps:
+      - bash: |
+          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+          source ~/.profile
+          tiup playground $(DB_VERSION) --db 1 --pd 1 --kv 1 &
+          while ! nc -W 1 localhost 4000 | grep -q -P '.+'; do sleep 1; done
+        displayName: Install and run TiDB
+      - bash: cargo test should_reuse_connections -- --nocapture
+        displayName: Run tests
+        env:
+          RUST_BACKTRACE: 1
+          DATABASE_URL: mysql://root@127.0.0.1:4000/mysql
+
   - job: "TestMySql"
     pool:
       vmImage: "ubuntu-latest"
