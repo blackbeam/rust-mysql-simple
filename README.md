@@ -170,6 +170,8 @@ structure in the create API docs):
     of the `tcp_keepalive_time` field in the `Opts` structure;
 *   `tcp_connect_timeout_ms: u64` - defines the value (in milliseconds)
     of the `tcp_connect_timeout` field in the `Opts` structure;
+*   `tcp_user_timeout_ms` - defines the value (in milliseconds)
+    of the `tcp_user_timeout` field in the `Opts` structure;
 *   `stmt_cache_size: u32` - defines the value of the same field in the `Opts` structure;
 *   `compress` - defines the value of the same field in the `Opts` structure.
     Supported value are:
