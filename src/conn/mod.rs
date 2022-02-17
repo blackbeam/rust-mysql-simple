@@ -391,6 +391,8 @@ impl Conn {
         let read_timeout = opts.get_read_timeout().cloned();
         let write_timeout = opts.get_write_timeout().cloned();
         let tcp_keepalive_time = opts.get_tcp_keepalive_time_ms();
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        let tcp_keepalive_probe_count = opts.get_tcp_keepalive_probe_count();
         #[cfg(target_os = "linux")]
         let tcp_user_timeout = opts.get_tcp_user_timeout_ms();
         let tcp_nodelay = opts.get_tcp_nodelay();
@@ -411,6 +413,8 @@ impl Conn {
                 read_timeout,
                 write_timeout,
                 tcp_keepalive_time,
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                tcp_keepalive_probe_count,
                 #[cfg(target_os = "linux")]
                 tcp_user_timeout,
                 tcp_nodelay,

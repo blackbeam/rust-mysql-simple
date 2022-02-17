@@ -134,6 +134,12 @@ pub(crate) struct InnerOpts {
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     tcp_keepalive_time: Option<u32>,
 
+    /// TCP keep alive probe count for mysql connection.
+    ///
+    /// Can be defined using `tcp_keepalive_probe_count` connection url parameter.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    tcp_keepalive_probe_count: Option<u32>,
+
     /// TCP_USER_TIMEOUT time for mysql connection.
     ///
     /// Can be defined using `tcp_user_timeout_ms` connection url parameter.
@@ -222,6 +228,8 @@ impl Default for InnerOpts {
             init: vec![],
             ssl_opts: None,
             tcp_keepalive_time: None,
+            #[cfg(any(target_os = "linux", target_os = "macos",))]
+            tcp_keepalive_probe_count: None,
             #[cfg(target_os = "linux")]
             tcp_user_timeout: None,
             tcp_nodelay: true,
@@ -326,6 +334,12 @@ impl Opts {
     /// TCP keep alive time for mysql connection.
     pub fn get_tcp_keepalive_time_ms(&self) -> Option<u32> {
         self.0.tcp_keepalive_time
+    }
+
+    /// TCP keep alive probe count for mysql connection.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn get_tcp_keepalive_probe_count(&self) -> Option<u32> {
+        self.0.tcp_keepalive_probe_count
     }
 
     /// TCP_USER_TIMEOUT time for mysql connection.
@@ -490,6 +504,7 @@ impl OptsBuilder {
     /// - db_name = Database name (defaults to `None`).
     /// - prefer_socket = Prefer socket connection (defaults to `true`)
     /// - tcp_keepalive_time_ms = TCP keep alive time for mysql connection (defaults to `None`)
+    /// - tcp_keepalive_probe_count = TCP keep alive probe count for mysql connection (defaults to `None`)
     /// - tcp_user_timeout_ms = TCP_USER_TIMEOUT time for mysql connection (defaults to `None`)
     /// - compress = Compression level(defaults to `None`)
     /// - tcp_connect_timeout_ms = Tcp connect timeout (defaults to `None`)
@@ -535,6 +550,16 @@ impl OptsBuilder {
                 "tcp_keepalive_time_ms" => {
                     //if cannot parse, default to none
                     self.opts.0.tcp_keepalive_time = match value.parse::<u32>() {
+                        Ok(val) => Some(val),
+                        _ => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
+                    }
+                }
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                "tcp_keepalive_probe_count" => {
+                    //if cannot parse, default to none
+                    self.opts.0.tcp_keepalive_probe_count = match value.parse::<u32>() {
                         Ok(val) => Some(val),
                         _ => {
                             return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
@@ -658,6 +683,16 @@ impl OptsBuilder {
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     pub fn tcp_keepalive_time_ms(mut self, tcp_keepalive_time_ms: Option<u32>) -> Self {
         self.opts.0.tcp_keepalive_time = tcp_keepalive_time_ms;
+        self
+    }
+
+    /// TCP keep alive probe count for mysql connection (defaults to `None`). Available as
+    /// `tcp_keepalive_probe_count` url parameter.
+    ///
+    /// Can be defined using `tcp_keepalive_probe_count` connection url parameter.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn tcp_keepalive_probe_count(mut self, tcp_keepalive_probe_count: Option<u32>) -> Self {
+        self.opts.0.tcp_keepalive_probe_count = tcp_keepalive_probe_count;
         self
     }
 
@@ -956,13 +991,19 @@ mod test {
 
     #[test]
     fn should_convert_url_into_opts() {
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        let tcp_keepalive_probe_count = "&tcp_keepalive_probe_count=5";
+        #[cfg(not(any(target_os = "linux", target_os = "macos",)))]
+        let tcp_keepalive_probe_count = "";
+
         #[cfg(target_os = "linux")]
         let tcp_user_timeout = "&tcp_user_timeout_ms=6000";
         #[cfg(not(target_os = "linux"))]
         let tcp_user_timeout = "";
 
         let opts = format!(
-            "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000{}&socket=%2Ftmp%2Fmysql.sock&compress=8",
+            "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000{}{}&socket=%2Ftmp%2Fmysql.sock&compress=8",
+            tcp_keepalive_probe_count,
             tcp_user_timeout,
         );
         assert_eq!(
@@ -974,6 +1015,8 @@ mod test {
                 db_name: Some("db-name".to_string()),
                 prefer_socket: false,
                 tcp_keepalive_time: Some(5000),
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                tcp_keepalive_probe_count: Some(5),
                 #[cfg(target_os = "linux")]
                 tcp_user_timeout: Some(6000),
                 socket: Some("/tmp/mysql.sock".into()),
@@ -1020,7 +1063,7 @@ mod test {
             };
         );
 
-        let cnf_map = map! {
+        let mut cnf_map = map! {
             "user".to_string() => "test".to_string(),
             "password".to_string() => "password".to_string(),
             "host".to_string() => "127.0.0.1".to_string(),
@@ -1032,6 +1075,8 @@ mod test {
             "tcp_connect_timeout_ms".to_string() => "1000".to_string(),
             "stmt_cache_size".to_string() => "33".to_string()
         };
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        cnf_map.insert("tcp_keepalive_probe_count".to_string(), "5".to_string());
 
         let parsed_opts = OptsBuilder::new().from_hash_map(&cnf_map).unwrap();
 
@@ -1042,6 +1087,8 @@ mod test {
         assert_eq!(parsed_opts.opts.get_db_name(), Some("test_db"));
         assert_eq!(parsed_opts.opts.get_prefer_socket(), false);
         assert_eq!(parsed_opts.opts.get_tcp_keepalive_time_ms(), Some(5000));
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        assert_eq!(parsed_opts.opts.get_tcp_keepalive_probe_count(), Some(5));
         assert_eq!(
             parsed_opts.opts.get_compress(),
             Some(crate::Compression::best())
