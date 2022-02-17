@@ -22,6 +22,8 @@ pub struct MyTcpBuilder<T> {
     write_timeout: Option<Duration>,
     keepalive_time_ms: Option<u32>,
     #[cfg(any(target_os = "linux", target_os = "macos",))]
+    keepalive_probe_interval_secs: Option<u32>,
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
     keepalive_probe_count: Option<u32>,
     #[cfg(target_os = "linux")]
     user_timeout: Option<u32>,
@@ -31,6 +33,15 @@ pub struct MyTcpBuilder<T> {
 impl<T: ToSocketAddrs> MyTcpBuilder<T> {
     pub fn keepalive_time_ms(&mut self, keepalive_time_ms: Option<u32>) -> &mut Self {
         self.keepalive_time_ms = keepalive_time_ms;
+        self
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn keepalive_probe_interval_secs(
+        &mut self,
+        keepalive_probe_interval_secs: Option<u32>,
+    ) -> &mut Self {
+        self.keepalive_probe_interval_secs = keepalive_probe_interval_secs;
         self
     }
 
@@ -83,6 +94,8 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             write_timeout: None,
             keepalive_time_ms: None,
             #[cfg(any(target_os = "linux", target_os = "macos",))]
+            keepalive_probe_interval_secs: None,
+            #[cfg(any(target_os = "linux", target_os = "macos",))]
             keepalive_probe_count: None,
             #[cfg(target_os = "linux")]
             user_timeout: None,
@@ -98,6 +111,8 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             read_timeout,
             write_timeout,
             keepalive_time_ms,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            keepalive_probe_interval_secs,
             #[cfg(any(target_os = "linux", target_os = "macos",))]
             keepalive_probe_count,
             #[cfg(target_os = "linux")]
@@ -169,6 +184,23 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             let conf =
                 socket2::TcpKeepalive::new().with_time(Duration::from_millis(duration as u64));
             socket.set_tcp_keepalive(&conf)?;
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        if let Some(keepalive_probe_interval_secs) = keepalive_probe_interval_secs {
+            use std::os::unix::io::AsRawFd;
+            let fd = socket.as_raw_fd();
+            unsafe {
+                if libc::setsockopt(
+                    fd,
+                    libc::IPPROTO_TCP,
+                    libc::TCP_KEEPINTVL,
+                    &keepalive_probe_interval_secs as *const _ as *const libc::c_void,
+                    std::mem::size_of_val(&keepalive_probe_interval_secs) as libc::socklen_t,
+                ) != 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+            }
         }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(keepalive_probe_count) = keepalive_probe_count {

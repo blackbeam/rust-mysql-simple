@@ -134,6 +134,12 @@ pub(crate) struct InnerOpts {
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     tcp_keepalive_time: Option<u32>,
 
+    /// TCP keep alive interval between subsequent probe for mysql connection.
+    ///
+    /// Can be defined using `tcp_keepalive_probe_interval_secs` connection url parameter.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    tcp_keepalive_probe_interval_secs: Option<u32>,
+
     /// TCP keep alive probe count for mysql connection.
     ///
     /// Can be defined using `tcp_keepalive_probe_count` connection url parameter.
@@ -228,6 +234,8 @@ impl Default for InnerOpts {
             init: vec![],
             ssl_opts: None,
             tcp_keepalive_time: None,
+            #[cfg(any(target_os = "linux", target_os = "macos",))]
+            tcp_keepalive_probe_interval_secs: None,
             #[cfg(any(target_os = "linux", target_os = "macos",))]
             tcp_keepalive_probe_count: None,
             #[cfg(target_os = "linux")]
@@ -334,6 +342,12 @@ impl Opts {
     /// TCP keep alive time for mysql connection.
     pub fn get_tcp_keepalive_time_ms(&self) -> Option<u32> {
         self.0.tcp_keepalive_time
+    }
+
+    /// TCP keep alive interval between subsequent probes for mysql connection.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn get_tcp_keepalive_probe_interval_secs(&self) -> Option<u32> {
+        self.0.tcp_keepalive_probe_interval_secs
     }
 
     /// TCP keep alive probe count for mysql connection.
@@ -504,6 +518,7 @@ impl OptsBuilder {
     /// - db_name = Database name (defaults to `None`).
     /// - prefer_socket = Prefer socket connection (defaults to `true`)
     /// - tcp_keepalive_time_ms = TCP keep alive time for mysql connection (defaults to `None`)
+    /// - tcp_keepalive_probe_interval_secs = TCP keep alive interval between probes for mysql connection (defaults to `None`)
     /// - tcp_keepalive_probe_count = TCP keep alive probe count for mysql connection (defaults to `None`)
     /// - tcp_user_timeout_ms = TCP_USER_TIMEOUT time for mysql connection (defaults to `None`)
     /// - compress = Compression level(defaults to `None`)
@@ -550,6 +565,16 @@ impl OptsBuilder {
                 "tcp_keepalive_time_ms" => {
                     //if cannot parse, default to none
                     self.opts.0.tcp_keepalive_time = match value.parse::<u32>() {
+                        Ok(val) => Some(val),
+                        _ => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
+                    }
+                }
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                "tcp_keepalive_probe_interval_secs" => {
+                    //if cannot parse, default to none
+                    self.opts.0.tcp_keepalive_probe_interval_secs = match value.parse::<u32>() {
                         Ok(val) => Some(val),
                         _ => {
                             return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
@@ -683,6 +708,19 @@ impl OptsBuilder {
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     pub fn tcp_keepalive_time_ms(mut self, tcp_keepalive_time_ms: Option<u32>) -> Self {
         self.opts.0.tcp_keepalive_time = tcp_keepalive_time_ms;
+        self
+    }
+
+    /// TCP keep alive interval between probes for mysql connection (defaults to `None`). Available as
+    /// `tcp_keepalive_probe_interval_secs` url parameter.
+    ///
+    /// Can be defined using `tcp_keepalive_probe_interval_secs` connection url parameter.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn tcp_keepalive_probe_interval_secs(
+        mut self,
+        tcp_keepalive_probe_interval_secs: Option<u32>,
+    ) -> Self {
+        self.opts.0.tcp_keepalive_probe_interval_secs = tcp_keepalive_probe_interval_secs;
         self
     }
 
@@ -992,6 +1030,11 @@ mod test {
     #[test]
     fn should_convert_url_into_opts() {
         #[cfg(any(target_os = "linux", target_os = "macos",))]
+        let tcp_keepalive_probe_interval_secs = "&tcp_keepalive_probe_interval_secs=8";
+        #[cfg(not(any(target_os = "linux", target_os = "macos",)))]
+        let tcp_keepalive_probe_interval_secs = "";
+
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
         let tcp_keepalive_probe_count = "&tcp_keepalive_probe_count=5";
         #[cfg(not(any(target_os = "linux", target_os = "macos",)))]
         let tcp_keepalive_probe_count = "";
@@ -1002,7 +1045,8 @@ mod test {
         let tcp_user_timeout = "";
 
         let opts = format!(
-            "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000{}{}&socket=%2Ftmp%2Fmysql.sock&compress=8",
+            "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000{}{}{}&socket=%2Ftmp%2Fmysql.sock&compress=8",
+            tcp_keepalive_probe_interval_secs,
             tcp_keepalive_probe_count,
             tcp_user_timeout,
         );
@@ -1015,6 +1059,8 @@ mod test {
                 db_name: Some("db-name".to_string()),
                 prefer_socket: false,
                 tcp_keepalive_time: Some(5000),
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                tcp_keepalive_probe_interval_secs: Some(8),
                 #[cfg(any(target_os = "linux", target_os = "macos",))]
                 tcp_keepalive_probe_count: Some(5),
                 #[cfg(target_os = "linux")]
@@ -1076,6 +1122,11 @@ mod test {
             "stmt_cache_size".to_string() => "33".to_string()
         };
         #[cfg(any(target_os = "linux", target_os = "macos",))]
+        cnf_map.insert(
+            "tcp_keepalive_probe_interval_secs".to_string(),
+            "8".to_string(),
+        );
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
         cnf_map.insert("tcp_keepalive_probe_count".to_string(), "5".to_string());
 
         let parsed_opts = OptsBuilder::new().from_hash_map(&cnf_map).unwrap();
@@ -1087,6 +1138,11 @@ mod test {
         assert_eq!(parsed_opts.opts.get_db_name(), Some("test_db"));
         assert_eq!(parsed_opts.opts.get_prefer_socket(), false);
         assert_eq!(parsed_opts.opts.get_tcp_keepalive_time_ms(), Some(5000));
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        assert_eq!(
+            parsed_opts.opts.get_tcp_keepalive_probe_interval_secs(),
+            Some(8)
+        );
         #[cfg(any(target_os = "linux", target_os = "macos",))]
         assert_eq!(parsed_opts.opts.get_tcp_keepalive_probe_count(), Some(5));
         assert_eq!(

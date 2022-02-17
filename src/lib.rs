@@ -175,6 +175,8 @@
 //! *   `prefer_socket: true | false` - defines the value of the same field in the `Opts` structure;
 //! *   `tcp_keepalive_time_ms: u32` - defines the value (in milliseconds)
 //!     of the `tcp_keepalive_time` field in the `Opts` structure;
+//! *   `tcp_keepalive_probe_interval_secs: u32` - defines the value
+//!     of the `tcp_keepalive_probe_interval_secs` field in the `Opts` structure;
 //! *   `tcp_keepalive_probe_count: u32` - defines the value
 //!     of the `tcp_keepalive_probe_count` field in the `Opts` structure;
 //! *   `tcp_connect_timeout_ms: u64` - defines the value (in milliseconds)
