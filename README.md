@@ -124,17 +124,17 @@ println!("Yay!");
         *   **mysql_common/uuid** – the `uuid` is enabled by default
         *   **mysql_common/frunk** – the `frunk` is enabled by default
 
-Please note, that you'll need to reenable external features if you are using `no-default-features = true`:
+Please note, that you'll need to reenable external features if you are using `default-features = false`:
 
 ```toml
 [dependencies]
 # Lets say that we want to use the `rustls-tls` feature:
-mysql = { version = "*", no-default-features = true, features = ["rustls-tls", "buffer-pool"] }
+mysql = { version = "*", default-features = false, features = ["rustls-tls", "buffer-pool"] }
 # Previous line disables default mysql features,
 # so now we have to choose the flate2 backend (this is necessary),
 # as well as the desired set of mysql_common features:
-flate2 = { version = "*", no-default-features = true, features = ["zlib"] }
-mysql_common = { version = "*", no-default-features = true, features = ["bigdecimal03", "time03", "uuid"]}
+flate2 = { version = "*", default-features = false, features = ["zlib"] }
+mysql_common = { version = "*", default-features = false, features = ["bigdecimal03", "time03", "uuid"]}
 ```
 
 ### API Documentation
