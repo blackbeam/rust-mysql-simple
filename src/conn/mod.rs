@@ -175,8 +175,7 @@ struct ConnInner {
 }
 
 impl ConnInner {
-    fn empty<T: Into<Opts>>(opts: T) -> Self {
-        let opts = opts.into();
+    fn empty(opts: Opts) -> Self {
         ConnInner {
             stmt_cache: StmtCache::new(opts.get_stmt_cache_size()),
             opts,
@@ -316,7 +315,12 @@ impl Conn {
     }
 
     /// Creates new `Conn`.
-    pub fn new<T: Into<Opts>>(opts: T) -> Result<Conn> {
+    pub fn new<T, E>(opts: T) -> Result<Conn>
+    where
+        Opts: TryFrom<T, Error = E>,
+        crate::Error: From<E>,
+    {
+        let opts = Opts::try_from(opts)?;
         let mut conn = Conn(Box::new(ConnInner::empty(opts)));
         conn.connect_stream()?;
         conn.connect()?;

@@ -255,6 +255,14 @@ impl Default for InnerOpts {
     }
 }
 
+impl TryFrom<&'_ str> for Opts {
+    type Error = UrlError;
+
+    fn try_from(url: &'_ str) -> Result<Self, Self::Error> {
+        Opts::from_url(url)
+    }
+}
+
 /// Mysql connection options.
 ///
 /// Build one with [`OptsBuilder`](struct.OptsBuilder.html).
@@ -491,7 +499,7 @@ impl Opts {
 /// let connection_url = "mysql://root:password@localhost:3307/mysql?prefer_socket=false";
 /// let pool = my::Pool::new(connection_url).unwrap();
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OptsBuilder {
     opts: Opts,
 }
@@ -1019,7 +1027,17 @@ mod test {
     use mysql_common::proto::codec::Compression;
     use std::time::Duration;
 
-    use super::{InnerOpts, Opts};
+    use super::{InnerOpts, Opts, OptsBuilder};
+
+    #[allow(dead_code)]
+    fn assert_conn_from_url_opts_optsbuilder(url: &str, opts: Opts, opts_builder: OptsBuilder) {
+        crate::Conn::new(url).unwrap();
+        crate::Conn::new(opts.clone()).unwrap();
+        crate::Conn::new(opts_builder.clone()).unwrap();
+        crate::Pool::new(url).unwrap();
+        crate::Pool::new(opts).unwrap();
+        crate::Pool::new(opts_builder).unwrap();
+    }
 
     #[test]
     fn should_report_empty_url_database_as_none() {

@@ -53,6 +53,7 @@
 //! }
 //!
 //! let url = "mysql://root:password@localhost:3307/db_name";
+//! # Opts::try_from(url)?;
 //! # let url = get_opts();
 //!
 //! let pool = Pool::new(url)?;

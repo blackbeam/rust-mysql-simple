@@ -180,13 +180,21 @@ impl Pool {
     }
 
     /// Creates new pool with `min = 10` and `max = 100`.
-    pub fn new<T: Into<Opts>>(opts: T) -> Result<Pool> {
+    pub fn new<T, E>(opts: T) -> Result<Pool>
+    where
+        Opts: TryFrom<T, Error = E>,
+        crate::Error: From<E>,
+    {
         Pool::new_manual(10, 100, opts)
     }
 
     /// Same as `new` but you can set `min` and `max`.
-    pub fn new_manual<T: Into<Opts>>(min: usize, max: usize, opts: T) -> Result<Pool> {
-        let pool = InnerPool::new(min, max, opts.into())?;
+    pub fn new_manual<T, E>(min: usize, max: usize, opts: T) -> Result<Pool>
+    where
+        Opts: TryFrom<T, Error = E>,
+        crate::Error: From<E>,
+    {
+        let pool = InnerPool::new(min, max, opts.try_into()?)?;
         Ok(Pool {
             arced_pool: Arc::new(ArcedPool {
                 inner: (Mutex::new(pool), Condvar::new()),
