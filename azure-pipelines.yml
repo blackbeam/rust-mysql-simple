@@ -230,6 +230,10 @@ jobs:
     strategy:
       maxParallel: 10
       matrix:
+        v108:
+          DB_VERSION: "10.8"
+        v107:
+          DB_VERSION: "10.7"
         v106:
           DB_VERSION: "10.6"
         v105:
