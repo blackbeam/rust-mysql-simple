@@ -449,7 +449,7 @@ impl Opts {
     /// _client_name    | The client library name (`rust-mysql-simple`)
     /// _client_version | The client library version
     /// _os             | The operation system (`target_os` cfg feature)
-    /// _pid            | The client proces ID
+    /// _pid            | The client process ID
     /// _platform       | The machine platform (`target_arch` cfg feature)
     /// program_name    | The first element of `std::env::args` if program_name isn't set by programs.
     ///
@@ -899,7 +899,7 @@ impl OptsBuilder {
     /// _client_name    | The client library name (`rust-mysql-simple`)
     /// _client_version | The client library version
     /// _os             | The operation system (`target_os` cfg feature)
-    /// _pid            | The client proces ID
+    /// _pid            | The client process ID
     /// _platform       | The machine platform (`target_arch` cfg feature)
     /// program_name    | The first element of `std::env::args` if program_name isn't set by programs.
     ///

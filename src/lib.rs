@@ -734,7 +734,7 @@
 //!     be immediately deallocated if the pool is full. Set it to `0` to disable the pool at runtime.
 //!
 //! *   `RUST_MYSQL_BUFFER_SIZE_CAP` (defaults to 4MiB) – controls the maximum capacity of a buffer
-//!     stored in the pool. Capacity of a dropped buffer will be shrinked to this value when buffer
+//!     stored in the pool. Capacity of a dropped buffer will be shrunk to this value when buffer
 //!     is returned to the pool.
 //!
 //! To completely disable the pool (say you are using jemalloc) please remove the `buffer-pool` feature
