@@ -163,7 +163,7 @@ impl<Q: AsRef<str>> TextQuery for Q {
     }
 }
 
-/// Representaion of a prepared statement query.
+/// Representation of a prepared statement query.
 ///
 /// See `BinQuery` for details.
 #[derive(Debug, Clone, PartialEq, Eq)]
