@@ -157,13 +157,6 @@ impl From<std::convert::Infallible> for Error {
     }
 }
 
-#[cfg(unix)]
-impl From<::nix::Error> for Error {
-    fn from(errno: ::nix::Error) -> Error {
-        Error::from(io::Error::from_raw_os_error(errno as i32))
-    }
-}
-
 impl From<UrlError> for Error {
     fn from(err: UrlError) -> Error {
         Error::UrlError(err)

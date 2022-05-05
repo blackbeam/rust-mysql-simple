@@ -94,4 +94,3 @@ named_pipe = "~0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-nix = { version = "0.24.1", default-features = false, features = [] }
