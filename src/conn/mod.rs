@@ -1759,7 +1759,10 @@ mod test {
             let cid = c.connection_id();
             c.reset().unwrap();
             match (c.0.server_version, c.0.mariadb_server_version) {
-                (Some(ref version), _) | (_, Some(ref version)) if *version > (5, 7, 3) => {
+                (Some(ref version), _) if *version > (5, 7, 3) => {
+                    assert_eq!(cid, c.connection_id());
+                }
+                (_, Some(ref version)) if *version >= (10, 2, 7) => {
                     assert_eq!(cid, c.connection_id());
                 }
                 _ => assert_ne!(cid, c.connection_id()),
