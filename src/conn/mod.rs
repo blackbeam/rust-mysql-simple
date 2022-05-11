@@ -160,8 +160,11 @@ struct ConnInner {
     opts: Opts,
     stream: Option<MySyncFramed<Stream>>,
     stmt_cache: StmtCache,
+
+    // TODO: clean this up
     server_version: Option<(u16, u16, u16)>,
     mariadb_server_version: Option<(u16, u16, u16)>,
+
     /// Last Ok packet, if any.
     ok_packet: Option<OkPacket<'static>>,
     capability_flags: CapabilityFlags,
@@ -354,7 +357,6 @@ impl Conn {
     }
 
     fn hard_reset(&mut self) -> Result<()> {
-        self.0.stream = None;
         self.0.stmt_cache.clear();
         self.0.capability_flags = CapabilityFlags::empty();
         self.0.status_flags = StatusFlags::empty();
@@ -1749,6 +1751,39 @@ mod test {
             std::thread::sleep(Duration::from_secs(2));
             assert!(rx.try_recv().is_ok());
             handle.join().unwrap();
+        }
+
+        #[test]
+        fn reset_does_work() {
+            let mut c = Conn::new(get_opts()).unwrap();
+            let cid = c.connection_id();
+            c.reset().unwrap();
+            match (c.0.server_version, c.0.mariadb_server_version) {
+                (Some(ref version), _) if *version > (5, 7, 3) => {
+                    assert_eq!(cid, c.connection_id());
+                }
+                (_, Some(ref version)) if *version >= (10, 2, 7) => {
+                    assert_eq!(cid, c.connection_id());
+                }
+                _ => assert_ne!(cid, c.connection_id()),
+            }
+        }
+
+        /// Library panics with "incomplete connection" in case of subsequent
+        /// failed calls to `reset` when the server is down.
+        /// (see [blackbeam/rust-mysql-simple#317][1]).
+        ///
+        /// [1]: https://github.com/blackbeam/rust-mysql-simple/issues/317
+        #[test]
+        fn issue_317() {
+            let mut c = Conn::new(get_opts()).unwrap();
+            c.0.opts = get_opts().tcp_port(55555).into();
+            let version = std::mem::replace(&mut c.0.server_version, Some((0, 0, 0)));
+            let mdbversion = std::mem::replace(&mut c.0.mariadb_server_version, Some((0, 0, 0)));
+            c.reset().unwrap_err();
+            c.0.server_version = version;
+            c.0.mariadb_server_version = mdbversion;
+            let _ = c.reset();
         }
 
         #[test]
