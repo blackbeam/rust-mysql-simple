@@ -11,16 +11,17 @@ use io_enum::*;
 #[cfg(windows)]
 use named_pipe as np;
 
+#[cfg(not(target_os = "wasi"))]
+use std::net::{self, SocketAddr};
 #[cfg(unix)]
 use std::os::{
     unix,
     unix::io::{AsRawFd, RawFd},
 };
-use std::{
-    fmt, io,
-    net::{self, SocketAddr},
-    time::Duration,
-};
+use std::{fmt, io, time::Duration};
+
+#[cfg(target_os = "wasi")]
+use wasmedge_wasi_socket::{self, SocketAddr};
 
 use crate::error::{
     DriverError::{ConnectTimeout, CouldNotConnect},
@@ -141,11 +142,17 @@ impl Stream {
         }
     }
 
+    #[cfg(not(target_os = "wasi"))]
     pub fn is_socket(&self) -> bool {
         match self {
             Stream::SocketStream(_) => true,
             _ => false,
         }
+    }
+
+    #[cfg(target_os = "wasi")]
+    pub fn is_socket(&self) -> bool {
+        false
     }
 
     #[cfg(all(not(feature = "native-tls"), not(feature = "rustls")))]
@@ -173,7 +180,10 @@ pub enum TcpStream {
     Secure(BufStream<native_tls::TlsStream<net::TcpStream>>),
     #[cfg(feature = "rustls")]
     Secure(BufStream<rustls::StreamOwned<rustls::ClientConnection, net::TcpStream>>),
+    #[cfg(not(target_os = "wasi"))]
     Insecure(BufStream<net::TcpStream>),
+    #[cfg(target_os = "wasi")]
+    Insecure(BufStream<wasmedge_wasi_socket::TcpStream>),
 }
 
 #[cfg(unix)]

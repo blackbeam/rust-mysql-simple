@@ -5,13 +5,15 @@
 // license <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
-
+#[cfg(not(target_os = "wasi"))]
 use socket2::{Domain, SockAddr, Socket, Type};
-
-use std::{
-    io,
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
-    time::Duration,
+#[cfg(not(target_os = "wasi"))]
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::{io, time::Duration};
+#[cfg(target_os = "wasi")]
+use wasmedge_wasi_socket::{
+    socket::{AddressFamily, Socket, SocketType},
+    SocketAddr, TcpStream, ToSocketAddrs,
 };
 
 pub struct MyTcpBuilder<T> {
@@ -132,15 +134,30 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             let fold_fun = |prev, sock_addr: &SocketAddr| match prev {
                 Ok(socket) => Ok(socket),
                 Err(_) => {
-                    let domain = Domain::for_address(*sock_addr);
-                    let socket = Socket::new(domain, Type::STREAM, None)?;
-                    socket.bind(&bind_address.into())?;
-                    if let Some(connect_timeout) = connect_timeout {
-                        socket.connect_timeout(&SockAddr::from(*sock_addr), connect_timeout)?;
-                    } else {
-                        socket.connect(&SockAddr::from(*sock_addr))?;
+                    #[cfg(not(target_os = "wasi"))]
+                    {
+                        let domain = Domain::for_address(*sock_addr);
+                        let socket = Socket::new(domain, Type::STREAM, None)?;
+                        socket.bind(&bind_address.into())?;
+                        if let Some(connect_timeout) = connect_timeout {
+                            socket.connect_timeout(&SockAddr::from(*sock_addr), connect_timeout)?;
+                        } else {
+                            socket.connect(&SockAddr::from(*sock_addr))?;
+                        }
+                        Ok(socket)
                     }
-                    Ok(socket)
+                    #[cfg(target_os = "wasi")]
+                    {
+                        let domain = if sock_addr.is_ipv4() {
+                            AddressFamily::Inet4
+                        } else {
+                            AddressFamily::Inet6
+                        };
+                        let socket = Socket::new(domain, SocketType::Stream)?;
+                        socket.bind(&bind_address.into())?;
+                        socket.connect(&SocketAddr::from(*sock_addr))?;
+                        Ok(socket)
+                    }
                 }
             };
 
@@ -166,24 +183,40 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
                 .fold(Err(err), |prev, sock_addr| match prev {
                     Ok(socket) => Ok(socket),
                     Err(_) => {
-                        let domain = Domain::for_address(sock_addr);
-                        let socket = Socket::new(domain, Type::STREAM, None)?;
-                        if let Some(connect_timeout) = connect_timeout {
-                            socket.connect_timeout(&sock_addr.into(), connect_timeout)?;
-                        } else {
-                            socket.connect(&sock_addr.into())?;
+                        #[cfg(not(target_os = "wasi"))]
+                        {
+                            let domain = Domain::for_address(sock_addr);
+                            let socket = Socket::new(domain, Type::STREAM, None)?;
+                            if let Some(connect_timeout) = connect_timeout {
+                                socket.connect_timeout(&sock_addr.into(), connect_timeout)?;
+                            } else {
+                                socket.connect(&sock_addr.into())?;
+                            }
+                            Ok(socket)
                         }
-                        Ok(socket)
+                        #[cfg(target_os = "wasi")]
+                        {
+                            let domain = if sock_addr.is_ipv4() {
+                                AddressFamily::Inet4
+                            } else {
+                                AddressFamily::Inet6
+                            };
+                            let socket = Socket::new(domain, SocketType::Stream)?;
+                            socket.connect(&sock_addr.into())?;
+                            Ok(socket)
+                        }
                     }
                 })
         }?;
-
-        socket.set_read_timeout(read_timeout)?;
-        socket.set_write_timeout(write_timeout)?;
-        if let Some(duration) = keepalive_time_ms {
-            let conf =
-                socket2::TcpKeepalive::new().with_time(Duration::from_millis(duration as u64));
-            socket.set_tcp_keepalive(&conf)?;
+        #[cfg(not(target_os = "wasi"))]
+        {
+            socket.set_read_timeout(read_timeout)?;
+            socket.set_write_timeout(write_timeout)?;
+            if let Some(duration) = keepalive_time_ms {
+                let conf =
+                    socket2::TcpKeepalive::new().with_time(Duration::from_millis(duration as u64));
+                socket.set_tcp_keepalive(&conf)?;
+            }
         }
         #[cfg(any(target_os = "linux", target_os = "macos",))]
         if let Some(keepalive_probe_interval_secs) = keepalive_probe_interval_secs {
@@ -236,6 +269,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
                 }
             }
         }
+        #[cfg(not(target_os = "wasi"))]
         socket.set_nodelay(nodelay)?;
         Ok(TcpStream::from(socket))
     }
