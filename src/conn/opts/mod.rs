@@ -496,8 +496,8 @@ impl Opts {
 /// Example:
 ///
 /// ```ignore
-/// let connection_url = "mysql://root:password@localhost:3307/mysql?prefer_socket=false";
-/// let pool = my::Pool::new(connection_url).unwrap();
+/// let connection_opts = mysql::Opts::from_url("mysql://root:password@localhost:3307/mysql?prefer_socket=false").unwrap();
+/// let pool = mysql::Pool::new(connection_opts).unwrap();
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptsBuilder {
