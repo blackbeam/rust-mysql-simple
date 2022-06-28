@@ -50,6 +50,7 @@ lazy_static = "1.4.0"
 rand = "0.8.2"
 serde_derive = "1"
 time = "0.3"
+frunk = "0.4"
 
 [dependencies]
 bufstream = "~0.1"

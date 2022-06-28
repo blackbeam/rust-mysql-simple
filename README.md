@@ -410,6 +410,17 @@ for i in 0..row.len() {
     assert_eq!(row[i], Value::Int(i as i64));
 }
 
+// Another way to handle wide rows is to use HList (requires `mysql_common/frunk` feature)
+use frunk::{HList, hlist, hlist_pat};
+let query = "select 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15";
+type RowType = HList!(u8, u16, u32, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8);
+let first_three_columns = conn.query_map(query, |row: RowType| {
+    // do something with the row (see the `frunk` crate documentation)
+    let hlist_pat![c1, c2, c3, ...] = row;
+    (c1, c2, c3)
+});
+assert_eq!(first_three_columns.unwrap(), vec![(0_u8, 1_u16, 2_u32)]);
+
 // Some unknown row
 let row: Row = conn.query_first(
     // ...
