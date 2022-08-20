@@ -28,6 +28,8 @@ use mysql_common::{
     packets::SslRequest,
 };
 
+#[cfg(not(target_os = "wasi"))]
+use std::process;
 use std::{
     borrow::{Borrow, Cow},
     cmp,
@@ -36,7 +38,6 @@ use std::{
     io::{self, Write as _},
     mem,
     ops::{Deref, DerefMut},
-    process,
     sync::Arc,
 };
 
@@ -406,33 +407,56 @@ impl Conn {
         let tcp_nodelay = opts.get_tcp_nodelay();
         let tcp_connect_timeout = opts.get_tcp_connect_timeout();
         let bind_address = opts.bind_address().cloned();
-        let stream = if let Some(socket) = opts.get_socket() {
-            Stream::connect_socket(&*socket, read_timeout, write_timeout)?
-        } else {
+        #[cfg(not(target_os = "wasi"))]
+        {
+            let stream = if let Some(socket) = opts.get_socket() {
+                Stream::connect_socket(&*socket, read_timeout, write_timeout)?
+            } else {
+                let port = opts.get_tcp_port();
+                let ip_or_hostname = match opts.get_host() {
+                    url::Host::Domain(domain) => domain,
+                    url::Host::Ipv4(ip) => ip.to_string(),
+                    url::Host::Ipv6(ip) => ip.to_string(),
+                };
+                Stream::connect_tcp(
+                    &*ip_or_hostname,
+                    port,
+                    read_timeout,
+                    write_timeout,
+                    tcp_keepalive_time,
+                    #[cfg(any(target_os = "linux", target_os = "macos",))]
+                    tcp_keepalive_probe_interval_secs,
+                    #[cfg(any(target_os = "linux", target_os = "macos",))]
+                    tcp_keepalive_probe_count,
+                    #[cfg(target_os = "linux")]
+                    tcp_user_timeout,
+                    tcp_nodelay,
+                    tcp_connect_timeout,
+                    bind_address,
+                )?
+            };
+            self.0.stream = Some(MySyncFramed::new(stream));
+        }
+        #[cfg(target_os = "wasi")]
+        {
             let port = opts.get_tcp_port();
             let ip_or_hostname = match opts.get_host() {
                 url::Host::Domain(domain) => domain,
                 url::Host::Ipv4(ip) => ip.to_string(),
                 url::Host::Ipv6(ip) => ip.to_string(),
             };
-            Stream::connect_tcp(
+            let stream = Stream::connect_tcp(
                 &*ip_or_hostname,
                 port,
                 read_timeout,
                 write_timeout,
                 tcp_keepalive_time,
-                #[cfg(any(target_os = "linux", target_os = "macos",))]
-                tcp_keepalive_probe_interval_secs,
-                #[cfg(any(target_os = "linux", target_os = "macos",))]
-                tcp_keepalive_probe_count,
-                #[cfg(target_os = "linux")]
-                tcp_user_timeout,
                 tcp_nodelay,
                 tcp_connect_timeout,
                 bind_address,
-            )?
-        };
-        self.0.stream = Some(MySyncFramed::new(stream));
+            )?;
+            self.0.stream = Some(MySyncFramed::new(stream));
+        }
         Ok(())
     }
 
@@ -650,7 +674,10 @@ impl Conn {
         attrs.insert("_client_name".into(), "rust-mysql-simple".into());
         attrs.insert("_client_version".into(), env!("CARGO_PKG_VERSION").into());
         attrs.insert("_os".into(), env!("CARGO_CFG_TARGET_OS").into());
+        #[cfg(not(target_os = "wasi"))]
         attrs.insert("_pid".into(), process::id().to_string());
+        #[cfg(target_os = "wasi")]
+        attrs.insert("_pid".into(), "66666".into());
         attrs.insert("_platform".into(), env!("CARGO_CFG_TARGET_ARCH").into());
         attrs.insert("program_name".into(), program_name);
 
@@ -1389,6 +1416,7 @@ mod test {
             assert_eq!(db_name, DB_NAME);
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_connect_by_hostname() {
             let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
@@ -1475,6 +1503,7 @@ mod test {
             );
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_parse_large_text_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
@@ -1538,6 +1567,7 @@ mod test {
             assert_eq!(rows, vec![row1, row2]);
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_parse_large_binary_result() {
             let mut conn = Conn::new(get_opts()).unwrap();
@@ -1714,6 +1744,7 @@ mod test {
             );
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
             let opts = OptsBuilder::from_opts(get_opts());
@@ -1723,6 +1754,7 @@ mod test {
             }
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_connect_via_socket_localhost() {
             let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
@@ -1735,6 +1767,7 @@ mod test {
         /// QueryResult::drop hangs on connectivity errors (see [blackbeam/rust-mysql-simple#306][1]).
         ///
         /// [1]: https://github.com/blackbeam/rust-mysql-simple/issues/306
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn issue_306() {
             let (tx, rx) = channel::<()>();
@@ -1884,6 +1917,7 @@ mod test {
                 .unwrap();
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn issue_285() {
             let (tx, rx) = sync_channel::<()>(0);
@@ -1962,6 +1996,7 @@ mod test {
             }
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_handle_tcp_connect_timeout() {
             use crate::error::{DriverError::ConnectTimeout, Error::DriverError};
@@ -1999,6 +2034,7 @@ mod test {
             assert_eq!(result.affected_rows(), 1);
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_bind_before_connect() {
             let port = 28000 + (rand::random::<u16>() % 2000);
@@ -2017,6 +2053,7 @@ mod test {
             );
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_bind_before_connect_with_timeout() {
             let port = 30000 + (rand::random::<u16>() % 2000);
@@ -2177,8 +2214,10 @@ mod test {
                         );
                     }
                 }
-
+                #[cfg(not(target_os = "wasi"))]
                 let pid = process::id().to_string();
+                #[cfg(target_os = "wasi")]
+                let pid = "66666".to_string();
                 let progname = std::env::args_os()
                     .next()
                     .unwrap()
@@ -2211,6 +2250,7 @@ mod test {
             }
         }
 
+        #[cfg(not(target_os = "wasi"))]
         #[test]
         fn should_read_binlog() -> crate::Result<()> {
             use std::{
