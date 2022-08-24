@@ -1,21 +1,21 @@
 [package]
-name = "mysql"
+name = "mysql-wasi"
 version = "22.2.0"
-authors = ["blackbeam"]
-description = "Mysql client library implemented in rust"
+authors = ["blackbeam", "Tricster"]
+description = "Mysql client library implemented in rust for WASI."
 license = "MIT/Apache-2.0"
-documentation = "https://docs.rs/mysql"
-repository = "https://github.com/blackbeam/rust-mysql-simple"
-keywords = ["database", "sql"]
+documentation = "https://docs.rs/mysql-wasi"
+repository = "https://github.com/WasmEdge/rust-mysql-simple-wasi"
+keywords = ["database", "sql", "WASI"]
 exclude = ["tests/*", ".*", "Makefile"]
 categories = ["database"]
 edition = "2021"
 build = "build.rs"
 
-[badges.azure-devops]
-build = "1"
-pipeline = "blackbeam.rust-mysql-simple"
-project = "aikorsky/mysql Rust"
+# [badges.azure-devops]
+# build = "1"
+# pipeline = "blackbeam.rust-mysql-simple"
+# project = "aikorsky/mysql Rust"
 
 [lib]
 name = "mysql"
@@ -26,7 +26,7 @@ debug = true
 
 [features]
 default = [
-    "native-tls",
+    # "native-tls",
 
     # It is necessary to choose one of `flate2` backends.
     "flate2/zlib",
