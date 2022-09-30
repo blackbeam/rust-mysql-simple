@@ -21,8 +21,8 @@ mysql_wasi = "*"
 ### Example
 
 ```rust
-use mysql_wasi::*;
-use mysql_wasi::prelude::*;
+use mysql::*;
+use mysql::prelude::*;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Payment {
