@@ -1,5 +1,5 @@
 [package]
-name = "mysql-wasi"
+name = "mysql_wasi"
 version = "22.2.0"
 authors = ["blackbeam", "Tricster"]
 description = "Mysql client library implemented in rust for WASI."
@@ -99,4 +99,4 @@ libc = "0.2"
 socket2 = "0.4"
 
 [target.'cfg(target_os = "wasi")'.dependencies]
-wasmedge_wasi_socket = { git = "https://github.com/second-state/wasmedge_wasi_socket" }
+wasmedge_wasi_socket = "0.4.2"
