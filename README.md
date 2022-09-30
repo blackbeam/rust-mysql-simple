@@ -15,14 +15,14 @@ Put the desired version of the crate into the `dependencies` section of your `Ca
 
 ```toml
 [dependencies]
-mysql_wasi = "*"
+mysql_wasi = "22.2.1"
 ```
 
 ### Example
 
 ```rust
-use mysql_wasi::*;
-use mysql_wasi::prelude::*;
+use mysql::*;
+use mysql::prelude::*;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Payment {
