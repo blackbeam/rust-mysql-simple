@@ -22,6 +22,12 @@ jobs:
           sudo service mysql start
           mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -proot
           mysql -e "SET GLOBAL local_infile = 1;" -uroot -proot
+          mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot -proot
+          mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot -proot
+          mysql -e "SET @@GLOBAL.GTID_MODE = OFF_PERMISSIVE;" -uroot -proot
+          mysql -e "SET @@GLOBAL.GTID_MODE = ON_PERMISSIVE;" -uroot -proot
+          mysql -e "SET @@GLOBAL.GTID_MODE = ON;" -uroot -proot
+          mysql -e "PURGE BINARY LOGS BEFORE now();" -uroot -proot
         displayName: Install MySql
       - bash: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
@@ -38,9 +44,15 @@ jobs:
           SSL=true COMPRESS=false cargo test
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
+
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+
+          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:root@127.0.0.1:3306/mysql
+          DATABASE_URL: mysql://root:root@localhost:3306/mysql
         displayName: Run tests
 
   - job: "TestBasicMacOs"
@@ -61,8 +73,14 @@ jobs:
           echo 'local_infile=1' >> /usr/local/etc/my.cnf
           echo 'socket=/tmp/mysql.sock' >> /usr/local/etc/my.cnf
           brew services start mysql
+          mysql --version
           sleep 5
           /usr/local/Cellar/mysql/*/bin/mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = OFF_PERMISSIVE;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = ON_PERMISSIVE;" -uroot
+          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = ON;" -uroot
         displayName: Install MySql
       - bash: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN
@@ -72,9 +90,15 @@ jobs:
           SSL=true COMPRESS=false cargo test
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
+
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+
+          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root@127.0.0.1/mysql
+          DATABASE_URL: mysql://root@localhost/mysql
         displayName: Run tests
 
   - job: "TestBasicWindows"
@@ -103,6 +127,11 @@ jobs:
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld" --install MySQL --defaults-file=C:\my.cnf
           net start MySql
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.GTID_MODE = OFF_PERMISSIVE;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.GTID_MODE = ON_PERMISSIVE;" -uroot -ppassword
+          "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.GTID_MODE = ON;" -uroot -ppassword
         displayName: Install MySql
       - bash: |
           rustup install $RUST_TOOLCHAIN
@@ -112,10 +141,38 @@ jobs:
           SSL=true COMPRESS=false cargo test
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
+
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+
+          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+          DATABASE_URL: mysql://root:password@localhost/mysql
         displayName: Run tests
+
+  - job: "TestTiDB"
+    pool:
+      vmImage: "ubuntu-latest"
+    strategy:
+      matrix:
+        v5.3.0:
+          DB_VERSION: "v5.3.0"
+        v5.0.6:
+          DB_VERSION: "v5.0.6"
+    steps:
+      - bash: |
+          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+          source ~/.profile
+          tiup playground $(DB_VERSION) --db 1 --pd 1 --kv 1 &
+          while ! nc -W 1 localhost 4000 | grep -q -P '.+'; do sleep 1; done
+        displayName: Install and run TiDB
+      - bash: cargo test should_reuse_connections -- --nocapture
+        displayName: Run tests
+        env:
+          RUST_BACKTRACE: 1
+          DATABASE_URL: mysql://root@127.0.0.1:4000/mysql
 
   - job: "TestMySql"
     pool:
@@ -138,23 +195,33 @@ jobs:
           docker --version
         displayName: Install docker
       - bash: |
-          docker run --rm --name container -v `pwd`:/root -p 3307:3306 -d -e MYSQL_ROOT_PASSWORD=password mysql:$(DB_VERSION) --max-allowed-packet=36700160 --local-infile
+          if [[ "5.6" == "$(DB_VERSION)" ]]; then ARG="--secure-auth=OFF"; fi
+          docker run -d --name container -v `pwd`:/root -p 3307:3306 -e MYSQL_ROOT_PASSWORD=password mysql:$(DB_VERSION) --max-allowed-packet=36700160 --local-infile --log-bin=mysql-bin --log-slave-updates --gtid_mode=ON --enforce_gtid_consistency=ON --server-id=1 $ARG
           while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
         displayName: Run MySql in Docker
+      - bash: |
+          docker exec container bash -l -c "mysql -uroot -ppassword -e \"SET old_passwords = 1; GRANT ALL PRIVILEGES ON *.* TO 'root2'@'%' IDENTIFIED WITH mysql_old_password AS 'password'; SET PASSWORD FOR 'root2'@'%' = OLD_PASSWORD('password')\"";
+        condition: eq(variables['DB_VERSION'], '5.6')
       - bash: |
           docker exec container bash -l -c "apt-get update"
           docker exec container bash -l -c "apt-get install -y curl clang libssl-dev pkg-config"
           docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
         displayName: Install Rust in docker
       - bash: |
-          if [[ "5.6" != "$(DB_VERSION)" ]]; then SSL=true; fi
+          if [[ "5.6" != "$(DB_VERSION)" ]]; then SSL=true; else DATABASE_URL="mysql://root2:password@localhost/mysql?secure_auth=false"; fi
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
+
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk"
+
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk"
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+          DATABASE_URL: mysql://root:password@localhost/mysql
         displayName: Run tests in Docker
 
   - job: "TestMariaDb"
@@ -163,6 +230,12 @@ jobs:
     strategy:
       maxParallel: 10
       matrix:
+        v108:
+          DB_VERSION: "10.8"
+        v107:
+          DB_VERSION: "10.7"
+        v106:
+          DB_VERSION: "10.6"
         v105:
           DB_VERSION: "10.5"
         v104:
@@ -191,13 +264,15 @@ jobs:
                   --max-allowed-packet=36700160 \
                   --local-infile \
                   --performance-schema=on \
+                  --log-bin=mysql-bin --gtid-domain-id=1 \
                   --ssl \
-                  --ssl-ca=/root/tests/ca-cert.pem \
-                  --ssl-cert=/root/tests/server-cert.pem \
-                  --ssl-key=/root/tests/server-key.pem
+                  --ssl-ca=/root/tests/ca.crt \
+                  --ssl-cert=/root/tests/server.crt \
+                  --ssl-key=/root/tests/server-key.pem &
           while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
           docker logs container
           docker exec container bash -l -c "mysql -uroot -ppassword -e 'SHOW VARIABLES LIKE \"%ssl%\"'"
+          docker exec container bash -l -c "mysql -uroot -ppassword -e 'SET GLOBAL server_id = 1;'"
           docker exec container bash -l -c "ls -la /root/tests"
         displayName: Run MariaDb in Docker
       - bash: |
@@ -210,7 +285,13 @@ jobs:
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test"
+
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk"
+
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk"
         env:
           RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:password@127.0.0.1/mysql
+          DATABASE_URL: mysql://root:password@localhost/mysql
         displayName: Run tests in Docker

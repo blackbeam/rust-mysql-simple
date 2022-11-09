@@ -17,7 +17,7 @@ use crate::{
     Params, QueryResult, Result, Statement,
 };
 
-/// Something, that eventualy is a `Statement` in the context of a `T: Queryable`.
+/// Something, that eventually is a `Statement` in the context of a `T: Queryable`.
 pub trait AsStatement {
     /// Make a statement out of `Self`.
     fn as_statement<Q: Queryable>(&self, queryable: &mut Q) -> Result<Cow<'_, Statement>>;

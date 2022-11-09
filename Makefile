@@ -1,8 +1,8 @@
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 mkfile_dir := $(dir $(mkfile_path))
 MYSQL_DATA_DIR = $(mkfile_dir)tests/rust-mysql-simple-test
-MYSQL_SSL_CA = $(mkfile_dir)tests/ca-cert.pem
-MYSQL_SSL_CERT = $(mkfile_dir)tests/server-cert.pem
+MYSQL_SSL_CA = $(mkfile_dir)tests/ca.crt
+MYSQL_SSL_CERT = $(mkfile_dir)tests/server.crt
 MYSQL_SSL_KEY = $(mkfile_dir)tests/server-key.pem
 MYSQL_PORT = 3307
 BASEDIR := $(shell mysqld --verbose --help 2>/dev/null | grep -e '^basedir' | awk '{ print $$2 }')
@@ -46,6 +46,8 @@ mysqld --no-defaults \
        --innodb_file_per_table=1 \
        --innodb_log_file_size=256M \
        --local-infile=ON \
+       --gtid_mode=ON \
+       --enforce_gtid_consistency=ON \
        --ssl \
        --ssl-ca=$(MYSQL_SSL_CA) \
        --ssl-cert=$(MYSQL_SSL_CERT) \

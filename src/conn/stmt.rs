@@ -6,7 +6,7 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use mysql_common::packets::{parse_stmt_packet, StmtPacket};
+use mysql_common::{io::ParseBuf, packets::StmtPacket, proto::MyDeserialize};
 
 use std::{borrow::Cow, io, sync::Arc};
 
@@ -20,9 +20,12 @@ pub struct InnerStmt {
     connection_id: u32,
 }
 
-impl InnerStmt {
-    pub fn from_payload(pld: &[u8], connection_id: u32) -> io::Result<InnerStmt> {
-        let stmt_packet = parse_stmt_packet(pld)?;
+impl<'de> MyDeserialize<'de> for InnerStmt {
+    const SIZE: Option<usize> = StmtPacket::SIZE;
+    type Ctx = u32;
+
+    fn deserialize(connection_id: Self::Ctx, buf: &mut ParseBuf<'de>) -> io::Result<Self> {
+        let stmt_packet = buf.parse(())?;
 
         Ok(InnerStmt {
             columns: None,
@@ -31,7 +34,9 @@ impl InnerStmt {
             connection_id,
         })
     }
+}
 
+impl InnerStmt {
     pub fn with_params(mut self, params: Option<Vec<Column>>) -> Self {
         self.params = params;
         self

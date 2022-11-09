@@ -138,9 +138,9 @@ impl<'a> io::Write for LocalInfile<'a> {
     fn flush(&mut self) -> io::Result<()> {
         let n = self.buffer.position() as usize;
         if n > 0 {
-            let range = &self.buffer.get_ref()[..n];
+            let mut range = &self.buffer.get_ref()[..n];
             self.conn
-                .write_packet(range)
+                .write_packet(&mut range)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, Box::new(e)))?;
         }
         self.buffer.set_position(0);

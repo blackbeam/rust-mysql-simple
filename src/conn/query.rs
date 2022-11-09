@@ -163,7 +163,7 @@ impl<Q: AsRef<str>> TextQuery for Q {
     }
 }
 
-/// Representaion of a prepared statement query.
+/// Representation of a prepared statement query.
 ///
 /// See `BinQuery` for details.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,8 +384,8 @@ where
             let params = params.into();
             let meta = conn._execute(&*statement, params)?;
             let mut query_result = QueryResult::<Binary>::new((&mut *conn).into(), meta);
-            while let Some(result_set) = query_result.next_set() {
-                for row in result_set? {
+            while let Some(result_set) = query_result.iter() {
+                for row in result_set {
                     row?;
                 }
             }

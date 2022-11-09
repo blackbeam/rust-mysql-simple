@@ -14,12 +14,13 @@
 //! Features:
 //!
 //! *   macOS, Windows and Linux support;
-//! *   TLS support via **nativetls** create;
+//! *   TLS support via **nativetls** or **rustls** (see the [SSL Support](#ssl-support) section);
 //! *   MySql text protocol support, i.e. support of simple text queries and text result sets;
 //! *   MySql binary protocol support, i.e. support of prepared statements and binary result sets;
 //! *   support of multi-result sets;
-//! *   support of named parameters for prepared statements;
-//! *   optional per-connection cache of prepared statements;
+//! *   support of named parameters for prepared statements (see the [Named Parameters](#named-parameters) section);
+//! *   optional per-connection cache of prepared statements (see the [Statement Cache](#statement-cache) section);
+//! *   buffer pool (see the [Buffer Pool](#buffer-pool) section);
 //! *   support of MySql packets larger than 2^24;
 //! *   support of Unix sockets and Windows named pipes;
 //! *   support of custom LOCAL INFILE handlers;
@@ -40,7 +41,6 @@
 //! ## Example
 //!
 //! ```rust
-//! # mysql::doctest_wrapper!(__result, {
 //! use mysql::*;
 //! use mysql::prelude::*;
 //!
@@ -51,55 +51,98 @@
 //!     account_name: Option<String>,
 //! }
 //!
-//! let url = "mysql://root:password@localhost:3307/db_name";
-//! # let url = get_opts();
+//! # def_get_opts!();
 //!
-//! let pool = Pool::new(url)?;
+//! fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+//!     let url = "mysql://root:password@localhost:3307/db_name";
+//!     # Opts::try_from(url)?;
+//!     # let url = get_opts();
+//!     let pool = Pool::new(url)?;
 //!
-//! let mut conn = pool.get_conn()?;
+//!     let mut conn = pool.get_conn()?;
 //!
-//! // Let's create a table for payments.
-//! conn.query_drop(
-//!     r"CREATE TEMPORARY TABLE payment (
-//!         customer_id int not null,
-//!         amount int not null,
-//!         account_name text
-//!     )")?;
+//!     // Let's create a table for payments.
+//!     conn.query_drop(
+//!         r"CREATE TEMPORARY TABLE payment (
+//!             customer_id int not null,
+//!             amount int not null,
+//!             account_name text
+//!         )")?;
 //!
-//! let payments = vec![
-//!     Payment { customer_id: 1, amount: 2, account_name: None },
-//!     Payment { customer_id: 3, amount: 4, account_name: Some("foo".into()) },
-//!     Payment { customer_id: 5, amount: 6, account_name: None },
-//!     Payment { customer_id: 7, amount: 8, account_name: None },
-//!     Payment { customer_id: 9, amount: 10, account_name: Some("bar".into()) },
-//! ];
+//!     let payments = vec![
+//!         Payment { customer_id: 1, amount: 2, account_name: None },
+//!         Payment { customer_id: 3, amount: 4, account_name: Some("foo".into()) },
+//!         Payment { customer_id: 5, amount: 6, account_name: None },
+//!         Payment { customer_id: 7, amount: 8, account_name: None },
+//!         Payment { customer_id: 9, amount: 10, account_name: Some("bar".into()) },
+//!     ];
 //!
-//! // Now let's insert payments to the database
-//! conn.exec_batch(
-//!     r"INSERT INTO payment (customer_id, amount, account_name)
-//!       VALUES (:customer_id, :amount, :account_name)",
-//!     payments.iter().map(|p| params! {
-//!         "customer_id" => p.customer_id,
-//!         "amount" => p.amount,
-//!         "account_name" => &p.account_name,
-//!     })
-//! )?;
-//!
-//! // Let's select payments from database. Type inference should do the trick here.
-//! let selected_payments = conn
-//!     .query_map(
-//!         "SELECT customer_id, amount, account_name from payment",
-//!         |(customer_id, amount, account_name)| {
-//!             Payment { customer_id, amount, account_name }
-//!         },
+//!     // Now let's insert payments to the database
+//!     conn.exec_batch(
+//!         r"INSERT INTO payment (customer_id, amount, account_name)
+//!           VALUES (:customer_id, :amount, :account_name)",
+//!         payments.iter().map(|p| params! {
+//!             "customer_id" => p.customer_id,
+//!             "amount" => p.amount,
+//!             "account_name" => &p.account_name,
+//!         })
 //!     )?;
 //!
-//! // Let's make sure, that `payments` equals to `selected_payments`.
-//! // Mysql gives no guaranties on order of returned rows
-//! // without `ORDER BY`, so assume we are lucky.
-//! assert_eq!(payments, selected_payments);
-//! println!("Yay!");
-//! # });
+//!     // Let's select payments from database. Type inference should do the trick here.
+//!     let selected_payments = conn
+//!         .query_map(
+//!             "SELECT customer_id, amount, account_name from payment",
+//!             |(customer_id, amount, account_name)| {
+//!                 Payment { customer_id, amount, account_name }
+//!             },
+//!         )?;
+//!
+//!     // Let's make sure, that `payments` equals to `selected_payments`.
+//!     // Mysql gives no guaranties on order of returned rows
+//!     // without `ORDER BY`, so assume we are lucky.
+//!     assert_eq!(payments, selected_payments);
+//!     println!("Yay!");
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Crate Features
+//!
+//! * crate's features:
+//!
+//!     *   **native-tls** (enabled by default) – specifies `native-tls` as the TLS backend
+//!         (see the [SSL Support](#ssl-support) section)
+//!     *   **rustls-tls** (disabled by default) – specifies `rustls` as the TLS backend
+//!         (see the [SSL Support](#ssl-support) section)
+//!     *   **buffer-pool** (enabled by default) – enables buffer pooling
+//!         (see the [Buffer Pool](#buffer-pool) section)
+//!
+//! * external features enabled by default:
+//!
+//!     * for the `flate2` crate (please consult `flate2` crate documentation for available features):
+//!
+//!         *   **flate2/zlib** (necessary) – `zlib` backend is chosed by default.
+//!
+//!     * for the `mysql_common` crate (please consult `mysql_common` crate documentation for available features):
+//!
+//!         *   **mysql_common/bigdecimal03** – the `bigdecimal03` is enabled by default
+//!         *   **mysql_common/rust_decimal** – the `rust_decimal` is enabled by default
+//!         *   **mysql_common/time03** – the `time03` is enabled by default
+//!         *   **mysql_common/uuid** – the `uuid` is enabled by default
+//!         *   **mysql_common/frunk** – the `frunk` is enabled by default
+//!
+//! Please note, that you'll need to reenable external features if you are using `default-features = false`:
+//!
+//! ```toml
+//! [dependencies]
+//! # Lets say that we want to use the `rustls-tls` feature:
+//! mysql = { version = "*", default-features = false, features = ["rustls-tls", "buffer-pool"] }
+//! # Previous line disables default mysql features,
+//! # so now we have to choose the flate2 backend (this is necessary),
+//! # as well as the desired set of mysql_common features:
+//! flate2 = { version = "*", default-features = false, features = ["zlib"] }
+//! mysql_common = { version = "*", default-features = false, features = ["bigdecimal03", "time03", "uuid"]}
 //! ```
 //!
 //! ## API Documentation
@@ -136,8 +179,14 @@
 //! *   `prefer_socket: true | false` - defines the value of the same field in the `Opts` structure;
 //! *   `tcp_keepalive_time_ms: u32` - defines the value (in milliseconds)
 //!     of the `tcp_keepalive_time` field in the `Opts` structure;
+//! *   `tcp_keepalive_probe_interval_secs: u32` - defines the value
+//!     of the `tcp_keepalive_probe_interval_secs` field in the `Opts` structure;
+//! *   `tcp_keepalive_probe_count: u32` - defines the value
+//!     of the `tcp_keepalive_probe_count` field in the `Opts` structure;
 //! *   `tcp_connect_timeout_ms: u64` - defines the value (in milliseconds)
 //!     of the `tcp_connect_timeout` field in the `Opts` structure;
+//! *   `tcp_user_timeout_ms` - defines the value (in milliseconds)
+//!     of the `tcp_user_timeout` field in the `Opts` structure;
 //! *   `stmt_cache_size: u32` - defines the value of the same field in the `Opts` structure;
 //! *   `compress` - defines the value of the same field in the `Opts` structure.
 //!     Supported value are:
@@ -166,6 +215,8 @@
 //!
 //! This structure represents an active MySql connection. It also holds statement cache
 //! and metadata for the last result set.
+//!
+//! Conn's destructor will gracefully disconnect it from the server.
 //!
 //! ### `Transaction`
 //!
@@ -324,8 +375,8 @@
 //!         println!("A double precision float value: {}", from_value::<f64>(val))
 //!     }
 //!     val @ Value::Date(..) => {
-//!         use mysql::chrono::NaiveDateTime;
-//!         println!("A date value: {}", from_value::<NaiveDateTime>(val))
+//!         use time::PrimitiveDateTime;
+//!         println!("A date value: {}", from_value::<PrimitiveDateTime>(val))
 //!     }
 //!     val @ Value::Time(..) => {
 //!         use std::time::Duration;
@@ -376,6 +427,17 @@
 //! for i in 0..row.len() {
 //!     assert_eq!(row[i], Value::Int(i as i64));
 //! }
+//!
+//! // Another way to handle wide rows is to use HList (requires `mysql_common/frunk` feature)
+//! use frunk::{HList, hlist, hlist_pat};
+//! let query = "select 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15";
+//! type RowType = HList!(u8, u16, u32, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8);
+//! let first_three_columns = conn.query_map(query, |row: RowType| {
+//!     // do something with the row (see the `frunk` crate documentation)
+//!     let hlist_pat![c1, c2, c3, ...] = row;
+//!     (c1, c2, c3)
+//! });
+//! assert_eq!(first_three_columns.unwrap(), vec![(0_u8, 1_u16, 2_u32)]);
 //!
 //! // Some unknown row
 //! let row: Row = conn.query_first(
@@ -460,7 +522,7 @@
 //! # });
 //! ```
 //!
-//! ### `QueryResult`
+//! ### [`QueryResult`]
 //!
 //! It's an iterator over rows of a query result with support of multi-result sets. It's intended
 //! for cases when you need full control during result set iteration. For other cases
@@ -469,7 +531,7 @@
 //!
 //! This iterator is lazy so it won't read the result from server until you iterate over it.
 //! MySql protocol is strictly sequential, so `Conn` will be mutably borrowed until the result
-//! is fully consumed.
+//! is fully consumed (please also look at [`QueryResult::iter`] docs).
 //!
 //! ```rust
 //! # #[macro_use] extern crate serde_derive;
@@ -483,8 +545,7 @@
 //! let mut result = conn.query_iter("SELECT 1, 2; SELECT 3, 3.14;")?;
 //!
 //! let mut sets = 0;
-//! while let Some(result_set) = result.next_set() {
-//!     let result_set = result_set?;
+//! while let Some(result_set) = result.iter() {
 //!     sets += 1;
 //!
 //!     println!("Result set columns: {:?}", result_set.columns());
@@ -641,13 +702,17 @@
 //! ### Named parameters
 //!
 //! MySql itself doesn't have named parameters support, so it's implemented on the client side.
-//! One should use `:name` as a placeholder syntax for a named parameter.
+//! One should use `:name` as a placeholder syntax for a named parameter. Named parameters uses
+//! the following naming convention:
+//!
+//! * parameter name must start with either `_` or `a..z`
+//! * parameter name may continue with `_`, `a..z` and `0..9`
 //!
 //! Named parameters may be repeated within the statement, e.g `SELECT :foo, :foo` will require
 //! a single named parameter `foo` that will be repeated on the corresponding positions during
 //! statement execution.
 //!
-//! One should use the `params!` macro to build a parameters for execution.
+//! One should use the `params!` macro to build parameters for execution.
 //!
 //! **Note:** Positional and named parameters can't be mixed within the single statement.
 //!
@@ -672,6 +737,22 @@
 //! assert_eq!((13, foo, 13), val_13);
 //! # });
 //! ```
+//!
+//! ### Buffer pool
+//!
+//! Crate uses the global lock-free buffer pool for the purpose of IO and data serialization/deserialization,
+//! that helps to avoid allocations for basic scenarios. You can control it's characteristics using
+//! the following environment variables:
+//!
+//! *   `RUST_MYSQL_BUFFER_POOL_CAP` (defaults to 128) – controls the pool capacity. Dropped buffer will
+//!     be immediately deallocated if the pool is full. Set it to `0` to disable the pool at runtime.
+//!
+//! *   `RUST_MYSQL_BUFFER_SIZE_CAP` (defaults to 4MiB) – controls the maximum capacity of a buffer
+//!     stored in the pool. Capacity of a dropped buffer will be shrunk to this value when buffer
+//!     is returned to the pool.
+//!
+//! To completely disable the pool (say you are using jemalloc) please remove the `buffer-pool` feature
+//! from the set of default crate features (see the [Crate Features](#crate-features) section).
 //!
 //! ### `BinQuery` and `BatchQuery` traits.
 //!
@@ -748,15 +829,27 @@
 //! The trait also defines the `exec_batch` function, which is a helper for batch statement
 //! execution.
 //!
+//! ## SSL Support
+//!
+//! SSL support comes in two flavors:
+//!
+//! 1.  Based on **native-tls** – this is the default option, that usually works without pitfalls
+//!     (see the `native-tls` crate feature).
+//! 2.  Based on **rustls** – TLS backend written in Rust. Please use the `rustls-tls` crate feature
+//!     to enable it (see the [Crate Features](#crate-features) section).
+//!
+//!     Please also note a few things about **rustls**:
+//!
+//!     *   it will fail if you'll try to connect to the server by its IP address, hostname is required;
+//!     *   it, most likely, won't work on windows, at least with default server certs, generated by the
+//!         MySql installer.
+//!
 //! [crate docs]: https://docs.rs/mysql
 //! [mysql_common docs]: https://docs.rs/mysql_common
 //! [max_prepared_stmt_count]: https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_max_prepared_stmt_count
 //!
 
-#![crate_name = "mysql"]
-#![crate_type = "rlib"]
-#![crate_type = "dylib"]
-#![cfg_attr(feature = "nightly", feature(test, const_fn))]
+#![cfg_attr(feature = "nightly", feature(test))]
 #[cfg(feature = "nightly")]
 extern crate test;
 
@@ -767,19 +860,31 @@ pub extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 
-/// Reexport of `chrono` crate.
-pub use crate::myc::chrono;
-/// Reexport of `time` crate.
-pub use crate::myc::time;
-/// Reexport of `uuid` crate.
-pub use crate::myc::uuid;
-
+mod buffer_pool;
 mod conn;
 pub mod error;
 mod io;
 
 #[doc(inline)]
 pub use crate::myc::constants as consts;
+
+#[doc(inline)]
+pub use crate::myc::packets::{binlog_request::BinlogRequest, BinlogDumpFlags};
+
+pub mod binlog {
+    #[doc(inline)]
+    pub use crate::myc::binlog::consts::*;
+
+    #[doc(inline)]
+    pub use crate::myc::binlog::{events, jsonb, jsondiff, row, value};
+}
+
+#[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+#[doc(inline)]
+pub use crate::conn::opts::ClientIdentity;
+
+#[doc(inline)]
+pub use crate::myc::packets::{session_state_change, SessionStateInfo};
 
 #[doc(inline)]
 pub use crate::conn::local_infile::{LocalInfile, LocalInfileHandler};
@@ -798,7 +903,7 @@ pub use crate::conn::stmt::Statement;
 #[doc(inline)]
 pub use crate::conn::transaction::{AccessMode, IsolationLevel, Transaction, TxOpts};
 #[doc(inline)]
-pub use crate::conn::Conn;
+pub use crate::conn::{binlog_stream::BinlogStream, Conn};
 #[doc(inline)]
 pub use crate::error::{DriverError, Error, MySqlError, Result, ServerError, UrlError};
 #[doc(inline)]
@@ -854,7 +959,7 @@ macro_rules! def_database_url {
             }
             url
         } else {
-            "mysql://root:password@127.0.0.1:3307/mysql".into()
+            "mysql://root:password@localhost:3307/mysql".into()
         }
     };
 }
@@ -875,8 +980,9 @@ macro_rules! def_get_opts {
 
         pub fn get_opts() -> $crate::OptsBuilder {
             let database_url = $crate::def_database_url!();
-            let mut builder = $crate::OptsBuilder::from_opts(&*database_url)
-                .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
+            let mut builder =
+                $crate::OptsBuilder::from_opts($crate::Opts::from_url(&*database_url).unwrap())
+                    .init(vec!["SET GLOBAL sql_mode = 'TRADITIONAL'"]);
             if test_compression() {
                 builder = builder.compress(Some(Default::default()));
             }

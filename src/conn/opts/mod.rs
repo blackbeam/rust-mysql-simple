@@ -6,12 +6,11 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use percent_encoding::{percent_decode, percent_decode_str};
+use percent_encoding::percent_decode;
 use url::Url;
 
 use std::{
-    borrow::Cow, collections::HashMap, hash::Hash, net::SocketAddr, path::Path, str::FromStr,
-    time::Duration,
+    borrow::Cow, collections::HashMap, hash::Hash, net::SocketAddr, path::Path, time::Duration,
 };
 
 use crate::{consts::CapabilityFlags, Compression, LocalInfileHandler, UrlError};
@@ -19,33 +18,30 @@ use crate::{consts::CapabilityFlags, Compression, LocalInfileHandler, UrlError};
 /// Default value for client side per-connection statement cache.
 pub const DEFAULT_STMT_CACHE_SIZE: usize = 32;
 
+mod native_tls_opts;
+mod rustls_opts;
+
+#[cfg(feature = "native-tls")]
+pub use native_tls_opts::ClientIdentity;
+
+#[cfg(feature = "rustls-tls")]
+pub use rustls_opts::ClientIdentity;
+
 /// Ssl Options.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
 pub struct SslOpts {
-    pkcs12_path: Option<Cow<'static, Path>>,
-    password: Option<Cow<'static, str>>,
+    #[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+    client_identity: Option<ClientIdentity>,
     root_cert_path: Option<Cow<'static, Path>>,
     skip_domain_validation: bool,
     accept_invalid_certs: bool,
 }
 
 impl SslOpts {
-    /// Sets path to the pkcs12 archive.
-    ///
-    /// If you have the client's private key and certificate in PEM format, you
-    /// can translate them to pkcs12 using `openssl`:
-    ///
-    /// ```text
-    /// openssl pkcs12 -password pass: -export -out path.p12 -inkey privatekey.pem -in cert.pem -no-CAfile
-    /// ```
-    pub fn with_pkcs12_path<T: Into<Cow<'static, Path>>>(mut self, pkcs12_path: Option<T>) -> Self {
-        self.pkcs12_path = pkcs12_path.map(Into::into);
-        self
-    }
-
-    /// Sets the password for a pkcs12 archive (defaults to `None`).
-    pub fn with_password<T: Into<Cow<'static, str>>>(mut self, password: Option<T>) -> Self {
-        self.password = password.map(Into::into);
+    /// Sets the client identity.
+    #[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+    pub fn with_client_identity(mut self, identity: Option<ClientIdentity>) -> Self {
+        self.client_identity = identity;
         self
     }
 
@@ -75,12 +71,9 @@ impl SslOpts {
         self
     }
 
-    pub fn pkcs12_path(&self) -> Option<&Path> {
-        self.pkcs12_path.as_ref().map(|x| x.as_ref())
-    }
-
-    pub fn password(&self) -> Option<&str> {
-        self.password.as_ref().map(AsRef::as_ref)
+    #[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+    pub fn client_identity(&self) -> Option<&ClientIdentity> {
+        self.client_identity.as_ref()
     }
 
     pub fn root_cert_path(&self) -> Option<&Path> {
@@ -141,6 +134,24 @@ pub(crate) struct InnerOpts {
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     tcp_keepalive_time: Option<u32>,
 
+    /// TCP keep alive interval between subsequent probe for mysql connection.
+    ///
+    /// Can be defined using `tcp_keepalive_probe_interval_secs` connection url parameter.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    tcp_keepalive_probe_interval_secs: Option<u32>,
+
+    /// TCP keep alive probe count for mysql connection.
+    ///
+    /// Can be defined using `tcp_keepalive_probe_count` connection url parameter.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    tcp_keepalive_probe_count: Option<u32>,
+
+    /// TCP_USER_TIMEOUT time for mysql connection.
+    ///
+    /// Can be defined using `tcp_user_timeout_ms` connection url parameter.
+    #[cfg(target_os = "linux")]
+    tcp_user_timeout: Option<u32>,
+
     /// Commands to execute on each new database connection.
     init: Vec<String>,
 
@@ -198,6 +209,11 @@ pub(crate) struct InnerOpts {
     /// Connect attributes
     connect_attrs: HashMap<String, String>,
 
+    /// Disables `mysql_old_password` plugin (defaults to `true`).
+    ///
+    /// Available via `secure_auth` connection url parameter.
+    secure_auth: bool,
+
     /// For tests only
     #[cfg(test)]
     pub injected_socket: Option<String>,
@@ -218,6 +234,12 @@ impl Default for InnerOpts {
             init: vec![],
             ssl_opts: None,
             tcp_keepalive_time: None,
+            #[cfg(any(target_os = "linux", target_os = "macos",))]
+            tcp_keepalive_probe_interval_secs: None,
+            #[cfg(any(target_os = "linux", target_os = "macos",))]
+            tcp_keepalive_probe_count: None,
+            #[cfg(target_os = "linux")]
+            tcp_user_timeout: None,
             tcp_nodelay: true,
             local_infile_handler: None,
             tcp_connect_timeout: None,
@@ -226,9 +248,18 @@ impl Default for InnerOpts {
             compress: None,
             additional_capabilities: CapabilityFlags::empty(),
             connect_attrs: HashMap::new(),
+            secure_auth: true,
             #[cfg(test)]
             injected_socket: None,
         }
+    }
+}
+
+impl TryFrom<&'_ str> for Opts {
+    type Error = UrlError;
+
+    fn try_from(url: &'_ str) -> Result<Self, Self::Error> {
+        Opts::from_url(url)
     }
 }
 
@@ -325,10 +356,6 @@ impl Opts {
         self.0.ssl_opts.as_ref()
     }
 
-    fn set_prefer_socket(&mut self, val: bool) {
-        self.0.prefer_socket = val;
-    }
-
     /// Whether `TCP_NODELAY` will be set for mysql connection.
     pub fn get_tcp_nodelay(&self) -> bool {
         self.0.tcp_nodelay
@@ -337,6 +364,24 @@ impl Opts {
     /// TCP keep alive time for mysql connection.
     pub fn get_tcp_keepalive_time_ms(&self) -> Option<u32> {
         self.0.tcp_keepalive_time
+    }
+
+    /// TCP keep alive interval between subsequent probes for mysql connection.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn get_tcp_keepalive_probe_interval_secs(&self) -> Option<u32> {
+        self.0.tcp_keepalive_probe_interval_secs
+    }
+
+    /// TCP keep alive probe count for mysql connection.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn get_tcp_keepalive_probe_count(&self) -> Option<u32> {
+        self.0.tcp_keepalive_probe_count
+    }
+
+    /// TCP_USER_TIMEOUT time for mysql connection.
+    #[cfg(target_os = "linux")]
+    pub fn get_tcp_user_timeout_ms(&self) -> Option<u32> {
+        self.0.tcp_user_timeout
     }
 
     /// Callback to handle requests for local files.
@@ -418,7 +463,7 @@ impl Opts {
     /// _client_name    | The client library name (`rust-mysql-simple`)
     /// _client_version | The client library version
     /// _os             | The operation system (`target_os` cfg feature)
-    /// _pid            | The client proces ID
+    /// _pid            | The client process ID
     /// _platform       | The machine platform (`target_arch` cfg feature)
     /// program_name    | The first element of `std::env::args` if program_name isn't set by programs.
     ///
@@ -428,6 +473,13 @@ impl Opts {
     ///
     pub fn get_connect_attrs(&self) -> &HashMap<String, String> {
         &self.0.connect_attrs
+    }
+
+    /// Disables `mysql_old_password` plugin (defaults to `true`).
+    ///
+    /// Available via `secure_auth` connection url parameter.
+    pub fn get_secure_auth(&self) -> bool {
+        self.0.secure_auth
     }
 }
 
@@ -458,10 +510,10 @@ impl Opts {
 /// Example:
 ///
 /// ```ignore
-/// let connection_url = "mysql://root:password@localhost:3307/mysql?prefer_socket=false";
-/// let pool = my::Pool::new(connection_url).unwrap();
+/// let connection_opts = mysql::Opts::from_url("mysql://root:password@localhost:3307/mysql?prefer_socket=false").unwrap();
+/// let pool = mysql::Pool::new(connection_opts).unwrap();
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OptsBuilder {
     opts: Opts,
 }
@@ -488,13 +540,17 @@ impl OptsBuilder {
     /// - db_name = Database name (defaults to `None`).
     /// - prefer_socket = Prefer socket connection (defaults to `true`)
     /// - tcp_keepalive_time_ms = TCP keep alive time for mysql connection (defaults to `None`)
+    /// - tcp_keepalive_probe_interval_secs = TCP keep alive interval between probes for mysql connection (defaults to `None`)
+    /// - tcp_keepalive_probe_count = TCP keep alive probe count for mysql connection (defaults to `None`)
+    /// - tcp_user_timeout_ms = TCP_USER_TIMEOUT time for mysql connection (defaults to `None`)
     /// - compress = Compression level(defaults to `None`)
     /// - tcp_connect_timeout_ms = Tcp connect timeout (defaults to `None`)
     /// - stmt_cache_size = Number of prepared statements cached on the client side (per connection)
+    /// - secure_auth = Disable `mysql_old_password` auth plugin
     ///
-    /// Login .cnf file parsing lib https://github.com/rjcortese/myloginrs returns a HashMap for client configs
+    /// Login .cnf file parsing lib <https://github.com/rjcortese/myloginrs> returns a HashMap for client configs
     ///
-    /// **Note:** You do **not** have to use myloginrs lib.    
+    /// **Note:** You do **not** have to use myloginrs lib.
     pub fn from_hash_map(mut self, client: &HashMap<String, String>) -> Result<Self, UrlError> {
         for (key, value) in client.iter() {
             match key.as_str() {
@@ -522,9 +578,44 @@ impl OptsBuilder {
                         }
                     }
                 }
+                "secure_auth" => match value.parse::<bool>() {
+                    Ok(parsed) => self.opts.0.secure_auth = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 "tcp_keepalive_time_ms" => {
                     //if cannot parse, default to none
                     self.opts.0.tcp_keepalive_time = match value.parse::<u32>() {
+                        Ok(val) => Some(val),
+                        _ => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
+                    }
+                }
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                "tcp_keepalive_probe_interval_secs" => {
+                    //if cannot parse, default to none
+                    self.opts.0.tcp_keepalive_probe_interval_secs = match value.parse::<u32>() {
+                        Ok(val) => Some(val),
+                        _ => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
+                    }
+                }
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                "tcp_keepalive_probe_count" => {
+                    //if cannot parse, default to none
+                    self.opts.0.tcp_keepalive_probe_count = match value.parse::<u32>() {
+                        Ok(val) => Some(val),
+                        _ => {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                        }
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                "tcp_user_timeout_ms" => {
+                    self.opts.0.tcp_user_timeout = match value.parse::<u32>() {
                         Ok(val) => Some(val),
                         _ => {
                             return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
@@ -564,7 +655,7 @@ impl OptsBuilder {
                 },
                 _ => {
                     //throw an error if there is an unrecognized param
-                    UrlError::UnknownParameter(key.to_string());
+                    return Err(UrlError::UnknownParameter(key.to_string()));
                 }
             }
         }
@@ -639,6 +730,39 @@ impl OptsBuilder {
     /// Can be defined using `tcp_keepalive_time_ms` connection url parameter.
     pub fn tcp_keepalive_time_ms(mut self, tcp_keepalive_time_ms: Option<u32>) -> Self {
         self.opts.0.tcp_keepalive_time = tcp_keepalive_time_ms;
+        self
+    }
+
+    /// TCP keep alive interval between probes for mysql connection (defaults to `None`). Available as
+    /// `tcp_keepalive_probe_interval_secs` url parameter.
+    ///
+    /// Can be defined using `tcp_keepalive_probe_interval_secs` connection url parameter.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn tcp_keepalive_probe_interval_secs(
+        mut self,
+        tcp_keepalive_probe_interval_secs: Option<u32>,
+    ) -> Self {
+        self.opts.0.tcp_keepalive_probe_interval_secs = tcp_keepalive_probe_interval_secs;
+        self
+    }
+
+    /// TCP keep alive probe count for mysql connection (defaults to `None`). Available as
+    /// `tcp_keepalive_probe_count` url parameter.
+    ///
+    /// Can be defined using `tcp_keepalive_probe_count` connection url parameter.
+    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    pub fn tcp_keepalive_probe_count(mut self, tcp_keepalive_probe_count: Option<u32>) -> Self {
+        self.opts.0.tcp_keepalive_probe_count = tcp_keepalive_probe_count;
+        self
+    }
+
+    /// TCP_USER_TIMEOUT for mysql connection (defaults to `None`). Available as
+    /// `tcp_user_timeout_ms` url parameter.
+    ///
+    /// Can be defined using `tcp_user_timeout_ms` connection url parameter.
+    #[cfg(target_os = "linux")]
+    pub fn tcp_user_timeout_ms(mut self, tcp_user_timeout_ms: Option<u32>) -> Self {
+        self.opts.0.tcp_user_timeout = tcp_user_timeout_ms;
         self
     }
 
@@ -789,7 +913,7 @@ impl OptsBuilder {
     /// _client_name    | The client library name (`rust-mysql-simple`)
     /// _client_version | The client library version
     /// _os             | The operation system (`target_os` cfg feature)
-    /// _pid            | The client proces ID
+    /// _pid            | The client process ID
     /// _platform       | The machine platform (`target_arch` cfg feature)
     /// program_name    | The first element of `std::env::args` if program_name isn't set by programs.
     ///
@@ -808,6 +932,14 @@ impl OptsBuilder {
                 self.opts.0.connect_attrs.insert(name, value.into());
             }
         }
+        self
+    }
+
+    /// Disables `mysql_old_password` plugin (defaults to `true`).
+    ///
+    /// Available via `secure_auth` connection url parameter.
+    pub fn secure_auth(mut self, secure_auth: bool) -> Self {
+        self.opts.0.secure_auth = secure_auth;
         self
     }
 }
@@ -897,83 +1029,11 @@ fn from_url_basic(url_str: &str) -> Result<(Opts, Vec<(String, String)>), UrlErr
 }
 
 fn from_url(url: &str) -> Result<Opts, UrlError> {
-    let (mut opts, query_pairs) = from_url_basic(url)?;
-    for (key, value) in query_pairs {
-        if key == "prefer_socket" {
-            if value == "true" {
-                opts.set_prefer_socket(true);
-            } else if value == "false" {
-                opts.set_prefer_socket(false);
-            } else {
-                return Err(UrlError::InvalidValue("prefer_socket".into(), value));
-            }
-        } else if key == "tcp_keepalive_time_ms" {
-            match u32::from_str(&*value) {
-                Ok(tcp_keepalive_time_ms) => {
-                    opts.0.tcp_keepalive_time = Some(tcp_keepalive_time_ms);
-                }
-                _ => {
-                    return Err(UrlError::InvalidValue(
-                        "tcp_keepalive_time_ms".into(),
-                        value,
-                    ));
-                }
-            }
-        } else if key == "tcp_connect_timeout_ms" {
-            match u64::from_str(&*value) {
-                Ok(tcp_connect_timeout_ms) => {
-                    opts.0.tcp_connect_timeout =
-                        Some(Duration::from_millis(tcp_connect_timeout_ms));
-                }
-                _ => {
-                    return Err(UrlError::InvalidValue(
-                        "tcp_connect_timeout_ms".into(),
-                        value,
-                    ));
-                }
-            }
-        } else if key == "stmt_cache_size" {
-            match usize::from_str(&*value) {
-                Ok(stmt_cache_size) => {
-                    opts.0.stmt_cache_size = stmt_cache_size;
-                }
-                _ => {
-                    return Err(UrlError::InvalidValue("stmt_cache_size".into(), value));
-                }
-            }
-        } else if key == "compress" {
-            if value == "true" {
-                opts.0.compress = Some(crate::Compression::default());
-            } else if value == "fast" {
-                opts.0.compress = Some(crate::Compression::fast());
-            } else if value == "best" {
-                opts.0.compress = Some(crate::Compression::best());
-            } else if value.len() == 1 && 0x30 <= value.as_bytes()[0] && value.as_bytes()[0] <= 0x39
-            {
-                opts.0.compress =
-                    Some(crate::Compression::new((value.as_bytes()[0] - 0x30) as u32));
-            } else {
-                return Err(UrlError::InvalidValue("compress".into(), value));
-            }
-        } else if key == "socket" {
-            let socket = percent_decode_str(&*value).decode_utf8_lossy().into_owned();
-            if !socket.is_empty() {
-                opts.0.socket = Some(socket);
-            }
-        } else {
-            return Err(UrlError::UnknownParameter(key));
-        }
-    }
-    Ok(opts)
-}
-
-impl<S: AsRef<str>> From<S> for Opts {
-    fn from(url: S) -> Opts {
-        match from_url(url.as_ref()) {
-            Ok(opts) => opts,
-            Err(err) => panic!("{}", err),
-        }
-    }
+    let (opts, query_pairs) = from_url_basic(url)?;
+    let hash_map = query_pairs.into_iter().collect::<HashMap<String, String>>();
+    OptsBuilder::from_opts(opts)
+        .from_hash_map(&hash_map)
+        .map(Into::into)
 }
 
 #[cfg(test)]
@@ -981,17 +1041,47 @@ mod test {
     use mysql_common::proto::codec::Compression;
     use std::time::Duration;
 
-    use super::{InnerOpts, Opts};
+    use super::{InnerOpts, Opts, OptsBuilder};
+
+    #[allow(dead_code)]
+    fn assert_conn_from_url_opts_optsbuilder(url: &str, opts: Opts, opts_builder: OptsBuilder) {
+        crate::Conn::new(url).unwrap();
+        crate::Conn::new(opts.clone()).unwrap();
+        crate::Conn::new(opts_builder.clone()).unwrap();
+        crate::Pool::new(url).unwrap();
+        crate::Pool::new(opts).unwrap();
+        crate::Pool::new(opts_builder).unwrap();
+    }
 
     #[test]
     fn should_report_empty_url_database_as_none() {
-        let opt = Opts::from("mysql://localhost/");
+        let opt = Opts::from_url("mysql://localhost/").unwrap();
         assert_eq!(opt.get_db_name(), None);
     }
 
     #[test]
     fn should_convert_url_into_opts() {
-        let opts = "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000&socket=%2Ftmp%2Fmysql.sock&compress=8";
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        let tcp_keepalive_probe_interval_secs = "&tcp_keepalive_probe_interval_secs=8";
+        #[cfg(not(any(target_os = "linux", target_os = "macos",)))]
+        let tcp_keepalive_probe_interval_secs = "";
+
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        let tcp_keepalive_probe_count = "&tcp_keepalive_probe_count=5";
+        #[cfg(not(any(target_os = "linux", target_os = "macos",)))]
+        let tcp_keepalive_probe_count = "";
+
+        #[cfg(target_os = "linux")]
+        let tcp_user_timeout = "&tcp_user_timeout_ms=6000";
+        #[cfg(not(target_os = "linux"))]
+        let tcp_user_timeout = "";
+
+        let opts = format!(
+            "mysql://us%20r:p%20w@localhost:3308/db%2dname?prefer_socket=false&tcp_keepalive_time_ms=5000{}{}{}&socket=%2Ftmp%2Fmysql.sock&compress=8",
+            tcp_keepalive_probe_interval_secs,
+            tcp_keepalive_probe_count,
+            tcp_user_timeout,
+        );
         assert_eq!(
             Opts(Box::new(InnerOpts {
                 user: Some("us r".to_string()),
@@ -1001,11 +1091,17 @@ mod test {
                 db_name: Some("db-name".to_string()),
                 prefer_socket: false,
                 tcp_keepalive_time: Some(5000),
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                tcp_keepalive_probe_interval_secs: Some(8),
+                #[cfg(any(target_os = "linux", target_os = "macos",))]
+                tcp_keepalive_probe_count: Some(5),
+                #[cfg(target_os = "linux")]
+                tcp_user_timeout: Some(6000),
                 socket: Some("/tmp/mysql.sock".into()),
                 compress: Some(Compression::new(8)),
                 ..InnerOpts::default()
             })),
-            opts.into()
+            Opts::from_url(&opts).unwrap(),
         );
     }
 
@@ -1013,21 +1109,21 @@ mod test {
     #[should_panic]
     fn should_panic_on_invalid_url() {
         let opts = "42";
-        let _: Opts = opts.into();
+        Opts::from_url(opts).unwrap();
     }
 
     #[test]
     #[should_panic]
     fn should_panic_on_invalid_scheme() {
         let opts = "postgres://localhost";
-        let _: Opts = opts.into();
+        Opts::from_url(opts).unwrap();
     }
 
     #[test]
     #[should_panic]
     fn should_panic_on_unknown_query_param() {
         let opts = "mysql://localhost/foo?bar=baz";
-        let _: Opts = opts.into();
+        Opts::from_url(opts).unwrap();
     }
 
     #[test]
@@ -1045,7 +1141,7 @@ mod test {
             };
         );
 
-        let cnf_map = map! {
+        let mut cnf_map = map! {
             "user".to_string() => "test".to_string(),
             "password".to_string() => "password".to_string(),
             "host".to_string() => "127.0.0.1".to_string(),
@@ -1057,6 +1153,13 @@ mod test {
             "tcp_connect_timeout_ms".to_string() => "1000".to_string(),
             "stmt_cache_size".to_string() => "33".to_string()
         };
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        cnf_map.insert(
+            "tcp_keepalive_probe_interval_secs".to_string(),
+            "8".to_string(),
+        );
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        cnf_map.insert("tcp_keepalive_probe_count".to_string(), "5".to_string());
 
         let parsed_opts = OptsBuilder::new().from_hash_map(&cnf_map).unwrap();
 
@@ -1067,6 +1170,13 @@ mod test {
         assert_eq!(parsed_opts.opts.get_db_name(), Some("test_db"));
         assert_eq!(parsed_opts.opts.get_prefer_socket(), false);
         assert_eq!(parsed_opts.opts.get_tcp_keepalive_time_ms(), Some(5000));
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        assert_eq!(
+            parsed_opts.opts.get_tcp_keepalive_probe_interval_secs(),
+            Some(8)
+        );
+        #[cfg(any(target_os = "linux", target_os = "macos",))]
+        assert_eq!(parsed_opts.opts.get_tcp_keepalive_probe_count(), Some(5));
         assert_eq!(
             parsed_opts.opts.get_compress(),
             Some(crate::Compression::best())

@@ -7,7 +7,7 @@
 // modified, or distributed except according to those terms.
 
 use mysql_common::{
-    named_params::MixedParamsError, packets::ErrPacket, params::MissingNamedParameterError,
+    named_params::MixedParamsError, packets, params::MissingNamedParameterError,
     proto::codec::error::PacketCodecError, row::convert::FromRowError,
     value::convert::FromValueError,
 };
@@ -17,8 +17,10 @@ use std::{error, fmt, io, result, sync};
 
 use crate::{Row, Value};
 
-impl<'a> From<ErrPacket<'a>> for MySqlError {
-    fn from(x: ErrPacket<'a>) -> MySqlError {
+pub mod tls;
+
+impl<'a> From<packets::ServerError<'a>> for MySqlError {
+    fn from(x: packets::ServerError<'a>) -> MySqlError {
         MySqlError {
             state: x.sql_state_str().into_owned(),
             code: x.error_code(),
@@ -58,8 +60,8 @@ pub enum Error {
     MySqlError(MySqlError),
     DriverError(DriverError),
     UrlError(UrlError),
-    TlsError(native_tls::Error),
-    TlsHandshakeError(native_tls::HandshakeError<std::net::TcpStream>),
+    #[cfg(any(feature = "native-tls", feature = "rustls"))]
+    TlsError(tls::TlsError),
     FromValueError(Value),
     FromRowError(Row),
 }
@@ -68,42 +70,34 @@ impl Error {
     #[doc(hidden)]
     pub fn is_connectivity_error(&self) -> bool {
         match self {
-            Error::IoError(_)
-            | Error::DriverError(_)
-            | Error::CodecError(_)
-            | Error::TlsHandshakeError(_)
-            | Error::TlsError(_) => true,
+            #[cfg(any(feature = "native-tls", feature = "rustls"))]
+            Error::TlsError(_) => true,
+            Error::IoError(_) | Error::DriverError(_) | Error::CodecError(_) => true,
             Error::MySqlError(_)
             | Error::UrlError(_)
             | Error::FromValueError(_)
             | Error::FromRowError(_) => false,
         }
     }
+
+    #[doc(hidden)]
+    pub fn server_disconnected() -> Self {
+        Error::IoError(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "server disconnected",
+        ))
+    }
 }
 
 impl error::Error for Error {
-    fn description(&self) -> &str {
-        match *self {
-            Error::IoError(_) => "I/O Error",
-            Error::CodecError(_) => "protocol codec error",
-            Error::MySqlError(_) => "MySql server error",
-            Error::DriverError(_) => "driver error",
-            Error::UrlError(_) => "url error",
-            Error::TlsError(_) => "tls error",
-            Error::TlsHandshakeError(_) => "tls handshake error",
-            Error::FromRowError(_) => "from row conversion error",
-            Error::FromValueError(_) => "from value conversion error",
-        }
-    }
-
     fn cause(&self) -> Option<&dyn error::Error> {
         match *self {
             Error::IoError(ref err) => Some(err),
             Error::DriverError(ref err) => Some(err),
             Error::MySqlError(ref err) => Some(err),
             Error::UrlError(ref err) => Some(err),
+            #[cfg(any(feature = "native-tls", feature = "rustls"))]
             Error::TlsError(ref err) => Some(err),
-            Error::TlsHandshakeError(ref err) => Some(err),
             _ => None,
         }
     }
@@ -163,28 +157,6 @@ impl From<std::convert::Infallible> for Error {
     }
 }
 
-#[cfg(unix)]
-impl From<::nix::Error> for Error {
-    fn from(x: ::nix::Error) -> Error {
-        match x {
-            ::nix::Error::Sys(errno) => Error::from(io::Error::from_raw_os_error(errno as i32)),
-            _ => Error::from(io::Error::new(io::ErrorKind::Other, x)),
-        }
-    }
-}
-
-impl From<native_tls::Error> for Error {
-    fn from(err: native_tls::Error) -> Error {
-        Error::TlsError(err)
-    }
-}
-
-impl From<native_tls::HandshakeError<std::net::TcpStream>> for Error {
-    fn from(err: native_tls::HandshakeError<std::net::TcpStream>) -> Error {
-        Error::TlsHandshakeError(err)
-    }
-}
-
 impl From<UrlError> for Error {
     fn from(err: UrlError) -> Error {
         Error::UrlError(err)
@@ -205,8 +177,8 @@ impl fmt::Display for Error {
             Error::MySqlError(ref err) => write!(f, "MySqlError {{ {} }}", err),
             Error::DriverError(ref err) => write!(f, "DriverError {{ {} }}", err),
             Error::UrlError(ref err) => write!(f, "UrlError {{ {} }}", err),
+            #[cfg(any(feature = "native-tls", feature = "rustls"))]
             Error::TlsError(ref err) => write!(f, "TlsError {{ {} }}", err),
-            Error::TlsHandshakeError(ref err) => write!(f, "TlsHandshakeError {{ {} }}", err),
             Error::FromRowError(_) => "from row conversion error".fmt(f),
             Error::FromValueError(_) => "from value conversion error".fmt(f),
         }
@@ -241,6 +213,7 @@ pub enum DriverError {
     NamedParamsForPositionalQuery,
     MixedParams,
     UnknownAuthPlugin(String),
+    OldMysqlPasswordDisabled,
 }
 
 impl error::Error for DriverError {
@@ -297,6 +270,12 @@ impl fmt::Display for DriverError {
             ),
             DriverError::UnknownAuthPlugin(ref name) => {
                 write!(f, "Unknown authentication protocol: `{}`", name)
+            }
+            DriverError::OldMysqlPasswordDisabled => {
+                write!(
+                    f,
+                    "`old_mysql_password` plugin is insecure and disabled by default",
+                )
             }
         }
     }
