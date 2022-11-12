@@ -859,6 +859,7 @@ pub extern crate serde_json;
 #[cfg(test)]
 #[macro_use]
 extern crate serde_derive;
+extern crate core;
 
 mod buffer_pool;
 mod conn;

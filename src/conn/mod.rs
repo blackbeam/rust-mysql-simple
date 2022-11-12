@@ -8,7 +8,6 @@
 
 use bytes::{Buf, BufMut};
 use mysql_common::{
-    constants::{UTF8MB4_GENERAL_CI, UTF8_GENERAL_CI},
     crypto,
     io::{ParseBuf, ReadMysqlExt},
     misc::raw::Either,
@@ -25,7 +24,7 @@ use mysql_common::{
 };
 
 use mysql_common::{
-    constants::{DEFAULT_MAX_ALLOWED_PACKET, UTF8_GENERAL_CI},
+    constants::{DEFAULT_MAX_ALLOWED_PACKET, UTF8_GENERAL_CI, UTF8MB4_GENERAL_CI},
     packets::SslRequest,
 };
 
@@ -43,6 +42,8 @@ use std::{
 
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, RawFd};
+use mysql_common::io::WriteMysqlExt;
+use mysql_common::proto::MyDeserialize;
 
 use crate::{
     buffer_pool::{get_buffer, Buffer},
@@ -83,6 +84,14 @@ pub mod queryable;
 pub mod stmt;
 mod stmt_cache;
 pub mod transaction;
+
+pub struct ChangeUser(pub Vec<u8>);
+
+impl MySerialize for ChangeUser {
+    fn serialize(&self, buf: &mut Vec<u8>) {
+        buf.put_slice(self.0.as_slice());
+    }
+}
 
 /// Mutable connection.
 #[derive(Debug)]
@@ -324,9 +333,9 @@ impl Conn {
 
     /// Creates new `Conn`.
     pub fn new<T, E>(opts: T) -> Result<Conn>
-    where
-        Opts: TryFrom<T, Error = E>,
-        crate::Error: From<E>,
+        where
+            Opts: TryFrom<T, Error=E>,
+            crate::Error: From<E>,
     {
         let opts = Opts::try_from(opts)?;
         let mut conn = Conn(Box::new(ConnInner::empty(opts)));
@@ -402,12 +411,12 @@ impl Conn {
         let read_timeout = opts.get_read_timeout().cloned();
         let write_timeout = opts.get_write_timeout().cloned();
         let tcp_keepalive_time = opts.get_tcp_keepalive_time_ms();
-        #[cfg(any(target_os = "linux", target_os = "macos",))]
-        let tcp_keepalive_probe_interval_secs = opts.get_tcp_keepalive_probe_interval_secs();
-        #[cfg(any(target_os = "linux", target_os = "macos",))]
-        let tcp_keepalive_probe_count = opts.get_tcp_keepalive_probe_count();
+        #[cfg(any(target_os = "linux", target_os = "macos", ))]
+            let tcp_keepalive_probe_interval_secs = opts.get_tcp_keepalive_probe_interval_secs();
+        #[cfg(any(target_os = "linux", target_os = "macos", ))]
+            let tcp_keepalive_probe_count = opts.get_tcp_keepalive_probe_count();
         #[cfg(target_os = "linux")]
-        let tcp_user_timeout = opts.get_tcp_user_timeout_ms();
+            let tcp_user_timeout = opts.get_tcp_user_timeout_ms();
         let tcp_nodelay = opts.get_tcp_nodelay();
         let tcp_connect_timeout = opts.get_tcp_connect_timeout();
         let bind_address = opts.bind_address().cloned();
@@ -426,12 +435,12 @@ impl Conn {
                 read_timeout,
                 write_timeout,
                 tcp_keepalive_time,
-                #[cfg(any(target_os = "linux", target_os = "macos",))]
-                tcp_keepalive_probe_interval_secs,
-                #[cfg(any(target_os = "linux", target_os = "macos",))]
-                tcp_keepalive_probe_count,
+                #[cfg(any(target_os = "linux", target_os = "macos", ))]
+                    tcp_keepalive_probe_interval_secs,
+                #[cfg(any(target_os = "linux", target_os = "macos", ))]
+                    tcp_keepalive_probe_count,
                 #[cfg(target_os = "linux")]
-                tcp_user_timeout,
+                    tcp_user_timeout,
                 tcp_nodelay,
                 tcp_connect_timeout,
                 bind_address,
@@ -636,12 +645,17 @@ impl Conn {
             return Err(DriverError(UnknownAuthPlugin(plugin_name)));
         }
 
-        let auth_data = auth_plugin
+        let empty = vec![];
+
+        let auth_data_l = auth_plugin
             .gen_data(
                 password.as_ref().map(|p| p.as_ref()),
                 self.0.nonce.as_ref().unwrap_or(&empty).as_slice(),
-            )
-            .unwrap_or(vec![]);
+            ).ok_or(
+            DriverError(UnknownAuthPlugin(String::from("invalid")))
+        )?;
+
+        let auth_data: &[u8] = auth_data_l.deref();
 
         if self
             .0
@@ -649,9 +663,9 @@ impl Conn {
             .contains(CapabilityFlags::CLIENT_SECURE_CONNECTION)
         {
             body.push(auth_data.len() as u8);
-            body.extend_from_slice(auth_data.as_slice());
+            body.extend_from_slice(auth_data);
         } else {
-            body.extend_from_slice(auth_data.as_slice());
+            body.extend_from_slice(auth_data);
             body.push(0);
         }
 
@@ -690,9 +704,9 @@ impl Conn {
                 .connect_attrs()
                 .iter()
                 .map(|(k, v)| {
-                    mysql_common::misc::lenenc_str_len(k) + mysql_common::misc::lenenc_str_len(v)
+                    mysql_common::misc::lenenc_str_len(k.as_bytes()) + mysql_common::misc::lenenc_str_len(v.as_bytes())
                 })
-                .sum::<usize>();
+                .sum::<u64>();
             body.write_lenenc_int(len as u64).expect("out of memory");
 
             for (name, value) in &self.connect_attrs() {
@@ -703,9 +717,10 @@ impl Conn {
             }
         }
 
-        self.write_command_raw(body)?;
+        self.write_command_raw(&ChangeUser(body))?;
 
-        let response = self.read_packet()?;
+        let response_b = self.read_packet()?;
+        let response : &[u8] = response_b.deref();
         if response[0] == 0xfe {
             self.0.opts.set_user(user.as_ref());
 
@@ -723,11 +738,9 @@ impl Conn {
 
             self.0.stmt_cache.clear();
 
-            self.perform_auth_switch(parse_auth_switch_request(response.as_slice())?)
+            self.perform_auth_switch(AuthSwitchRequest::deserialize((), &mut ParseBuf(response))?)
         } else {
-            let error_packet = parse_err_packet(&*response, self.0.capability_flags)?;
-            self.handle_err();
-            Err(MySqlError(error_packet.into()))
+            Err(DriverError(UnexpectedPacket))
         }
     }
 
@@ -1181,7 +1194,7 @@ impl Conn {
                 Ok(from_value_opt::<usize>(
                     self.get_system_var("max_allowed_packet")?.unwrap_or(NULL),
                 )
-                .unwrap_or(0))
+                    .unwrap_or(0))
             })
             .and_then(|max_allowed_packet| {
                 if max_allowed_packet == 0 {
@@ -1302,9 +1315,9 @@ impl Queryable for Conn {
     }
 
     fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
-    where
-        S: AsStatement,
-        P: Into<Params>,
+        where
+            S: AsStatement,
+            P: Into<Params>,
     {
         let statement = stmt.as_statement(self)?;
         let meta = self._execute(&*statement, params.into())?;
@@ -1354,8 +1367,8 @@ mod test {
         };
 
         fn get_system_variable<T>(conn: &mut Conn, name: &str) -> T
-        where
-            T: FromValue,
+            where
+                T: FromValue,
         {
             conn.query_first::<(String, T), _>(format!("show variables like '{}'", name))
                 .unwrap()
@@ -1598,7 +1611,7 @@ mod test {
                         "321".into(),
                         "2014-06-06".into(),
                         "321.321".into()
-                    )
+                    ),
                 ]
             );
         }
@@ -1647,7 +1660,7 @@ mod test {
                     from_value::<f32>(row1.4.clone()),
                 ),
             )
-            .unwrap();
+                .unwrap();
             conn.exec_drop(
                 &insert_stmt,
                 (
@@ -1658,7 +1671,7 @@ mod test {
                     from_value::<f32>(row2.4.clone()),
                 ),
             )
-            .unwrap();
+                .unwrap();
 
             let select_stmt = conn.prep("SELECT * from mysql.tbl").unwrap();
             let rows: Vec<RowType> = conn.exec(&select_stmt, ()).unwrap();
@@ -1694,7 +1707,7 @@ mod test {
             conn.query_drop(
                 "CREATE TEMPORARY TABLE mysql.tbl(id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, a INT)",
             )
-            .unwrap();
+                .unwrap();
             let _ = conn
                 .start_transaction(TxOpts::default())
                 .and_then(|mut t| {
@@ -1751,9 +1764,9 @@ mod test {
                 vec![Bytes(b"2".to_vec())]
             );
             let mut tx = conn.start_transaction(TxOpts::default()).unwrap();
-            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (3,))
+            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (3, ))
                 .unwrap();
-            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (4,))
+            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (4, ))
                 .unwrap();
             tx.commit().unwrap();
             assert_eq!(
@@ -1766,9 +1779,9 @@ mod test {
                 vec![Bytes(b"4".to_vec())]
             );
             let mut tx = conn.start_transaction(TxOpts::default()).unwrap();
-            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (5,))
+            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (5, ))
                 .unwrap();
-            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (6,))
+            tx.exec_drop("INSERT INTO mysql.tbl(a) VALUES(?)", (6, ))
                 .unwrap();
             drop(tx);
             assert_eq!(
@@ -1776,6 +1789,7 @@ mod test {
                 Some(4_usize),
             );
         }
+
         #[test]
         fn should_handle_LOCAL_INFILE_with_custom_handler() {
             let mut conn = Conn::new(get_opts()).unwrap();
@@ -1800,7 +1814,7 @@ mod test {
                 .query_iter("SELECT * FROM mysql.tbl")
                 .unwrap()
                 .map(|row| {
-                    assert_eq!(from_row::<(Vec<u8>,)>(row.unwrap()).0.len(), 65535);
+                    assert_eq!(from_row::<(Vec<u8>, )>(row.unwrap()).0.len(), 65535);
                     1
                 })
                 .sum::<usize>();
@@ -1814,7 +1828,7 @@ mod test {
                 "CREATE TEMPORARY TABLE `mysql`.`test` \
                  (`test` VARCHAR(255) NULL);",
             )
-            .unwrap();
+                .unwrap();
             conn.query_drop("INSERT INTO `mysql`.`test` (`test`) VALUES ('foo');")
                 .unwrap();
             assert_eq!(conn.affected_rows(), 1);
@@ -1927,7 +1941,7 @@ mod test {
                 INSERT INTO TEST_TABLE (name) VALUES ('two');
                 INSERT INTO TEST_TABLE (name) VALUES ('three');",
             )
-            .unwrap();
+                .unwrap();
             conn.exec_drop("SELECT * FROM TEST_TABLE", ()).unwrap();
 
             let mut query_result = conn
@@ -1962,7 +1976,7 @@ mod test {
                         SELECT REPEAT('A', 17000000);
                     END"#,
             )
-            .unwrap();
+                .unwrap();
             {
                 let mut query_result = conn.query_iter("CALL multi()").unwrap();
                 let result_set = query_result
@@ -2003,8 +2017,8 @@ mod test {
             BEGIN
                 RETURN p_arg + p_arg2;
             END"
-            .run(&mut conn)
-            .unwrap();
+                .run(&mut conn)
+                .unwrap();
 
             "SELECT f1(?, ?)"
                 .with((100u8, 100u8))
@@ -2243,9 +2257,9 @@ mod test {
             }
             conn.exec_drop(
                 r#"INSERT INTO mysql.tbl VALUES ('hello', ?)"#,
-                (Serialized(&decodable),),
+                (Serialized(&decodable), ),
             )
-            .unwrap();
+                .unwrap();
 
             let (a, b): (String, Json) = conn
                 .query_first("SELECT a, b FROM mysql.tbl")
@@ -2260,7 +2274,7 @@ mod test {
             );
 
             let row = conn
-                .exec_first("SELECT a, b FROM mysql.tbl WHERE a = ?", ("hello",))
+                .exec_first("SELECT a, b FROM mysql.tbl WHERE a = ?", ("hello", ))
                 .unwrap()
                 .unwrap();
             let (a, Deserialized(b)) = from_row(row);
@@ -2352,7 +2366,7 @@ mod test {
 
                 for i in 0_u8..100 {
                     "INSERT INTO customers(customer_id) VALUES (?)"
-                        .with((i,))
+                        .with((i, ))
                         .run(&mut conn)?;
                 }
 
@@ -2365,7 +2379,7 @@ mod test {
                 let mut conn = Conn::new(get_opts())?;
 
                 if let Ok(Some(gtid_mode)) =
-                    "SELECT @@GLOBAL.GTID_MODE".first::<String, _>(&mut conn)
+                "SELECT @@GLOBAL.GTID_MODE".first::<String, _>(&mut conn)
                 {
                     if !gtid_mode.starts_with("ON") {
                         panic!(
@@ -2518,7 +2532,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             bencher.iter(|| {
                 let stmt = conn.prep("SELECT ?").unwrap();
-                let _ = conn.exec_drop(&stmt, (0,)).unwrap();
+                let _ = conn.exec_drop(&stmt, (0, )).unwrap();
             })
         }
 
@@ -2544,7 +2558,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             let stmt = conn.prep("SELECT ?").unwrap();
             bencher.iter(|| {
-                let _ = conn.exec_drop(&stmt, (0,)).unwrap();
+                let _ = conn.exec_drop(&stmt, (0, )).unwrap();
             })
         }
 
