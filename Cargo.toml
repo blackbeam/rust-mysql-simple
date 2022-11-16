@@ -41,6 +41,17 @@ default = [
     # use global buffer pool by default
     "buffer-pool",
 ]
+default-rustls = [
+    "rustls-tls",
+    "flate2/zlib",
+    "mysql_common/bigdecimal03",
+    "mysql_common/rust_decimal",
+    "mysql_common/time03",
+    "mysql_common/uuid",
+    "mysql_common/frunk",
+    "buffer-pool",
+]
+minimal = ["flate2/zlib"]
 rustls-tls = ["rustls", "webpki", "webpki-roots", "rustls-pemfile"]
 buffer-pool = []
 nightly = []
