@@ -110,7 +110,7 @@ impl Pool {
     /// Will verify and fix it via `Conn::ping` and `Conn::reset` if `call_ping` is `true`.
     /// Will try to get concrete connection if `id` is `Some(_)`.
     /// Will wait til timeout if `timeout_ms` is `Some(_)`
-    fn _get_conn<T: AsRef<str>>(
+    fn _get_conn<T: AsRef<[u8]>>(
         &self,
         stmt: Option<T>,
         timeout_ms: Option<u32>,
