@@ -8,6 +8,7 @@
 
 use bytes::{Buf, BufMut};
 use mysql_common::{
+    constants::UTF8MB4_GENERAL_CI,
     crypto,
     io::{ParseBuf, ReadMysqlExt},
     misc::raw::Either,
@@ -205,7 +206,10 @@ pub struct Conn(Box<ConnInner>);
 impl Conn {
     /// Returns version number reported by the server.
     pub fn server_version(&self) -> (u16, u16, u16) {
-        self.0.server_version.unwrap()
+        self.0
+            .server_version
+            .or_else(|| self.0.mariadb_server_version)
+            .unwrap()
     }
 
     /// Returns connection identifier.
@@ -662,10 +666,16 @@ impl Conn {
     }
 
     fn do_ssl_request(&mut self) -> Result<()> {
+        let charset = if self.server_version() >= (5, 5, 3) {
+            UTF8MB4_GENERAL_CI
+        } else {
+            UTF8_GENERAL_CI
+        };
+
         let ssl_request = SslRequest::new(
             self.get_client_flags(),
             DEFAULT_MAX_ALLOWED_PACKET as u32,
-            UTF8_GENERAL_CI as u8,
+            charset as u8,
         );
         self.write_struct(&ssl_request)
     }
