@@ -75,11 +75,11 @@ impl InnerStmt {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Statement {
     pub(crate) inner: Arc<InnerStmt>,
-    pub(crate) named_params: Option<Vec<String>>,
+    pub(crate) named_params: Option<Vec<Vec<u8>>>,
 }
 
 impl Statement {
-    pub(crate) fn new(inner: Arc<InnerStmt>, named_params: Option<Vec<String>>) -> Self {
+    pub(crate) fn new(inner: Arc<InnerStmt>, named_params: Option<Vec<Vec<u8>>>) -> Self {
         Self {
             inner,
             named_params,

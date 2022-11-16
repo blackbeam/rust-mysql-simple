@@ -1,6 +1,6 @@
 [package]
 name = "mysql"
-version = "22.2.0"
+version = "23.0.0"
 authors = ["blackbeam"]
 description = "Mysql client library implemented in rust"
 license = "MIT/Apache-2.0"
@@ -41,6 +41,17 @@ default = [
     # use global buffer pool by default
     "buffer-pool",
 ]
+default-rustls = [
+    "rustls-tls",
+    "flate2/zlib",
+    "mysql_common/bigdecimal03",
+    "mysql_common/rust_decimal",
+    "mysql_common/time03",
+    "mysql_common/uuid",
+    "mysql_common/frunk",
+    "buffer-pool",
+]
+minimal = ["flate2/zlib"]
 rustls-tls = ["rustls", "webpki", "webpki-roots", "rustls-pemfile"]
 buffer-pool = []
 nightly = []
@@ -58,8 +69,8 @@ bytes = "1.0.1"
 crossbeam = "0.8.1"
 io-enum = "1.0.0"
 flate2 = { version = "1.0", default-features = false }
-lru = "0.7"
-mysql_common = { version = "0.28.0", default-features = false }
+lru = "0.8.1"
+mysql_common = { version = "0.29.1", default-features = false }
 socket2 = "0.4"
 once_cell = "1.7.2"
 pem = "1.0.1"

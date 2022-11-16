@@ -181,9 +181,9 @@ jobs:
       maxParallel: 10
       matrix:
         v80:
-          DB_VERSION: "8.0"
+          DB_VERSION: "8-debian"
         v57:
-          DB_VERSION: "5.7"
+          DB_VERSION: "5-debian"
         v56:
           DB_VERSION: "5.6"
     steps:
@@ -204,7 +204,7 @@ jobs:
         condition: eq(variables['DB_VERSION'], '5.6')
       - bash: |
           docker exec container bash -l -c "apt-get update"
-          docker exec container bash -l -c "apt-get install -y curl clang libssl-dev pkg-config"
+          docker exec container bash -l -c "apt-get install -y curl clang libssl-dev pkg-config build-essential"
           docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
         displayName: Install Rust in docker
       - bash: |
