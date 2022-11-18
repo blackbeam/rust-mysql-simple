@@ -1,6 +1,6 @@
 [package]
 name = "mysql_wasi"
-version = "22.2.1"
+version = "23.0.0"
 authors = ["blackbeam", "Tricster"]
 description = "Mysql client library implemented in rust for WASI."
 license = "MIT/Apache-2.0"
