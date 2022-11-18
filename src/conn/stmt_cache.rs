@@ -19,16 +19,16 @@ use std::{
 use crate::conn::stmt::InnerStmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct QueryString(pub Arc<String>);
+pub struct QueryString(pub Arc<Vec<u8>>);
 
-impl Borrow<str> for QueryString {
-    fn borrow(&self) -> &str {
+impl Borrow<[u8]> for QueryString {
+    fn borrow(&self) -> &[u8] {
         &**self.0.as_ref()
     }
 }
 
-impl PartialEq<str> for QueryString {
-    fn eq(&self, other: &str) -> bool {
+impl PartialEq<[u8]> for QueryString {
+    fn eq(&self, other: &[u8]) -> bool {
         &**self.0.as_ref() == other
     }
 }
@@ -77,7 +77,7 @@ impl StmtCache {
         }
     }
 
-    pub fn put(&mut self, query: Arc<String>, stmt: Arc<InnerStmt>) -> Option<Arc<InnerStmt>> {
+    pub fn put(&mut self, query: Arc<Vec<u8>>, stmt: Arc<InnerStmt>) -> Option<Arc<InnerStmt>> {
         if self.cap == 0 {
             return None;
         }
@@ -104,7 +104,7 @@ impl StmtCache {
 
     pub fn remove(&mut self, id: u32) {
         if let Some(entry) = self.cache.pop(&id) {
-            self.query_map.remove::<str>(entry.query.borrow());
+            self.query_map.remove::<[u8]>(entry.query.borrow());
         }
     }
 
