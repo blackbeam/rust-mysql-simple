@@ -117,7 +117,9 @@ impl From<FromRowError> for Error {
 
 impl From<MissingNamedParameterError> for Error {
     fn from(MissingNamedParameterError(name): MissingNamedParameterError) -> Error {
-        Error::DriverError(DriverError::MissingNamedParameter(name))
+        Error::DriverError(DriverError::MissingNamedParameter(
+            String::from_utf8_lossy(&name).into_owned(),
+        ))
     }
 }
 
