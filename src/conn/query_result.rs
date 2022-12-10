@@ -8,7 +8,7 @@
 
 pub use mysql_common::proto::{Binary, Text};
 
-use mysql_common::packets::OkPacket;
+use mysql_common::{io::ParseBuf, packets::OkPacket, row::RowDeserializer, value::ServerSide};
 
 use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
@@ -27,13 +27,25 @@ pub trait Protocol: 'static + Send + Sync {
 
 impl Protocol for Text {
     fn next(conn: &mut Conn, columns: Arc<[Column]>) -> Result<Option<Row>> {
-        conn.next_text(columns)
+        match conn.next_row_packet()? {
+            Some(pld) => {
+                let row = ParseBuf(&*pld).parse::<RowDeserializer<(), Text>>(columns)?;
+                Ok(Some(row.into()))
+            }
+            None => Ok(None),
+        }
     }
 }
 
 impl Protocol for Binary {
     fn next(conn: &mut Conn, columns: Arc<[Column]>) -> Result<Option<Row>> {
-        conn.next_bin(columns)
+        match conn.next_row_packet()? {
+            Some(pld) => {
+                let row = ParseBuf(&*pld).parse::<RowDeserializer<ServerSide, Binary>>(columns)?;
+                Ok(Some(row.into()))
+            }
+            None => Ok(None),
+        }
     }
 }
 
