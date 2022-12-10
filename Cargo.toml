@@ -1,6 +1,6 @@
 [package]
 name = "mysql"
-version = "23.0.0"
+version = "23.0.1"
 authors = ["blackbeam"]
 description = "Mysql client library implemented in rust"
 license = "MIT/Apache-2.0"
