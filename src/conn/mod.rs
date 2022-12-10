@@ -17,7 +17,7 @@ use mysql_common::{
         binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
         ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
         HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
-        OldAuthSwitchRequest, ResultSetTerminator, SessionStateInfo,
+        OldAuthSwitchRequest, OldEofPacket, ResultSetTerminator, SessionStateInfo,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
     row::{Row, RowDeserializer},
@@ -204,6 +204,11 @@ impl ConnInner {
 pub struct Conn(Box<ConnInner>);
 
 impl Conn {
+    /// Must not be called before handle_handshake.
+    const fn has_capability(&self, flag: CapabilityFlags) -> bool {
+        self.0.capability_flags.contains(flag)
+    }
+
     /// Returns version number reported by the server.
     pub fn server_version(&self) -> (u16, u16, u16) {
         self.0
@@ -562,10 +567,7 @@ impl Conn {
 
         if self.is_insecure() {
             if let Some(ssl_opts) = self.0.opts.get_ssl_opts().cloned() {
-                if !handshake
-                    .capabilities()
-                    .contains(CapabilityFlags::CLIENT_SSL)
-                {
+                if !self.has_capability(CapabilityFlags::CLIENT_SSL) {
                     return Err(DriverError(TlsNotSupported));
                 } else {
                     self.do_ssl_request()?;
@@ -596,11 +598,7 @@ impl Conn {
         self.write_handshake_response(&auth_plugin, auth_data.as_deref())?;
         self.continue_auth(&auth_plugin, &*nonce, false)?;
 
-        if self
-            .0
-            .capability_flags
-            .contains(CapabilityFlags::CLIENT_COMPRESS)
-        {
+        if self.has_capability(CapabilityFlags::CLIENT_COMPRESS) {
             self.switch_to_compressed();
         }
 
@@ -1080,32 +1078,28 @@ impl Conn {
         self.query_first(format!("SELECT @@{}", name))
     }
 
-    fn next_bin(&mut self, columns: Arc<[Column]>) -> Result<Option<Row>> {
+    fn next_row_packet(&mut self) -> Result<Option<Buffer>> {
         if !self.0.has_results {
             return Ok(None);
         }
-        let pld = self.read_packet()?;
-        if pld[0] == 0xfe && pld.len() < 0xfe {
-            self.0.has_results = false;
-            self.handle_ok::<ResultSetTerminator>(&pld)?;
-            return Ok(None);
-        }
-        let row = ParseBuf(&*pld).parse::<RowDeserializer<ServerSide, Binary>>(columns)?;
-        Ok(Some(row.into()))
-    }
 
-    fn next_text(&mut self, columns: Arc<[Column]>) -> Result<Option<Row>> {
-        if !self.0.has_results {
-            return Ok(None);
-        }
         let pld = self.read_packet()?;
-        if pld[0] == 0xfe && pld.len() < 0xfe {
-            self.0.has_results = false;
-            self.handle_ok::<ResultSetTerminator>(&pld)?;
-            return Ok(None);
+
+        if self.has_capability(CapabilityFlags::CLIENT_DEPRECATE_EOF) {
+            if pld[0] == 0xfe && pld.len() < MAX_PAYLOAD_LEN {
+                self.0.has_results = false;
+                self.handle_ok::<ResultSetTerminator>(&pld)?;
+                return Ok(None);
+            }
+        } else {
+            if pld[0] == 0xfe && pld.len() < 8 {
+                self.0.has_results = false;
+                self.handle_ok::<OldEofPacket>(&pld)?;
+                return Ok(None);
+            }
         }
-        let row = ParseBuf(&*pld).parse::<RowDeserializer<(), Text>>(columns)?;
-        Ok(Some(row.into()))
+
+        Ok(Some(pld))
     }
 
     fn has_stmt(&self, query: &[u8]) -> bool {

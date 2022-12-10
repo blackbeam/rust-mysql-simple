@@ -103,7 +103,7 @@ jobs:
 
   - job: "TestBasicWindows"
     pool:
-      vmImage: "vs2017-win2016"
+      vmImage: "windows-2019"
     strategy:
       maxParallel: 10
       matrix:
@@ -125,7 +125,7 @@ jobs:
           echo socket=MYSQL >> C:\my.cnf
           echo datadir=C:\\ProgramData\\MySQL\\MySQL Server 8.0\\Data\\ >> C:\my.cnf
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld" --install MySQL --defaults-file=C:\my.cnf
-          net start MySql
+          net start MySQL
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -ppassword
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot -ppassword
           "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot -ppassword
