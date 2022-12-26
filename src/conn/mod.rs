@@ -8,7 +8,6 @@
 
 use bytes::{Buf, BufMut};
 use mysql_common::{
-    constants::UTF8MB4_GENERAL_CI,
     crypto,
     io::{ParseBuf, ReadMysqlExt},
     misc::raw::Either,
