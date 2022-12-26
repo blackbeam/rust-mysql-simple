@@ -8,6 +8,7 @@
 
 use bytes::{Buf, BufMut};
 use mysql_common::{
+    constants::UTF8MB4_GENERAL_CI,
     crypto,
     io::{ParseBuf, ReadMysqlExt},
     misc::raw::Either,
@@ -16,7 +17,7 @@ use mysql_common::{
         binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
         ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
         HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
-        OldAuthSwitchRequest, ResultSetTerminator, SessionStateInfo,
+        OldAuthSwitchRequest, OldEofPacket, ResultSetTerminator, SessionStateInfo,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
     row::{Row, RowDeserializer},
@@ -217,9 +218,17 @@ impl ConnInner {
 pub struct Conn(Box<ConnInner>);
 
 impl Conn {
+    /// Must not be called before handle_handshake.
+    const fn has_capability(&self, flag: CapabilityFlags) -> bool {
+        self.0.capability_flags.contains(flag)
+    }
+
     /// Returns version number reported by the server.
     pub fn server_version(&self) -> (u16, u16, u16) {
-        self.0.server_version.unwrap()
+        self.0
+            .server_version
+            .or_else(|| self.0.mariadb_server_version)
+            .unwrap()
     }
 
     /// Returns connection identifier.
@@ -572,10 +581,7 @@ impl Conn {
 
         if self.is_insecure() {
             if let Some(ssl_opts) = self.0.opts.get_ssl_opts().cloned() {
-                if !handshake
-                    .capabilities()
-                    .contains(CapabilityFlags::CLIENT_SSL)
-                {
+                if !self.has_capability(CapabilityFlags::CLIENT_SSL) {
                     return Err(DriverError(TlsNotSupported));
                 } else {
                     self.do_ssl_request()?;
@@ -606,11 +612,7 @@ impl Conn {
         self.write_handshake_response(&auth_plugin, auth_data.as_deref())?;
         self.continue_auth(&auth_plugin, &*nonce, false)?;
 
-        if self
-            .0
-            .capability_flags
-            .contains(CapabilityFlags::CLIENT_COMPRESS)
-        {
+        if self.has_capability(CapabilityFlags::CLIENT_COMPRESS) {
             self.switch_to_compressed();
         }
 
@@ -803,10 +805,16 @@ impl Conn {
     }
 
     fn do_ssl_request(&mut self) -> Result<()> {
+        let charset = if self.server_version() >= (5, 5, 3) {
+            UTF8MB4_GENERAL_CI
+        } else {
+            UTF8_GENERAL_CI
+        };
+
         let ssl_request = SslRequest::new(
             self.get_client_flags(),
             DEFAULT_MAX_ALLOWED_PACKET as u32,
-            UTF8_GENERAL_CI as u8,
+            charset as u8,
         );
         self.write_struct(&ssl_request)
     }
@@ -1142,8 +1150,8 @@ impl Conn {
         Ok(Transaction::new(self.into()))
     }
 
-    fn _true_prepare(&mut self, query: &str) -> Result<InnerStmt> {
-        self.write_command(Command::COM_STMT_PREPARE, query.as_bytes())?;
+    fn _true_prepare(&mut self, query: &[u8]) -> Result<InnerStmt> {
+        self.write_command(Command::COM_STMT_PREPARE, query)?;
         let pld = self.read_packet()?;
         let mut stmt = ParseBuf(&*pld).parse::<InnerStmt>(self.connection_id())?;
         if stmt.num_params() > 0 {
@@ -1167,7 +1175,7 @@ impl Conn {
         Ok(stmt)
     }
 
-    fn _prepare(&mut self, query: &str) -> Result<Arc<InnerStmt>> {
+    fn _prepare(&mut self, query: &[u8]) -> Result<Arc<InnerStmt>> {
         if let Some(entry) = self.0.stmt_cache.by_query(query) {
             return Ok(entry.stmt.clone());
         }
@@ -1211,35 +1219,31 @@ impl Conn {
         self.query_first(format!("SELECT @@{}", name))
     }
 
-    fn next_bin(&mut self, columns: Arc<[Column]>) -> Result<Option<Row>> {
+    fn next_row_packet(&mut self) -> Result<Option<Buffer>> {
         if !self.0.has_results {
             return Ok(None);
         }
+
         let pld = self.read_packet()?;
-        if pld[0] == 0xfe && pld.len() < 0xfe {
-            self.0.has_results = false;
-            self.handle_ok::<ResultSetTerminator>(&pld)?;
-            return Ok(None);
+
+        if self.has_capability(CapabilityFlags::CLIENT_DEPRECATE_EOF) {
+            if pld[0] == 0xfe && pld.len() < MAX_PAYLOAD_LEN {
+                self.0.has_results = false;
+                self.handle_ok::<ResultSetTerminator>(&pld)?;
+                return Ok(None);
+            }
+        } else {
+            if pld[0] == 0xfe && pld.len() < 8 {
+                self.0.has_results = false;
+                self.handle_ok::<OldEofPacket>(&pld)?;
+                return Ok(None);
+            }
         }
-        let row = ParseBuf(&*pld).parse::<RowDeserializer<ServerSide, Binary>>(columns)?;
-        Ok(Some(row.into()))
+
+        Ok(Some(pld))
     }
 
-    fn next_text(&mut self, columns: Arc<[Column]>) -> Result<Option<Row>> {
-        if !self.0.has_results {
-            return Ok(None);
-        }
-        let pld = self.read_packet()?;
-        if pld[0] == 0xfe && pld.len() < 0xfe {
-            self.0.has_results = false;
-            self.handle_ok::<ResultSetTerminator>(&pld)?;
-            return Ok(None);
-        }
-        let row = ParseBuf(&*pld).parse::<RowDeserializer<(), Text>>(columns)?;
-        Ok(Some(row.into()))
-    }
-
-    fn has_stmt(&self, query: &str) -> bool {
+    fn has_stmt(&self, query: &[u8]) -> bool {
         self.0.stmt_cache.contains_query(query)
     }
 
@@ -1303,7 +1307,7 @@ impl Queryable for Conn {
 
     fn prep<T: AsRef<str>>(&mut self, query: T) -> Result<Statement> {
         let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query)?;
+        let (named_params, real_query) = parse_named_params(query.as_bytes())?;
         self._prepare(real_query.borrow())
             .map(|inner| Statement::new(inner, named_params))
     }
@@ -2225,9 +2229,9 @@ mod test {
                 .stmt_cache
                 .iter()
                 .map(|(_, entry)| &**entry.query.0.as_ref())
-                .collect::<Vec<&str>>();
+                .collect::<Vec<&[u8]>>();
             order.sort();
-            assert_eq!(order, &["DO 3", "DO 5", "DO 6"]);
+            assert_eq!(order, &[b"DO 3", b"DO 5", b"DO 6"]);
         }
 
         #[test]
