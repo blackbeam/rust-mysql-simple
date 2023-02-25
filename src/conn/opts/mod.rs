@@ -214,6 +214,17 @@ pub(crate) struct InnerOpts {
     /// Available via `secure_auth` connection url parameter.
     secure_auth: bool,
 
+    /// Enables Client-Side Cleartext Pluggable Authentication (defaults to `false`).
+    ///
+    /// Enables client to send passwords to the server as cleartext, without hashing or encryption
+    /// (consult MySql documentation for more info).
+    ///
+    /// # Security Notes
+    ///
+    /// Sending passwords as cleartext may be a security problem in some configurations. Please
+    /// consider using TLS or encrypted tunnels for server connection.
+    enable_cleartext_plugin: bool,
+
     /// For tests only
     #[cfg(test)]
     pub injected_socket: Option<String>,
@@ -249,6 +260,7 @@ impl Default for InnerOpts {
             additional_capabilities: CapabilityFlags::empty(),
             connect_attrs: HashMap::new(),
             secure_auth: true,
+            enable_cleartext_plugin: false,
             #[cfg(test)]
             injected_socket: None,
         }
@@ -467,6 +479,31 @@ impl Opts {
     pub fn get_secure_auth(&self) -> bool {
         self.0.secure_auth
     }
+
+    /// Returns `true` if `mysql_clear_password` plugin support is enabled (defaults to `false`).
+    ///
+    /// `mysql_clear_password` enables client to send passwords to the server as cleartext, without
+    /// hashing or encryption (consult MySql documentation for more info).
+    ///
+    /// # Security Notes
+    ///
+    /// Sending passwords as cleartext may be a security problem in some configurations. Please
+    /// consider using TLS or encrypted tunnels for server connection.
+    ///
+    /// # Connection URL
+    ///
+    /// Use `enable_cleartext_plugin` URL parameter to set this value. E.g.
+    ///
+    /// ```
+    /// # use mysql::*;
+    /// # fn main() -> Result<()> {
+    /// let opts = Opts::from_url("mysql://localhost/db?enable_cleartext_plugin=true")?;
+    /// assert!(opts.get_enable_cleartext_plugin());
+    /// # Ok(()) }
+    /// ```
+    pub fn get_enable_cleartext_plugin(&self) -> bool {
+        self.0.enable_cleartext_plugin
+    }
 }
 
 /// Provides a way to build [`Opts`](struct.Opts.html).
@@ -564,6 +601,12 @@ impl OptsBuilder {
                         }
                     }
                 }
+                "enable_cleartext_plugin" => match value.parse::<bool>() {
+                    Ok(parsed) => self.opts.0.enable_cleartext_plugin = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 "secure_auth" => match value.parse::<bool>() {
                     Ok(parsed) => self.opts.0.secure_auth = parsed,
                     Err(_) => {
@@ -926,6 +969,32 @@ impl OptsBuilder {
     /// Available via `secure_auth` connection url parameter.
     pub fn secure_auth(mut self, secure_auth: bool) -> Self {
         self.opts.0.secure_auth = secure_auth;
+        self
+    }
+
+    /// Enables Client-Side Cleartext Pluggable Authentication (defaults to `false`).
+    ///
+    /// Enables client to send passwords to the server as cleartext, without hashing or encryption
+    /// (consult MySql documentation for more info).
+    ///
+    /// # Security Notes
+    ///
+    /// Sending passwords as cleartext may be a security problem in some configurations. Please
+    /// consider using TLS or encrypted tunnels for server connection.
+    ///
+    /// # Connection URL
+    ///
+    /// Use `enable_cleartext_plugin` URL parameter to set this value. E.g.
+    ///
+    /// ```
+    /// # use mysql::*;
+    /// # fn main() -> Result<()> {
+    /// let opts = Opts::from_url("mysql://localhost/db?enable_cleartext_plugin=true")?;
+    /// assert!(opts.get_enable_cleartext_plugin());
+    /// # Ok(()) }
+    /// ```
+    pub fn enable_cleartext_plugin(mut self, enable_cleartext_plugin: bool) -> Self {
+        self.opts.0.enable_cleartext_plugin = enable_cleartext_plugin;
         self
     }
 }
