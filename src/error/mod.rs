@@ -342,7 +342,7 @@ impl From<ParseError> for UrlError {
     }
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T, E = Error> = result::Result<T, E>;
 
 /// Server error codes (u16)
 #[allow(non_camel_case_types)]
