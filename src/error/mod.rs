@@ -216,6 +216,7 @@ pub enum DriverError {
     MixedParams,
     UnknownAuthPlugin(String),
     OldMysqlPasswordDisabled,
+    CleartextPluginDisabled,
 }
 
 impl error::Error for DriverError {
@@ -278,6 +279,9 @@ impl fmt::Display for DriverError {
                     f,
                     "`old_mysql_password` plugin is insecure and disabled by default",
                 )
+            }
+            DriverError::CleartextPluginDisabled => {
+                write!(f, "mysql_clear_password must be enabled on the client side")
             }
         }
     }

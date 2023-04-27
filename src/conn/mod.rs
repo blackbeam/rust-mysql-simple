@@ -11,7 +11,6 @@ use mysql_common::{
     constants::UTF8MB4_GENERAL_CI,
     crypto,
     io::{ParseBuf, ReadMysqlExt},
-    misc::raw::{bytes::NullBytes, Either, RawBytes},
     named_params::parse_named_params,
     packets::{
         binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
@@ -57,9 +56,9 @@ use crate::{
     io::Stream,
     prelude::*,
     DriverError::{
-        MismatchedStmtParams, NamedParamsForPositionalQuery, OldMysqlPasswordDisabled,
-        Protocol41NotSet, ReadOnlyTransNotSupported, SetupError, UnexpectedPacket,
-        UnknownAuthPlugin, UnsupportedProtocol,
+        CleartextPluginDisabled, MismatchedStmtParams, NamedParamsForPositionalQuery,
+        OldMysqlPasswordDisabled, Protocol41NotSet, ReadOnlyTransNotSupported, SetupError,
+        UnexpectedPacket, UnknownAuthPlugin, UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
     LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Transaction,
@@ -539,38 +538,37 @@ impl Conn {
             AuthPlugin::Other(Cow::Borrowed(b"mysql_clear_password"))
         ) {
             if !self.0.opts.get_enable_cleartext_plugin() {
-                return Err(DriverError(UnknownAuthPlugin(
-                    "mysql_clear_password".into(),
-                )));
+                return Err(DriverError(CleartextPluginDisabled));
             }
         }
 
         let nonce = auth_switch_request.plugin_data();
         let plugin_data = match auth_switch_request.auth_plugin() {
             x @ AuthPlugin::MysqlOldPassword => {
-                x.gen_data(self.0.opts.get_pass(), nonce).map(Either::Left)
-            }
-            x @ AuthPlugin::MysqlNativePassword => {
-                x.gen_data(self.0.opts.get_pass(), nonce).map(Either::Left)
-            }
-            x @ AuthPlugin::CachingSha2Password => {
-                x.gen_data(self.0.opts.get_pass(), nonce).map(Either::Left)
-            }
-            AuthPlugin::Other(ref name) => {
-                if name.as_ref() == b"mysql_clear_password" {
-                    Some(Either::Right(Either::Left(
-                        RawBytes::<NullBytes>::new(
-                            self.0.opts.get_pass().unwrap_or_default().as_bytes(),
-                        )
-                        .into_owned(),
-                    )))
-                } else {
-                    Some(Either::Right(Either::Right([])))
+                if self.0.opts.get_secure_auth() {
+                    return Err(DriverError(OldMysqlPasswordDisabled));
                 }
+                x.gen_data(self.0.opts.get_pass(), nonce)
             }
+            x @ AuthPlugin::MysqlNativePassword => x.gen_data(self.0.opts.get_pass(), nonce),
+            x @ AuthPlugin::CachingSha2Password => x.gen_data(self.0.opts.get_pass(), nonce),
+            x @ AuthPlugin::MysqlClearPassword => {
+                if !self.0.opts.get_enable_cleartext_plugin() {
+                    return Err(DriverError(UnknownAuthPlugin(
+                        "mysql_clear_password".into(),
+                    )));
+                }
+
+                x.gen_data(self.0.opts.get_pass(), nonce)
+            }
+            AuthPlugin::Other(_) => None,
+        };
+
+        if let Some(plugin_data) = plugin_data {
+            self.write_struct(&plugin_data.into_owned())?;
+        } else {
+            self.write_packet(&mut &[0_u8; 0][..])?;
         }
-        .unwrap_or_else(|| Either::Right(Either::Right([])));
-        self.write_struct(&plugin_data)?;
         self.continue_auth(&auth_switch_request.auth_plugin(), nonce, true)
     }
 
@@ -622,7 +620,9 @@ impl Conn {
             _ => AuthPlugin::MysqlNativePassword,
         };
 
-        let auth_data = auth_plugin.gen_data(self.0.opts.get_pass(), &*nonce);
+        let auth_data = auth_plugin
+            .gen_data(self.0.opts.get_pass(), &*nonce)
+            .map(|x| x.into_owned());
         self.write_handshake_response(&auth_plugin, auth_data.as_deref())?;
         self.continue_auth(&auth_plugin, &*nonce, false)?;
 
@@ -741,16 +741,16 @@ impl Conn {
                 self.continue_mysql_native_password_auth(nonce, auth_switched)?;
                 Ok(())
             }
-            AuthPlugin::Other(ref name) => {
-                if name.as_ref() == b"mysql_clear_password"
-                    && self.0.opts.get_enable_cleartext_plugin()
-                {
-                    self.continue_mysql_native_password_auth(nonce, auth_switched)?;
-                    Ok(())
-                } else {
-                    let plugin_name = String::from_utf8_lossy(name).into();
-                    Err(DriverError(UnknownAuthPlugin(plugin_name)))
+            AuthPlugin::MysqlClearPassword => {
+                if !self.0.opts.get_enable_cleartext_plugin() {
+                    return Err(DriverError(CleartextPluginDisabled));
                 }
+                self.continue_mysql_native_password_auth(nonce, auth_switched)?;
+                Ok(())
+            }
+            AuthPlugin::Other(ref name) => {
+                let plugin_name = String::from_utf8_lossy(name).into();
+                Err(DriverError(UnknownAuthPlugin(plugin_name)))
             }
         }
     }
