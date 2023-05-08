@@ -45,11 +45,11 @@ jobs:
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
 
-          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk
 
-          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
-          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk
+          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:root@localhost:3306/mysql
@@ -91,11 +91,11 @@ jobs:
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
 
-          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk
 
-          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
-          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk
+          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root@localhost/mysql
@@ -142,11 +142,11 @@ jobs:
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
 
-          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk
 
-          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
-          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk
+          SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk
+          SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@localhost/mysql
@@ -214,11 +214,11 @@ jobs:
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
 
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk"
 
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk"
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@localhost/mysql
@@ -286,11 +286,11 @@ jobs:
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test"
 
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time03,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,flate2/zlib,mysql_common/time,mysql_common/frunk"
 
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time03,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features flate2/zlib,mysql_common/time,mysql_common/frunk"
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@localhost/mysql

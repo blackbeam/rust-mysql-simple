@@ -938,7 +938,7 @@ pub mod prelude {
     #[doc(inline)]
     pub use crate::myc::row::ColumnIndex;
     #[doc(inline)]
-    pub use crate::myc::value::convert::{ConvIr, FromValue, ToValue};
+    pub use crate::myc::value::convert::{FromValue, ToValue};
 
     /// Trait for protocol markers [`crate::Binary`] and [`crate::Text`].
     pub trait Protocol: crate::conn::query_result::Protocol {}
