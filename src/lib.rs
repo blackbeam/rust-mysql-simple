@@ -896,7 +896,10 @@ pub use crate::conn::local_infile::{LocalInfile, LocalInfileHandler};
 #[doc(inline)]
 pub use crate::conn::opts::SslOpts;
 #[doc(inline)]
-pub use crate::conn::opts::{Opts, OptsBuilder, DEFAULT_STMT_CACHE_SIZE};
+pub use crate::conn::opts::{
+    pool_opts::{PoolConstraints, PoolOpts},
+    Opts, OptsBuilder, DEFAULT_STMT_CACHE_SIZE,
+};
 #[doc(inline)]
 pub use crate::conn::pool::{Pool, PooledConn};
 #[doc(inline)]

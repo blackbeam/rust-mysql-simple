@@ -13,13 +13,17 @@ use std::{
     borrow::Cow, collections::HashMap, hash::Hash, net::SocketAddr, path::Path, time::Duration,
 };
 
-use crate::{consts::CapabilityFlags, Compression, LocalInfileHandler, UrlError};
+use crate::{
+    consts::CapabilityFlags, Compression, LocalInfileHandler, PoolConstraints, PoolOpts, UrlError,
+};
 
 /// Default value for client side per-connection statement cache.
 pub const DEFAULT_STMT_CACHE_SIZE: usize = 32;
 
 mod native_tls_opts;
 mod rustls_opts;
+
+pub mod pool_opts;
 
 #[cfg(feature = "native-tls")]
 pub use native_tls_opts::ClientIdentity;
@@ -158,6 +162,9 @@ pub(crate) struct InnerOpts {
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
     ssl_opts: Option<SslOpts>,
 
+    /// Connection pool options (defaults to [`PoolOpts::default`]).
+    pool_opts: PoolOpts,
+
     /// Callback to handle requests for local files.
     ///
     /// These are caused by using `LOAD DATA LOCAL INFILE` queries.
@@ -244,6 +251,7 @@ impl Default for InnerOpts {
             prefer_socket: true,
             init: vec![],
             ssl_opts: None,
+            pool_opts: PoolOpts::default(),
             tcp_keepalive_time: None,
             #[cfg(any(target_os = "linux", target_os = "macos",))]
             tcp_keepalive_probe_interval_secs: None,
@@ -352,6 +360,11 @@ impl Opts {
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
     pub fn get_ssl_opts(&self) -> Option<&SslOpts> {
         self.0.ssl_opts.as_ref()
+    }
+
+    /// Connection pool options (defaults to [`Default::default`]).
+    pub fn get_pool_opts(&self) -> &PoolOpts {
+        &self.0.pool_opts
     }
 
     /// Whether `TCP_NODELAY` will be set for mysql connection.
@@ -555,6 +568,8 @@ impl OptsBuilder {
     /// OptsBuilder::new().from_hash_map(client);
     /// ```
     /// `HashMap` key,value pairs:
+    /// - pool_min = upper bound for [`PoolConstraints`]
+    /// - pool_max = lower bound for [`PoolConstraints`]
     /// - user = Username
     /// - password = Password
     /// - host = Host name or ip address
@@ -575,8 +590,23 @@ impl OptsBuilder {
     ///
     /// **Note:** You do **not** have to use myloginrs lib.
     pub fn from_hash_map(mut self, client: &HashMap<String, String>) -> Result<Self, UrlError> {
+        let mut pool_min = PoolConstraints::DEFAULT.min();
+        let mut pool_max = PoolConstraints::DEFAULT.max();
+
         for (key, value) in client.iter() {
             match key.as_str() {
+                "pool_min" => match value.parse::<usize>() {
+                    Ok(parsed) => pool_min = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
+                "pool_max" => match value.parse::<usize>() {
+                    Ok(parsed) => pool_max = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 "user" => self.opts.0.user = Some(value.to_string()),
                 "password" => self.opts.0.pass = Some(value.to_string()),
                 "host" => {
@@ -682,12 +712,30 @@ impl OptsBuilder {
                         return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
                     }
                 },
+                "reset_connection" => match value.parse::<bool>() {
+                    Ok(parsed) => {
+                        self.opts.0.pool_opts = self.opts.0.pool_opts.with_reset_connection(parsed)
+                    }
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 _ => {
                     //throw an error if there is an unrecognized param
                     return Err(UrlError::UnknownParameter(key.to_string()));
                 }
             }
         }
+
+        if let Some(pool_constraints) = PoolConstraints::new(pool_min, pool_max) {
+            self.opts.0.pool_opts = self.opts.0.pool_opts.with_constraints(pool_constraints);
+        } else {
+            return Err(UrlError::InvalidPoolConstraints {
+                min: pool_min,
+                max: pool_max,
+            });
+        }
+
         Ok(self)
     }
 
@@ -827,6 +875,14 @@ impl OptsBuilder {
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
     pub fn ssl_opts<T: Into<Option<SslOpts>>>(mut self, ssl_opts: T) -> Self {
         self.opts.0.ssl_opts = ssl_opts.into();
+        self
+    }
+
+    /// Connection pool options (see [`Opts::get_pool_opts`]).
+    ///
+    /// Pass `None` to reset to default.
+    pub fn pool_opts<T: Into<Option<PoolOpts>>>(mut self, pool_opts: T) -> Self {
+        self.opts.0.pool_opts = pool_opts.into().unwrap_or_default();
         self
     }
 

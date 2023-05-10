@@ -302,6 +302,10 @@ pub enum UrlError {
     /// (feature_name, value)
     InvalidValue(String, String),
     UnknownParameter(String),
+    InvalidPoolConstraints {
+        min: usize,
+        max: usize,
+    },
     BadUrl,
 }
 
@@ -328,6 +332,13 @@ impl fmt::Display for UrlError {
             ),
             UrlError::UnknownParameter(ref parameter) => {
                 write!(f, "Unknown URL parameter `{}'", parameter)
+            }
+            UrlError::InvalidPoolConstraints { min, max } => {
+                write!(
+                    f,
+                    "Invalid pool constraints: pool_min ({}) > pool_max ({})",
+                    min, max
+                )
             }
             UrlError::BadUrl => write!(f, "Invalid or incomplete connection URL"),
         }
