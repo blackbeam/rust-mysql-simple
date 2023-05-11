@@ -898,7 +898,7 @@ pub use crate::conn::opts::SslOpts;
 #[doc(inline)]
 pub use crate::conn::opts::{
     pool_opts::{PoolConstraints, PoolOpts},
-    Opts, OptsBuilder, DEFAULT_STMT_CACHE_SIZE,
+    ChangeUserOpts, Opts, OptsBuilder, DEFAULT_STMT_CACHE_SIZE,
 };
 #[doc(inline)]
 pub use crate::conn::pool::{Pool, PooledConn};

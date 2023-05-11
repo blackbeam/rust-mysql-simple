@@ -26,6 +26,7 @@ macro_rules! const_assert {
 pub struct PoolOpts {
     constraints: PoolConstraints,
     reset_connection: bool,
+    check_health: bool,
 }
 
 impl PoolOpts {
@@ -45,13 +46,13 @@ impl PoolOpts {
         self.constraints
     }
 
-    /// Sets whether to reset connection upon returning it to a pool (defaults to `true`).
+    /// Sets whether to reset the connection upon returning it to a pool (defaults to `true`).
     ///
     /// Default behavior increases reliability but comes with cons:
     ///
     /// * reset procedure removes all prepared statements, i.e. kills prepared statements cache
     /// * connection reset is quite fast but requires additional client-server roundtrip
-    ///   (might also requires requthentication for older servers)
+    ///   (might require re-authentication for older servers)
     ///
     /// The purpose of the reset procedure is to:
     ///
@@ -62,7 +63,7 @@ impl PoolOpts {
     /// * remove temporary tables
     /// * remove all PREPARE statement (this action kills prepared statements cache)
     ///
-    /// So to encrease overall performance you can safely opt-out of the default behavior
+    /// So to increase overall performance you can safely opt-out of the default behavior
     /// if you are not willing to change the session state in an unpleasant way.
     ///
     /// It is also possible to selectively opt-in/out using [`Conn::reset_connection`].
@@ -88,6 +89,31 @@ impl PoolOpts {
     pub fn reset_connection(&self) -> bool {
         self.reset_connection
     }
+
+    /// Sets whether to check connection health upon retrieving it from a pool (defaults to `true`).
+    ///
+    /// If `true`, then `Conn::ping` will be invoked on a non-fresh pooled connection.
+    ///
+    /// # Connection URL
+    ///
+    /// Use `check_health` URL parameter to set this value. E.g.
+    ///
+    /// ```
+    /// # use mysql::*;
+    /// # use std::time::Duration;
+    /// # fn main() -> Result<()> {
+    /// let opts = Opts::from_url("mysql://localhost/db?check_health=false")?;
+    /// assert_eq!(opts.get_pool_opts().check_health(), false);
+    /// # Ok(()) }
+    /// ```
+    pub fn with_check_health(mut self, check_health: bool) -> Self {
+        self.check_health = check_health;
+        self
+    }
+
+    pub fn check_health(&self) -> bool {
+        self.check_health
+    }
 }
 
 impl Default for PoolOpts {
@@ -95,6 +121,7 @@ impl Default for PoolOpts {
         Self {
             constraints: PoolConstraints::DEFAULT,
             reset_connection: true,
+            check_health: true,
         }
     }
 }
@@ -112,6 +139,16 @@ const_assert!(
     _DEFAULT_POOL_CONSTRAINTS_ARE_CORRECT,
     PoolConstraints::DEFAULT.min <= PoolConstraints::DEFAULT.max,
 );
+
+pub struct Assert<const L: usize, const R: usize>;
+impl<const L: usize, const R: usize> Assert<L, R> {
+    pub const LEQ: usize = R - L;
+}
+
+#[allow(path_statements)]
+pub const fn gte<const M: usize, const N: usize>() {
+    Assert::<M, N>::LEQ;
+}
 
 impl PoolConstraints {
     /// Default pool constraints.
@@ -136,6 +173,11 @@ impl PoolConstraints {
         } else {
             None
         }
+    }
+
+    pub const fn new_const<const MIN: usize, const MAX: usize>() -> PoolConstraints {
+        gte::<MIN, MAX>();
+        PoolConstraints { min: MIN, max: MAX }
     }
 
     /// Lower bound of this pool constraints.
