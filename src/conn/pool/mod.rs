@@ -71,16 +71,12 @@ impl Pool {
     fn _get_conn<T: AsRef<[u8]>>(
         &self,
         stmt: Option<T>,
-        timeout_ms: Option<u32>,
+        timeout: Option<Duration>,
         mut call_ping: bool,
     ) -> Result<PooledConn> {
-        let times = if let Some(timeout_ms) = timeout_ms {
-            Some((Instant::now(), Duration::from_millis(timeout_ms.into())))
-        } else {
-            None
-        };
+        let times = timeout.map(|timeout| (Instant::now(), timeout));
 
-        let &(ref protected, ref condvar) = self.inner.protected();
+        let (protected, condvar) = self.inner.protected();
 
         let conn = if !self.inner.opts().reset_connection() {
             // stmt cache considered enabled if reset_connection is false
@@ -122,7 +118,7 @@ impl Pool {
         if call_ping && self.inner.opts().check_health() && !conn.ping() {
             // existing connection seem to be dead, retrying..
             self.inner.decrease();
-            return self._get_conn(stmt, timeout_ms, call_ping);
+            return self._get_conn(stmt, timeout, call_ping);
         }
 
         Ok(PooledConn {
@@ -147,13 +143,13 @@ impl Pool {
         self._get_conn(None::<String>, None, true)
     }
 
-    /// Will try to get connection for a duration of `timeout_ms` milliseconds.
+    /// Will try to get connection for the duration of `timeout`.
     ///
     /// # Failure
     /// This function will return `Error::DriverError(DriverError::Timeout)` if timeout was
     /// reached while waiting for new connection to become available.
-    pub fn try_get_conn(&self, timeout_ms: u32) -> Result<PooledConn> {
-        self._get_conn(None::<String>, Some(timeout_ms), true)
+    pub fn try_get_conn(&self, timeout: Duration) -> Result<PooledConn> {
+        self._get_conn(None::<String>, Some(timeout), true)
     }
 
     /// Shortcut for `pool.get_conn()?.start_transaction(..)`.
@@ -489,15 +485,15 @@ mod test {
                 PoolOpts::default().with_constraints(PoolConstraints::new_const::<0, 1>()),
             ))
             .unwrap();
-            let conn1 = pool.try_get_conn(357).unwrap();
-            let conn2 = pool.try_get_conn(357);
+            let conn1 = pool.try_get_conn(Duration::from_millis(357)).unwrap();
+            let conn2 = pool.try_get_conn(Duration::from_millis(357));
             assert!(conn2.is_err());
             match conn2 {
                 Err(Error::DriverError(DriverError::Timeout)) => assert!(true),
                 _ => assert!(false),
             }
             drop(conn1);
-            assert!(pool.try_get_conn(357).is_ok());
+            assert!(pool.try_get_conn(Duration::from_millis(357)).is_ok());
         }
 
         #[test]

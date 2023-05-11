@@ -135,9 +135,9 @@ impl Deref for ConnMut<'_, '_, '_> {
 
     fn deref(&self) -> &Conn {
         match self {
-            ConnMut::Mut(conn) => &**conn,
-            ConnMut::TxMut(tx) => &*tx.conn,
-            ConnMut::Owned(conn) => &conn,
+            ConnMut::Mut(conn) => conn,
+            ConnMut::TxMut(tx) => &tx.conn,
+            ConnMut::Owned(conn) => conn,
             ConnMut::Pooled(conn) => conn.as_ref(),
         }
     }
@@ -146,8 +146,8 @@ impl Deref for ConnMut<'_, '_, '_> {
 impl DerefMut for ConnMut<'_, '_, '_> {
     fn deref_mut(&mut self) -> &mut Conn {
         match self {
-            ConnMut::Mut(ref mut conn) => &mut **conn,
-            ConnMut::TxMut(tx) => &mut *tx.conn,
+            ConnMut::Mut(conn) => conn,
+            ConnMut::TxMut(tx) => &mut tx.conn,
             ConnMut::Owned(ref mut conn) => conn,
             ConnMut::Pooled(ref mut conn) => conn.as_mut(),
         }
@@ -222,7 +222,7 @@ impl Conn {
     pub fn server_version(&self) -> (u16, u16, u16) {
         self.0
             .server_version
-            .or_else(|| self.0.mariadb_server_version)
+            .or(self.0.mariadb_server_version)
             .unwrap()
     }
 
@@ -477,7 +477,7 @@ impl Conn {
         let tcp_connect_timeout = opts.get_tcp_connect_timeout();
         let bind_address = opts.bind_address().cloned();
         let stream = if let Some(socket) = opts.get_socket() {
-            Stream::connect_socket(&*socket, read_timeout, write_timeout)?
+            Stream::connect_socket(socket, read_timeout, write_timeout)?
         } else {
             let port = opts.get_tcp_port();
             let ip_or_hostname = match opts.get_host() {
@@ -486,7 +486,7 @@ impl Conn {
                 url::Host::Ipv6(ip) => ip.to_string(),
             };
             Stream::connect_tcp(
-                &*ip_or_hostname,
+                &ip_or_hostname,
                 port,
                 read_timeout,
                 write_timeout,
@@ -519,7 +519,7 @@ impl Conn {
             let mut buffer = get_buffer();
             match self.raw_read_packet(buffer.as_mut()) {
                 Ok(()) if buffer.first() == Some(&0xff) => {
-                    match ParseBuf(&*buffer).parse(self.0.capability_flags)? {
+                    match ParseBuf(&buffer).parse(self.0.capability_flags)? {
                         ErrPacket::Error(server_error) => {
                             self.handle_err();
                             return Err(MySqlError(From::from(server_error)));
@@ -567,7 +567,7 @@ impl Conn {
         &mut self,
         buffer: &'a Buffer,
     ) -> crate::Result<OkPacket<'a>> {
-        let ok = ParseBuf(&**buffer)
+        let ok = ParseBuf(buffer)
             .parse::<OkPacketDeserializer<T>>(self.0.capability_flags)?
             .into_inner();
         self.0.status_flags = ok.status_flags();
@@ -591,19 +591,17 @@ impl Conn {
         if matches!(
             auth_switch_request.auth_plugin(),
             AuthPlugin::MysqlOldPassword
-        ) {
-            if self.0.opts.get_secure_auth() {
-                return Err(DriverError(OldMysqlPasswordDisabled));
-            }
+        ) && self.0.opts.get_secure_auth()
+        {
+            return Err(DriverError(OldMysqlPasswordDisabled));
         }
 
         if matches!(
             auth_switch_request.auth_plugin(),
             AuthPlugin::Other(Cow::Borrowed(b"mysql_clear_password"))
-        ) {
-            if !self.0.opts.get_enable_cleartext_plugin() {
-                return Err(DriverError(CleartextPluginDisabled));
-            }
+        ) && !self.0.opts.get_enable_cleartext_plugin()
+        {
+            return Err(DriverError(CleartextPluginDisabled));
         }
 
         self.0.nonce = auth_switch_request.plugin_data().to_vec();
@@ -644,7 +642,7 @@ impl Conn {
 
     fn do_handshake(&mut self) -> Result<()> {
         let payload = self.read_packet()?;
-        let handshake = ParseBuf(&*payload).parse::<HandshakePacket>(())?;
+        let handshake = ParseBuf(&payload).parse::<HandshakePacket>(())?;
 
         if handshake.protocol_version() != 10u8 {
             return Err(DriverError(UnsupportedProtocol(
@@ -738,7 +736,7 @@ impl Conn {
             None => {
                 let arg0 = std::env::args_os().next();
                 let arg0 = arg0.as_ref().map(|x| x.to_string_lossy());
-                arg0.unwrap_or_else(|| "".into()).to_owned().to_string()
+                arg0.unwrap_or_else(|| "".into()).into_owned()
             }
         };
 
@@ -777,7 +775,7 @@ impl Conn {
         let auth_data = self
             .0
             .auth_plugin
-            .gen_data(self.0.opts.get_pass(), &*self.0.nonce)
+            .gen_data(self.0.opts.get_pass(), &self.0.nonce)
             .map(|x| x.into_owned());
 
         let handshake_response = HandshakeResponse::new(
@@ -787,7 +785,7 @@ impl Conn {
             self.0.opts.get_db_name().map(str::as_bytes),
             Some(self.0.auth_plugin.clone()),
             self.0.capability_flags,
-            Some(self.connect_attrs().clone()),
+            Some(self.connect_attrs()),
         );
 
         let mut buf = get_buffer();
@@ -828,9 +826,9 @@ impl Conn {
             // auth switch
             0xfe if !auth_switched => {
                 let auth_switch = if payload.len() > 1 {
-                    ParseBuf(&*payload).parse(())?
+                    ParseBuf(&payload).parse(())?
                 } else {
-                    let _ = ParseBuf(&*payload).parse::<OldAuthSwitchRequest>(())?;
+                    let _ = ParseBuf(&payload).parse::<OldAuthSwitchRequest>(())?;
                     // we'll map OldAuthSwitchRequest to an AuthSwitchRequest with mysql_old_password plugin.
                     AuthSwitchRequest::new("mysql_old_password".as_bytes(), &*self.0.nonce)
                         .into_owned()
@@ -875,10 +873,10 @@ impl Conn {
                             .map(Vec::from)
                             .unwrap_or_else(Vec::new);
                         pass.push(0);
-                        for i in 0..pass.len() {
-                            pass[i] ^= self.0.nonce[i % self.0.nonce.len()];
+                        for (i, c) in pass.iter_mut().enumerate() {
+                            *(c) ^= self.0.nonce[i % self.0.nonce.len()];
                         }
-                        let encrypted_pass = crypto::encrypt(&*pass, key);
+                        let encrypted_pass = crypto::encrypt(&pass, key);
                         self.write_packet(&mut encrypted_pass.as_slice())?;
                     }
 
@@ -888,7 +886,7 @@ impl Conn {
                 _ => Err(DriverError(UnexpectedPacket)),
             },
             0xfe if !auth_switched => {
-                let auth_switch_request = ParseBuf(&*payload).parse(())?;
+                let auth_switch_request = ParseBuf(&payload).parse(())?;
                 self.perform_auth_switch(auth_switch_request)
             }
             _ => Err(DriverError(UnexpectedPacket)),
@@ -964,10 +962,10 @@ impl Conn {
                 }
 
                 let (body, as_long_data) =
-                    ComStmtExecuteRequestBuilder::new(stmt.id()).build(&*params);
+                    ComStmtExecuteRequestBuilder::new(stmt.id()).build(params);
 
                 if as_long_data {
-                    self.send_long_data(stmt.id(), &*params)?;
+                    self.send_long_data(stmt.id(), params)?;
                 }
 
                 body
@@ -1060,7 +1058,7 @@ impl Conn {
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
                 for _ in 0..column_count {
                     let pld = self.read_packet()?;
-                    let column = ParseBuf(&*pld).parse(())?;
+                    let column = ParseBuf(&pld).parse(())?;
                     columns.push(column);
                 }
                 // skip eof packet
@@ -1104,12 +1102,12 @@ impl Conn {
     fn _true_prepare(&mut self, query: &[u8]) -> Result<InnerStmt> {
         self.write_command(Command::COM_STMT_PREPARE, query)?;
         let pld = self.read_packet()?;
-        let mut stmt = ParseBuf(&*pld).parse::<InnerStmt>(self.connection_id())?;
+        let mut stmt = ParseBuf(&pld).parse::<InnerStmt>(self.connection_id())?;
         if stmt.num_params() > 0 {
             let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
             for _ in 0..stmt.num_params() {
                 let pld = self.read_packet()?;
-                params.push(ParseBuf(&*pld).parse(())?);
+                params.push(ParseBuf(&pld).parse(())?);
             }
             stmt = stmt.with_params(Some(params));
             self.drop_packet()?;
@@ -1118,7 +1116,7 @@ impl Conn {
             let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns() as usize);
             for _ in 0..stmt.num_columns() {
                 let pld = self.read_packet()?;
-                columns.push(ParseBuf(&*pld).parse(())?);
+                columns.push(ParseBuf(&pld).parse(())?);
             }
             stmt = stmt.with_columns(Some(columns));
             self.drop_packet()?;
@@ -1183,12 +1181,10 @@ impl Conn {
                 self.handle_ok::<ResultSetTerminator>(&pld)?;
                 return Ok(None);
             }
-        } else {
-            if pld[0] == 0xfe && pld.len() < 8 {
-                self.0.has_results = false;
-                self.handle_ok::<OldEofPacket>(&pld)?;
-                return Ok(None);
-            }
+        } else if pld[0] == 0xfe && pld.len() < 8 {
+            self.0.has_results = false;
+            self.handle_ok::<OldEofPacket>(&pld)?;
+            return Ok(None);
         }
 
         Ok(Some(pld))
@@ -1286,7 +1282,7 @@ impl Queryable for Conn {
         P: Into<Params>,
     {
         let statement = stmt.as_statement(self)?;
-        let meta = self._execute(&*statement, params.into())?;
+        let meta = self._execute(&statement, params.into())?;
         Ok(QueryResult::new(ConnMut::Mut(self), meta))
     }
 }

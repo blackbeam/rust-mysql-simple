@@ -78,7 +78,7 @@ impl LocalInfileHandler {
 
 impl PartialEq for LocalInfileHandler {
     fn eq(&self, other: &LocalInfileHandler) -> bool {
-        (&*self.0 as *const _) == (&*other.0 as *const _)
+        std::ptr::eq(&*self.0, &*other.0)
     }
 }
 

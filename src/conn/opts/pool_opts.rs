@@ -147,6 +147,7 @@ impl<const L: usize, const R: usize> Assert<L, R> {
 
 #[allow(path_statements)]
 pub const fn gte<const M: usize, const N: usize>() {
+    #[allow(clippy::no_effect)]
     Assert::<M, N>::LEQ;
 }
 

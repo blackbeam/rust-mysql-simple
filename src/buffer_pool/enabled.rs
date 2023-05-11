@@ -3,12 +3,12 @@
 use crossbeam::queue::ArrayQueue;
 use once_cell::sync::Lazy;
 
-use std::{mem::replace, ops::Deref, sync::Arc};
+use std::{mem::take, ops::Deref, sync::Arc};
 
 const DEFAULT_MYSQL_BUFFER_POOL_CAP: usize = 128;
 const DEFAULT_MYSQL_BUFFER_SIZE_CAP: usize = 4 * 1024 * 1024;
 
-static BUFFER_POOL: Lazy<Arc<BufferPool>> = Lazy::new(|| Default::default());
+static BUFFER_POOL: Lazy<Arc<BufferPool>> = Lazy::new(Default::default);
 
 #[inline(always)]
 pub fn get_buffer() -> Buffer {
@@ -97,7 +97,7 @@ impl Deref for Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         if let Some(ref inner) = self.1 {
-            inner.put(replace(&mut self.0, vec![]));
+            inner.put(take(&mut self.0));
         }
     }
 }

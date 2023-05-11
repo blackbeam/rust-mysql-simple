@@ -55,36 +55,34 @@ impl Iterator for BinlogStream {
             }
         };
 
-        let first_byte = packet.get(0).copied();
+        let first_byte = packet.first().copied();
 
         if first_byte == Some(255) {
-            if let Ok(ErrPacket::Error(err)) = ParseBuf(&*packet).parse(conn.0.capability_flags) {
+            if let Ok(ErrPacket::Error(err)) = ParseBuf(&packet).parse(conn.0.capability_flags) {
                 self.conn = None;
                 return Some(Err(crate::Error::MySqlError(From::from(err))));
             }
         }
 
-        if first_byte == Some(254) && packet.len() < 8 {
-            if ParseBuf(&*packet)
+        if first_byte == Some(254)
+            && packet.len() < 8
+            && ParseBuf(&packet)
                 .parse::<OkPacketDeserializer<NetworkStreamTerminator>>(conn.0.capability_flags)
                 .is_ok()
-            {
-                self.conn = None;
-                return None;
-            }
+        {
+            self.conn = None;
+            return None;
         }
 
         if first_byte == Some(0) {
             let event_data = &packet[1..];
             match self.esr.read(event_data) {
-                Ok(event) => {
-                    return Some(Ok(event));
-                }
-                Err(err) => return Some(Err(err.into())),
+                Ok(event) => Some(Ok(event)),
+                Err(err) => Some(Err(err.into())),
             }
         } else {
             self.conn = None;
-            return Some(Err(crate::error::DriverError::UnexpectedPacket.into()));
+            Some(Err(crate::error::DriverError::UnexpectedPacket.into()))
         }
     }
 }

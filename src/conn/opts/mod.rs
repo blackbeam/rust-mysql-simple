@@ -549,7 +549,7 @@ impl Opts {
 /// let connection_opts = mysql::Opts::from_url("mysql://root:password@localhost:3307/mysql?prefer_socket=false").unwrap();
 /// let pool = mysql::Pool::new(connection_opts).unwrap();
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct OptsBuilder {
     opts: Opts,
 }
@@ -1069,17 +1069,9 @@ impl From<OptsBuilder> for Opts {
     }
 }
 
-impl Default for OptsBuilder {
-    fn default() -> OptsBuilder {
-        OptsBuilder {
-            opts: Opts::default(),
-        }
-    }
-}
-
 fn get_opts_user_from_url(url: &Url) -> Option<String> {
     let user = url.username();
-    if user != "" {
+    if !user.is_empty() {
         Some(
             percent_decode(user.as_ref())
                 .decode_utf8_lossy()
@@ -1091,15 +1083,11 @@ fn get_opts_user_from_url(url: &Url) -> Option<String> {
 }
 
 fn get_opts_pass_from_url(url: &Url) -> Option<String> {
-    if let Some(pass) = url.password() {
-        Some(
-            percent_decode(pass.as_ref())
-                .decode_utf8_lossy()
-                .into_owned(),
-        )
-    } else {
-        None
-    }
+    url.password().map(|pass| {
+        percent_decode(pass.as_ref())
+            .decode_utf8_lossy()
+            .into_owned()
+    })
 }
 
 fn get_opts_db_name_from_url(url: &Url) -> Option<String> {
