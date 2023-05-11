@@ -19,7 +19,7 @@
 //! *   MySql binary protocol support, i.e. support of prepared statements and binary result sets;
 //! *   support of multi-result sets;
 //! *   support of named parameters for prepared statements (see the [Named Parameters](#named-parameters) section);
-//! *   optional per-connection cache of prepared statements (see the [Statement Cache](#statement-cache) section);
+//! *   per-connection cache of prepared statements (see the [Statement Cache](#statement-cache) section);
 //! *   buffer pool (see the [Buffer Pool](#buffer-pool) section);
 //! *   support of MySql packets larger than 2^24;
 //! *   support of Unix sockets and Windows named pipes;
@@ -27,7 +27,8 @@
 //! *   support of MySql protocol compression;
 //! *   support of auth plugins:
 //!     *   **mysql_native_password** - for MySql prior to v8;
-//!     *   **caching_sha2_password** - for MySql v8 and higher.
+//!     *   **caching_sha2_password** - for MySql v8 and higher;
+//!     *   **mysql_clear_password** - opt-in (see [`Opts::get_enable_cleartext_plugin`].
 //!
 //! ## Installation
 //!
@@ -181,7 +182,14 @@
 //! Supported URL parameters (for the meaning of each field please refer to the docs on `Opts`
 //! structure in the create API docs):
 //!
-//! *   `prefer_socket: true | false` - defines the value of the same field in the `Opts` structure;
+//! *   `user: string` – MySql client user name
+//! *   `password: string` – MySql client password;
+//! *   `db_name: string` – MySql database name;
+//! *   `host: Host` – MySql server hostname/ip;
+//! *   `port: u16` – MySql server port;
+//! *   `pool_min: usize` – see [`PoolConstraints::min`];
+//! *   `pool_max: usize` – see [`PoolConstraints::max`];
+//! *   `prefer_socket: true | false` - see [`Opts::get_prefer_socket`];
 //! *   `tcp_keepalive_time_ms: u32` - defines the value (in milliseconds)
 //!     of the `tcp_keepalive_time` field in the `Opts` structure;
 //! *   `tcp_keepalive_probe_interval_secs: u32` - defines the value
@@ -193,6 +201,10 @@
 //! *   `tcp_user_timeout_ms` - defines the value (in milliseconds)
 //!     of the `tcp_user_timeout` field in the `Opts` structure;
 //! *   `stmt_cache_size: u32` - defines the value of the same field in the `Opts` structure;
+//! *   `enable_cleartext_plugin` – see [`Opts::get_enable_cleartext_plugin`];
+//! *   `secure_auth` – see [`Opts::get_secure_auth`];
+//! *   `reset_connection` – see [`PoolOpts::get_reset_connection`];
+//! *   `check_health` – see [`PoolOpts::get_check_health`];
 //! *   `compress` - defines the value of the same field in the `Opts` structure.
 //!     Supported value are:
 //!     *  `true` - enables compression with the default compression level;
@@ -686,6 +698,16 @@
 //! ```
 //!
 //! ### Statement cache
+//!
+//! #### Note
+//!
+//! Statemet cache only works for:
+//! 1.  for raw [`Conn`]
+//! 2.  for [`PooledConn`]:
+//!     * within it's lifetime if [`PoolOpts::reset_connection`] is `true`
+//!     * within the lifetime of a wrapped [`Conn`] if [`PoolOpts::reset_connection`] is `false`
+//!
+//! #### Description
 //!
 //! `Conn` will manage the cache of prepared statements on the client side, so subsequent calls
 //! to prepare with the same statement won't lead to a client-server roundtrip. Cache size
