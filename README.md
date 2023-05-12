@@ -198,8 +198,8 @@ structure in the create API docs):
 *   `stmt_cache_size: u32` - defines the value of the same field in the `Opts` structure;
 *   `enable_cleartext_plugin` – see [`Opts::get_enable_cleartext_plugin`];
 *   `secure_auth` – see [`Opts::get_secure_auth`];
-*   `reset_connection` – see [`PoolOpts::get_reset_connection`];
-*   `check_health` – see [`PoolOpts::get_check_health`];
+*   `reset_connection` – see [`PoolOpts::reset_connection`];
+*   `check_health` – see [`PoolOpts::check_health`];
 *   `compress` - defines the value of the same field in the `Opts` structure.
     Supported value are:
     *  `true` - enables compression with the default compression level;

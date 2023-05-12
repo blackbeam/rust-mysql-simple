@@ -66,7 +66,7 @@ impl PoolOpts {
     /// So to increase overall performance you can safely opt-out of the default behavior
     /// if you are not willing to change the session state in an unpleasant way.
     ///
-    /// It is also possible to selectively opt-in/out using [`Conn::reset_connection`].
+    /// It is also possible to selectively opt-in/out using [`crate::PooledConn::reset_connection`].
     ///
     /// # Connection URL
     ///
