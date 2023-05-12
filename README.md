@@ -110,9 +110,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
 * feature sets:
 
-    *   **default** – includes default `mysql_common` features, `native-tls`, `buffer-pool`
-        and `flate2/zlib`
+    *   **default** – includes default `mysql_common` features, `native-tls`, `buffer-pool`,
+        `flate2/zlib` and `derive`
     *   **default-rustls** - same as `default` but with `rustls-tls` instead of `native-tls`
+        and `flate2/rust_backend` instead of `flate2/zlib`
     *   **minimal** - includes `flate2/zlib`
 
 * crate's features:
@@ -123,6 +124,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         (see the [SSL Support](#ssl-support) section)
     *   **buffer-pool** (enabled by default) – enables buffer pooling
         (see the [Buffer Pool](#buffer-pool) section)
+    *   **derive** (enabled by default) – reexports derive macros under `prelude`
 
 * external features enabled by default:
 

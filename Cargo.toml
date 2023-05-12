@@ -36,8 +36,8 @@ default = [
     "mysql_common/rust_decimal",
     "mysql_common/time",
     "mysql_common/frunk",
-    "mysql_common/derive",
 
+    "derive",
     # use global buffer pool by default
     "buffer-pool",
 ]
@@ -51,14 +51,15 @@ default-rustls = [
     "mysql_common/rust_decimal",
     "mysql_common/time",
     "mysql_common/frunk",
-    "mysql_common/derive",
 
+    "derive",
     "buffer-pool",
 ]
 minimal = ["flate2/zlib"]
 rustls-tls = ["rustls", "webpki", "webpki-roots", "rustls-pemfile"]
 buffer-pool = []
 nightly = []
+derive = ["mysql_common/derive"]
 
 [dev-dependencies]
 lazy_static = "1.4.0"

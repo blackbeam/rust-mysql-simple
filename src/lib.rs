@@ -112,9 +112,10 @@
 //!
 //! * feature sets:
 //!
-//!     *   **default** – includes default `mysql_common` features, `native-tls`, `buffer-pool`
-//!         and `flate2/zlib`
+//!     *   **default** – includes default `mysql_common` features, `native-tls`, `buffer-pool`,
+//!         `flate2/zlib` and `derive`
 //!     *   **default-rustls** - same as `default` but with `rustls-tls` instead of `native-tls`
+//!         and `flate2/rust_backend` instead of `flate2/zlib`
 //!     *   **minimal** - includes `flate2/zlib`
 //!
 //! * crate's features:
@@ -125,6 +126,7 @@
 //!         (see the [SSL Support](#ssl-support) section)
 //!     *   **buffer-pool** (enabled by default) – enables buffer pooling
 //!         (see the [Buffer Pool](#buffer-pool) section)
+//!     *   **derive** (enabled by default) – reexports derive macros under `prelude`
 //!
 //! * external features enabled by default:
 //!
@@ -892,6 +894,9 @@ mod conn;
 pub mod error;
 mod io;
 
+#[cfg(feature = "derive")]
+extern crate mysql_common;
+
 #[doc(inline)]
 pub use crate::myc::constants as consts;
 
@@ -959,11 +964,11 @@ pub mod prelude {
     #[doc(inline)]
     pub use crate::conn::queryable::{AsStatement, Queryable};
     #[doc(inline)]
-    pub use crate::myc::row::convert::FromRow;
+    pub use crate::myc::prelude::FromRow;
+    #[doc(inline)]
+    pub use crate::myc::prelude::{FromValue, ToValue};
     #[doc(inline)]
     pub use crate::myc::row::ColumnIndex;
-    #[doc(inline)]
-    pub use crate::myc::value::convert::{FromValue, ToValue};
 
     /// Trait for protocol markers [`crate::Binary`] and [`crate::Text`].
     pub trait Protocol: crate::conn::query_result::Protocol {}
