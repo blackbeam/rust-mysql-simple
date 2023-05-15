@@ -201,9 +201,13 @@ jobs:
         displayName: Run MySql in Docker
       - bash: |
           docker exec container bash -l -c "mysql -uroot -ppassword -e \"SET old_passwords = 1; GRANT ALL PRIVILEGES ON *.* TO 'root2'@'%' IDENTIFIED WITH mysql_old_password AS 'password'; SET PASSWORD FOR 'root2'@'%' = OLD_PASSWORD('password')\"";
+          docker exec container bash -l -c "echo 'deb [trusted=yes] http://archive.debian.org/debian/ stretch main non-free contrib' > /etc/apt/sources.list"
+          docker exec container bash -l -c "echo 'deb-src [trusted=yes] http://archive.debian.org/debian/ stretch main non-free contrib ' >> /etc/apt/sources.list"
+          docker exec container bash -l -c "echo 'deb [trusted=yes] http://archive.debian.org/debian-security/ stretch/updates main non-free contrib' >> /etc/apt/sources.list"
+          docker exec container bash -l -c "echo 'deb [trusted=yes] http://repo.mysql.com/apt/debian/ stretch mysql-5.6' > /etc/apt/sources.list.d/mysql.list"
         condition: eq(variables['DB_VERSION'], '5.6')
       - bash: |
-          docker exec container bash -l -c "apt-get update"
+          docker exec container bash -l -c "apt-get --allow-unauthenticated -y update"
           docker exec container bash -l -c "apt-get install -y curl clang libssl-dev pkg-config build-essential"
           docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
         displayName: Install Rust in docker
