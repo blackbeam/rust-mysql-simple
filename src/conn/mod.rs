@@ -1972,16 +1972,17 @@ mod test {
         fn reset_does_work() {
             let mut c = Conn::new(get_opts()).unwrap();
             let cid = c.connection_id();
+            c.query_drop("SET @foo = 'foo'").unwrap();
+            assert_eq!(
+                c.query_first::<String, _>("SELECT @foo").unwrap().unwrap(),
+                "foo",
+            );
             c.reset().unwrap();
-            match (c.0.server_version, c.0.mariadb_server_version) {
-                (Some(ref version), _) if *version > (5, 7, 3) => {
-                    assert_eq!(cid, c.connection_id());
-                }
-                (_, Some(ref version)) if *version >= (10, 2, 7) => {
-                    assert_eq!(cid, c.connection_id());
-                }
-                _ => assert_ne!(cid, c.connection_id()),
-            }
+            assert_eq!(cid, c.connection_id());
+            assert_eq!(
+                c.query_first::<Value, _>("SELECT @foo").unwrap().unwrap(),
+                Value::NULL
+            );
         }
 
         #[test]
