@@ -29,7 +29,7 @@ impl Protocol for Text {
     fn next(conn: &mut Conn, columns: Arc<[Column]>) -> Result<Option<Row>> {
         match conn.next_row_packet()? {
             Some(pld) => {
-                let row = ParseBuf(&*pld).parse::<RowDeserializer<(), Text>>(columns)?;
+                let row = ParseBuf(&pld).parse::<RowDeserializer<(), Text>>(columns)?;
                 Ok(Some(row.into()))
             }
             None => Ok(None),
@@ -41,7 +41,7 @@ impl Protocol for Binary {
     fn next(conn: &mut Conn, columns: Arc<[Column]>) -> Result<Option<Row>> {
         match conn.next_row_packet()? {
             Some(pld) => {
-                let row = ParseBuf(&*pld).parse::<RowDeserializer<ServerSide, Binary>>(columns)?;
+                let row = ParseBuf(&pld).parse::<RowDeserializer<ServerSide, Binary>>(columns)?;
                 Ok(Some(row.into()))
             }
             None => Ok(None),
@@ -341,9 +341,9 @@ impl<T: crate::prelude::Protocol> Iterator for QueryResult<'_, '_, '_, T> {
         let state = std::mem::replace(&mut self.state, OnBoundary);
 
         match state {
-            InSet(cols) => match T::next(&mut *self.conn, cols.clone()) {
+            InSet(cols) => match T::next(&mut self.conn, cols.clone()) {
                 Ok(Some(row)) => {
-                    self.state = InSet(cols.clone());
+                    self.state = InSet(cols);
                     Some(Ok(row))
                 }
                 Ok(None) => {

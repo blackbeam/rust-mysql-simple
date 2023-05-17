@@ -7,62 +7,23 @@
 // modified, or distributed except according to those terms.
 
 use std::{
-    collections::VecDeque,
     fmt,
     ops::Deref,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Condvar, Mutex,
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use crate::{
     conn::query_result::{Binary, Text},
     prelude::*,
-    Conn, DriverError, Error, LocalInfileHandler, Opts, Params, QueryResult, Result, Statement,
-    Transaction, TxOpts,
+    ChangeUserOpts, Conn, DriverError, LocalInfileHandler, Opts, Params, QueryResult, Result,
+    Statement, Transaction, TxOpts,
 };
 
-#[derive(Debug)]
-struct InnerPool {
-    opts: Opts,
-    pool: VecDeque<Conn>,
-}
+mod inner;
 
-impl InnerPool {
-    fn new(min: usize, max: usize, opts: Opts) -> Result<InnerPool> {
-        if min > max || max == 0 {
-            return Err(Error::DriverError(DriverError::InvalidPoolConstraints));
-        }
-        let mut pool = InnerPool {
-            opts,
-            pool: VecDeque::with_capacity(max),
-        };
-        for _ in 0..min {
-            pool.new_conn()?;
-        }
-        Ok(pool)
-    }
-    fn new_conn(&mut self) -> Result<()> {
-        match Conn::new(self.opts.clone()) {
-            Ok(conn) => {
-                self.pool.push_back(conn);
-                Ok(())
-            }
-            Err(err) => Err(err),
-        }
-    }
-}
-
-struct ArcedPool {
-    inner: (Mutex<InnerPool>, Condvar),
-    min: usize,
-    max: usize,
-    count: AtomicUsize,
-}
-
-/// `Pool` serves to provide you with a [`PooledConn`](struct.PooledConn.html)'s.
+/// Thread-safe cloneable smart pointer to a connection pool.
+///
 /// However you can prepare statements directly on `Pool` without
 /// invoking [`Pool::get_conn`](struct.Pool.html#method.get_conn).
 ///
@@ -76,11 +37,12 @@ struct ArcedPool {
 /// # use mysql::*;
 /// # use mysql::prelude::*;
 /// # let mut conn = Conn::new(get_opts())?;
-/// let opts = get_opts();
+/// # let pool_opts = PoolOpts::new().with_constraints(PoolConstraints::new_const::<5, 10>());
+/// # let opts = get_opts().pool_opts(pool_opts);
 /// let pool = Pool::new(opts).unwrap();
 /// let mut threads = Vec::new();
 ///
-/// for _ in 0..100 {
+/// for _ in 0..1000 {
 ///     let pool = pool.clone();
 ///     threads.push(std::thread::spawn(move || {
 ///         let mut conn = pool.get_conn().unwrap();
@@ -99,42 +61,27 @@ struct ArcedPool {
 /// [`PooledConn`](struct.PooledConn.html) documentation.
 #[derive(Clone)]
 pub struct Pool {
-    arced_pool: Arc<ArcedPool>,
-    check_health: bool,
-    use_cache: bool,
+    inner: Arc<inner::Inner>,
 }
 
 impl Pool {
     /// Will return connection taken from a pool.
     ///
-    /// Will verify and fix it via `Conn::ping` and `Conn::reset` if `call_ping` is `true`.
-    /// Will try to get concrete connection if `id` is `Some(_)`.
     /// Will wait til timeout if `timeout_ms` is `Some(_)`
     fn _get_conn<T: AsRef<[u8]>>(
         &self,
         stmt: Option<T>,
-        timeout_ms: Option<u32>,
-        call_ping: bool,
+        timeout: Option<Duration>,
+        mut call_ping: bool,
     ) -> Result<PooledConn> {
-        let times = if let Some(timeout_ms) = timeout_ms {
-            Some((Instant::now(), Duration::from_millis(timeout_ms.into())))
-        } else {
-            None
-        };
+        let times = timeout.map(|timeout| (Instant::now(), timeout));
 
-        let &(ref inner_pool, ref condvar) = &self.arced_pool.inner;
+        let (protected, condvar) = self.inner.protected();
 
-        let conn = if self.use_cache {
-            if let Some(query) = stmt {
-                let mut id = None;
-                let mut pool = inner_pool.lock()?;
-                for (i, conn) in pool.pool.iter().rev().enumerate() {
-                    if conn.has_stmt(query.as_ref()) {
-                        id = Some(i);
-                        break;
-                    }
-                }
-                id.and_then(|id| pool.pool.swap_remove_back(id))
+        let conn = if !self.inner.opts().reset_connection() {
+            // stmt cache considered enabled if reset_connection is false
+            if let Some(ref query) = stmt {
+                protected.lock()?.take_by_query(query.as_ref())
             } else {
                 None
             }
@@ -145,32 +92,33 @@ impl Pool {
         let mut conn = if let Some(conn) = conn {
             conn
         } else {
-            let mut pool = inner_pool.lock()?;
+            let mut protected = protected.lock()?;
             loop {
-                if let Some(conn) = pool.pool.pop_front() {
-                    drop(pool);
+                if let Some(conn) = protected.pop_front() {
+                    drop(protected);
                     break conn;
-                } else if self.arced_pool.count.load(Ordering::Relaxed) < self.arced_pool.max {
-                    pool.new_conn()?;
-                    self.arced_pool.count.fetch_add(1, Ordering::SeqCst);
-                } else {
-                    pool = if let Some((start, timeout)) = times {
+                } else if self.inner.is_full() {
+                    protected = if let Some((start, timeout)) = times {
                         if start.elapsed() > timeout {
                             return Err(DriverError::Timeout.into());
                         }
-                        condvar.wait_timeout(pool, timeout)?.0
+                        condvar.wait_timeout(protected, timeout)?.0
                     } else {
-                        condvar.wait(pool)?
+                        condvar.wait(protected)?
                     }
+                } else {
+                    protected.new_conn()?;
+                    self.inner.increase();
+                    // we do not have to call ping for a fresh connection
+                    call_ping = false;
                 }
             }
         };
 
-        if call_ping && self.check_health && !conn.ping() {
-            if let Err(err) = conn.reset() {
-                self.arced_pool.count.fetch_sub(1, Ordering::SeqCst);
-                return Err(err);
-            }
+        if call_ping && self.inner.opts().check_health() && !conn.ping() {
+            // existing connection seem to be dead, retrying..
+            self.inner.decrease();
+            return self._get_conn(stmt, timeout, call_ping);
         }
 
         Ok(PooledConn {
@@ -179,62 +127,29 @@ impl Pool {
         })
     }
 
-    /// Creates new pool with `min = 10` and `max = 100`.
+    /// Creates new pool with the given options (see [`Opts`]).
     pub fn new<T, E>(opts: T) -> Result<Pool>
     where
         Opts: TryFrom<T, Error = E>,
         crate::Error: From<E>,
     {
-        Pool::new_manual(10, 100, opts)
-    }
-
-    /// Same as `new` but you can set `min` and `max`.
-    pub fn new_manual<T, E>(min: usize, max: usize, opts: T) -> Result<Pool>
-    where
-        Opts: TryFrom<T, Error = E>,
-        crate::Error: From<E>,
-    {
-        let pool = InnerPool::new(min, max, opts.try_into()?)?;
         Ok(Pool {
-            arced_pool: Arc::new(ArcedPool {
-                inner: (Mutex::new(pool), Condvar::new()),
-                min,
-                max,
-                count: AtomicUsize::new(min),
-            }),
-            use_cache: true,
-            check_health: true,
+            inner: Arc::new(inner::Inner::new(Opts::try_from(opts)?)?),
         })
     }
 
-    /// A way to turn off searching for cached statement (on by default).
-    #[doc(hidden)]
-    pub fn use_cache(&mut self, use_cache: bool) {
-        self.use_cache = use_cache;
-    }
-
-    /// A way to turn off connection health check on each call to `get_conn` (on by default).
-    pub fn check_health(&mut self, check_health: bool) {
-        self.check_health = check_health;
-    }
-
     /// Gives you a [`PooledConn`](struct.PooledConn.html).
-    ///
-    /// `Pool` will check that connection is alive via
-    /// [`Conn::ping`](struct.Conn.html#method.ping) and will
-    /// call [`Conn::reset`](struct.Conn.html#method.reset) if
-    /// necessary.
     pub fn get_conn(&self) -> Result<PooledConn> {
         self._get_conn(None::<String>, None, true)
     }
 
-    /// Will try to get connection for a duration of `timeout_ms` milliseconds.
+    /// Will try to get connection for the duration of `timeout`.
     ///
     /// # Failure
     /// This function will return `Error::DriverError(DriverError::Timeout)` if timeout was
     /// reached while waiting for new connection to become available.
-    pub fn try_get_conn(&self, timeout_ms: u32) -> Result<PooledConn> {
-        self._get_conn(None::<String>, Some(timeout_ms), true)
+    pub fn try_get_conn(&self, timeout: Duration) -> Result<PooledConn> {
+        self._get_conn(None::<String>, Some(timeout), true)
     }
 
     /// Shortcut for `pool.get_conn()?.start_transaction(..)`.
@@ -256,15 +171,14 @@ impl fmt::Debug for Pool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Pool {{ min: {}, max: {}, count: {} }}",
-            self.arced_pool.min,
-            self.arced_pool.max,
-            self.arced_pool.count.load(Ordering::Relaxed)
+            "Pool {{ constraints: {:?}, count: {} }}",
+            self.inner.opts().constraints(),
+            self.inner.count(),
         )
     }
 }
 
-/// Pooled mysql connection which will return to the pool on `drop`.
+/// Pooled mysql connection.
 ///
 /// You should prefer using `prep` along `exec` instead of `query` from the Queryable trait where
 /// possible, except cases when statement has no params and when it has no return values or return
@@ -312,16 +226,27 @@ impl Deref for PooledConn {
 
 impl Drop for PooledConn {
     fn drop(&mut self) {
-        if self.pool.arced_pool.count.load(Ordering::Relaxed) > self.pool.arced_pool.max
-            || self.conn.is_none()
-        {
-            self.pool.arced_pool.count.fetch_sub(1, Ordering::SeqCst);
-        } else {
-            self.conn.as_mut().unwrap().set_local_infile_handler(None);
-            let mut pool = (self.pool.arced_pool.inner).0.lock().unwrap();
-            pool.pool.push_back(self.conn.take().unwrap());
-            drop(pool);
-            (self.pool.arced_pool.inner).1.notify_one();
+        if let Some(mut conn) = self.conn.take() {
+            match conn.cleanup_for_pool() {
+                Ok(_) => {
+                    let (protected, condvar) = self.pool.inner.protected();
+                    match protected.lock() {
+                        Ok(mut protected) => {
+                            protected.push_back(conn);
+                            drop(protected);
+                            condvar.notify_one();
+                        }
+                        Err(_) => {
+                            // everything is broken
+                            self.pool.inner.decrease();
+                        }
+                    }
+                }
+                Err(_) => {
+                    // the connection is broken
+                    self.pool.inner.decrease();
+                }
+            }
         }
     }
 }
@@ -372,6 +297,23 @@ impl PooledConn {
             .unwrap()
             .set_local_infile_handler(handler);
     }
+
+    /// Invokes `COM_CHANGE_USER` (see [`Conn::change_user`] docs).
+    pub fn change_user(&mut self) -> Result<()> {
+        self.conn
+            .as_mut()
+            .unwrap()
+            .change_user(ChangeUserOpts::default())
+    }
+
+    /// Turns on/off automatic connection reset upon return to a pool (see [`Opts::get_pool_opts`]).
+    ///
+    /// Initial value is taken from [`crate::PoolOpts::reset_connection`].
+    pub fn reset_connection(&mut self, reset_connection: bool) {
+        if let Some(conn) = self.conn.as_mut() {
+            conn.0.reset_upon_return = reset_connection;
+        }
+    }
 }
 
 impl Queryable for PooledConn {
@@ -404,7 +346,7 @@ mod test {
 
         use crate::{
             from_value, prelude::*, test_misc::get_opts, DriverError, Error, OptsBuilder, Pool,
-            TxOpts,
+            PoolConstraints, PoolOpts, TxOpts, Value,
         };
 
         #[test]
@@ -458,7 +400,10 @@ mod test {
 
         #[test]
         fn should_fix_connectivity_errors_on_prepare() {
-            let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
+            let pool = Pool::new(get_opts().pool_opts(
+                PoolOpts::default().with_constraints(PoolConstraints::new_const::<2, 2>()),
+            ))
+            .unwrap();
             let mut conn = pool.get_conn().unwrap();
 
             let id: u32 = pool
@@ -478,7 +423,10 @@ mod test {
 
         #[test]
         fn should_fix_connectivity_errors_on_prep_exec() {
-            let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
+            let pool = Pool::new(get_opts().pool_opts(
+                PoolOpts::default().with_constraints(PoolConstraints::new_const::<2, 2>()),
+            ))
+            .unwrap();
             let mut conn = pool.get_conn().unwrap();
 
             let id: u32 = pool
@@ -497,7 +445,10 @@ mod test {
         }
         #[test]
         fn should_fix_connectivity_errors_on_start_transaction() {
-            let pool = Pool::new_manual(2, 2, get_opts()).unwrap();
+            let pool = Pool::new(get_opts().pool_opts(
+                PoolOpts::default().with_constraints(PoolConstraints::new_const::<2, 2>()),
+            ))
+            .unwrap();
             let mut conn = pool.get_conn().unwrap();
 
             let id: u32 = pool
@@ -530,16 +481,19 @@ mod test {
         }
         #[test]
         fn should_timeout_if_no_connections_available() {
-            let pool = Pool::new_manual(0, 1, get_opts()).unwrap();
-            let conn1 = pool.try_get_conn(357).unwrap();
-            let conn2 = pool.try_get_conn(357);
+            let pool = Pool::new(get_opts().pool_opts(
+                PoolOpts::default().with_constraints(PoolConstraints::new_const::<0, 1>()),
+            ))
+            .unwrap();
+            let conn1 = pool.try_get_conn(Duration::from_millis(357)).unwrap();
+            let conn2 = pool.try_get_conn(Duration::from_millis(357));
             assert!(conn2.is_err());
             match conn2 {
                 Err(Error::DriverError(DriverError::Timeout)) => assert!(true),
                 _ => assert!(false),
             }
             drop(conn1);
-            assert!(pool.try_get_conn(357).is_ok());
+            assert!(pool.try_get_conn(Duration::from_millis(357)).is_ok());
         }
 
         #[test]
@@ -575,7 +529,14 @@ mod test {
         #[test]
         #[allow(unused_variables)]
         fn should_start_transaction_on_Pool() {
-            let pool = Pool::new_manual(1, 10, get_opts()).unwrap();
+            let pool = Pool::new(
+                get_opts().pool_opts(
+                    PoolOpts::default()
+                        .with_constraints(PoolConstraints::new_const::<1, 10>())
+                        .with_reset_connection(false),
+                ),
+            )
+            .unwrap();
             pool.get_conn()
                 .unwrap()
                 .query_drop("CREATE TEMPORARY TABLE mysql.tbl(a INT)")
@@ -632,7 +593,9 @@ mod test {
 
         #[test]
         fn should_reuse_connections() -> crate::Result<()> {
-            let pool = Pool::new_manual(1, 1, get_opts())?;
+            let pool = Pool::new(get_opts().pool_opts(
+                PoolOpts::default().with_constraints(PoolConstraints::new_const::<1, 1>()),
+            ))?;
             let mut conn = pool.get_conn()?;
 
             let server_version = conn.server_version();
@@ -687,6 +650,59 @@ mod test {
                 let mut x = x.unwrap();
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
+        }
+
+        #[test]
+        fn should_opt_out_of_connection_reset() {
+            let pool_opts = PoolOpts::new().with_constraints(PoolConstraints::new_const::<1, 1>());
+            let opts = get_opts().pool_opts(pool_opts.clone());
+
+            let pool = Pool::new(opts.clone()).unwrap();
+
+            let mut conn = pool.get_conn().unwrap();
+            assert_eq!(
+                conn.query_first::<Value, _>("SELECT @foo").unwrap(),
+                Some(Value::NULL)
+            );
+            conn.query_drop("SET @foo = 'foo'").unwrap();
+            assert_eq!(
+                conn.query_first::<String, _>("SELECT @foo")
+                    .unwrap()
+                    .unwrap(),
+                "foo",
+            );
+            drop(conn);
+
+            conn = pool.get_conn().unwrap();
+            assert_eq!(
+                conn.query_first::<Value, _>("SELECT @foo").unwrap(),
+                Some(Value::NULL)
+            );
+            conn.query_drop("SET @foo = 'foo'").unwrap();
+            conn.reset_connection(false);
+            drop(conn);
+
+            conn = pool.get_conn().unwrap();
+            assert_eq!(
+                conn.query_first::<String, _>("SELECT @foo")
+                    .unwrap()
+                    .unwrap(),
+                "foo",
+            );
+            drop(conn);
+
+            let pool = Pool::new(opts.pool_opts(pool_opts.with_reset_connection(false))).unwrap();
+            conn = pool.get_conn().unwrap();
+            conn.query_drop("SET @foo = 'foo'").unwrap();
+            drop(conn);
+            conn = pool.get_conn().unwrap();
+            assert_eq!(
+                conn.query_first::<String, _>("SELECT @foo")
+                    .unwrap()
+                    .unwrap(),
+                "foo",
+            );
+            drop(conn);
         }
 
         #[cfg(feature = "nightly")]

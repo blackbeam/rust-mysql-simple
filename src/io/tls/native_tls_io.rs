@@ -32,7 +32,7 @@ impl Stream {
             let mut root_cert_file = File::open(root_cert_path)?;
             root_cert_file.read_to_end(&mut root_cert_data)?;
 
-            let root_certs = Certificate::from_der(&*root_cert_data)
+            let root_certs = Certificate::from_der(&root_cert_data)
                 .map(|x| vec![x])
                 .or_else(|_| {
                     pem::parse_many(&*root_cert_data)

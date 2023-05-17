@@ -10,16 +10,20 @@ use percent_encoding::percent_decode;
 use url::Url;
 
 use std::{
-    borrow::Cow, collections::HashMap, hash::Hash, net::SocketAddr, path::Path, time::Duration,
+    borrow::Cow, collections::HashMap, fmt, hash::Hash, net::SocketAddr, path::Path, time::Duration,
 };
 
-use crate::{consts::CapabilityFlags, Compression, LocalInfileHandler, UrlError};
+use crate::{
+    consts::CapabilityFlags, Compression, LocalInfileHandler, PoolConstraints, PoolOpts, UrlError,
+};
 
 /// Default value for client side per-connection statement cache.
 pub const DEFAULT_STMT_CACHE_SIZE: usize = 32;
 
 mod native_tls_opts;
 mod rustls_opts;
+
+pub mod pool_opts;
 
 #[cfg(feature = "native-tls")]
 pub use native_tls_opts::ClientIdentity;
@@ -158,6 +162,9 @@ pub(crate) struct InnerOpts {
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
     ssl_opts: Option<SslOpts>,
 
+    /// Connection pool options (defaults to [`PoolOpts::default`]).
+    pool_opts: PoolOpts,
+
     /// Callback to handle requests for local files.
     ///
     /// These are caused by using `LOAD DATA LOCAL INFILE` queries.
@@ -196,7 +203,7 @@ pub(crate) struct InnerOpts {
 
     /// Additional client capabilities to set (defaults to empty).
     ///
-    /// This value will be OR'ed with other client capabilities during connection initialisation.
+    /// This value will be OR'ed with other client capabilities during connection initialization.
     ///
     /// ### Note
     ///
@@ -207,7 +214,7 @@ pub(crate) struct InnerOpts {
     additional_capabilities: CapabilityFlags,
 
     /// Connect attributes
-    connect_attrs: HashMap<String, String>,
+    connect_attrs: Option<HashMap<String, String>>,
 
     /// Disables `mysql_old_password` plugin (defaults to `true`).
     ///
@@ -244,6 +251,7 @@ impl Default for InnerOpts {
             prefer_socket: true,
             init: vec![],
             ssl_opts: None,
+            pool_opts: PoolOpts::default(),
             tcp_keepalive_time: None,
             #[cfg(any(target_os = "linux", target_os = "macos",))]
             tcp_keepalive_probe_interval_secs: None,
@@ -258,7 +266,7 @@ impl Default for InnerOpts {
             stmt_cache_size: DEFAULT_STMT_CACHE_SIZE,
             compress: None,
             additional_capabilities: CapabilityFlags::empty(),
-            connect_attrs: HashMap::new(),
+            connect_attrs: Some(HashMap::new()),
             secure_auth: true,
             enable_cleartext_plugin: false,
             #[cfg(test)]
@@ -354,6 +362,11 @@ impl Opts {
         self.0.ssl_opts.as_ref()
     }
 
+    /// Connection pool options (defaults to [`Default::default`]).
+    pub fn get_pool_opts(&self) -> &PoolOpts {
+        &self.0.pool_opts
+    }
+
     /// Whether `TCP_NODELAY` will be set for mysql connection.
     pub fn get_tcp_nodelay(&self) -> bool {
         self.0.tcp_nodelay
@@ -425,7 +438,7 @@ impl Opts {
 
     /// Additional client capabilities to set (defaults to empty).
     ///
-    /// This value will be OR'ed with other client capabilities during connection initialisation.
+    /// This value will be OR'ed with other client capabilities during connection initialization.
     ///
     /// ### Note
     ///
@@ -437,7 +450,7 @@ impl Opts {
         self.0.additional_capabilities
     }
 
-    /// Connect attributes
+    /// Connect attributes (the default connect attributes are sent by default).
     ///
     /// This value is sent to the server as custom name-value attributes.
     /// You can see them from performance_schema tables: [`session_account_connect_attrs`
@@ -451,10 +464,18 @@ impl Opts {
     ///
     /// ### Note
     ///
+    /// - set `connect_attrs` to `None` to completely remove connect attributes
+    /// - set `connect_attrs` to an empty map to send only the default attributes
+    ///
+    /// #### Warning
+    ///
+    /// > There is a bug in MySql 5.6 that kills COM_CHANGE_USER in the presence of connection
+    /// > attributes so it's better to stick to `None` for mysql < 5.7.
+    ///
     /// Attribute names that begin with an underscore (`_`) are not set by
     /// application programs because they are reserved for internal use.
     ///
-    /// The following attributes are sent in addition to ones set by programs.
+    /// The following default attributes are sent in addition to ones set by programs.
     ///
     /// name            | value
     /// ----------------|--------------------------
@@ -469,8 +490,8 @@ impl Opts {
     /// [`performance_schema`]: https://dev.mysql.com/doc/refman/8.0/en/performance-schema-system-variables.html#sysvar_performance_schema
     /// [`performance_schema_session_connect_attrs_size`]: https://dev.mysql.com/doc/refman/en/performance-schema-system-variables.html#sysvar_performance_schema_session_connect_attrs_size
     ///
-    pub fn get_connect_attrs(&self) -> &HashMap<String, String> {
-        &self.0.connect_attrs
+    pub fn get_connect_attrs(&self) -> Option<&HashMap<String, String>> {
+        self.0.connect_attrs.as_ref()
     }
 
     /// Disables `mysql_old_password` plugin (defaults to `true`).
@@ -536,7 +557,7 @@ impl Opts {
 /// let connection_opts = mysql::Opts::from_url("mysql://root:password@localhost:3307/mysql?prefer_socket=false").unwrap();
 /// let pool = mysql::Pool::new(connection_opts).unwrap();
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct OptsBuilder {
     opts: Opts,
 }
@@ -555,6 +576,8 @@ impl OptsBuilder {
     /// OptsBuilder::new().from_hash_map(client);
     /// ```
     /// `HashMap` key,value pairs:
+    /// - pool_min = upper bound for [`PoolConstraints`]
+    /// - pool_max = lower bound for [`PoolConstraints`]
     /// - user = Username
     /// - password = Password
     /// - host = Host name or ip address
@@ -575,8 +598,23 @@ impl OptsBuilder {
     ///
     /// **Note:** You do **not** have to use myloginrs lib.
     pub fn from_hash_map(mut self, client: &HashMap<String, String>) -> Result<Self, UrlError> {
+        let mut pool_min = PoolConstraints::DEFAULT.min();
+        let mut pool_max = PoolConstraints::DEFAULT.max();
+
         for (key, value) in client.iter() {
             match key.as_str() {
+                "pool_min" => match value.parse::<usize>() {
+                    Ok(parsed) => pool_min = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
+                "pool_max" => match value.parse::<usize>() {
+                    Ok(parsed) => pool_max = parsed,
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 "user" => self.opts.0.user = Some(value.to_string()),
                 "password" => self.opts.0.pass = Some(value.to_string()),
                 "host" => {
@@ -682,12 +720,38 @@ impl OptsBuilder {
                         return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
                     }
                 },
+                "reset_connection" => match value.parse::<bool>() {
+                    Ok(parsed) => {
+                        self.opts.0.pool_opts = self.opts.0.pool_opts.with_reset_connection(parsed)
+                    }
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
+                "check_health" => match value.parse::<bool>() {
+                    Ok(parsed) => {
+                        self.opts.0.pool_opts = self.opts.0.pool_opts.with_check_health(parsed)
+                    }
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 _ => {
                     //throw an error if there is an unrecognized param
                     return Err(UrlError::UnknownParameter(key.to_string()));
                 }
             }
         }
+
+        if let Some(pool_constraints) = PoolConstraints::new(pool_min, pool_max) {
+            self.opts.0.pool_opts = self.opts.0.pool_opts.with_constraints(pool_constraints);
+        } else {
+            return Err(UrlError::InvalidPoolConstraints {
+                min: pool_min,
+                max: pool_max,
+            });
+        }
+
         Ok(self)
     }
 
@@ -830,6 +894,14 @@ impl OptsBuilder {
         self
     }
 
+    /// Connection pool options (see [`Opts::get_pool_opts`]).
+    ///
+    /// Pass `None` to reset to default.
+    pub fn pool_opts<T: Into<Option<PoolOpts>>>(mut self, pool_opts: T) -> Self {
+        self.opts.0.pool_opts = pool_opts.into().unwrap_or_default();
+        self
+    }
+
     /// Callback to handle requests for local files. These are
     /// caused by using `LOAD DATA LOCAL INFILE` queries. The
     /// callback is passed the filename, and a `Write`able object
@@ -894,7 +966,7 @@ impl OptsBuilder {
 
     /// Additional client capabilities to set (defaults to empty).
     ///
-    /// This value will be OR'ed with other client capabilities during connection initialisation.
+    /// This value will be OR'ed with other client capabilities during connection initialization.
     ///
     /// ### Note
     ///
@@ -918,7 +990,7 @@ impl OptsBuilder {
         self
     }
 
-    /// Connect attributes
+    /// Connect attributes (the default connect attributes are sent by default).
     ///
     /// This value is sent to the server as custom name-value attributes.
     /// You can see them from performance_schema tables: [`session_account_connect_attrs`
@@ -932,10 +1004,18 @@ impl OptsBuilder {
     ///
     /// ### Note
     ///
+    /// - set `connect_attrs` to `None` to completely remove connect attributes
+    /// - set `connect_attrs` to an empty map to send only the default attributes
+    ///
+    /// #### Warning
+    ///
+    /// > There is a bug in MySql 5.6 that kills COM_CHANGE_USER in the presence of connection
+    /// > attributes so it's better to stick to `None` for mysql < 5.7.
+    ///
     /// Attribute names that begin with an underscore (`_`) are not set by
     /// application programs because they are reserved for internal use.
     ///
-    /// The following attributes are sent in addition to ones set by programs.
+    /// The following default attributes are sent in addition to ones set by programs.
     ///
     /// name            | value
     /// ----------------|--------------------------
@@ -952,14 +1032,19 @@ impl OptsBuilder {
     ///
     pub fn connect_attrs<T1: Into<String> + Eq + Hash, T2: Into<String>>(
         mut self,
-        connect_attrs: HashMap<T1, T2>,
+        connect_attrs: Option<HashMap<T1, T2>>,
     ) -> Self {
-        self.opts.0.connect_attrs = HashMap::with_capacity(connect_attrs.len());
-        for (name, value) in connect_attrs {
-            let name = name.into();
-            if !name.starts_with('_') {
-                self.opts.0.connect_attrs.insert(name, value.into());
+        if let Some(connect_attrs) = connect_attrs {
+            let mut attrs = HashMap::with_capacity(connect_attrs.len());
+            for (name, value) in connect_attrs {
+                let name = name.into();
+                if !name.starts_with('_') {
+                    attrs.insert(name, value.into());
+                }
             }
+            self.opts.0.connect_attrs = Some(attrs);
+        } else {
+            self.opts.0.connect_attrs = None;
         }
         self
     }
@@ -1005,17 +1090,9 @@ impl From<OptsBuilder> for Opts {
     }
 }
 
-impl Default for OptsBuilder {
-    fn default() -> OptsBuilder {
-        OptsBuilder {
-            opts: Opts::default(),
-        }
-    }
-}
-
 fn get_opts_user_from_url(url: &Url) -> Option<String> {
     let user = url.username();
-    if user != "" {
+    if !user.is_empty() {
         Some(
             percent_decode(user.as_ref())
                 .decode_utf8_lossy()
@@ -1027,15 +1104,11 @@ fn get_opts_user_from_url(url: &Url) -> Option<String> {
 }
 
 fn get_opts_pass_from_url(url: &Url) -> Option<String> {
-    if let Some(pass) = url.password() {
-        Some(
-            percent_decode(pass.as_ref())
-                .decode_utf8_lossy()
-                .into_owned(),
-        )
-    } else {
-        None
-    }
+    url.password().map(|pass| {
+        percent_decode(pass.as_ref())
+            .decode_utf8_lossy()
+            .into_owned()
+    })
 }
 
 fn get_opts_db_name_from_url(url: &Url) -> Option<String> {
@@ -1089,6 +1162,124 @@ fn from_url(url: &str) -> Result<Opts, UrlError> {
     OptsBuilder::from_opts(opts)
         .from_hash_map(&hash_map)
         .map(Into::into)
+}
+
+/// [`COM_CHANGE_USER`][1] options.
+///
+/// Connection [`Opts`] are going to be updated accordingly upon `COM_CHANGE_USER`.
+///
+/// [`Opts`] won't be updated by default, because default `ChangeUserOpts` will reuse
+/// connection's `user`, `pass` and `db_name`.
+///
+/// [1]: https://dev.mysql.com/doc/c-api/5.7/en/mysql-change-user.html
+#[derive(Clone, Eq, PartialEq)]
+pub struct ChangeUserOpts {
+    user: Option<Option<String>>,
+    pass: Option<Option<String>>,
+    db_name: Option<Option<String>>,
+}
+
+impl ChangeUserOpts {
+    pub const DEFAULT: Self = Self {
+        user: None,
+        pass: None,
+        db_name: None,
+    };
+
+    pub(crate) fn update_opts(self, opts: &mut Opts) {
+        if self.user.is_none() && self.pass.is_none() && self.db_name.is_none() {
+            return;
+        }
+
+        let mut builder = OptsBuilder::from_opts(opts.clone());
+
+        if let Some(user) = self.user {
+            builder = builder.user(user);
+        }
+
+        if let Some(pass) = self.pass {
+            builder = builder.pass(pass);
+        }
+
+        if let Some(db_name) = self.db_name {
+            builder = builder.db_name(db_name);
+        }
+
+        *opts = Opts::from(builder);
+    }
+
+    /// Creates change user options that'll reuse connection options.
+    pub fn new() -> Self {
+        Self {
+            user: None,
+            pass: None,
+            db_name: None,
+        }
+    }
+
+    /// Set [`Opts::get_user`] to the given value.
+    pub fn with_user(mut self, user: Option<String>) -> Self {
+        self.user = Some(user);
+        self
+    }
+
+    /// Set [`Opts::get_pass`] to the given value.
+    pub fn with_pass(mut self, pass: Option<String>) -> Self {
+        self.pass = Some(pass);
+        self
+    }
+
+    /// Set [`Opts::get_db_name`] to the given value.
+    pub fn with_db_name(mut self, db_name: Option<String>) -> Self {
+        self.db_name = Some(db_name);
+        self
+    }
+
+    /// Returns user.
+    ///
+    /// * if `None` then `self` does not meant to change user
+    /// * if `Some(None)` then `self` will clear user
+    /// * if `Some(Some(_))` then `self` will change user
+    pub fn user(&self) -> Option<Option<&str>> {
+        self.user.as_ref().map(|x| x.as_deref())
+    }
+
+    /// Returns password.
+    ///
+    /// * if `None` then `self` does not meant to change password
+    /// * if `Some(None)` then `self` will clear password
+    /// * if `Some(Some(_))` then `self` will change password
+    pub fn pass(&self) -> Option<Option<&str>> {
+        self.pass.as_ref().map(|x| x.as_deref())
+    }
+
+    /// Returns database name.
+    ///
+    /// * if `None` then `self` does not meant to change database name
+    /// * if `Some(None)` then `self` will clear database name
+    /// * if `Some(Some(_))` then `self` will change database name
+    pub fn db_name(&self) -> Option<Option<&str>> {
+        self.db_name.as_ref().map(|x| x.as_deref())
+    }
+}
+
+impl Default for ChangeUserOpts {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for ChangeUserOpts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChangeUserOpts")
+            .field("user", &self.user)
+            .field(
+                "pass",
+                &self.pass.as_ref().map(|x| x.as_ref().map(|_| "...")),
+            )
+            .field("db_name", &self.db_name)
+            .finish()
+    }
 }
 
 #[cfg(test)]

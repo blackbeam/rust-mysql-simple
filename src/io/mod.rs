@@ -135,17 +135,11 @@ impl Stream {
     }
 
     pub fn is_insecure(&self) -> bool {
-        match self {
-            Stream::TcpStream(TcpStream::Insecure(_)) => true,
-            _ => false,
-        }
+        matches!(self, Stream::TcpStream(TcpStream::Insecure(_)))
     }
 
     pub fn is_socket(&self) -> bool {
-        match self {
-            Stream::SocketStream(_) => true,
-            _ => false,
-        }
+        matches!(self, Stream::SocketStream(_))
     }
 
     #[cfg(all(not(feature = "native-tls"), not(feature = "rustls")))]

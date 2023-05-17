@@ -216,6 +216,7 @@ pub enum DriverError {
     MixedParams,
     UnknownAuthPlugin(String),
     OldMysqlPasswordDisabled,
+    CleartextPluginDisabled,
 }
 
 impl error::Error for DriverError {
@@ -279,6 +280,9 @@ impl fmt::Display for DriverError {
                     "`old_mysql_password` plugin is insecure and disabled by default",
                 )
             }
+            DriverError::CleartextPluginDisabled => {
+                write!(f, "mysql_clear_password must be enabled on the client side")
+            }
         }
     }
 }
@@ -298,6 +302,10 @@ pub enum UrlError {
     /// (feature_name, value)
     InvalidValue(String, String),
     UnknownParameter(String),
+    InvalidPoolConstraints {
+        min: usize,
+        max: usize,
+    },
     BadUrl,
 }
 
@@ -324,6 +332,13 @@ impl fmt::Display for UrlError {
             ),
             UrlError::UnknownParameter(ref parameter) => {
                 write!(f, "Unknown URL parameter `{}'", parameter)
+            }
+            UrlError::InvalidPoolConstraints { min, max } => {
+                write!(
+                    f,
+                    "Invalid pool constraints: pool_min ({}) > pool_max ({})",
+                    min, max
+                )
             }
             UrlError::BadUrl => write!(f, "Invalid or incomplete connection URL"),
         }

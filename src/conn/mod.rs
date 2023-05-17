@@ -11,13 +11,13 @@ use mysql_common::{
     constants::UTF8MB4_GENERAL_CI,
     crypto,
     io::{ParseBuf, ReadMysqlExt},
-    misc::raw::{bytes::NullBytes, Either, RawBytes},
     named_params::parse_named_params,
     packets::{
-        binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComStmtClose,
-        ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
-        HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
-        OldAuthSwitchRequest, OldEofPacket, ResultSetTerminator, SessionStateInfo,
+        binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComChangeUser,
+        ComChangeUserMoreData, ComStmtClose, ComStmtExecuteRequestBuilder, ComStmtSendLongData,
+        CommonOkPacket, ErrPacket, HandshakePacket, HandshakeResponse, OkPacket,
+        OkPacketDeserializer, OkPacketKind, OldAuthSwitchRequest, OldEofPacket,
+        ResultSetTerminator, SessionStateInfo,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
 };
@@ -56,10 +56,11 @@ use crate::{
     from_value, from_value_opt,
     io::Stream,
     prelude::*,
+    ChangeUserOpts,
     DriverError::{
-        MismatchedStmtParams, NamedParamsForPositionalQuery, OldMysqlPasswordDisabled,
-        Protocol41NotSet, ReadOnlyTransNotSupported, SetupError, UnexpectedPacket,
-        UnknownAuthPlugin, UnsupportedProtocol,
+        CleartextPluginDisabled, MismatchedStmtParams, NamedParamsForPositionalQuery,
+        OldMysqlPasswordDisabled, Protocol41NotSet, ReadOnlyTransNotSupported, SetupError,
+        UnexpectedPacket, UnknownAuthPlugin, UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
     LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Transaction,
@@ -134,9 +135,9 @@ impl Deref for ConnMut<'_, '_, '_> {
 
     fn deref(&self) -> &Conn {
         match self {
-            ConnMut::Mut(conn) => &**conn,
-            ConnMut::TxMut(tx) => &*tx.conn,
-            ConnMut::Owned(conn) => &conn,
+            ConnMut::Mut(conn) => conn,
+            ConnMut::TxMut(tx) => &tx.conn,
+            ConnMut::Owned(conn) => conn,
             ConnMut::Pooled(conn) => conn.as_ref(),
         }
     }
@@ -145,8 +146,8 @@ impl Deref for ConnMut<'_, '_, '_> {
 impl DerefMut for ConnMut<'_, '_, '_> {
     fn deref_mut(&mut self) -> &mut Conn {
         match self {
-            ConnMut::Mut(ref mut conn) => &mut **conn,
-            ConnMut::TxMut(tx) => &mut *tx.conn,
+            ConnMut::Mut(conn) => conn,
+            ConnMut::TxMut(tx) => &mut tx.conn,
             ConnMut::Owned(ref mut conn) => conn,
             ConnMut::Pooled(ref mut conn) => conn.as_mut(),
         }
@@ -174,13 +175,18 @@ struct ConnInner {
     connected: bool,
     has_results: bool,
     local_infile_handler: Option<LocalInfileHandler>,
+
+    auth_plugin: AuthPlugin<'static>,
+    nonce: Vec<u8>,
+
+    /// This flag is to opt-in/opt-out from reset upon return to a pool.
+    pub(crate) reset_upon_return: bool,
 }
 
 impl ConnInner {
     fn empty(opts: Opts) -> Self {
         ConnInner {
             stmt_cache: StmtCache::new(opts.get_stmt_cache_size()),
-            opts,
             stream: None,
             capability_flags: CapabilityFlags::empty(),
             status_flags: StatusFlags::empty(),
@@ -193,6 +199,11 @@ impl ConnInner {
             server_version: None,
             mariadb_server_version: None,
             local_infile_handler: None,
+            auth_plugin: AuthPlugin::MysqlNativePassword,
+            nonce: Vec::new(),
+            reset_upon_return: opts.get_pool_opts().reset_connection(),
+
+            opts,
         }
     }
 }
@@ -211,7 +222,7 @@ impl Conn {
     pub fn server_version(&self) -> (u16, u16, u16) {
         self.0
             .server_version
-            .or_else(|| self.0.mariadb_server_version)
+            .or(self.0.mariadb_server_version)
             .unwrap()
     }
 
@@ -354,7 +365,7 @@ impl Conn {
         Ok(conn)
     }
 
-    fn soft_reset(&mut self) -> Result<()> {
+    fn exec_com_reset_connection(&mut self) -> Result<()> {
         self.write_command(Command::COM_RESET_CONNECTION, &[])?;
         let packet = self.read_packet()?;
         self.handle_ok::<CommonOkPacket>(&packet)?;
@@ -363,31 +374,87 @@ impl Conn {
         Ok(())
     }
 
-    fn hard_reset(&mut self) -> Result<()> {
-        self.0.stmt_cache.clear();
-        self.0.capability_flags = CapabilityFlags::empty();
-        self.0.status_flags = StatusFlags::empty();
-        self.0.connection_id = 0;
-        self.0.character_set = 0;
-        self.0.ok_packet = None;
+    fn exec_com_change_user(&mut self, opts: ChangeUserOpts) -> Result<()> {
+        opts.update_opts(&mut self.0.opts);
+        let com_change_user = ComChangeUser::new()
+            .with_user(self.0.opts.get_user().map(|x| x.as_bytes()))
+            .with_database(self.0.opts.get_db_name().map(|x| x.as_bytes()))
+            .with_auth_plugin_data(
+                self.0
+                    .auth_plugin
+                    .gen_data(self.0.opts.get_pass(), &self.0.nonce)
+                    .as_deref(),
+            )
+            .with_more_data(Some(
+                ComChangeUserMoreData::new(if self.server_version() >= (5, 5, 3) {
+                    UTF8MB4_GENERAL_CI
+                } else {
+                    UTF8_GENERAL_CI
+                })
+                .with_auth_plugin(Some(self.0.auth_plugin.clone()))
+                .with_connect_attributes(self.0.opts.get_connect_attrs().cloned()),
+            ))
+            .into_owned();
+        self.write_command_raw(&com_change_user)?;
         self.0.last_command = 0;
-        self.0.connected = false;
-        self.0.has_results = false;
-        self.connect_stream()?;
-        self.connect()
+        self.0.stmt_cache.clear();
+        self.continue_auth(false)
     }
 
-    /// Resets `MyConn` (drops state then reconnects).
+    /// Tries to reset the connection.
+    ///
+    /// This function will try to invoke COM_RESET_CONNECTION with
+    /// a fall back to COM_CHANGE_USER on older servers.
+    ///
+    /// ## Warining
+    ///
+    /// There is a long-standing bug in mysql 5.6 that kills this functionality in presence
+    /// of connection attributes (see [Bug #92954](https://bugs.mysql.com/bug.php?id=92954)).
+    ///
+    /// ## Note
+    ///
+    /// Re-executes [`Opts::get_init`].
     pub fn reset(&mut self) -> Result<()> {
-        match (self.0.server_version, self.0.mariadb_server_version) {
-            (Some(ref version), _) if *version > (5, 7, 3) => {
-                self.soft_reset().or_else(|_| self.hard_reset())
+        let reset_result = match (self.0.server_version, self.0.mariadb_server_version) {
+            (Some(ref version), _) if *version > (5, 7, 3) => self.exec_com_reset_connection(),
+            (_, Some(ref version)) if *version >= (10, 2, 7) => self.exec_com_reset_connection(),
+            _ => return self.exec_com_change_user(ChangeUserOpts::DEFAULT),
+        };
+
+        match reset_result {
+            Ok(_) => (),
+            Err(crate::Error::MySqlError(_)) => {
+                // fallback to COM_CHANGE_USER if server reports an error for COM_RESET_CONNECTION
+                self.exec_com_change_user(ChangeUserOpts::DEFAULT)?;
             }
-            (_, Some(ref version)) if *version >= (10, 2, 7) => {
-                self.soft_reset().or_else(|_| self.hard_reset())
-            }
-            _ => self.hard_reset(),
+            Err(e) => return Err(e),
         }
+
+        for cmd in self.0.opts.get_init() {
+            self.query_drop(cmd)?;
+        }
+
+        Ok(())
+    }
+
+    /// Executes [`COM_CHANGE_USER`][1].
+    ///
+    /// This might be used as an older and slower alternative to `COM_RESET_CONNECTION` that
+    /// works on MySql prior to 5.7.3 (MariaDb prior ot 10.2.4).
+    ///
+    /// ## Note
+    ///
+    /// * Using non-default `opts` for a pooled connection is discouraging.
+    /// * Connection options will be updated permanently.
+    ///
+    /// ## Warining
+    ///
+    /// There is a long-standing bug in mysql 5.6 that kills this functionality in presence
+    /// of connection attributes (see [Bug #92954](https://bugs.mysql.com/bug.php?id=92954)).
+    ///
+    /// [1]: https://dev.mysql.com/doc/c-api/5.7/en/mysql-change-user.html
+    pub fn change_user(&mut self, opts: ChangeUserOpts) -> Result<()> {
+        self.exec_com_change_user(opts)
     }
 
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
@@ -414,7 +481,7 @@ impl Conn {
         let tcp_connect_timeout = opts.get_tcp_connect_timeout();
         let bind_address = opts.bind_address().cloned();
         let stream = if let Some(socket) = opts.get_socket() {
-            Stream::connect_socket(&*socket, read_timeout, write_timeout)?
+            Stream::connect_socket(socket, read_timeout, write_timeout)?
         } else {
             let port = opts.get_tcp_port();
             let ip_or_hostname = match opts.get_host() {
@@ -423,7 +490,7 @@ impl Conn {
                 url::Host::Ipv6(ip) => ip.to_string(),
             };
             Stream::connect_tcp(
-                &*ip_or_hostname,
+                &ip_or_hostname,
                 port,
                 read_timeout,
                 write_timeout,
@@ -456,7 +523,7 @@ impl Conn {
             let mut buffer = get_buffer();
             match self.raw_read_packet(buffer.as_mut()) {
                 Ok(()) if buffer.first() == Some(&0xff) => {
-                    match ParseBuf(&*buffer).parse(self.0.capability_flags)? {
+                    match ParseBuf(&buffer).parse(self.0.capability_flags)? {
                         ErrPacket::Error(server_error) => {
                             self.handle_err();
                             return Err(MySqlError(From::from(server_error)));
@@ -504,7 +571,7 @@ impl Conn {
         &mut self,
         buffer: &'a Buffer,
     ) -> crate::Result<OkPacket<'a>> {
-        let ok = ParseBuf(&**buffer)
+        let ok = ParseBuf(buffer)
             .parse::<OkPacketDeserializer<T>>(self.0.capability_flags)?
             .into_inner();
         self.0.status_flags = ok.status_flags();
@@ -528,55 +595,58 @@ impl Conn {
         if matches!(
             auth_switch_request.auth_plugin(),
             AuthPlugin::MysqlOldPassword
-        ) {
-            if self.0.opts.get_secure_auth() {
-                return Err(DriverError(OldMysqlPasswordDisabled));
-            }
+        ) && self.0.opts.get_secure_auth()
+        {
+            return Err(DriverError(OldMysqlPasswordDisabled));
         }
 
         if matches!(
             auth_switch_request.auth_plugin(),
             AuthPlugin::Other(Cow::Borrowed(b"mysql_clear_password"))
-        ) {
-            if !self.0.opts.get_enable_cleartext_plugin() {
-                return Err(DriverError(UnknownAuthPlugin(
-                    "mysql_clear_password".into(),
-                )));
-            }
+        ) && !self.0.opts.get_enable_cleartext_plugin()
+        {
+            return Err(DriverError(CleartextPluginDisabled));
         }
 
-        let nonce = auth_switch_request.plugin_data();
-        let plugin_data = match auth_switch_request.auth_plugin() {
-            x @ AuthPlugin::MysqlOldPassword => {
-                x.gen_data(self.0.opts.get_pass(), nonce).map(Either::Left)
-            }
-            x @ AuthPlugin::MysqlNativePassword => {
-                x.gen_data(self.0.opts.get_pass(), nonce).map(Either::Left)
-            }
-            x @ AuthPlugin::CachingSha2Password => {
-                x.gen_data(self.0.opts.get_pass(), nonce).map(Either::Left)
-            }
-            AuthPlugin::Other(ref name) => {
-                if name.as_ref() == b"mysql_clear_password" {
-                    Some(Either::Right(Either::Left(
-                        RawBytes::<NullBytes>::new(
-                            self.0.opts.get_pass().unwrap_or_default().as_bytes(),
-                        )
-                        .into_owned(),
-                    )))
-                } else {
-                    Some(Either::Right(Either::Right([])))
+        self.0.nonce = auth_switch_request.plugin_data().to_vec();
+        self.0.auth_plugin = auth_switch_request.auth_plugin().into_owned();
+        let plugin_data = match self.0.auth_plugin {
+            ref x @ AuthPlugin::MysqlOldPassword => {
+                if self.0.opts.get_secure_auth() {
+                    return Err(DriverError(OldMysqlPasswordDisabled));
                 }
+                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
             }
+            ref x @ AuthPlugin::MysqlNativePassword => {
+                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
+            }
+            ref x @ AuthPlugin::CachingSha2Password => {
+                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
+            }
+            ref x @ AuthPlugin::MysqlClearPassword => {
+                if !self.0.opts.get_enable_cleartext_plugin() {
+                    return Err(DriverError(UnknownAuthPlugin(
+                        "mysql_clear_password".into(),
+                    )));
+                }
+
+                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
+            }
+            AuthPlugin::Other(_) => None,
+        };
+
+        if let Some(plugin_data) = plugin_data {
+            self.write_struct(&plugin_data.into_owned())?;
+        } else {
+            self.write_packet(&mut &[0_u8; 0][..])?;
         }
-        .unwrap_or_else(|| Either::Right(Either::Right([])));
-        self.write_struct(&plugin_data)?;
-        self.continue_auth(&auth_switch_request.auth_plugin(), nonce, true)
+
+        self.continue_auth(true)
     }
 
     fn do_handshake(&mut self) -> Result<()> {
         let payload = self.read_packet()?;
-        let handshake = ParseBuf(&*payload).parse::<HandshakePacket>(())?;
+        let handshake = ParseBuf(&payload).parse::<HandshakePacket>(())?;
 
         if handshake.protocol_version() != 10u8 {
             return Err(DriverError(UnsupportedProtocol(
@@ -605,7 +675,7 @@ impl Conn {
         }
 
         // Handshake scramble is always 21 bytes length (20 + zero terminator)
-        let nonce = {
+        self.0.nonce = {
             let mut nonce = Vec::from(handshake.scramble_1_ref());
             nonce.extend_from_slice(handshake.scramble_2_ref().unwrap_or(&[][..]));
             // Trim zero terminator. Fill with zeroes if nonce
@@ -617,14 +687,13 @@ impl Conn {
         // Allow only CachingSha2Password and MysqlNativePassword here
         // because sha256_password is deprecated and other plugins won't
         // appear here.
-        let auth_plugin = match handshake.auth_plugin() {
-            Some(x @ AuthPlugin::CachingSha2Password) => x,
+        self.0.auth_plugin = match handshake.auth_plugin() {
+            Some(x @ AuthPlugin::CachingSha2Password) => x.into_owned(),
             _ => AuthPlugin::MysqlNativePassword,
         };
 
-        let auth_data = auth_plugin.gen_data(self.0.opts.get_pass(), &*nonce);
-        self.write_handshake_response(&auth_plugin, auth_data.as_deref())?;
-        self.continue_auth(&auth_plugin, &*nonce, false)?;
+        self.write_handshake_response()?;
+        self.continue_auth(false)?;
 
         if self.has_capability(CapabilityFlags::CLIENT_COMPRESS) {
             self.switch_to_compressed();
@@ -649,10 +718,12 @@ impl Conn {
             | CapabilityFlags::CLIENT_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PLUGIN_AUTH
-            | CapabilityFlags::CLIENT_CONNECT_ATTRS
             | (self.0.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
         if self.0.opts.get_compress().is_some() {
             client_flags.insert(CapabilityFlags::CLIENT_COMPRESS);
+        }
+        if self.0.opts.get_connect_attrs().is_some() {
+            client_flags.insert(CapabilityFlags::CLIENT_CONNECT_ATTRS);
         }
         if let Some(db_name) = self.0.opts.get_db_name() {
             if !db_name.is_empty() {
@@ -665,30 +736,34 @@ impl Conn {
         client_flags | self.0.opts.get_additional_capabilities()
     }
 
-    fn connect_attrs(&self) -> HashMap<String, String> {
-        let program_name = match self.0.opts.get_connect_attrs().get("program_name") {
-            Some(program_name) => program_name.clone(),
-            None => {
-                let arg0 = std::env::args_os().next();
-                let arg0 = arg0.as_ref().map(|x| x.to_string_lossy());
-                arg0.unwrap_or_else(|| "".into()).to_owned().to_string()
+    fn connect_attrs(&self) -> Option<HashMap<String, String>> {
+        if let Some(attrs) = self.0.opts.get_connect_attrs() {
+            let program_name = match attrs.get("program_name") {
+                Some(program_name) => program_name.clone(),
+                None => {
+                    let arg0 = std::env::args_os().next();
+                    let arg0 = arg0.as_ref().map(|x| x.to_string_lossy());
+                    arg0.unwrap_or_else(|| "".into()).into_owned()
+                }
+            };
+
+            let mut attrs_to_send = HashMap::new();
+
+            attrs_to_send.insert("_client_name".into(), "rust-mysql-simple".into());
+            attrs_to_send.insert("_client_version".into(), env!("CARGO_PKG_VERSION").into());
+            attrs_to_send.insert("_os".into(), env!("CARGO_CFG_TARGET_OS").into());
+            attrs_to_send.insert("_pid".into(), process::id().to_string());
+            attrs_to_send.insert("_platform".into(), env!("CARGO_CFG_TARGET_ARCH").into());
+            attrs_to_send.insert("program_name".into(), program_name);
+
+            for (name, value) in attrs.clone() {
+                attrs_to_send.insert(name, value);
             }
-        };
 
-        let mut attrs = HashMap::new();
-
-        attrs.insert("_client_name".into(), "rust-mysql-simple".into());
-        attrs.insert("_client_version".into(), env!("CARGO_PKG_VERSION").into());
-        attrs.insert("_os".into(), env!("CARGO_CFG_TARGET_OS").into());
-        attrs.insert("_pid".into(), process::id().to_string());
-        attrs.insert("_platform".into(), env!("CARGO_CFG_TARGET_ARCH").into());
-        attrs.insert("program_name".into(), program_name);
-
-        for (name, value) in self.0.opts.get_connect_attrs().clone() {
-            attrs.insert(name, value);
+            Some(attrs_to_send)
+        } else {
+            None
         }
-
-        attrs
     }
 
     fn do_ssl_request(&mut self) -> Result<()> {
@@ -706,19 +781,21 @@ impl Conn {
         self.write_struct(&ssl_request)
     }
 
-    fn write_handshake_response(
-        &mut self,
-        auth_plugin: &AuthPlugin<'_>,
-        scramble_buf: Option<&[u8]>,
-    ) -> Result<()> {
+    fn write_handshake_response(&mut self) -> Result<()> {
+        let auth_data = self
+            .0
+            .auth_plugin
+            .gen_data(self.0.opts.get_pass(), &self.0.nonce)
+            .map(|x| x.into_owned());
+
         let handshake_response = HandshakeResponse::new(
-            scramble_buf,
+            auth_data.as_deref(),
             self.0.server_version.unwrap_or((0, 0, 0)),
             self.0.opts.get_user().map(str::as_bytes),
             self.0.opts.get_db_name().map(str::as_bytes),
-            Some(auth_plugin.clone()),
+            Some(self.0.auth_plugin.clone()),
             self.0.capability_flags,
-            Some(self.connect_attrs().clone()),
+            self.connect_attrs(),
         );
 
         let mut buf = get_buffer();
@@ -726,40 +803,31 @@ impl Conn {
         self.write_packet(&mut &*buf)
     }
 
-    fn continue_auth(
-        &mut self,
-        auth_plugin: &AuthPlugin<'_>,
-        nonce: &[u8],
-        auth_switched: bool,
-    ) -> Result<()> {
-        match auth_plugin {
+    fn continue_auth(&mut self, auth_switched: bool) -> Result<()> {
+        match self.0.auth_plugin {
             AuthPlugin::CachingSha2Password => {
-                self.continue_caching_sha2_password_auth(nonce, auth_switched)?;
+                self.continue_caching_sha2_password_auth(auth_switched)?;
                 Ok(())
             }
             AuthPlugin::MysqlNativePassword | AuthPlugin::MysqlOldPassword => {
-                self.continue_mysql_native_password_auth(nonce, auth_switched)?;
+                self.continue_mysql_native_password_auth(auth_switched)?;
+                Ok(())
+            }
+            AuthPlugin::MysqlClearPassword => {
+                if !self.0.opts.get_enable_cleartext_plugin() {
+                    return Err(DriverError(CleartextPluginDisabled));
+                }
+                self.continue_mysql_native_password_auth(auth_switched)?;
                 Ok(())
             }
             AuthPlugin::Other(ref name) => {
-                if name.as_ref() == b"mysql_clear_password"
-                    && self.0.opts.get_enable_cleartext_plugin()
-                {
-                    self.continue_mysql_native_password_auth(nonce, auth_switched)?;
-                    Ok(())
-                } else {
-                    let plugin_name = String::from_utf8_lossy(name).into();
-                    Err(DriverError(UnknownAuthPlugin(plugin_name)))
-                }
+                let plugin_name = String::from_utf8_lossy(name).into();
+                Err(DriverError(UnknownAuthPlugin(plugin_name)))
             }
         }
     }
 
-    fn continue_mysql_native_password_auth(
-        &mut self,
-        nonce: &[u8],
-        auth_switched: bool,
-    ) -> Result<()> {
+    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> Result<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
@@ -768,11 +836,12 @@ impl Conn {
             // auth switch
             0xfe if !auth_switched => {
                 let auth_switch = if payload.len() > 1 {
-                    ParseBuf(&*payload).parse(())?
+                    ParseBuf(&payload).parse(())?
                 } else {
-                    let _ = ParseBuf(&*payload).parse::<OldAuthSwitchRequest>(())?;
+                    let _ = ParseBuf(&payload).parse::<OldAuthSwitchRequest>(())?;
                     // we'll map OldAuthSwitchRequest to an AuthSwitchRequest with mysql_old_password plugin.
-                    AuthSwitchRequest::new("mysql_old_password".as_bytes(), nonce)
+                    AuthSwitchRequest::new("mysql_old_password".as_bytes(), &*self.0.nonce)
+                        .into_owned()
                 };
                 self.perform_auth_switch(auth_switch)
             }
@@ -780,11 +849,7 @@ impl Conn {
         }
     }
 
-    fn continue_caching_sha2_password_auth(
-        &mut self,
-        nonce: &[u8],
-        auth_switched: bool,
-    ) -> Result<()> {
+    fn continue_caching_sha2_password_auth(&mut self, auth_switched: bool) -> Result<()> {
         let payload = self.read_packet()?;
 
         match payload[0] {
@@ -818,10 +883,10 @@ impl Conn {
                             .map(Vec::from)
                             .unwrap_or_else(Vec::new);
                         pass.push(0);
-                        for i in 0..pass.len() {
-                            pass[i] ^= nonce[i % nonce.len()];
+                        for (i, c) in pass.iter_mut().enumerate() {
+                            *(c) ^= self.0.nonce[i % self.0.nonce.len()];
                         }
-                        let encrypted_pass = crypto::encrypt(&*pass, key);
+                        let encrypted_pass = crypto::encrypt(&pass, key);
                         self.write_packet(&mut encrypted_pass.as_slice())?;
                     }
 
@@ -831,7 +896,7 @@ impl Conn {
                 _ => Err(DriverError(UnexpectedPacket)),
             },
             0xfe if !auth_switched => {
-                let auth_switch_request = ParseBuf(&*payload).parse(())?;
+                let auth_switch_request = ParseBuf(&payload).parse(())?;
                 self.perform_auth_switch(auth_switch_request)
             }
             _ => Err(DriverError(UnexpectedPacket)),
@@ -907,10 +972,10 @@ impl Conn {
                 }
 
                 let (body, as_long_data) =
-                    ComStmtExecuteRequestBuilder::new(stmt.id()).build(&*params);
+                    ComStmtExecuteRequestBuilder::new(stmt.id()).build(params);
 
                 if as_long_data {
-                    self.send_long_data(stmt.id(), &*params)?;
+                    self.send_long_data(stmt.id(), params)?;
                 }
 
                 body
@@ -1003,7 +1068,7 @@ impl Conn {
                 let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
                 for _ in 0..column_count {
                     let pld = self.read_packet()?;
-                    let column = ParseBuf(&*pld).parse(())?;
+                    let column = ParseBuf(&pld).parse(())?;
                     columns.push(column);
                 }
                 // skip eof packet
@@ -1047,12 +1112,12 @@ impl Conn {
     fn _true_prepare(&mut self, query: &[u8]) -> Result<InnerStmt> {
         self.write_command(Command::COM_STMT_PREPARE, query)?;
         let pld = self.read_packet()?;
-        let mut stmt = ParseBuf(&*pld).parse::<InnerStmt>(self.connection_id())?;
+        let mut stmt = ParseBuf(&pld).parse::<InnerStmt>(self.connection_id())?;
         if stmt.num_params() > 0 {
             let mut params: Vec<Column> = Vec::with_capacity(stmt.num_params() as usize);
             for _ in 0..stmt.num_params() {
                 let pld = self.read_packet()?;
-                params.push(ParseBuf(&*pld).parse(())?);
+                params.push(ParseBuf(&pld).parse(())?);
             }
             stmt = stmt.with_params(Some(params));
             self.drop_packet()?;
@@ -1061,7 +1126,7 @@ impl Conn {
             let mut columns: Vec<Column> = Vec::with_capacity(stmt.num_columns() as usize);
             for _ in 0..stmt.num_columns() {
                 let pld = self.read_packet()?;
-                columns.push(ParseBuf(&*pld).parse(())?);
+                columns.push(ParseBuf(&pld).parse(())?);
             }
             stmt = stmt.with_columns(Some(columns));
             self.drop_packet()?;
@@ -1126,12 +1191,10 @@ impl Conn {
                 self.handle_ok::<ResultSetTerminator>(&pld)?;
                 return Ok(None);
             }
-        } else {
-            if pld[0] == 0xfe && pld.len() < 8 {
-                self.0.has_results = false;
-                self.handle_ok::<OldEofPacket>(&pld)?;
-                return Ok(None);
-            }
+        } else if pld[0] == 0xfe && pld.len() < 8 {
+            self.0.has_results = false;
+            self.handle_ok::<OldEofPacket>(&pld)?;
+            return Ok(None);
         }
 
         Ok(Some(pld))
@@ -1184,6 +1247,17 @@ impl Conn {
         self.request_binlog(request)?;
         Ok(BinlogStream::new(self))
     }
+
+    fn cleanup_for_pool(&mut self) -> Result<()> {
+        self.set_local_infile_handler(None);
+        if self.0.reset_upon_return {
+            self.reset()?;
+        }
+
+        self.0.reset_upon_return = self.0.opts.get_pool_opts().reset_connection();
+
+        Ok(())
+    }
 }
 
 #[cfg(unix)]
@@ -1218,7 +1292,7 @@ impl Queryable for Conn {
         P: Into<Params>,
     {
         let statement = stmt.as_statement(self)?;
-        let meta = self._execute(&*statement, params.into())?;
+        let meta = self._execute(&statement, params.into())?;
         Ok(QueryResult::new(ConnMut::Mut(self), meta))
     }
 }
@@ -1251,6 +1325,7 @@ mod test {
         };
 
         use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
+        use rand::Fill;
         use time::PrimitiveDateTime;
 
         use crate::{
@@ -1338,47 +1413,62 @@ mod test {
         fn query_traits() -> Result<(), Box<dyn std::error::Error>> {
             macro_rules! test_query {
                 ($conn : expr) => {
-                    "CREATE TABLE tmplak (a INT)".run($conn)?;
+                    "CREATE TABLE IF NOT EXISTS tmplak (a INT)"
+                        .run($conn)
+                        .unwrap();
+                    "DELETE FROM tmplak".run($conn).unwrap();
 
-                    "INSERT INTO tmplak (a) VALUES (?)".with((42,)).run($conn)?;
+                    "INSERT INTO tmplak (a) VALUES (?)"
+                        .with((42,))
+                        .run($conn)
+                        .unwrap();
 
                     "INSERT INTO tmplak (a) VALUES (?)"
                         .with((43..=44).map(|x| (x,)))
                         .batch($conn)?;
 
-                    let first: Option<u8> = "SELECT a FROM tmplak LIMIT 1".first($conn)?;
+                    let first: Option<u8> = "SELECT a FROM tmplak LIMIT 1".first($conn).unwrap();
                     assert_eq!(first, Some(42), "first text");
 
-                    let first: Option<u8> = "SELECT a FROM tmplak LIMIT 1".with(()).first($conn)?;
+                    let first: Option<u8> = "SELECT a FROM tmplak LIMIT 1"
+                        .with(())
+                        .first($conn)
+                        .unwrap();
                     assert_eq!(first, Some(42), "first bin");
 
-                    let count = "SELECT a FROM tmplak".run($conn)?.count();
+                    let count = "SELECT a FROM tmplak".run($conn).unwrap().count();
                     assert_eq!(count, 3, "run text");
 
-                    let count = "SELECT a FROM tmplak".with(()).run($conn)?.count();
+                    let count = "SELECT a FROM tmplak".with(()).run($conn).unwrap().count();
                     assert_eq!(count, 3, "run bin");
 
-                    let all: Vec<u8> = "SELECT a FROM tmplak".fetch($conn)?;
+                    let all: Vec<u8> = "SELECT a FROM tmplak".fetch($conn).unwrap();
                     assert_eq!(all, vec![42, 43, 44], "fetch text");
 
-                    let all: Vec<u8> = "SELECT a FROM tmplak".with(()).fetch($conn)?;
+                    let all: Vec<u8> = "SELECT a FROM tmplak".with(()).fetch($conn).unwrap();
                     assert_eq!(all, vec![42, 43, 44], "fetch bin");
 
-                    let mapped = "SELECT a FROM tmplak".map($conn, |x: u8| x + 1)?;
+                    let mapped = "SELECT a FROM tmplak".map($conn, |x: u8| x + 1).unwrap();
                     assert_eq!(mapped, vec![43, 44, 45], "map text");
 
-                    let mapped = "SELECT a FROM tmplak".with(()).map($conn, |x: u8| x + 1)?;
+                    let mapped = "SELECT a FROM tmplak"
+                        .with(())
+                        .map($conn, |x: u8| x + 1)
+                        .unwrap();
                     assert_eq!(mapped, vec![43, 44, 45], "map bin");
 
-                    let sum = "SELECT a FROM tmplak".fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                    let sum = "SELECT a FROM tmplak"
+                        .fold($conn, 0_u8, |acc, x: u8| acc + x)
+                        .unwrap();
                     assert_eq!(sum, 42 + 43 + 44, "fold text");
 
                     let sum = "SELECT a FROM tmplak"
                         .with(())
-                        .fold($conn, 0_u8, |acc, x: u8| acc + x)?;
+                        .fold($conn, 0_u8, |acc, x: u8| acc + x)
+                        .unwrap();
                     assert_eq!(sum, 42 + 43 + 44, "fold bin");
 
-                    "DROP TABLE tmplak".run($conn)?;
+                    "DROP TABLE tmplak".run($conn).unwrap();
                 };
             }
 
@@ -1736,6 +1826,105 @@ mod test {
         }
 
         #[test]
+        fn should_change_user() -> crate::Result<()> {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            assert_eq!(
+                conn.query_first::<Value, _>("SELECT @foo")
+                    .unwrap()
+                    .unwrap(),
+                Value::NULL
+            );
+
+            conn.query_drop("SET @foo = 'foo'").unwrap();
+
+            assert_eq!(
+                conn.query_first::<String, _>("SELECT @foo")
+                    .unwrap()
+                    .unwrap(),
+                "foo",
+            );
+
+            conn.change_user(Default::default()).unwrap();
+            assert_eq!(
+                conn.query_first::<Value, _>("SELECT @foo")
+                    .unwrap()
+                    .unwrap(),
+                Value::NULL
+            );
+
+            let plugins: &[&str] =
+                if conn.0.mariadb_server_version.is_none() && conn.server_version() >= (5, 8, 0) {
+                    &["mysql_native_password", "caching_sha2_password"]
+                } else {
+                    &["mysql_native_password"]
+                };
+
+            for plugin in plugins {
+                let mut rng = rand::thread_rng();
+                let mut pass = [0u8; 10];
+                pass.try_fill(&mut rng).unwrap();
+                let pass: String = IntoIterator::into_iter(pass)
+                    .map(|x| ((x % (123 - 97)) + 97) as char)
+                    .collect();
+
+                conn.query_drop("DELETE FROM mysql.user WHERE user = '__mats'")
+                    .unwrap();
+                conn.query_drop("FLUSH PRIVILEGES").unwrap();
+
+                if conn.0.mariadb_server_version.is_some() || conn.server_version() < (5, 7, 0) {
+                    if matches!(conn.server_version(), (5, 6, _)) {
+                        conn.query_drop(
+                            "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_old_password",
+                        )
+                        .unwrap();
+                        conn.query_drop(format!(
+                            "SET PASSWORD FOR '__mats'@'%' = OLD_PASSWORD({})",
+                            Value::from(pass.clone()).as_sql(false)
+                        ))
+                        .unwrap();
+                    } else {
+                        conn.query_drop("CREATE USER '__mats'@'%'").unwrap();
+                        conn.query_drop(format!(
+                            "SET PASSWORD FOR '__mats'@'%' = PASSWORD({})",
+                            Value::from(pass.clone()).as_sql(false)
+                        ))
+                        .unwrap();
+                    }
+                } else {
+                    conn.query_drop(format!(
+                        "CREATE USER '__mats'@'%' IDENTIFIED WITH {} BY {}",
+                        plugin,
+                        Value::from(pass.clone()).as_sql(false)
+                    ))
+                    .unwrap();
+                };
+
+                conn.query_drop("DELETE FROM mysql.user WHERE user = ''")
+                    .unwrap();
+                let _ = conn.query_drop("SET GLOBAL secure_auth = 0");
+                conn.query_drop("FLUSH PRIVILEGES").unwrap();
+
+                let mut conn2 = Conn::new(get_opts().secure_auth(false)).unwrap();
+                conn2
+                    .change_user(
+                        crate::ChangeUserOpts::default()
+                            .with_db_name(None)
+                            .with_user(Some("__mats".into()))
+                            .with_pass(Some(pass)),
+                    )
+                    .unwrap();
+                let (db, user) = conn2
+                    .query_first::<(Option<String>, String), _>("SELECT DATABASE(), USER();")
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(db, None);
+                assert!(user.starts_with("__mats"));
+            }
+
+            Ok(())
+        }
+
+        #[test]
         fn prep_exec() {
             let mut conn = Conn::new(get_opts()).unwrap();
 
@@ -1796,33 +1985,17 @@ mod test {
         fn reset_does_work() {
             let mut c = Conn::new(get_opts()).unwrap();
             let cid = c.connection_id();
+            c.query_drop("SET @foo = 'foo'").unwrap();
+            assert_eq!(
+                c.query_first::<String, _>("SELECT @foo").unwrap().unwrap(),
+                "foo",
+            );
             c.reset().unwrap();
-            match (c.0.server_version, c.0.mariadb_server_version) {
-                (Some(ref version), _) if *version > (5, 7, 3) => {
-                    assert_eq!(cid, c.connection_id());
-                }
-                (_, Some(ref version)) if *version >= (10, 2, 7) => {
-                    assert_eq!(cid, c.connection_id());
-                }
-                _ => assert_ne!(cid, c.connection_id()),
-            }
-        }
-
-        /// Library panics with "incomplete connection" in case of subsequent
-        /// failed calls to `reset` when the server is down.
-        /// (see [blackbeam/rust-mysql-simple#317][1]).
-        ///
-        /// [1]: https://github.com/blackbeam/rust-mysql-simple/issues/317
-        #[test]
-        fn issue_317() {
-            let mut c = Conn::new(get_opts()).unwrap();
-            c.0.opts = get_opts().tcp_port(55555).into();
-            let version = std::mem::replace(&mut c.0.server_version, Some((0, 0, 0)));
-            let mdbversion = std::mem::replace(&mut c.0.mariadb_server_version, Some((0, 0, 0)));
-            c.reset().unwrap_err();
-            c.0.server_version = version;
-            c.0.mariadb_server_version = mdbversion;
-            let _ = c.reset();
+            assert_eq!(cid, c.connection_id());
+            assert_eq!(
+                c.query_first::<Value, _>("SELECT @foo").unwrap().unwrap(),
+                Value::NULL
+            );
         }
 
         #[test]
@@ -2180,7 +2353,9 @@ mod test {
 
         #[test]
         fn should_set_connect_attrs() {
-            let opts = OptsBuilder::from_opts(get_opts());
+            let opts = OptsBuilder::from_opts(
+                get_opts().connect_attrs::<String, String>(Some(Default::default())),
+            );
             let mut conn = Conn::new(opts).unwrap();
 
             let support_connect_attrs = match (conn.0.server_version, conn.0.mariadb_server_version)
@@ -2241,7 +2416,7 @@ mod test {
                 connect_attrs.insert("foo", "foo val");
                 connect_attrs.insert("bar", "bar val");
                 connect_attrs.insert("program_name", "my program name");
-                let mut conn = Conn::new(opts.connect_attrs(connect_attrs)).unwrap();
+                let mut conn = Conn::new(opts.connect_attrs(Some(connect_attrs))).unwrap();
                 expected_values.pop(); // remove program_name at the last
                 expected_values.push(("foo", "foo val"));
                 expected_values.push(("bar", "bar val"));

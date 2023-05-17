@@ -25,37 +25,16 @@ pub(crate) type LocalInfileInner =
 /// Note that older versions of Mysql server may not support this functionality.
 ///
 /// ```rust
-/// # use std::io::Write;
-/// # use mysql::{
-/// #     Pool,
-/// #     Opts,
-/// #     OptsBuilder,
-/// #     LocalInfileHandler,
-/// #     from_row,
-/// #     error::Error,
-/// #     prelude::*,
-/// # };
-/// use mysql::prelude::Queryable;
-/// # fn get_opts() -> Opts {
-/// #     let url = if let Ok(url) = std::env::var("DATABASE_URL") {
-/// #         let opts = Opts::from_url(&url).expect("DATABASE_URL invalid");
-/// #         if opts.get_db_name().expect("a database name is required").is_empty() {
-/// #             panic!("database name is empty");
-/// #         }
-/// #         url
-/// #     } else {
-/// #         "mysql://root:password@127.0.0.1:3307/mysql".to_string()
-/// #     };
-/// #     Opts::from_url(&*url).unwrap()
-/// # }
-/// # let opts = get_opts();
-/// # let pool = Pool::new_manual(1, 1, opts).unwrap();
-/// # let mut conn = pool.get_conn().unwrap();
-/// # conn.query_drop("CREATE TEMPORARY TABLE mysql.Users (id INT, name TEXT, age INT, email TEXT)").unwrap();
-/// # conn.exec_drop("INSERT INTO mysql.Users (id, name, age, email) VALUES (?, ?, ?, ?)",
-/// #                (1, "John", 17, "foo@bar.baz")).unwrap();
-/// conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)").unwrap();
+/// # mysql::doctest_wrapper!(__result, {
+/// use mysql::*;
+/// use mysql::prelude::*;
 ///
+/// use std::io::Write;
+///
+/// let pool = Pool::new(get_opts())?;
+/// let mut conn = pool.get_conn().unwrap();
+///
+/// conn.query_drop("CREATE TEMPORARY TABLE mysql.tbl(a TEXT)").unwrap();
 /// conn.set_local_infile_handler(Some(
 ///     LocalInfileHandler::new(|file_name, writer| {
 ///         writer.write_all(b"row1: file name is ")?;
@@ -70,7 +49,7 @@ pub(crate) type LocalInfileInner =
 ///     Ok(_) => (),
 ///     Err(Error::MySqlError(ref e)) if e.code == 1148 => {
 ///         // functionality is not supported by the server
-///         return;
+///         return Ok(());
 ///     }
 ///     err => {
 ///         err.unwrap();
@@ -83,6 +62,7 @@ pub(crate) type LocalInfileInner =
 ///     result,
 ///     vec!["row1: file name is file_name".to_string(), "row2: foobar".to_string()],
 /// );
+/// # });
 /// ```
 #[derive(Clone)]
 pub struct LocalInfileHandler(pub(crate) LocalInfileInner);
@@ -98,7 +78,7 @@ impl LocalInfileHandler {
 
 impl PartialEq for LocalInfileHandler {
     fn eq(&self, other: &LocalInfileHandler) -> bool {
-        (&*self.0 as *const _) == (&*other.0 as *const _)
+        std::ptr::eq(&*self.0, &*other.0)
     }
 }
 

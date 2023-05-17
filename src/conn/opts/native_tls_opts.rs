@@ -44,7 +44,7 @@ impl ClientIdentity {
     pub(crate) fn load(&self) -> crate::Result<Identity> {
         let der = std::fs::read(self.pkcs12_path.as_ref())?;
         Ok(Identity::from_pkcs12(
-            &*der,
+            &der,
             self.password.as_deref().unwrap_or(""),
         )?)
     }
