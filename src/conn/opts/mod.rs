@@ -214,7 +214,7 @@ pub(crate) struct InnerOpts {
     additional_capabilities: CapabilityFlags,
 
     /// Connect attributes
-    connect_attrs: HashMap<String, String>,
+    connect_attrs: Option<HashMap<String, String>>,
 
     /// Disables `mysql_old_password` plugin (defaults to `true`).
     ///
@@ -266,7 +266,7 @@ impl Default for InnerOpts {
             stmt_cache_size: DEFAULT_STMT_CACHE_SIZE,
             compress: None,
             additional_capabilities: CapabilityFlags::empty(),
-            connect_attrs: HashMap::new(),
+            connect_attrs: Some(HashMap::new()),
             secure_auth: true,
             enable_cleartext_plugin: false,
             #[cfg(test)]
@@ -450,7 +450,7 @@ impl Opts {
         self.0.additional_capabilities
     }
 
-    /// Connect attributes
+    /// Connect attributes (the default connect attributes are sent by default).
     ///
     /// This value is sent to the server as custom name-value attributes.
     /// You can see them from performance_schema tables: [`session_account_connect_attrs`
@@ -464,10 +464,18 @@ impl Opts {
     ///
     /// ### Note
     ///
+    /// - set `connect_attrs` to `None` to completely remove connect attributes
+    /// - set `connect_attrs` to an empty map to send only the default attributes
+    ///
+    /// #### Warning
+    ///
+    /// > There is a bug in MySql 5.6 that kills COM_CHANGE_USER in the presence of connection
+    /// > attributes so it's better to stick to `None` for mysql < 5.7.
+    ///
     /// Attribute names that begin with an underscore (`_`) are not set by
     /// application programs because they are reserved for internal use.
     ///
-    /// The following attributes are sent in addition to ones set by programs.
+    /// The following default attributes are sent in addition to ones set by programs.
     ///
     /// name            | value
     /// ----------------|--------------------------
@@ -482,8 +490,8 @@ impl Opts {
     /// [`performance_schema`]: https://dev.mysql.com/doc/refman/8.0/en/performance-schema-system-variables.html#sysvar_performance_schema
     /// [`performance_schema_session_connect_attrs_size`]: https://dev.mysql.com/doc/refman/en/performance-schema-system-variables.html#sysvar_performance_schema_session_connect_attrs_size
     ///
-    pub fn get_connect_attrs(&self) -> &HashMap<String, String> {
-        &self.0.connect_attrs
+    pub fn get_connect_attrs(&self) -> Option<&HashMap<String, String>> {
+        self.0.connect_attrs.as_ref()
     }
 
     /// Disables `mysql_old_password` plugin (defaults to `true`).
@@ -982,7 +990,7 @@ impl OptsBuilder {
         self
     }
 
-    /// Connect attributes
+    /// Connect attributes (the default connect attributes are sent by default).
     ///
     /// This value is sent to the server as custom name-value attributes.
     /// You can see them from performance_schema tables: [`session_account_connect_attrs`
@@ -996,10 +1004,18 @@ impl OptsBuilder {
     ///
     /// ### Note
     ///
+    /// - set `connect_attrs` to `None` to completely remove connect attributes
+    /// - set `connect_attrs` to an empty map to send only the default attributes
+    ///
+    /// #### Warning
+    ///
+    /// > There is a bug in MySql 5.6 that kills COM_CHANGE_USER in the presence of connection
+    /// > attributes so it's better to stick to `None` for mysql < 5.7.
+    ///
     /// Attribute names that begin with an underscore (`_`) are not set by
     /// application programs because they are reserved for internal use.
     ///
-    /// The following attributes are sent in addition to ones set by programs.
+    /// The following default attributes are sent in addition to ones set by programs.
     ///
     /// name            | value
     /// ----------------|--------------------------
@@ -1016,14 +1032,19 @@ impl OptsBuilder {
     ///
     pub fn connect_attrs<T1: Into<String> + Eq + Hash, T2: Into<String>>(
         mut self,
-        connect_attrs: HashMap<T1, T2>,
+        connect_attrs: Option<HashMap<T1, T2>>,
     ) -> Self {
-        self.opts.0.connect_attrs = HashMap::with_capacity(connect_attrs.len());
-        for (name, value) in connect_attrs {
-            let name = name.into();
-            if !name.starts_with('_') {
-                self.opts.0.connect_attrs.insert(name, value.into());
+        if let Some(connect_attrs) = connect_attrs {
+            let mut attrs = HashMap::with_capacity(connect_attrs.len());
+            for (name, value) in connect_attrs {
+                let name = name.into();
+                if !name.starts_with('_') {
+                    attrs.insert(name, value.into());
+                }
             }
+            self.opts.0.connect_attrs = Some(attrs);
+        } else {
+            self.opts.0.connect_attrs = None;
         }
         self
     }

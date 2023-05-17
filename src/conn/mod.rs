@@ -392,13 +392,7 @@ impl Conn {
                     UTF8_GENERAL_CI
                 })
                 .with_auth_plugin(Some(self.0.auth_plugin.clone()))
-                .with_connect_attributes(
-                    if self.0.opts.get_connect_attrs().is_empty() {
-                        None
-                    } else {
-                        Some(self.0.opts.get_connect_attrs().clone())
-                    },
-                ),
+                .with_connect_attributes(self.0.opts.get_connect_attrs().cloned()),
             ))
             .into_owned();
         self.write_command_raw(&com_change_user)?;
@@ -411,6 +405,11 @@ impl Conn {
     ///
     /// This function will try to invoke COM_RESET_CONNECTION with
     /// a fall back to COM_CHANGE_USER on older servers.
+    ///
+    /// ## Warining
+    ///
+    /// There is a long-standing bug in mysql 5.6 that kills this functionality in presence
+    /// of connection attributes (see [Bug #92954](https://bugs.mysql.com/bug.php?id=92954)).
     ///
     /// ## Note
     ///
@@ -447,6 +446,11 @@ impl Conn {
     ///
     /// * Using non-default `opts` for a pooled connection is discouraging.
     /// * Connection options will be updated permanently.
+    ///
+    /// ## Warining
+    ///
+    /// There is a long-standing bug in mysql 5.6 that kills this functionality in presence
+    /// of connection attributes (see [Bug #92954](https://bugs.mysql.com/bug.php?id=92954)).
     ///
     /// [1]: https://dev.mysql.com/doc/c-api/5.7/en/mysql-change-user.html
     pub fn change_user(&mut self, opts: ChangeUserOpts) -> Result<()> {
@@ -714,10 +718,12 @@ impl Conn {
             | CapabilityFlags::CLIENT_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PLUGIN_AUTH
-            | CapabilityFlags::CLIENT_CONNECT_ATTRS
             | (self.0.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
         if self.0.opts.get_compress().is_some() {
             client_flags.insert(CapabilityFlags::CLIENT_COMPRESS);
+        }
+        if self.0.opts.get_connect_attrs().is_some() {
+            client_flags.insert(CapabilityFlags::CLIENT_CONNECT_ATTRS);
         }
         if let Some(db_name) = self.0.opts.get_db_name() {
             if !db_name.is_empty() {
@@ -730,30 +736,34 @@ impl Conn {
         client_flags | self.0.opts.get_additional_capabilities()
     }
 
-    fn connect_attrs(&self) -> HashMap<String, String> {
-        let program_name = match self.0.opts.get_connect_attrs().get("program_name") {
-            Some(program_name) => program_name.clone(),
-            None => {
-                let arg0 = std::env::args_os().next();
-                let arg0 = arg0.as_ref().map(|x| x.to_string_lossy());
-                arg0.unwrap_or_else(|| "".into()).into_owned()
+    fn connect_attrs(&self) -> Option<HashMap<String, String>> {
+        if let Some(attrs) = self.0.opts.get_connect_attrs() {
+            let program_name = match attrs.get("program_name") {
+                Some(program_name) => program_name.clone(),
+                None => {
+                    let arg0 = std::env::args_os().next();
+                    let arg0 = arg0.as_ref().map(|x| x.to_string_lossy());
+                    arg0.unwrap_or_else(|| "".into()).into_owned()
+                }
+            };
+
+            let mut attrs_to_send = HashMap::new();
+
+            attrs_to_send.insert("_client_name".into(), "rust-mysql-simple".into());
+            attrs_to_send.insert("_client_version".into(), env!("CARGO_PKG_VERSION").into());
+            attrs_to_send.insert("_os".into(), env!("CARGO_CFG_TARGET_OS").into());
+            attrs_to_send.insert("_pid".into(), process::id().to_string());
+            attrs_to_send.insert("_platform".into(), env!("CARGO_CFG_TARGET_ARCH").into());
+            attrs_to_send.insert("program_name".into(), program_name);
+
+            for (name, value) in attrs.clone() {
+                attrs_to_send.insert(name, value);
             }
-        };
 
-        let mut attrs = HashMap::new();
-
-        attrs.insert("_client_name".into(), "rust-mysql-simple".into());
-        attrs.insert("_client_version".into(), env!("CARGO_PKG_VERSION").into());
-        attrs.insert("_os".into(), env!("CARGO_CFG_TARGET_OS").into());
-        attrs.insert("_pid".into(), process::id().to_string());
-        attrs.insert("_platform".into(), env!("CARGO_CFG_TARGET_ARCH").into());
-        attrs.insert("program_name".into(), program_name);
-
-        for (name, value) in self.0.opts.get_connect_attrs().clone() {
-            attrs.insert(name, value);
+            Some(attrs_to_send)
+        } else {
+            None
         }
-
-        attrs
     }
 
     fn do_ssl_request(&mut self) -> Result<()> {
@@ -785,7 +795,7 @@ impl Conn {
             self.0.opts.get_db_name().map(str::as_bytes),
             Some(self.0.auth_plugin.clone()),
             self.0.capability_flags,
-            Some(self.connect_attrs()),
+            self.connect_attrs(),
         );
 
         let mut buf = get_buffer();
@@ -1889,6 +1899,9 @@ mod test {
                     .unwrap();
                 };
 
+                conn.query_drop("DELETE FROM mysql.user WHERE user = ''")
+                    .unwrap();
+                let _ = conn.query_drop("SET GLOBAL secure_auth = 0");
                 conn.query_drop("FLUSH PRIVILEGES").unwrap();
 
                 let mut conn2 = Conn::new(get_opts().secure_auth(false)).unwrap();
@@ -2340,7 +2353,9 @@ mod test {
 
         #[test]
         fn should_set_connect_attrs() {
-            let opts = OptsBuilder::from_opts(get_opts());
+            let opts = OptsBuilder::from_opts(
+                get_opts().connect_attrs::<String, String>(Some(Default::default())),
+            );
             let mut conn = Conn::new(opts).unwrap();
 
             let support_connect_attrs = match (conn.0.server_version, conn.0.mariadb_server_version)
@@ -2401,7 +2416,7 @@ mod test {
                 connect_attrs.insert("foo", "foo val");
                 connect_attrs.insert("bar", "bar val");
                 connect_attrs.insert("program_name", "my program name");
-                let mut conn = Conn::new(opts.connect_attrs(connect_attrs)).unwrap();
+                let mut conn = Conn::new(opts.connect_attrs(Some(connect_attrs))).unwrap();
                 expected_values.pop(); // remove program_name at the last
                 expected_values.push(("foo", "foo val"));
                 expected_values.push(("bar", "bar val"));
