@@ -115,7 +115,7 @@ impl Pool {
             }
         };
 
-        if call_ping && self.inner.opts().check_health() && !conn.ping() {
+        if call_ping && self.inner.opts().check_health() && conn.ping().is_err() {
             // existing connection seem to be dead, retrying..
             self.inner.decrease();
             return self._get_conn(stmt, timeout, call_ping);
