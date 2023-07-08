@@ -1677,7 +1677,7 @@ mod test {
 
         #[test]
         fn manually_closed_stmt() {
-            let opts = OptsBuilder::from(get_opts()).stmt_cache_size(1);
+            let opts = get_opts().stmt_cache_size(1);
             let mut conn = Conn::new(opts).unwrap();
             let stmt = conn.prep("SELECT 1").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
@@ -1696,15 +1696,13 @@ mod test {
                 "CREATE TEMPORARY TABLE mysql.tbl(id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, a INT)",
             )
             .unwrap();
-            let _ = conn
-                .start_transaction(TxOpts::default())
-                .and_then(|mut t| {
+            conn.start_transaction(TxOpts::default())
+                .map(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     assert_eq!(t.last_insert_id(), Some(1));
                     assert_eq!(t.affected_rows(), 1);
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.commit().unwrap();
-                    Ok(())
                 })
                 .unwrap();
             assert_eq!(
@@ -1716,11 +1714,9 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"2".to_vec())]
             );
-            let _ = conn
-                .start_transaction(TxOpts::default())
-                .and_then(|mut t| {
+            conn.start_transaction(TxOpts::default())
+                .map(|mut t| {
                     t.query_drop("INSERT INTO tbl2(a) VALUES(1)").unwrap_err();
-                    Ok(())
                     // implicit rollback
                 })
                 .unwrap();
@@ -1733,13 +1729,11 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"2".to_vec())]
             );
-            let _ = conn
-                .start_transaction(TxOpts::default())
-                .and_then(|mut t| {
+            conn.start_transaction(TxOpts::default())
+                .map(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.rollback().unwrap();
-                    Ok(())
                 })
                 .unwrap();
             assert_eq!(
@@ -1786,7 +1780,7 @@ mod test {
                 let mut cell_data = vec![b'Z'; 65535];
                 cell_data.push(b'\n');
                 for _ in 0..1536 {
-                    stream.write_all(&*cell_data)?;
+                    stream.write_all(&cell_data)?;
                 }
                 Ok(())
             })));
@@ -2159,7 +2153,7 @@ mod test {
                 conn.exec_first::<crate::Row, _, _>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
-                _ => assert!(false),
+                _ => panic!(),
             }
         }
 
@@ -2170,7 +2164,7 @@ mod test {
             let result = conn.exec_drop(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(NamedParamsForPositionalQuery)) => (),
-                _ => assert!(false),
+                _ => panic!(),
             }
         }
 
@@ -2373,7 +2367,7 @@ mod test {
                 }
                 let attrs_size: i32 =
                     get_system_variable(&mut conn, "performance_schema_session_connect_attrs_size");
-                if attrs_size >= 0 && attrs_size <= 128 {
+                if (0..=128).contains(&attrs_size) {
                     panic!("The system variable `performance_schema_session_connect_attrs_size` is {}. Restart the MySQL server with `--performance_schema_session_connect_attrs_size=-1` to pass the test.", attrs_size);
                 }
 
@@ -2554,7 +2548,7 @@ mod test {
             // iterate using COM_BINLOG_DUMP with BINLOG_DUMP_NON_BLOCK flag
             let (conn, filename, pos) = get_conn().unwrap();
 
-            let mut binlog_stream = conn
+            let binlog_stream = conn
                 .get_binlog_stream(
                     BinlogRequest::new(14)
                         .with_filename(filename)
@@ -2564,7 +2558,7 @@ mod test {
                 .unwrap();
 
             events_num = 0;
-            while let Some(event) = binlog_stream.next() {
+            for event in binlog_stream {
                 let event = event.unwrap();
                 events_num += 1;
                 event.header().event_type().unwrap();

@@ -1414,7 +1414,7 @@ mod test {
         assert_eq!(parsed_opts.opts.get_ip_or_hostname(), "127.0.0.1");
         assert_eq!(parsed_opts.opts.get_tcp_port(), 8080);
         assert_eq!(parsed_opts.opts.get_db_name(), Some("test_db"));
-        assert_eq!(parsed_opts.opts.get_prefer_socket(), false);
+        assert!(!parsed_opts.opts.get_prefer_socket());
         assert_eq!(parsed_opts.opts.get_tcp_keepalive_time_ms(), Some(5000));
         #[cfg(any(target_os = "linux", target_os = "macos",))]
         assert_eq!(
