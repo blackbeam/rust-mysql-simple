@@ -160,6 +160,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
                     .or_else(|e| addrs.iter().filter(|x| x.is_ipv4()).fold(Err(e), fold_fun))
             }
         } else {
+            #[allow(clippy::manual_try_fold)]
             // no bind address
             addrs
                 .into_iter()
@@ -188,7 +189,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
         }
         #[cfg(any(target_os = "linux", target_os = "macos",))]
         if let Some(keepalive_probe_interval_secs) = keepalive_probe_interval_secs {
-            use std::os::unix::io::AsRawFd;
+            use std::os::fd::AsRawFd as _;
             let fd = socket.as_raw_fd();
             unsafe {
                 if libc::setsockopt(
@@ -205,7 +206,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
         }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(keepalive_probe_count) = keepalive_probe_count {
-            use std::os::unix::io::AsRawFd;
+            use std::os::fd::AsRawFd as _;
             let fd = socket.as_raw_fd();
             unsafe {
                 if libc::setsockopt(
