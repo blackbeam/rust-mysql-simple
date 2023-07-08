@@ -391,8 +391,10 @@ impl<'a> SetColumns<'a> {
             .as_ref()
             .and_then(|cols| cols.iter().position(|col| col.name_ref() == name))
     }
+}
 
-    pub fn as_ref(&self) -> &[Column] {
+impl AsRef<[Column]> for SetColumns<'_> {
+    fn as_ref(&self) -> &[Column] {
         self.inner
             .as_ref()
             .map(|cols| &(*cols)[..])
