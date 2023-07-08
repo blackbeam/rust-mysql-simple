@@ -266,18 +266,6 @@ impl PooledConn {
         self.conn.take().unwrap().get_binlog_stream(request)
     }
 
-    /// Gives mutable reference to the wrapped
-    /// [`Conn`](struct.Conn.html).
-    pub fn as_mut(&mut self) -> &mut Conn {
-        self.conn.as_mut().unwrap()
-    }
-
-    /// Gives reference to the wrapped
-    /// [`Conn`](struct.Conn.html).
-    pub fn as_ref(&self) -> &Conn {
-        self.conn.as_ref().unwrap()
-    }
-
     /// Unwraps wrapped [`Conn`](struct.Conn.html).
     pub fn unwrap(mut self) -> Conn {
         self.conn.take().unwrap()
@@ -320,6 +308,13 @@ impl AsRef<Conn> for PooledConn {
     /// Gives reference to the wrapped [`Conn`].
     fn as_ref(&self) -> &Conn {
         self.conn.as_ref().unwrap()
+    }
+}
+
+impl AsMut<Conn> for PooledConn {
+    /// Gives mutable reference to the wrapped [`Conn`].
+    fn as_mut(&mut self) -> &mut Conn {
+        self.conn.as_mut().unwrap()
     }
 }
 
