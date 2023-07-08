@@ -316,6 +316,13 @@ impl PooledConn {
     }
 }
 
+impl AsRef<Conn> for PooledConn {
+    /// Gives reference to the wrapped [`Conn`].
+    fn as_ref(&self) -> &Conn {
+        self.conn.as_ref().unwrap()
+    }
+}
+
 impl Queryable for PooledConn {
     fn query_iter<T: AsRef<str>>(&mut self, query: T) -> Result<QueryResult<'_, '_, '_, Text>> {
         self.conn.as_mut().unwrap().query_iter(query)
