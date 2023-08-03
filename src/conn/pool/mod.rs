@@ -463,7 +463,7 @@ mod test {
             pool.start_transaction(TxOpts::default()).unwrap();
         }
         #[test]
-        fn should_execute_queryes_on_PooledConn() {
+        fn should_execute_queries_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {

@@ -406,7 +406,7 @@ impl Conn {
     /// This function will try to invoke COM_RESET_CONNECTION with
     /// a fall back to COM_CHANGE_USER on older servers.
     ///
-    /// ## Warining
+    /// ## Warning
     ///
     /// There is a long-standing bug in mysql 5.6 that kills this functionality in presence
     /// of connection attributes (see [Bug #92954](https://bugs.mysql.com/bug.php?id=92954)).
@@ -447,7 +447,7 @@ impl Conn {
     /// * Using non-default `opts` for a pooled connection is discouraging.
     /// * Connection options will be updated permanently.
     ///
-    /// ## Warining
+    /// ## Warning
     ///
     /// There is a long-standing bug in mysql 5.6 that kills this functionality in presence
     /// of connection attributes (see [Bug #92954](https://bugs.mysql.com/bug.php?id=92954)).
@@ -1542,7 +1542,7 @@ mod test {
         }
 
         #[test]
-        fn should_execute_queryes_and_parse_results() {
+        fn should_execute_queries_and_parse_results() {
             type TestRow = (String, String, String, String, String, String);
 
             const CREATE_QUERY: &str = r"CREATE TEMPORARY TABLE mysql.tbl
@@ -1568,7 +1568,7 @@ mod test {
             assert_eq!(conn.affected_rows(), 1);
             assert_eq!(conn.last_insert_id(), 2);
 
-            conn.query_drop("SELECT * FROM unexisted").unwrap_err();
+            conn.query_drop("SELECT * FROM nonexistent").unwrap_err();
             conn.query_iter("SELECT * FROM mysql.tbl").unwrap(); // Drop::drop for QueryResult
 
             conn.query_drop("UPDATE mysql.tbl SET a = 'foo'").unwrap();
@@ -1618,7 +1618,7 @@ mod test {
         fn should_execute_statements_and_parse_results() {
             const CREATE_QUERY: &str = r"CREATE TEMPORARY TABLE
                 mysql.tbl (a TEXT, b INT, c INT UNSIGNED, d DATE, e FLOAT)";
-            const INSERT_SMTM: &str = r"INSERT
+            const INSERT_STMT: &str = r"INSERT
                 INTO mysql.tbl (a, b, c, d, e)
                 VALUES (?, ?, ?, ?, ?)";
 
@@ -1636,7 +1636,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             conn.query_drop(CREATE_QUERY).unwrap();
 
-            let insert_stmt = conn.prep(INSERT_SMTM).unwrap();
+            let insert_stmt = conn.prep(INSERT_STMT).unwrap();
             assert_eq!(insert_stmt.connection_id(), conn.connection_id());
             conn.exec_drop(
                 &insert_stmt,
@@ -2029,7 +2029,7 @@ mod test {
         }
 
         #[test]
-        fn should_handle_multi_resultset() {
+        fn should_handle_multi_result_set() {
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
                 .db_name(Some("mysql"));
@@ -2393,7 +2393,7 @@ mod test {
                 }
 
                 let pid = process::id().to_string();
-                let progname = std::env::args_os()
+                let prog_name = std::env::args_os()
                     .next()
                     .unwrap()
                     .to_string_lossy()
@@ -2404,7 +2404,7 @@ mod test {
                     ("_os", env!("CARGO_CFG_TARGET_OS")),
                     ("_pid", &pid),
                     ("_platform", env!("CARGO_CFG_TARGET_ARCH")),
-                    ("program_name", &progname),
+                    ("program_name", &prog_name),
                 ];
 
                 // No connect attributes are added.
