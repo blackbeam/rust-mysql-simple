@@ -14,7 +14,7 @@
 //! Features:
 //!
 //! *   macOS, Windows and Linux support;
-//! *   TLS support via **nativetls** or **rustls** (see the [SSL Support](#ssl-support) section);
+//! *   TLS support via **native-tls** or **rustls** (see the [SSL Support](#ssl-support) section);
 //! *   MySql text protocol support, i.e. support of simple text queries and text result sets;
 //! *   MySql binary protocol support, i.e. support of prepared statements and binary result sets;
 //! *   support of multi-result sets;
@@ -132,7 +132,7 @@
 //!
 //!     * for the `flate2` crate (please consult `flate2` crate documentation for available features):
 //!
-//!         *   **flate2/zlib** (necessary) – `zlib` backend is chosed by default.
+//!         *   **flate2/zlib** (necessary) – `zlib` backend is chosen by default.
 //!
 //!     * for the `mysql_common` crate (please consult `mysql_common` crate documentation for available features):
 //!
@@ -436,7 +436,7 @@
 //! let val: Option<String> = conn.query_first("SELECT 'foo'")?;
 //! assert_eq!(val.unwrap(), "foo");
 //!
-//! // Example of a mutli-column row conversion to an inferred type:
+//! // Example of a multi-column row conversion to an inferred type:
 //! let row = conn.query_first("SELECT 255, 256")?;
 //! assert_eq!(row, Some((255u8, 256u16)));
 //!
@@ -703,7 +703,7 @@
 //!
 //! #### Note
 //!
-//! Statemet cache only works for:
+//! Statement cache only works for:
 //! 1.  for raw [`Conn`]
 //! 2.  for [`PooledConn`]:
 //!     * within it's lifetime if [`PoolOpts::reset_connection`] is `true`
@@ -725,7 +725,7 @@
 //!
 //! *   you should be aware of the [`max_prepared_stmt_count`][max_prepared_stmt_count]
 //!     option of the MySql server. If the number of active connections times the value
-//!     of `stmt_cache_size` is greater, than you could receive an error while prepareing
+//!     of `stmt_cache_size` is greater, than you could receive an error while preparing
 //!     another statement.
 //!
 //! ### Named parameters
@@ -787,7 +787,7 @@
 //!
 //! `BinQuery` and `BatchQuery` traits covers the set of `Queryable::exec*` methods from
 //! the perspective of a query, i.e. `BinQuery` is something, that can be performed if suitable
-//! connection is given (see [`TextQuery`](#the-textquery-trat) section for the list
+//! connection is given (see [`TextQuery`](#the-textquery-trait) section for the list
 //! of suitable connections).
 //!
 //! As with the [`TextQuery`](#the-textquery-trait) you can give away the connection and acquire

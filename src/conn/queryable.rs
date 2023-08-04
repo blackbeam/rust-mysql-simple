@@ -25,7 +25,7 @@ pub trait AsStatement {
 
 /// Queryable object.
 pub trait Queryable {
-    /// Perfoms text query.
+    /// Performs text query.
     fn query_iter<Q: AsRef<str>>(&mut self, query: Q) -> Result<QueryResult<'_, '_, '_, Text>>;
 
     /// Performs text query and collects the first result set.
@@ -236,7 +236,7 @@ pub trait Queryable {
         })
     }
 
-    /// Executes the given `stmt` and folds the first result set to a signel value.
+    /// Executes the given `stmt` and folds the first result set to a single value.
     fn exec_fold<T, S, P, U, F>(&mut self, stmt: S, params: P, init: U, mut f: F) -> Result<U>
     where
         S: AsStatement,
