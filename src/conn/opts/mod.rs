@@ -755,6 +755,23 @@ impl OptsBuilder {
         Ok(self)
     }
 
+    /// Pool constraints (pool_min and pool_max). Passing None to one or the
+    /// other preserves the default value(s) (defaults to 10 and 100 resp.)
+    pub fn pool_constraints(mut self, pool_min: Option<usize>, pool_max: Option<usize>) -> Result<Self, UrlError> {
+        let pool_min = pool_min.unwrap_or(PoolConstraints::DEFAULT.min());
+        let pool_max = pool_max.unwrap_or(PoolConstraints::DEFAULT.max());
+
+        if let Some(pool_constraints) = PoolConstraints::new(pool_min, pool_max) {
+            self.opts.0.pool_opts = self.opts.0.pool_opts.with_constraints(pool_constraints);
+        } else {
+            return Err(UrlError::InvalidPoolConstraints {
+                min: pool_min,
+                max: pool_max,
+            });
+        }
+        Ok(self)
+    }
+
     /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
     ///
     /// **Note:** IPv6 addresses must be given in square brackets, e.g. `[::1]`.
