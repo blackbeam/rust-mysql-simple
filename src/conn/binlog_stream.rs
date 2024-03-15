@@ -77,7 +77,7 @@ impl Iterator for BinlogStream {
         if first_byte == Some(0) {
             let event_data = &packet[1..];
             match self.esr.read(event_data) {
-                Ok(event) => Some(Ok(event)),
+                Ok(event) => Some(Ok(event?)),
                 Err(err) => Some(Err(err.into())),
             }
         } else {

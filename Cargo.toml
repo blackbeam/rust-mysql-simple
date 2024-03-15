@@ -36,6 +36,7 @@ default = [
     "mysql_common/rust_decimal",
     "mysql_common/time",
     "mysql_common/frunk",
+    "mysql_common/binlog",
 
     "derive",
     # use global buffer pool by default
@@ -75,7 +76,7 @@ crossbeam = "0.8.1"
 io-enum = "1.0.0"
 flate2 = { version = "1.0", default-features = false }
 lru = "0.10"
-mysql_common = { version = "0.30", default-features = false }
+mysql_common = { version = "0.31", default-features = false }
 socket2 = "0.5.2"
 once_cell = "1.7.2"
 pem = "2.0.1"
