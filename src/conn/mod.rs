@@ -11,7 +11,7 @@ use mysql_common::{
     constants::UTF8MB4_GENERAL_CI,
     crypto,
     io::{ParseBuf, ReadMysqlExt},
-    named_params::parse_named_params,
+    named_params::ParsedNamedParams,
     packets::{
         binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComChangeUser,
         ComChangeUserMoreData, ComStmtClose, ComStmtExecuteRequestBuilder, ComStmtSendLongData,
@@ -1275,8 +1275,15 @@ impl Queryable for Conn {
 
     fn prep<T: AsRef<str>>(&mut self, query: T) -> Result<Statement> {
         let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query.as_bytes())?;
-        self._prepare(real_query.borrow())
+        let parsed = ParsedNamedParams::parse(query.as_bytes())?;
+        let named_params: Vec<Vec<u8>> =
+            parsed.params().iter().map(|param| param.to_vec()).collect();
+        let named_params = if named_params.len() == 0 {
+            None
+        } else {
+            Some(named_params)
+        };
+        self._prepare(parsed.borrow().query())
             .map(|inner| Statement::new(inner, named_params))
     }
 
