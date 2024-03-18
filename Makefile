@@ -84,6 +84,12 @@ doc:
 
 test:
 	$(run-mysql)
+	if ! (COMPRESS=0 SSL=0 cargo test --no-default-features --features minimal,time,frunk); \
+	then \
+		kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \
+		rm -rf $(MYSQL_DATA_DIR) || true; \
+		exit 1; \
+	fi
 	if ! (COMPRESS=0 SSL=0 cargo test); \
 	then \
 		kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \

@@ -7,17 +7,18 @@
 // modified, or distributed except according to those terms.
 
 use bytes::{Buf, BufMut};
+#[cfg(feature = "binlog")]
+use mysql_common::packets::binlog_request::BinlogRequest;
 use mysql_common::{
     constants::UTF8MB4_GENERAL_CI,
     crypto,
     io::{ParseBuf, ReadMysqlExt},
-    named_params::parse_named_params,
+    named_params::ParsedNamedParams,
     packets::{
-        binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComChangeUser,
-        ComChangeUserMoreData, ComStmtClose, ComStmtExecuteRequestBuilder, ComStmtSendLongData,
-        CommonOkPacket, ErrPacket, HandshakePacket, HandshakeResponse, OkPacket,
-        OkPacketDeserializer, OkPacketKind, OldAuthSwitchRequest, OldEofPacket,
-        ResultSetTerminator, SessionStateInfo,
+        AuthPlugin, AuthSwitchRequest, Column, ComChangeUser, ComChangeUserMoreData, ComStmtClose,
+        ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
+        HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
+        OldAuthSwitchRequest, OldEofPacket, ResultSetTerminator, SessionStateInfo,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
 };
@@ -70,8 +71,10 @@ use crate::{
 use crate::DriverError::TlsNotSupported;
 use crate::SslOpts;
 
+#[cfg(feature = "binlog")]
 use self::binlog_stream::BinlogStream;
 
+#[cfg(feature = "binlog")]
 pub mod binlog_stream;
 pub mod local_infile;
 pub mod opts;
@@ -406,7 +409,7 @@ impl Conn {
     /// This function will try to invoke COM_RESET_CONNECTION with
     /// a fall back to COM_CHANGE_USER on older servers.
     ///
-    /// ## Warining
+    /// ## Warning
     ///
     /// There is a long-standing bug in mysql 5.6 that kills this functionality in presence
     /// of connection attributes (see [Bug #92954](https://bugs.mysql.com/bug.php?id=92954)).
@@ -447,7 +450,7 @@ impl Conn {
     /// * Using non-default `opts` for a pooled connection is discouraging.
     /// * Connection options will be updated permanently.
     ///
-    /// ## Warining
+    /// ## Warning
     ///
     /// There is a long-standing bug in mysql 5.6 that kills this functionality in presence
     /// of connection attributes (see [Bug #92954](https://bugs.mysql.com/bug.php?id=92954)).
@@ -796,6 +799,10 @@ impl Conn {
             Some(self.0.auth_plugin.clone()),
             self.0.capability_flags,
             self.connect_attrs(),
+            self.0
+                .opts
+                .get_max_allowed_packet()
+                .unwrap_or(DEFAULT_MAX_ALLOWED_PACKET) as u32,
         );
 
         let mut buf = get_buffer();
@@ -864,24 +871,14 @@ impl Conn {
                 }
                 0x04 => {
                     if !self.is_insecure() || self.is_socket() {
-                        let mut pass = self
-                            .0
-                            .opts
-                            .get_pass()
-                            .map(Vec::from)
-                            .unwrap_or_else(Vec::new);
+                        let mut pass = self.0.opts.get_pass().map(Vec::from).unwrap_or_default();
                         pass.push(0);
                         self.write_packet(&mut pass.as_slice())?;
                     } else {
                         self.write_packet(&mut &[0x02][..])?;
                         let payload = self.read_packet()?;
                         let key = &payload[1..];
-                        let mut pass = self
-                            .0
-                            .opts
-                            .get_pass()
-                            .map(Vec::from)
-                            .unwrap_or_else(Vec::new);
+                        let mut pass = self.0.opts.get_pass().map(Vec::from).unwrap_or_default();
                         pass.push(0);
                         for (i, c) in pass.iter_mut().enumerate() {
                             *(c) ^= self.0.nonce[i % self.0.nonce.len()];
@@ -1084,22 +1081,18 @@ impl Conn {
         self.handle_result_set()
     }
 
-    /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
+    /// Executes [`COM_PING`](https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_ping.html)
     /// on `Conn`. Return `true` on success or `false` on error.
-    pub fn ping(&mut self) -> bool {
-        match self.write_command(Command::COM_PING, &[]) {
-            Ok(_) => self.drop_packet().is_ok(),
-            _ => false,
-        }
+    pub fn ping(&mut self) -> Result<(), Error> {
+        self.write_command(Command::COM_PING, &[])?;
+        self.drop_packet()
     }
 
-    /// Executes [`COM_INIT_DB`](https://dev.mysql.com/doc/internals/en/com-init-db.html)
+    /// Executes [`COM_INIT_DB`](https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_init_db.html)
     /// on `Conn`.
-    pub fn select_db(&mut self, schema: &str) -> bool {
-        match self.write_command(Command::COM_INIT_DB, schema.as_bytes()) {
-            Ok(_) => self.drop_packet().is_ok(),
-            _ => false,
-        }
+    pub fn select_db(&mut self, schema: &str) -> Result<(), Error> {
+        self.write_command(Command::COM_INIT_DB, schema.as_bytes())?;
+        self.drop_packet()
     }
 
     /// Starts new transaction with provided options.
@@ -1157,11 +1150,12 @@ impl Conn {
             return Ok(());
         }
         self.do_handshake()
-            .and_then(|_| {
-                Ok(from_value_opt::<usize>(
+            .and_then(|_| match self.0.opts.get_max_allowed_packet() {
+                Some(x) => Ok(x),
+                None => Ok(from_value_opt::<usize>(
                     self.get_system_var("max_allowed_packet")?.unwrap_or(NULL),
                 )
-                .unwrap_or(0))
+                .unwrap_or(0)),
             })
             .and_then(|max_allowed_packet| {
                 if max_allowed_packet == 0 {
@@ -1220,6 +1214,7 @@ impl Conn {
             .contains(StatusFlags::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
     }
 
+    #[cfg(feature = "binlog")]
     fn register_as_slave(&mut self, server_id: u32) -> Result<()> {
         use mysql_common::packets::ComRegisterSlave;
 
@@ -1232,6 +1227,7 @@ impl Conn {
         Ok(())
     }
 
+    #[cfg(feature = "binlog")]
     fn request_binlog(&mut self, request: BinlogRequest<'_>) -> Result<()> {
         self.register_as_slave(request.server_id())?;
         self.write_command_raw(&request.as_cmd())?;
@@ -1240,9 +1236,11 @@ impl Conn {
 
     /// Turns this connection into a binlog stream.
     ///
-    /// You can use `SHOW BINARY LOGS` to get the current logfile and position from the master.
+    /// You can use `SHOW BINARY LOGS` to get the current log file and position from the master.
     /// If the request's `filename` is empty, the server will send the binlog-stream
     /// of the first known binlog.
+    #[cfg(feature = "binlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "binlog")))]
     pub fn get_binlog_stream(mut self, request: BinlogRequest<'_>) -> Result<BinlogStream> {
         self.request_binlog(request)?;
         Ok(BinlogStream::new(self))
@@ -1275,8 +1273,15 @@ impl Queryable for Conn {
 
     fn prep<T: AsRef<str>>(&mut self, query: T) -> Result<Statement> {
         let query = query.as_ref();
-        let (named_params, real_query) = parse_named_params(query.as_bytes())?;
-        self._prepare(real_query.borrow())
+        let parsed = ParsedNamedParams::parse(query.as_bytes())?;
+        let named_params: Vec<Vec<u8>> =
+            parsed.params().iter().map(|param| param.to_vec()).collect();
+        let named_params = if named_params.is_empty() {
+            None
+        } else {
+            Some(named_params)
+        };
+        self._prepare(parsed.borrow().query())
             .map(|inner| Statement::new(inner, named_params))
     }
 
@@ -1324,8 +1329,10 @@ mod test {
             time::Duration,
         };
 
+        #[cfg(feature = "binlog")]
         use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
         use rand::Fill;
+        #[cfg(feature = "time")]
         use time::PrimitiveDateTime;
 
         use crate::{
@@ -1358,7 +1365,7 @@ mod test {
                 .unwrap()
                 .unwrap();
             assert!(mode.contains("TRADITIONAL"));
-            assert!(conn.ping());
+            assert!(conn.ping().is_ok());
 
             if crate::test_misc::test_compression() {
                 assert!(format!("{:?}", conn.0.stream).contains("Compression"));
@@ -1522,7 +1529,7 @@ mod test {
         fn should_connect_by_hostname() {
             let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
             let mut conn = Conn::new(opts).unwrap();
-            assert!(conn.ping());
+            assert!(conn.ping().is_ok());
         }
 
         #[test]
@@ -1532,7 +1539,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS {}", DB_NAME))
                 .unwrap();
-            assert!(conn.select_db(DB_NAME));
+            assert!(conn.select_db(DB_NAME).is_ok());
 
             let db_name: String = conn.query_first("SELECT DATABASE()").unwrap().unwrap();
             assert_eq!(db_name, DB_NAME);
@@ -1542,7 +1549,7 @@ mod test {
         }
 
         #[test]
-        fn should_execute_queryes_and_parse_results() {
+        fn should_execute_queries_and_parse_results() {
             type TestRow = (String, String, String, String, String, String);
 
             const CREATE_QUERY: &str = r"CREATE TEMPORARY TABLE mysql.tbl
@@ -1568,7 +1575,7 @@ mod test {
             assert_eq!(conn.affected_rows(), 1);
             assert_eq!(conn.last_insert_id(), 2);
 
-            conn.query_drop("SELECT * FROM unexisted").unwrap_err();
+            conn.query_drop("SELECT * FROM nonexistent").unwrap_err();
             conn.query_iter("SELECT * FROM mysql.tbl").unwrap(); // Drop::drop for QueryResult
 
             conn.query_drop("UPDATE mysql.tbl SET a = 'foo'").unwrap();
@@ -1618,7 +1625,7 @@ mod test {
         fn should_execute_statements_and_parse_results() {
             const CREATE_QUERY: &str = r"CREATE TEMPORARY TABLE
                 mysql.tbl (a TEXT, b INT, c INT UNSIGNED, d DATE, e FLOAT)";
-            const INSERT_SMTM: &str = r"INSERT
+            const INSERT_STMT: &str = r"INSERT
                 INTO mysql.tbl (a, b, c, d, e)
                 VALUES (?, ?, ?, ?, ?)";
 
@@ -1636,7 +1643,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             conn.query_drop(CREATE_QUERY).unwrap();
 
-            let insert_stmt = conn.prep(INSERT_SMTM).unwrap();
+            let insert_stmt = conn.prep(INSERT_STMT).unwrap();
             assert_eq!(insert_stmt.connection_id(), conn.connection_id());
             conn.exec_drop(
                 &insert_stmt,
@@ -2023,7 +2030,7 @@ mod test {
         }
 
         #[test]
-        fn should_handle_multi_resultset() {
+        fn should_handle_multi_result_set() {
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
                 .db_name(Some("mysql"));
@@ -2164,7 +2171,7 @@ mod test {
             let result = conn.exec_drop(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(NamedParamsForPositionalQuery)) => (),
-                _ => panic!(),
+                _ => panic!("NamedParamsForPositionalQuery error expected"),
             }
         }
 
@@ -2175,7 +2182,7 @@ mod test {
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
                 .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
-            assert!(Conn::new(opts).unwrap().ping());
+            assert!(Conn::new(opts).unwrap().ping().is_ok());
 
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
@@ -2232,7 +2239,7 @@ mod test {
                 .bind_address(Some(([127, 0, 0, 1], port)))
                 .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
             let mut conn = Conn::new(opts).unwrap();
-            assert!(conn.ping());
+            assert!(conn.ping().is_ok());
             let debug_format: String = format!("{:?}", conn);
             let expected_1 = format!("addr: V4(127.0.0.1:{})", port);
             let expected_2 = format!("addr: 127.0.0.1:{}", port);
@@ -2387,7 +2394,7 @@ mod test {
                 }
 
                 let pid = process::id().to_string();
-                let progname = std::env::args_os()
+                let prog_name = std::env::args_os()
                     .next()
                     .unwrap()
                     .to_string_lossy()
@@ -2398,7 +2405,7 @@ mod test {
                     ("_os", env!("CARGO_CFG_TARGET_OS")),
                     ("_pid", &pid),
                     ("_platform", env!("CARGO_CFG_TARGET_ARCH")),
-                    ("program_name", &progname),
+                    ("program_name", &prog_name),
                 ];
 
                 // No connect attributes are added.
@@ -2420,6 +2427,7 @@ mod test {
         }
 
         #[test]
+        #[cfg(feature = "binlog")]
         fn should_read_binlog() -> crate::Result<()> {
             use std::{
                 collections::HashMap, sync::mpsc::sync_channel, thread::spawn, time::Duration,

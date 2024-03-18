@@ -22,7 +22,10 @@ pub mod tls;
 impl<'a> From<packets::ServerError<'a>> for MySqlError {
     fn from(x: packets::ServerError<'a>) -> MySqlError {
         MySqlError {
-            state: x.sql_state_str().into_owned(),
+            state: x
+                .sql_state_ref()
+                .map(|x| x.as_str().as_ref().to_owned())
+                .unwrap_or_else(|| "HY000".to_owned()),
             code: x.error_code(),
             message: x.message_str().into_owned(),
         }

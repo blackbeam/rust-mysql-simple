@@ -68,17 +68,17 @@ pub struct Inner {
 
 impl Inner {
     pub fn increase(&self) {
-        let prev = self.count.fetch_add(1, Ordering::SeqCst);
+        let prev = self.count.fetch_add(1, Ordering::Relaxed);
         debug_assert!(prev < self.max_constraint());
     }
 
     pub fn decrease(&self) {
-        let prev = self.count.fetch_sub(1, Ordering::SeqCst);
+        let prev = self.count.fetch_sub(1, Ordering::Relaxed);
         debug_assert!(prev > 0);
     }
 
     pub fn count(&self) -> usize {
-        let value = self.count.load(Ordering::SeqCst);
+        let value = self.count.load(Ordering::Relaxed);
         debug_assert!(value <= self.max_constraint());
         value
     }

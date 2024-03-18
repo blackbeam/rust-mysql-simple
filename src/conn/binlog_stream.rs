@@ -21,6 +21,7 @@ use crate::Conn;
 /// Binlog event stream.
 ///
 /// Stream initialization is lazy, i.e. binlog won't be requested until this stream is polled.
+#[cfg_attr(docsrs, doc(cfg(feature = "binlog")))]
 pub struct BinlogStream {
     conn: Option<Conn>,
     esr: EventStreamReader,
@@ -77,7 +78,7 @@ impl Iterator for BinlogStream {
         if first_byte == Some(0) {
             let event_data = &packet[1..];
             match self.esr.read(event_data) {
-                Ok(event) => Some(Ok(event)),
+                Ok(event) => Some(Ok(event?)),
                 Err(err) => Some(Err(err.into())),
             }
         } else {

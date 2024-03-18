@@ -115,7 +115,7 @@ impl Pool {
             }
         };
 
-        if call_ping && self.inner.opts().check_health() && !conn.ping() {
+        if call_ping && self.inner.opts().check_health() && conn.ping().is_err() {
             // existing connection seem to be dead, retrying..
             self.inner.decrease();
             return self._get_conn(stmt, timeout, call_ping);
@@ -259,6 +259,8 @@ impl PooledConn {
     }
 
     /// Turns this connection into a binlog stream (see [`Conn::get_binlog_stream`]).
+    #[cfg(feature = "binlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "binlog")))]
     pub fn get_binlog_stream(
         mut self,
         request: crate::BinlogRequest<'_>,
@@ -305,14 +307,12 @@ impl PooledConn {
 }
 
 impl AsRef<Conn> for PooledConn {
-    /// Gives reference to the wrapped [`Conn`].
     fn as_ref(&self) -> &Conn {
         self.conn.as_ref().unwrap()
     }
 }
 
 impl AsMut<Conn> for PooledConn {
-    /// Gives mutable reference to the wrapped [`Conn`].
     fn as_mut(&mut self) -> &mut Conn {
         self.conn.as_mut().unwrap()
     }
@@ -465,7 +465,7 @@ mod test {
             pool.start_transaction(TxOpts::default()).unwrap();
         }
         #[test]
-        fn should_execute_queryes_on_PooledConn() {
+        fn should_execute_queries_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
             for _ in 0usize..10 {
@@ -491,8 +491,8 @@ mod test {
             let conn2 = pool.try_get_conn(Duration::from_millis(357));
             assert!(conn2.is_err());
             match conn2 {
-                Err(Error::DriverError(DriverError::Timeout)) => {}
-                _ => panic!(),
+                Err(Error::DriverError(DriverError::Timeout)) => (),
+                _ => panic!("Timeout error expected"),
             }
             drop(conn1);
             assert!(pool.try_get_conn(Duration::from_millis(357)).is_ok());
