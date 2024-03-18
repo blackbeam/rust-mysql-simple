@@ -163,9 +163,9 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             // no bind address
             addrs
                 .into_iter()
-                .fold(Err(err), |prev, sock_addr| match prev {
-                    Ok(socket) => Ok(socket),
-                    Err(_) => {
+                .try_fold(None, |prev, sock_addr| match prev {
+                    Some(x) => io::Result::Ok(Some(x)),
+                    None => {
                         let domain = Domain::for_address(sock_addr);
                         let socket = Socket::new(domain, Type::STREAM, None)?;
                         if let Some(connect_timeout) = connect_timeout {
@@ -173,9 +173,10 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
                         } else {
                             socket.connect(&sock_addr.into())?;
                         }
-                        Ok(socket)
+                        Ok(Some(socket))
                     }
-                })
+                })?
+                .ok_or(err)
         }?;
 
         socket.set_read_timeout(read_timeout)?;

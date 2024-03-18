@@ -76,7 +76,7 @@ crossbeam = "0.8.1"
 io-enum = "1.0.0"
 flate2 = { version = "1.0", default-features = false }
 lru = "0.10"
-mysql_common = { version = "0.31", default-features = false }
+mysql_common = { version = "0.32", default-features = false }
 socket2 = "0.5.2"
 once_cell = "1.7.2"
 pem = "2.0.1"

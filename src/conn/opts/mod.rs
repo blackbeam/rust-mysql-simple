@@ -96,7 +96,7 @@ impl SslOpts {
 /// Options structure is quite large so we'll store it separately.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct InnerOpts {
-    /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
+    /// Address of mysql server (defaults to `127.0.0.1`). Host names should also work.
     ip_or_hostname: url::Host,
     /// TCP port of mysql server (defaults to `3306`).
     tcp_port: u16,
@@ -232,6 +232,12 @@ pub(crate) struct InnerOpts {
     /// consider using TLS or encrypted tunnels for server connection.
     enable_cleartext_plugin: bool,
 
+    /// Client side `max_allowed_packet` value (defaults to `None`).
+    ///
+    /// By default `Conn` will query this value from the server. One can avoid this step
+    /// by explicitly specifying it.
+    max_allowed_packet: Option<usize>,
+
     /// For tests only
     #[cfg(test)]
     pub injected_socket: Option<String>,
@@ -243,6 +249,7 @@ impl Default for InnerOpts {
             ip_or_hostname: url::Host::Domain(String::from("localhost")),
             tcp_port: 3306,
             socket: None,
+            max_allowed_packet: None,
             user: None,
             pass: None,
             db_name: None,
@@ -307,7 +314,7 @@ impl Opts {
         self.0.ip_or_hostname.clone()
     }
 
-    /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
+    /// Address of mysql server (defaults to `127.0.0.1`). Host names should also work.
     pub fn get_ip_or_hostname(&self) -> Cow<str> {
         self.0.ip_or_hostname.to_string().into()
     }
@@ -318,6 +325,15 @@ impl Opts {
     /// Socket path on unix or pipe name on windows (defaults to `None`).
     pub fn get_socket(&self) -> Option<&str> {
         self.0.socket.as_deref()
+    }
+    /// Client side `max_allowed_packet` value (defaults to `None`).
+    ///
+    /// By default `Conn` will query this value from the server. One can avoid this step
+    /// by explicitly specifying it. Server side default is 4MB.
+    ///
+    /// Available in connection URL via `max_allowed_packet` parameter.
+    pub fn get_max_allowed_packet(&self) -> Option<usize> {
+        self.0.max_allowed_packet
     }
     /// User (defaults to `None`).
     pub fn get_user(&self) -> Option<&str> {
@@ -736,6 +752,12 @@ impl OptsBuilder {
                         return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
                     }
                 },
+                "max_allowed_packet" => match value.parse::<usize>() {
+                    Ok(parsed) => self.opts.0.max_allowed_packet = Some(parsed),
+                    Err(_) => {
+                        return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
+                    }
+                },
                 _ => {
                     //throw an error if there is an unrecognized param
                     return Err(UrlError::UnknownParameter(key.to_string()));
@@ -755,7 +777,7 @@ impl OptsBuilder {
         Ok(self)
     }
 
-    /// Address of mysql server (defaults to `127.0.0.1`). Hostnames should also work.
+    /// Address of mysql server (defaults to `127.0.0.1`). Host names should also work.
     ///
     /// **Note:** IPv6 addresses must be given in square brackets, e.g. `[::1]`.
     pub fn ip_or_hostname<T: Into<String>>(mut self, ip_or_hostname: Option<T>) -> Self {
@@ -778,6 +800,16 @@ impl OptsBuilder {
     /// Can be defined using `socket` connection url parameter.
     pub fn socket<T: Into<String>>(mut self, socket: Option<T>) -> Self {
         self.opts.0.socket = socket.map(Into::into);
+        self
+    }
+
+    /// Defines `max_allowed_packet` option. See [`Opts::max_allowed_packet`].
+    ///
+    /// Note that it'll saturate to proper minimum and maximum values
+    /// for this parameter (see MySql documentation).
+    pub fn max_allowed_packet(mut self, max_allowed_packet: Option<usize>) -> Self {
+        self.opts.0.max_allowed_packet =
+            max_allowed_packet.map(|x| std::cmp::max(1024, std::cmp::min(1073741824, x)));
         self
     }
 
@@ -1397,7 +1429,8 @@ mod test {
             "tcp_keepalive_time_ms".to_string() => "5000".to_string(),
             "compress".to_string() => "best".to_string(),
             "tcp_connect_timeout_ms".to_string() => "1000".to_string(),
-            "stmt_cache_size".to_string() => "33".to_string()
+            "stmt_cache_size".to_string() => "33".to_string(),
+            "max_allowed_packet".to_string() => "65536".to_string()
         };
         #[cfg(any(target_os = "linux", target_os = "macos",))]
         cnf_map.insert(
@@ -1414,7 +1447,8 @@ mod test {
         assert_eq!(parsed_opts.opts.get_ip_or_hostname(), "127.0.0.1");
         assert_eq!(parsed_opts.opts.get_tcp_port(), 8080);
         assert_eq!(parsed_opts.opts.get_db_name(), Some("test_db"));
-        assert_eq!(parsed_opts.opts.get_prefer_socket(), false);
+        assert_eq!(parsed_opts.opts.get_max_allowed_packet(), Some(65536));
+        assert!(!parsed_opts.opts.get_prefer_socket());
         assert_eq!(parsed_opts.opts.get_tcp_keepalive_time_ms(), Some(5000));
         #[cfg(any(target_os = "linux", target_os = "macos",))]
         assert_eq!(

@@ -796,6 +796,10 @@ impl Conn {
             Some(self.0.auth_plugin.clone()),
             self.0.capability_flags,
             self.connect_attrs(),
+            self.0
+                .opts
+                .get_max_allowed_packet()
+                .unwrap_or(DEFAULT_MAX_ALLOWED_PACKET) as u32,
         );
 
         let mut buf = get_buffer();
@@ -864,24 +868,14 @@ impl Conn {
                 }
                 0x04 => {
                     if !self.is_insecure() || self.is_socket() {
-                        let mut pass = self
-                            .0
-                            .opts
-                            .get_pass()
-                            .map(Vec::from)
-                            .unwrap_or_else(Vec::new);
+                        let mut pass = self.0.opts.get_pass().map(Vec::from).unwrap_or_default();
                         pass.push(0);
                         self.write_packet(&mut pass.as_slice())?;
                     } else {
                         self.write_packet(&mut &[0x02][..])?;
                         let payload = self.read_packet()?;
                         let key = &payload[1..];
-                        let mut pass = self
-                            .0
-                            .opts
-                            .get_pass()
-                            .map(Vec::from)
-                            .unwrap_or_else(Vec::new);
+                        let mut pass = self.0.opts.get_pass().map(Vec::from).unwrap_or_default();
                         pass.push(0);
                         for (i, c) in pass.iter_mut().enumerate() {
                             *(c) ^= self.0.nonce[i % self.0.nonce.len()];
@@ -1157,11 +1151,12 @@ impl Conn {
             return Ok(());
         }
         self.do_handshake()
-            .and_then(|_| {
-                Ok(from_value_opt::<usize>(
+            .and_then(|_| match self.0.opts.get_max_allowed_packet() {
+                Some(x) => Ok(x),
+                None => Ok(from_value_opt::<usize>(
                     self.get_system_var("max_allowed_packet")?.unwrap_or(NULL),
                 )
-                .unwrap_or(0))
+                .unwrap_or(0)),
             })
             .and_then(|max_allowed_packet| {
                 if max_allowed_packet == 0 {
@@ -1240,7 +1235,7 @@ impl Conn {
 
     /// Turns this connection into a binlog stream.
     ///
-    /// You can use `SHOW BINARY LOGS` to get the current logfile and position from the master.
+    /// You can use `SHOW BINARY LOGS` to get the current log file and position from the master.
     /// If the request's `filename` is empty, the server will send the binlog-stream
     /// of the first known binlog.
     pub fn get_binlog_stream(mut self, request: BinlogRequest<'_>) -> Result<BinlogStream> {
@@ -1278,7 +1273,7 @@ impl Queryable for Conn {
         let parsed = ParsedNamedParams::parse(query.as_bytes())?;
         let named_params: Vec<Vec<u8>> =
             parsed.params().iter().map(|param| param.to_vec()).collect();
-        let named_params = if named_params.len() == 0 {
+        let named_params = if named_params.is_empty() {
             None
         } else {
             Some(named_params)
@@ -1684,7 +1679,7 @@ mod test {
 
         #[test]
         fn manually_closed_stmt() {
-            let opts = OptsBuilder::from(get_opts()).stmt_cache_size(1);
+            let opts = get_opts().stmt_cache_size(1);
             let mut conn = Conn::new(opts).unwrap();
             let stmt = conn.prep("SELECT 1").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
@@ -1703,15 +1698,13 @@ mod test {
                 "CREATE TEMPORARY TABLE mysql.tbl(id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, a INT)",
             )
             .unwrap();
-            let _ = conn
-                .start_transaction(TxOpts::default())
-                .and_then(|mut t| {
+            conn.start_transaction(TxOpts::default())
+                .map(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     assert_eq!(t.last_insert_id(), Some(1));
                     assert_eq!(t.affected_rows(), 1);
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.commit().unwrap();
-                    Ok(())
                 })
                 .unwrap();
             assert_eq!(
@@ -1723,11 +1716,9 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"2".to_vec())]
             );
-            let _ = conn
-                .start_transaction(TxOpts::default())
-                .and_then(|mut t| {
+            conn.start_transaction(TxOpts::default())
+                .map(|mut t| {
                     t.query_drop("INSERT INTO tbl2(a) VALUES(1)").unwrap_err();
-                    Ok(())
                     // implicit rollback
                 })
                 .unwrap();
@@ -1740,13 +1731,11 @@ mod test {
                     .unwrap(),
                 vec![Bytes(b"2".to_vec())]
             );
-            let _ = conn
-                .start_transaction(TxOpts::default())
-                .and_then(|mut t| {
+            conn.start_transaction(TxOpts::default())
+                .map(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
                     t.rollback().unwrap();
-                    Ok(())
                 })
                 .unwrap();
             assert_eq!(
@@ -1793,7 +1782,7 @@ mod test {
                 let mut cell_data = vec![b'Z'; 65535];
                 cell_data.push(b'\n');
                 for _ in 0..1536 {
-                    stream.write_all(&*cell_data)?;
+                    stream.write_all(&cell_data)?;
                 }
                 Ok(())
             })));
@@ -2166,7 +2155,7 @@ mod test {
                 conn.exec_first::<crate::Row, _, _>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
-                _ => assert!(false),
+                _ => panic!("MissingNamedParameter error expected"),
             }
         }
 
@@ -2177,7 +2166,7 @@ mod test {
             let result = conn.exec_drop(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(NamedParamsForPositionalQuery)) => (),
-                _ => assert!(false),
+                _ => panic!("NamedParamsForPositionalQuery error expected"),
             }
         }
 
@@ -2380,7 +2369,7 @@ mod test {
                 }
                 let attrs_size: i32 =
                     get_system_variable(&mut conn, "performance_schema_session_connect_attrs_size");
-                if attrs_size >= 0 && attrs_size <= 128 {
+                if (0..=128).contains(&attrs_size) {
                     panic!("The system variable `performance_schema_session_connect_attrs_size` is {}. Restart the MySQL server with `--performance_schema_session_connect_attrs_size=-1` to pass the test.", attrs_size);
                 }
 
@@ -2561,7 +2550,7 @@ mod test {
             // iterate using COM_BINLOG_DUMP with BINLOG_DUMP_NON_BLOCK flag
             let (conn, filename, pos) = get_conn().unwrap();
 
-            let mut binlog_stream = conn
+            let binlog_stream = conn
                 .get_binlog_stream(
                     BinlogRequest::new(14)
                         .with_filename(filename)
@@ -2571,7 +2560,7 @@ mod test {
                 .unwrap();
 
             events_num = 0;
-            while let Some(event) = binlog_stream.next() {
+            for event in binlog_stream {
                 let event = event.unwrap();
                 events_num += 1;
                 event.header().event_type().unwrap();
