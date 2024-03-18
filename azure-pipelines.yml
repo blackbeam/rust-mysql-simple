@@ -18,42 +18,22 @@ jobs:
     steps:
       - bash: |
           sudo apt-get update
-          sudo apt-get -y install mysql-server libmysqlclient-dev curl
-          sudo service mysql start
-          mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot -proot
-          mysql -e "SET GLOBAL local_infile = 1;" -uroot -proot
-          mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot -proot
-          mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot -proot
-          mysql -e "SET @@GLOBAL.GTID_MODE = OFF_PERMISSIVE;" -uroot -proot
-          mysql -e "SET @@GLOBAL.GTID_MODE = ON_PERMISSIVE;" -uroot -proot
-          mysql -e "SET @@GLOBAL.GTID_MODE = ON;" -uroot -proot
-          mysql -e "PURGE BINARY LOGS BEFORE now();" -uroot -proot
-        displayName: Install MySql
+          sudo apt-get -y install pkg-config libssl-dev build-essential
+        displayName: Install Dependencies
       - bash: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $(RUST_TOOLCHAIN)
           echo '##vso[task.setvariable variable=toolchain;isOutput=true]$(RUST_TOOLCHAIN)'
         displayName: Install Rust
         name: installRust
       - bash: |
-          rustup component add rustfmt
           cargo fmt -- --check
         condition: and(succeeded(), eq(variables['installRust.toolchain'], 'stable'))
         displayName: cargo fmt
       - bash: |
-          SSL=false COMPRESS=false cargo test
-          SSL=true COMPRESS=false cargo test
-          SSL=false COMPRESS=true cargo test
-          SSL=true COMPRESS=true cargo test
-
-          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
-
-          SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog
-          SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog
-        env:
-          RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root:root@localhost:3306/mysql
-        displayName: Run tests
+          cargo check
+          cargo check --no-default-features --features default-rustls
+          cargo check --no-default-features --features minimal
+        displayName: Run check
 
   - job: "TestBasicMacOs"
     pool:
@@ -65,41 +45,13 @@ jobs:
           RUST_TOOLCHAIN: stable
     steps:
       - bash: |
-          brew update
-          brew install mysql
-          brew services start mysql
-          brew services stop mysql
-          sleep 3
-          echo 'local_infile=1' >> /usr/local/etc/my.cnf
-          echo 'socket=/tmp/mysql.sock' >> /usr/local/etc/my.cnf
-          brew services start mysql
-          mysql --version
-          sleep 5
-          /usr/local/Cellar/mysql/*/bin/mysql -e "SET GLOBAL max_allowed_packet = 36700160;" -uroot
-          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = WARN;" -uroot
-          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.ENFORCE_GTID_CONSISTENCY = ON;" -uroot
-          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = OFF_PERMISSIVE;" -uroot
-          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = ON_PERMISSIVE;" -uroot
-          /usr/local/Cellar/mysql/*/bin/mysql -e "SET @@GLOBAL.GTID_MODE = ON;" -uroot
-        displayName: Install MySql
-      - bash: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN
         displayName: Install rust (MacOs)
       - bash: |
-          SSL=false COMPRESS=false cargo test
-          SSL=true COMPRESS=false cargo test
-          SSL=false COMPRESS=true cargo test
-          SSL=true COMPRESS=true cargo test
-
-          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
-
-          SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog
-          SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog
-        env:
-          RUST_BACKTRACE: 1
-          DATABASE_URL: mysql://root@localhost/mysql
-        displayName: Run tests
+          cargo check
+          cargo check --no-default-features --features default-rustls
+          cargo check --no-default-features --features minimal
+        displayName: Run check
 
   - job: "TestBasicWindows"
     pool:
@@ -157,8 +109,12 @@ jobs:
       vmImage: "ubuntu-latest"
     strategy:
       matrix:
-        v5.3.0:
-          DB_VERSION: "v5.3.0"
+        v7.5.1:
+          DB_VERSION: "v7.5.1"
+        v6.5.8:
+          DB_VERSION: "v6.5.8"
+        v5.3.4:
+          DB_VERSION: "v5.3.4"
         v5.0.6:
           DB_VERSION: "v5.0.6"
     steps:
@@ -181,9 +137,9 @@ jobs:
       maxParallel: 10
       matrix:
         v80:
-          DB_VERSION: "8-debian"
+          DB_VERSION: "8.0-debian"
         v57:
-          DB_VERSION: "5-debian"
+          DB_VERSION: "5.7-debian"
         v56:
           DB_VERSION: "5.6"
     steps:
@@ -234,22 +190,16 @@ jobs:
     strategy:
       maxParallel: 10
       matrix:
-        v108:
-          DB_VERSION: "10.8"
-        v107:
-          DB_VERSION: "10.7"
+        v113:
+          DB_VERSION: "11.3"
+        v1011:
+          DB_VERSION: "10.11"
         v106:
           DB_VERSION: "10.6"
         v105:
           DB_VERSION: "10.5"
         v104:
           DB_VERSION: "10.4"
-        v103:
-          DB_VERSION: "10.3"
-        v102:
-          DB_VERSION: "10.2"
-        v101:
-          DB_VERSION: "10.1"
     steps:
       - bash: |
           sudo apt-get update
