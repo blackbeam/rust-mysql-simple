@@ -7,17 +7,18 @@
 // modified, or distributed except according to those terms.
 
 use bytes::{Buf, BufMut};
+#[cfg(feature = "binlog")]
+use mysql_common::packets::binlog_request::BinlogRequest;
 use mysql_common::{
     constants::UTF8MB4_GENERAL_CI,
     crypto,
     io::{ParseBuf, ReadMysqlExt},
     named_params::ParsedNamedParams,
     packets::{
-        binlog_request::BinlogRequest, AuthPlugin, AuthSwitchRequest, Column, ComChangeUser,
-        ComChangeUserMoreData, ComStmtClose, ComStmtExecuteRequestBuilder, ComStmtSendLongData,
-        CommonOkPacket, ErrPacket, HandshakePacket, HandshakeResponse, OkPacket,
-        OkPacketDeserializer, OkPacketKind, OldAuthSwitchRequest, OldEofPacket,
-        ResultSetTerminator, SessionStateInfo,
+        AuthPlugin, AuthSwitchRequest, Column, ComChangeUser, ComChangeUserMoreData, ComStmtClose,
+        ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
+        HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
+        OldAuthSwitchRequest, OldEofPacket, ResultSetTerminator, SessionStateInfo,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
 };
@@ -70,8 +71,10 @@ use crate::{
 use crate::DriverError::TlsNotSupported;
 use crate::SslOpts;
 
+#[cfg(feature = "binlog")]
 use self::binlog_stream::BinlogStream;
 
+#[cfg(feature = "binlog")]
 pub mod binlog_stream;
 pub mod local_infile;
 pub mod opts;
@@ -1215,6 +1218,7 @@ impl Conn {
             .contains(StatusFlags::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
     }
 
+    #[cfg(feature = "binlog")]
     fn register_as_slave(&mut self, server_id: u32) -> Result<()> {
         use mysql_common::packets::ComRegisterSlave;
 
@@ -1227,6 +1231,7 @@ impl Conn {
         Ok(())
     }
 
+    #[cfg(feature = "binlog")]
     fn request_binlog(&mut self, request: BinlogRequest<'_>) -> Result<()> {
         self.register_as_slave(request.server_id())?;
         self.write_command_raw(&request.as_cmd())?;
@@ -1238,6 +1243,8 @@ impl Conn {
     /// You can use `SHOW BINARY LOGS` to get the current log file and position from the master.
     /// If the request's `filename` is empty, the server will send the binlog-stream
     /// of the first known binlog.
+    #[cfg(feature = "binlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "binlog")))]
     pub fn get_binlog_stream(mut self, request: BinlogRequest<'_>) -> Result<BinlogStream> {
         self.request_binlog(request)?;
         Ok(BinlogStream::new(self))
@@ -1326,8 +1333,10 @@ mod test {
             time::Duration,
         };
 
+        #[cfg(feature = "binlog")]
         use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
         use rand::Fill;
+        #[cfg(feature = "time")]
         use time::PrimitiveDateTime;
 
         use crate::{
@@ -2422,6 +2431,7 @@ mod test {
         }
 
         #[test]
+        #[cfg(feature = "binlog")]
         fn should_read_binlog() -> crate::Result<()> {
             use std::{
                 collections::HashMap, sync::mpsc::sync_channel, thread::spawn, time::Duration,

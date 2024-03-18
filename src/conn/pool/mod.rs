@@ -259,6 +259,8 @@ impl PooledConn {
     }
 
     /// Turns this connection into a binlog stream (see [`Conn::get_binlog_stream`]).
+    #[cfg(feature = "binlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "binlog")))]
     pub fn get_binlog_stream(
         mut self,
         request: crate::BinlogRequest<'_>,

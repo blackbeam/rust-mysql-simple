@@ -903,6 +903,8 @@ pub use crate::myc::constants as consts;
 #[doc(inline)]
 pub use crate::myc::packets::{binlog_request::BinlogRequest, BinlogDumpFlags};
 
+#[cfg(feature = "binlog")]
+#[cfg_attr(docsrs, doc(cfg(feature = "binlog")))]
 pub mod binlog {
     #[doc(inline)]
     pub use crate::myc::binlog::consts::*;
@@ -918,6 +920,9 @@ pub use crate::conn::opts::ClientIdentity;
 #[doc(inline)]
 pub use crate::myc::packets::{session_state_change, SessionStateInfo};
 
+#[cfg(feature = "binlog")]
+#[doc(inline)]
+pub use crate::conn::binlog_stream::BinlogStream;
 #[doc(inline)]
 pub use crate::conn::local_infile::{LocalInfile, LocalInfileHandler};
 #[doc(inline)]
@@ -938,7 +943,7 @@ pub use crate::conn::stmt::Statement;
 #[doc(inline)]
 pub use crate::conn::transaction::{AccessMode, IsolationLevel, Transaction, TxOpts};
 #[doc(inline)]
-pub use crate::conn::{binlog_stream::BinlogStream, Conn};
+pub use crate::conn::Conn;
 #[doc(inline)]
 pub use crate::error::{DriverError, Error, MySqlError, Result, ServerError, UrlError};
 #[doc(inline)]

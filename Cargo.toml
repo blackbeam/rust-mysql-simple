@@ -32,11 +32,11 @@ default = [
     "flate2/zlib",
 
     # set of enabled-by-default mysql_common features
-    "mysql_common/bigdecimal",
-    "mysql_common/rust_decimal",
-    "mysql_common/time",
-    "mysql_common/frunk",
-    "mysql_common/binlog",
+    "bigdecimal",
+    "rust_decimal",
+    "time",
+    "frunk",
+    "binlog",
 
     "derive",
     # use global buffer pool by default
@@ -48,19 +48,31 @@ default-rustls = [
     # default-rustls uses rust_backend for flate2.
     "flate2/rust_backend",
 
-    "mysql_common/bigdecimal",
-    "mysql_common/rust_decimal",
-    "mysql_common/time",
-    "mysql_common/frunk",
+    "bigdecimal",
+    "rust_decimal",
+    "time",
+    "frunk",
+    "binlog",
 
     "derive",
     "buffer-pool",
 ]
+# minimal feature set with system flate2 impl
 minimal = ["flate2/zlib"]
+# minimal feature set with rust flate2 impl
+minimal-rust = ["flate2/rust_backend"]
 rustls-tls = ["rustls", "webpki", "webpki-roots", "rustls-pemfile"]
 buffer-pool = []
 nightly = []
+
+# mysql_common features
 derive = ["mysql_common/derive"]
+chrono = ["mysql_common/chrono"]
+time = ["mysql_common/time"]
+bigdecimal = ["mysql_common/bigdecimal"]
+rust_decimal = ["mysql_common/rust_decimal"]
+frunk = ["mysql_common/frunk"]
+binlog = ["mysql_common/binlog"]
 
 [dev-dependencies]
 lazy_static = "1.4.0"
