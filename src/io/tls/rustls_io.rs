@@ -1,7 +1,6 @@
 #![cfg(feature = "rustls-tls")]
 
 use std::{
-    convert::TryInto,
     fs::File,
     io::{self, Read},
     sync::Arc,
@@ -9,12 +8,17 @@ use std::{
 
 use bufstream::BufStream;
 use rustls::{
-    client::{ServerCertVerifier, WebPkiVerifier},
-    Certificate, ClientConfig, OwnedTrustAnchor, RootCertStore,
+    client::{
+        danger::{ServerCertVerified, ServerCertVerifier},
+        WebPkiServerVerifier,
+    },
+    pki_types::{CertificateDer, ServerName, UnixTime},
+    ClientConfig, RootCertStore,
 };
 use rustls_pemfile::certs;
 
 use crate::{
+    error::tls::TlsError,
     io::{Stream, TcpStream},
     Result, SslOpts,
 };
@@ -33,13 +37,7 @@ impl Stream {
         };
 
         let mut root_store = RootCertStore::empty();
-        root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-            OwnedTrustAnchor::from_subject_spki_name_constraints(
-                ta.subject,
-                ta.spki,
-                ta.name_constraints,
-            )
-        }));
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().map(|x| x.to_owned()));
 
         if let Some(root_cert_path) = ssl_opts.root_cert_path() {
             let mut root_cert_data = vec![];
@@ -47,36 +45,35 @@ impl Stream {
             root_cert_file.read_to_end(&mut root_cert_data)?;
 
             let mut root_certs = Vec::new();
-            for cert in certs(&mut &*root_cert_data)? {
-                root_certs.push(Certificate(cert));
+            for cert in certs(&mut &*root_cert_data) {
+                root_certs.push(cert?);
             }
 
             if root_certs.is_empty() && !root_cert_data.is_empty() {
-                root_certs.push(Certificate(root_cert_data));
+                root_certs.push(CertificateDer::from(root_cert_data));
             }
 
             for cert in &root_certs {
-                root_store.add(cert)?;
+                root_store.add(cert.to_owned())?;
             }
         }
 
-        let config_builder = ClientConfig::builder()
-            .with_safe_defaults()
-            .with_root_certificates(root_store.clone());
+        let config_builder = ClientConfig::builder().with_root_certificates(root_store.clone());
 
         let mut config = if let Some(identity) = ssl_opts.client_identity() {
             let (cert_chain, priv_key) = identity.load()?;
-            config_builder.with_single_cert(cert_chain, priv_key)?
+            config_builder.with_client_auth_cert(cert_chain, priv_key)?
         } else {
             config_builder.with_no_client_auth()
         };
 
-        let server_name = domain
-            .as_str()
-            .try_into()
-            .map_err(|_| webpki::InvalidDnsNameError)?;
+        let server_name = ServerName::try_from(domain.as_str())
+            .map_err(|_| webpki::InvalidDnsNameError)?
+            .to_owned();
         let mut dangerous = config.dangerous();
-        let web_pki_verifier = WebPkiVerifier::new(root_store, None);
+        let web_pki_verifier = WebPkiServerVerifier::builder(Arc::new(root_store))
+            .build()
+            .map_err(TlsError::from)?;
         let dangerous_verifier = DangerousVerifier::new(
             ssl_opts.accept_invalid_certs(),
             ssl_opts.skip_domain_validation(),
@@ -105,17 +102,18 @@ impl Stream {
     }
 }
 
+#[derive(Debug)]
 struct DangerousVerifier {
     accept_invalid_certs: bool,
     skip_domain_validation: bool,
-    verifier: WebPkiVerifier,
+    verifier: Arc<WebPkiServerVerifier>,
 }
 
 impl DangerousVerifier {
     fn new(
         accept_invalid_certs: bool,
         skip_domain_validation: bool,
-        verifier: WebPkiVerifier,
+        verifier: Arc<WebPkiServerVerifier>,
     ) -> Self {
         Self {
             accept_invalid_certs,
@@ -128,21 +126,19 @@ impl DangerousVerifier {
 impl ServerCertVerifier for DangerousVerifier {
     fn verify_server_cert(
         &self,
-        end_entity: &Certificate,
-        intermediates: &[Certificate],
-        server_name: &rustls::ServerName,
-        scts: &mut dyn Iterator<Item = &[u8]>,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
         ocsp_response: &[u8],
-        now: std::time::SystemTime,
-    ) -> std::result::Result<rustls::client::ServerCertVerified, rustls::Error> {
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
         if self.accept_invalid_certs {
-            Ok(rustls::client::ServerCertVerified::assertion())
+            Ok(ServerCertVerified::assertion())
         } else {
             match self.verifier.verify_server_cert(
                 end_entity,
                 intermediates,
                 server_name,
-                scts,
                 ocsp_response,
                 now,
             ) {
@@ -151,10 +147,34 @@ impl ServerCertVerifier for DangerousVerifier {
                     if e.to_string().contains("CertNotValidForName")
                         && self.skip_domain_validation =>
                 {
-                    Ok(rustls::client::ServerCertVerified::assertion())
+                    Ok(ServerCertVerified::assertion())
                 }
                 Err(e) => Err(e),
             }
         }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::prelude::v1::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+    {
+        self.verifier.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::prelude::v1::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+    {
+        self.verifier.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.verifier.supported_verify_schemes()
     }
 }
