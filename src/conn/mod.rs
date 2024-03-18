@@ -2160,7 +2160,7 @@ mod test {
                 conn.exec_first::<crate::Row, _, _>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
                 Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
-                _ => panic!(),
+                _ => panic!("MissingNamedParameter error expected"),
             }
         }
 
