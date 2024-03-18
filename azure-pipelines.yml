@@ -45,11 +45,11 @@ jobs:
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
 
-          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
 
-          SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog"
-          SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog"
+          SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog
+          SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:root@localhost:3306/mysql
@@ -91,11 +91,11 @@ jobs:
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
 
-          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
 
-          SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog"
-          SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog"
+          SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog
+          SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root@localhost/mysql
@@ -142,11 +142,11 @@ jobs:
           SSL=false COMPRESS=true cargo test
           SSL=true COMPRESS=true cargo test
 
-          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
+          SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
 
-          SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog"
-          SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog"
+          SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog
+          SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@localhost/mysql
