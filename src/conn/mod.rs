@@ -1081,22 +1081,18 @@ impl Conn {
         self.handle_result_set()
     }
 
-    /// Executes [`COM_PING`](http://dev.mysql.com/doc/internals/en/com-ping.html)
+    /// Executes [`COM_PING`](https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_ping.html)
     /// on `Conn`. Return `true` on success or `false` on error.
-    pub fn ping(&mut self) -> bool {
-        match self.write_command(Command::COM_PING, &[]) {
-            Ok(_) => self.drop_packet().is_ok(),
-            _ => false,
-        }
+    pub fn ping(&mut self) -> Result<(), Error> {
+        self.write_command(Command::COM_PING, &[])?;
+        self.drop_packet()
     }
 
-    /// Executes [`COM_INIT_DB`](https://dev.mysql.com/doc/internals/en/com-init-db.html)
+    /// Executes [`COM_INIT_DB`](https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_init_db.html)
     /// on `Conn`.
-    pub fn select_db(&mut self, schema: &str) -> bool {
-        match self.write_command(Command::COM_INIT_DB, schema.as_bytes()) {
-            Ok(_) => self.drop_packet().is_ok(),
-            _ => false,
-        }
+    pub fn select_db(&mut self, schema: &str) -> Result<(), Error> {
+        self.write_command(Command::COM_INIT_DB, schema.as_bytes())?;
+        self.drop_packet()
     }
 
     /// Starts new transaction with provided options.
@@ -1369,7 +1365,7 @@ mod test {
                 .unwrap()
                 .unwrap();
             assert!(mode.contains("TRADITIONAL"));
-            assert!(conn.ping());
+            assert!(conn.ping().is_ok());
 
             if crate::test_misc::test_compression() {
                 assert!(format!("{:?}", conn.0.stream).contains("Compression"));
@@ -1533,7 +1529,7 @@ mod test {
         fn should_connect_by_hostname() {
             let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
             let mut conn = Conn::new(opts).unwrap();
-            assert!(conn.ping());
+            assert!(conn.ping().is_ok());
         }
 
         #[test]
@@ -1543,7 +1539,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS {}", DB_NAME))
                 .unwrap();
-            assert!(conn.select_db(DB_NAME));
+            assert!(conn.select_db(DB_NAME).is_ok());
 
             let db_name: String = conn.query_first("SELECT DATABASE()").unwrap().unwrap();
             assert_eq!(db_name, DB_NAME);
@@ -2186,7 +2182,7 @@ mod test {
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
                 .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
-            assert!(Conn::new(opts).unwrap().ping());
+            assert!(Conn::new(opts).unwrap().ping().is_ok());
 
             let opts = OptsBuilder::from_opts(get_opts())
                 .prefer_socket(false)
@@ -2243,7 +2239,7 @@ mod test {
                 .bind_address(Some(([127, 0, 0, 1], port)))
                 .tcp_connect_timeout(Some(::std::time::Duration::from_millis(1000)));
             let mut conn = Conn::new(opts).unwrap();
-            assert!(conn.ping());
+            assert!(conn.ping().is_ok());
             let debug_format: String = format!("{:?}", conn);
             let expected_1 = format!("addr: V4(127.0.0.1:{})", port);
             let expected_2 = format!("addr: 127.0.0.1:{}", port);
