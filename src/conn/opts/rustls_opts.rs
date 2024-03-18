@@ -72,7 +72,7 @@ impl ClientIdentity {
             priv_key = Some(PrivateKey(key));
         }
 
-        let priv_key = priv_key.unwrap_or_else(|| PrivateKey(key_data));
+        let priv_key = priv_key.unwrap_or(PrivateKey(key_data));
 
         Ok((cert_chain, priv_key))
     }
