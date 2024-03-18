@@ -115,7 +115,7 @@ impl Pool {
             }
         };
 
-        if call_ping && self.inner.opts().check_health() && !conn.ping() {
+        if call_ping && self.inner.opts().check_health() && conn.ping().is_err() {
             // existing connection seem to be dead, retrying..
             self.inner.decrease();
             return self._get_conn(stmt, timeout, call_ping);
@@ -259,6 +259,8 @@ impl PooledConn {
     }
 
     /// Turns this connection into a binlog stream (see [`Conn::get_binlog_stream`]).
+    #[cfg(feature = "binlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "binlog")))]
     pub fn get_binlog_stream(
         mut self,
         request: crate::BinlogRequest<'_>,
@@ -491,8 +493,8 @@ mod test {
             let conn2 = pool.try_get_conn(Duration::from_millis(357));
             assert!(conn2.is_err());
             match conn2 {
-                Err(Error::DriverError(DriverError::Timeout)) => assert!(true),
-                _ => assert!(false),
+                Err(Error::DriverError(DriverError::Timeout)) => (),
+                _ => panic!("Timeout error expected"),
             }
             drop(conn1);
             assert!(pool.try_get_conn(Duration::from_millis(357)).is_ok());
@@ -574,10 +576,9 @@ mod test {
                 2_u8
             );
             pool.start_transaction(TxOpts::default())
-                .and_then(|mut t| {
+                .map(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
-                    Ok(())
                 })
                 .unwrap();
             assert_eq!(
@@ -642,10 +643,9 @@ mod test {
                 assert_eq!(from_value::<u8>(x.take(0).unwrap()), 2u8);
             }
             conn.start_transaction(TxOpts::default())
-                .and_then(|mut t| {
+                .map(|mut t| {
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(1)").unwrap();
                     t.query_drop("INSERT INTO mysql.tbl(a) VALUES(2)").unwrap();
-                    Ok(())
                 })
                 .unwrap();
             for x in conn.query_iter("SELECT COUNT(a) FROM mysql.tbl").unwrap() {
