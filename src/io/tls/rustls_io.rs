@@ -9,11 +9,11 @@ use std::{
 use bufstream::BufStream;
 use rustls::{
     client::{
-        danger::{ServerCertVerified, ServerCertVerifier},
+        danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
         WebPkiServerVerifier,
     },
     pki_types::{CertificateDer, ServerName, UnixTime},
-    ClientConfig, RootCertStore,
+    CertificateError, ClientConfig, Error, RootCertStore, SignatureScheme,
 };
 use rustls_pemfile::certs;
 
@@ -131,7 +131,7 @@ impl ServerCertVerifier for DangerousVerifier {
         server_name: &ServerName<'_>,
         ocsp_response: &[u8],
         now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
+    ) -> Result<ServerCertVerified, Error> {
         if self.accept_invalid_certs {
             Ok(ServerCertVerified::assertion())
         } else {
@@ -143,9 +143,8 @@ impl ServerCertVerifier for DangerousVerifier {
                 now,
             ) {
                 Ok(assertion) => Ok(assertion),
-                Err(ref e)
-                    if e.to_string().contains("CertNotValidForName")
-                        && self.skip_domain_validation =>
+                Err(Error::InvalidCertificate(CertificateError::NotValidForName))
+                    if self.skip_domain_validation =>
                 {
                     Ok(ServerCertVerified::assertion())
                 }
@@ -159,8 +158,7 @@ impl ServerCertVerifier for DangerousVerifier {
         message: &[u8],
         cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
-    ) -> std::prelude::v1::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
-    {
+    ) -> Result<HandshakeSignatureValid, Error> {
         self.verifier.verify_tls12_signature(message, cert, dss)
     }
 
@@ -169,12 +167,11 @@ impl ServerCertVerifier for DangerousVerifier {
         message: &[u8],
         cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
-    ) -> std::prelude::v1::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
-    {
+    ) -> Result<HandshakeSignatureValid, Error> {
         self.verifier.verify_tls13_signature(message, cert, dss)
     }
 
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.verifier.supported_verify_schemes()
     }
 }
