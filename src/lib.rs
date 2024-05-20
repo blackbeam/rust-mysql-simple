@@ -879,6 +879,7 @@
 //!
 
 #![cfg_attr(feature = "nightly", feature(test))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #[cfg(feature = "nightly")]
 extern crate test;
 
