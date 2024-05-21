@@ -1,18 +1,20 @@
 #![cfg(feature = "buffer-pool")]
 
 use crossbeam::queue::ArrayQueue;
-use once_cell::sync::Lazy;
 
-use std::{mem::take, ops::Deref, sync::Arc};
+use std::{
+    mem::take,
+    ops::Deref,
+    sync::{Arc, OnceLock},
+};
 
 const DEFAULT_MYSQL_BUFFER_POOL_CAP: usize = 128;
 const DEFAULT_MYSQL_BUFFER_SIZE_CAP: usize = 4 * 1024 * 1024;
 
-static BUFFER_POOL: Lazy<Arc<BufferPool>> = Lazy::new(Default::default);
-
 #[inline(always)]
 pub fn get_buffer() -> Buffer {
-    BUFFER_POOL.get()
+    static BUFFER_POOL: OnceLock<Arc<BufferPool>> = OnceLock::new();
+    BUFFER_POOL.get_or_init(Default::default).get()
 }
 
 #[derive(Debug)]
