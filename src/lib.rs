@@ -879,6 +879,7 @@
 //!
 
 #![cfg_attr(feature = "nightly", feature(test))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #[cfg(feature = "nightly")]
 extern crate test;
 
@@ -1059,8 +1060,6 @@ macro_rules! doctest_wrapper {
 
 #[cfg(test)]
 mod test_misc {
-    use lazy_static::lazy_static;
-
     use crate::{def_database_url, def_get_opts};
 
     #[allow(dead_code)]
@@ -1069,8 +1068,9 @@ mod test_misc {
         _dummy(crate::error::Error::FromValueError(crate::Value::NULL));
     }
 
-    lazy_static! {
-        pub static ref DATABASE_URL: String = def_database_url!();
+    #[allow(dead_code)]
+    fn database_url() {
+        def_database_url!();
     }
 
     def_get_opts!();

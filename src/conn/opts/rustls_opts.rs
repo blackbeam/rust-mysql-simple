@@ -1,7 +1,7 @@
 #![cfg(feature = "rustls-tls")]
 
-use rustls::{Certificate, PrivateKey};
-use rustls_pemfile::{certs, rsa_private_keys};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer};
+use rustls_pemfile::{certs, ec_private_keys, pkcs8_private_keys, rsa_private_keys};
 
 use std::{borrow::Cow, path::Path};
 
@@ -55,25 +55,99 @@ impl ClientIdentity {
         self.priv_key_path.as_ref()
     }
 
-    pub(crate) fn load(&self) -> crate::Result<(Vec<Certificate>, PrivateKey)> {
+    pub(crate) fn load(
+        &self,
+    ) -> crate::Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
         let cert_data = std::fs::read(self.cert_chain_path.as_ref())?;
         let key_data = std::fs::read(self.priv_key_path.as_ref())?;
 
         let mut cert_chain = Vec::new();
-        for cert in certs(&mut &*cert_data)? {
-            cert_chain.push(Certificate(cert));
+        for cert in certs(&mut &*cert_data) {
+            cert_chain.push(cert?.to_owned());
         }
         if cert_chain.is_empty() && !cert_data.is_empty() {
-            cert_chain.push(Certificate(cert_data));
+            cert_chain.push(CertificateDer::from(cert_data));
         }
 
         let mut priv_key = None;
-        for key in rsa_private_keys(&mut &*key_data)?.into_iter().take(1) {
-            priv_key = Some(PrivateKey(key));
+
+        for key in rsa_private_keys(&mut &*key_data).take(1) {
+            priv_key = Some(PrivateKeyDer::Pkcs1(key?.clone_key()));
         }
 
-        let priv_key = priv_key.unwrap_or(PrivateKey(key_data));
+        if priv_key.is_none() {
+            for key in pkcs8_private_keys(&mut &*key_data).take(1) {
+                priv_key = Some(PrivateKeyDer::Pkcs8(key?.clone_key()))
+            }
+        }
 
-        Ok((cert_chain, priv_key))
+        if priv_key.is_none() {
+            for key in ec_private_keys(&mut &*key_data).take(1) {
+                priv_key = Some(PrivateKeyDer::Sec1(key?.clone_key()))
+            }
+        }
+
+        if let Some(priv_key) = priv_key {
+            return Ok((cert_chain, dbg!(priv_key)));
+        }
+
+        match PrivateKeyDer::try_from(key_data.as_slice()) {
+            Ok(key) => Ok((cert_chain, key.clone_key())),
+            Err(_) => Ok((
+                cert_chain,
+                PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(key_data)),
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use rustls::pki_types::PrivateKeyDer;
+
+    use crate::ClientIdentity;
+
+    #[test]
+    fn load_pkcs1() {
+        let (_certs, key_pem) = ClientIdentity::new(
+            Path::new("tests/client.crt"),
+            Path::new("tests/client-key.pem"),
+        )
+        .load()
+        .unwrap();
+        assert!(matches!(key_pem, PrivateKeyDer::Pkcs1(_)));
+
+        let (_certs, key_der) = ClientIdentity::new(
+            Path::new("tests/client.crt"),
+            Path::new("tests/client-key.pem"),
+        )
+        .load()
+        .unwrap();
+        assert!(matches!(key_der, PrivateKeyDer::Pkcs1(_)));
+
+        assert_eq!(key_der, key_pem);
+    }
+
+    #[test]
+    fn load_pkcs8() {
+        let (_certs, key_der) = ClientIdentity::new(
+            Path::new("tests/client.crt"),
+            Path::new("tests/client-key.pkcs8.der"),
+        )
+        .load()
+        .unwrap();
+        assert!(matches!(key_der, PrivateKeyDer::Pkcs8(_)));
+
+        let (_certs, key_pem) = ClientIdentity::new(
+            Path::new("tests/client.crt"),
+            Path::new("tests/client-key.pkcs8.pem"),
+        )
+        .load()
+        .unwrap();
+        assert!(matches!(key_pem, PrivateKeyDer::Pkcs8(_)));
+
+        assert_eq!(key_der, key_pem);
     }
 }

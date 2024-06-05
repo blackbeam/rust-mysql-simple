@@ -108,7 +108,7 @@ test:
 		rm -rf $(MYSQL_DATA_DIR) || true; \
 		exit 1; \
 	fi
-	if ! (COMPRESS=1 SSL=1 cargo test); \
+	if ! (COMPRESS=1 SSL=1 cargo test --no-default-features --features default-rustls); \
 	then \
 		kill -9 `cat $(MYSQL_DATA_DIR)/mysqld.pid`; \
 		rm -rf $(MYSQL_DATA_DIR) || true; \

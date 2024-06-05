@@ -2,8 +2,11 @@
 
 use std::fmt::Display;
 
+use rustls::server::VerifierBuilderError;
+
 #[derive(Debug)]
 pub enum TlsError {
+    VerifierBuilderError(VerifierBuilderError),
     Tls(rustls::Error),
     Pki(webpki::Error),
     InvalidDnsName(webpki::InvalidDnsNameError),
@@ -12,6 +15,12 @@ pub enum TlsError {
 impl From<TlsError> for crate::Error {
     fn from(e: TlsError) -> Self {
         crate::Error::TlsError(e)
+    }
+}
+
+impl From<VerifierBuilderError> for TlsError {
+    fn from(e: VerifierBuilderError) -> Self {
+        TlsError::VerifierBuilderError(e)
     }
 }
 
@@ -54,6 +63,7 @@ impl From<webpki::InvalidDnsNameError> for crate::Error {
 impl std::error::Error for TlsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            TlsError::VerifierBuilderError(e) => Some(e),
             TlsError::Tls(e) => Some(e),
             TlsError::Pki(e) => Some(e),
             TlsError::InvalidDnsName(e) => Some(e),
@@ -64,6 +74,7 @@ impl std::error::Error for TlsError {
 impl Display for TlsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            TlsError::VerifierBuilderError(e) => e.fmt(f),
             TlsError::Tls(e) => e.fmt(f),
             TlsError::Pki(e) => e.fmt(f),
             TlsError::InvalidDnsName(e) => e.fmt(f),
