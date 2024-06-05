@@ -31,6 +31,7 @@ use crate::error::{
 mod tcp;
 mod tls;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Read, Write)]
 pub enum Stream {
     #[cfg(unix)]
@@ -90,6 +91,7 @@ impl Stream {
         unimplemented!("Sockets is not implemented on current platform");
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn connect_tcp(
         ip_or_hostname: &str,
         port: u16,
@@ -161,6 +163,7 @@ impl AsRawFd for Stream {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Read, Write)]
 pub enum TcpStream {
     #[cfg(feature = "native-tls")]
