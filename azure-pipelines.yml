@@ -190,20 +190,24 @@ jobs:
     strategy:
       maxParallel: 10
       matrix:
-        v113:
-          DB_VERSION: "11.3"
+        verylatest:
+          CONTAINER: "quay.io/mariadb-foundation/mariadb-devel:verylatest"
+        latest:
+          CONTAINER: "quay.io/mariadb-foundation/mariadb-devel:latest"
+        lts:
+          CONTAINER: "mariadb:lts"
         v1011:
-          DB_VERSION: "10.11"
+          CONTAINER: "mariadb:10.11"
         v106:
-          DB_VERSION: "10.6"
+          CONTAINER: "mariadb:10.6"
         v105:
-          DB_VERSION: "10.5"
+          CONTAINER: "mariadb:10.5"
         v104:
-          DB_VERSION: "10.4"
+          CONTAINER: "mariadb:10.4"
     steps:
       - bash: |
           sudo apt-get update
-          sudo apt-get install docker.io netcat grep
+          sudo apt-get install docker.io
           sudo systemctl unmask docker
           sudo systemctl start docker
           docker --version
@@ -213,20 +217,20 @@ jobs:
               --name container \
               -v `pwd`:/root \
               -p 3307:3306 \
-              -e MYSQL_ROOT_PASSWORD=password \
-              mariadb:$(DB_VERSION) \
+              -e MARIADB_ROOT_PASSWORD=password \
+              $(CONTAINER) \
                   --max-allowed-packet=36700160 \
                   --local-infile \
                   --performance-schema=on \
                   --log-bin=mysql-bin --gtid-domain-id=1 \
+                  --server-id=1 \
                   --ssl \
                   --ssl-ca=/root/tests/ca.crt \
                   --ssl-cert=/root/tests/server.crt \
                   --ssl-key=/root/tests/server-key.pem &
-          while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
+          while ! docker exec container healthcheck.sh --connect --innodb_initialized ; do sleep 1; echo waiting; done
           docker logs container
-          docker exec container bash -l -c "mysql -uroot -ppassword -e 'SHOW VARIABLES LIKE \"%ssl%\"'"
-          docker exec container bash -l -c "mysql -uroot -ppassword -e 'SET GLOBAL server_id = 1;'"
+          docker exec container bash -l -c "mariadb -uroot -ppassword -e 'SHOW VARIABLES LIKE \"%ssl%\"'"
           docker exec container bash -l -c "ls -la /root/tests"
         displayName: Run MariaDb in Docker
       - bash: |
