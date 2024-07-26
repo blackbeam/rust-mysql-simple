@@ -336,7 +336,7 @@
 //!
 //!     Note, that for any variant of `Value` there exist a type, that fully covers its domain,
 //!     i.e. for any variant of `Value` there exist `T: FromValue` such that `from_value` will never
-//!     panic. This means, that if your database schema is known, than it's possible to write your
+//!     panic. This means, that if your database schema is known, then it's possible to write your
 //!     application using only `from_value` with no fear of runtime panic.
 //!
 //! *   `from_value_opt(Value) -> Option<T>` - non-panicking, but less convenient conversion.
@@ -706,7 +706,7 @@
 //! Statement cache only works for:
 //! 1.  for raw [`Conn`]
 //! 2.  for [`PooledConn`]:
-//!     * within it's lifetime if [`PoolOpts::reset_connection`] is `true`
+//!     * within its lifetime if [`PoolOpts::reset_connection`] is `true`
 //!     * within the lifetime of a wrapped [`Conn`] if [`PoolOpts::reset_connection`] is `false`
 //!
 //! #### Description
@@ -770,7 +770,7 @@
 //! ### Buffer pool
 //!
 //! Crate uses the global lock-free buffer pool for the purpose of IO and data serialization/deserialization,
-//! that helps to avoid allocations for basic scenarios. You can control it's characteristics using
+//! that helps to avoid allocations for basic scenarios. You can control its characteristics using
 //! the following environment variables:
 //!
 //! *   `RUST_MYSQL_BUFFER_POOL_CAP` (defaults to 128) – controls the pool capacity. Dropped buffer will
