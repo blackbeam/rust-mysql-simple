@@ -88,7 +88,7 @@ impl ClientIdentity {
         }
 
         if let Some(priv_key) = priv_key {
-            return Ok((cert_chain, dbg!(priv_key)));
+            return Ok((cert_chain, priv_key));
         }
 
         match PrivateKeyDer::try_from(key_data.as_slice()) {

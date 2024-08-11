@@ -30,6 +30,10 @@ jobs:
         condition: and(succeeded(), eq(variables['installRust.toolchain'], 'stable'))
         displayName: cargo fmt
       - bash: |
+          cargo clippy -- -Dclippy::dbg_macro -Dclippy::todo
+        condition: and(succeeded(), eq(variables['installRust.toolchain'], 'stable'))
+        displayName: lint
+      - bash: |
           cargo check
           cargo check --no-default-features --features default-rustls
           cargo check --no-default-features --features minimal
@@ -37,7 +41,7 @@ jobs:
 
   - job: "TestBasicMacOs"
     pool:
-      vmImage: "macOS-11"
+      vmImage: "macOS-13"
     strategy:
       maxParallel: 10
       matrix:

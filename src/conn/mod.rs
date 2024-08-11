@@ -2386,10 +2386,7 @@ mod test {
                     }
 
                     for (name, value) in expected_values {
-                        assert_eq!(
-                            actual_values.get(&name.to_string()),
-                            Some(&value.to_string())
-                        );
+                        assert_eq!(actual_values.get(*name), Some(&value.to_string()));
                     }
                 }
 
