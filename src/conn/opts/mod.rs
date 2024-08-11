@@ -808,8 +808,7 @@ impl OptsBuilder {
     /// Note that it'll saturate to proper minimum and maximum values
     /// for this parameter (see MySql documentation).
     pub fn max_allowed_packet(mut self, max_allowed_packet: Option<usize>) -> Self {
-        self.opts.0.max_allowed_packet =
-            max_allowed_packet.map(|x| std::cmp::max(1024, std::cmp::min(1073741824, x)));
+        self.opts.0.max_allowed_packet = max_allowed_packet.map(|x| x.clamp(1024, 1073741824));
         self
     }
 

@@ -90,6 +90,7 @@ impl Stream {
         unimplemented!("Sockets is not implemented on current platform");
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn connect_tcp(
         ip_or_hostname: &str,
         port: u16,
@@ -166,7 +167,7 @@ pub enum TcpStream {
     #[cfg(feature = "native-tls")]
     Secure(BufStream<native_tls::TlsStream<net::TcpStream>>),
     #[cfg(feature = "rustls")]
-    Secure(BufStream<rustls::StreamOwned<rustls::ClientConnection, net::TcpStream>>),
+    Secure(BufStream<Box<rustls::StreamOwned<rustls::ClientConnection, net::TcpStream>>>),
     Insecure(BufStream<net::TcpStream>),
 }
 

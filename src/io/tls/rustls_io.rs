@@ -92,7 +92,7 @@ impl Stream {
                         rustls::ClientConnection::new(Arc::new(config), server_name).unwrap();
                     let secure_stream = rustls::StreamOwned::new(conn, inner);
                     Ok(Stream::TcpStream(TcpStream::Secure(BufStream::new(
-                        secure_stream,
+                        Box::new(secure_stream),
                     ))))
                 }
                 TcpStream::Secure(_) => Ok(Stream::TcpStream(tcp_stream)),
