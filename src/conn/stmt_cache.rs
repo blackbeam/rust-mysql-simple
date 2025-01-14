@@ -7,7 +7,7 @@
 // modified, or distributed except according to those terms.
 
 use lru::LruCache;
-use twox_hash::XxHash;
+use twox_hash::XxHash64;
 
 use std::{
     borrow::Borrow,
@@ -42,7 +42,7 @@ pub struct Entry {
 pub struct StmtCache {
     cap: usize,
     cache: LruCache<u32, Entry>,
-    query_map: HashMap<QueryString, u32, BuildHasherDefault<XxHash>>,
+    query_map: HashMap<QueryString, u32, BuildHasherDefault<XxHash64>>,
 }
 
 impl StmtCache {
