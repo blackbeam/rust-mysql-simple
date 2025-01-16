@@ -25,43 +25,32 @@ path = "src/lib.rs"
 debug = true
 
 [features]
-default = [
-    "native-tls",
+default = ["minimal", "derive", "buffer-pool"]
+default-rust = ["minimal-rust", "derive", "buffer-pool"]
 
-    # It is necessary to choose one of `flate2` backends.
-    "flate2/zlib",
-
-    # set of enabled-by-default mysql_common features
-    "bigdecimal",
-    "rust_decimal",
-    "time",
-    "frunk",
-    "binlog",
-
-    "derive",
-    # use global buffer pool by default
-    "buffer-pool",
-]
-default-rustls = [
-    "rustls-tls",
-
-    # default-rustls uses rust_backend for flate2.
-    "flate2/rust_backend",
-
-    "bigdecimal",
-    "rust_decimal",
-    "time",
-    "frunk",
-    "binlog",
-
-    "derive",
-    "buffer-pool",
-]
 # minimal feature set with system flate2 impl
 minimal = ["flate2/zlib"]
 # minimal feature set with rust flate2 impl
 minimal-rust = ["flate2/rust_backend"]
-rustls-tls = ["rustls", "webpki", "webpki-roots", "rustls-pemfile"]
+
+# native TLS backend
+native-tls = ["dep:native-tls"]
+# rustls TLS backend with aws_lc_rs provider
+rustls-tls = ["rustls", "rustls/aws_lc_rs"]
+# rustls TLS backend with ring provider
+rustls-tls-ring = ["rustls", "rustls/ring"]
+# rustls TLS backend (no provider)
+rustls = [
+    "dep:rustls",
+    "rustls/logging",
+    "rustls/std",
+    "rustls/tls12",
+    "webpki",
+    "webpki-roots",
+    "rustls-pemfile",
+]
+
+# global buffer pool
 buffer-pool = []
 nightly = []
 
@@ -75,47 +64,31 @@ frunk = ["mysql_common/frunk"]
 binlog = ["mysql_common/binlog"]
 
 [dev-dependencies]
+mysql_common = { version = "0.34", features = ["time", "frunk"] }
 rand = "0.8.2"
-serde_derive = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 time = "0.3"
 frunk = "0.4"
 
 [dependencies]
 bufstream = "~0.1"
 bytes = "1.0.1"
-crossbeam = "0.8.1"
-io-enum = "1.0.0"
+crossbeam-queue = "0.3.12"
 flate2 = { version = "1.0", default-features = false }
-lru = "0.12"
-mysql_common = { version = "0.32", default-features = false }
-socket2 = "0.5.2"
+io-enum = "1.0.0"
+lru = { version = "0.12", default-features = false }
+mysql_common = { version = "0.34", default-features = false }
+native-tls = { version = "0.2.3", optional = true }
 pem = "3"
 percent-encoding = "2.1.0"
-serde = "1"
-serde_json = "1"
+rustls = { version = "0.23", optional = true, default-features = false }
+rustls-pemfile = { version = "2.1", optional = true }
+socket2 = "0.5.2"
 twox-hash = { version = "2", default-features = false, features = ["xxhash64"] }
 url = "2.1"
-
-[dependencies.native-tls]
-version = "0.2.3"
-optional = true
-
-[dependencies.rustls]
-version = "0.23"
-optional = true
-
-[dependencies.rustls-pemfile]
-version = "2.1"
-optional = true
-
-[dependencies.webpki]
-version = "0.22.0"
-features = ["std"]
-optional = true
-
-[dependencies.webpki-roots]
-version = "0.26"
-optional = true
+webpki = { version = "0.22", features = ["std"], optional = true }
+webpki-roots = { version = "0.26", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 named_pipe = "~0.4"

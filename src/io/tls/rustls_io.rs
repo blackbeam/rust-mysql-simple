@@ -1,4 +1,4 @@
-#![cfg(feature = "rustls-tls")]
+#![cfg(feature = "rustls")]
 
 use std::{
     fs::File,

@@ -1,4 +1,4 @@
-#![cfg(feature = "rustls-tls")]
+#![cfg(feature = "rustls")]
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer};
 use rustls_pemfile::{certs, ec_private_keys, pkcs8_private_keys, rsa_private_keys};

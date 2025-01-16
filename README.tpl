@@ -1,7 +1,7 @@
 [![Gitter](https://badges.gitter.im/rust-mysql/community.svg)](https://gitter.im/rust-mysql/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
 [![Crates.io](https://img.shields.io/crates/v/mysql.svg)](https://crates.io/crates/mysql)
-{{badges}}
+[![Build Status](https://dev.azure.com/aikorsky/mysql%20Rust/_apis/build/status/blackbeam%2Erust%2Dmysql%2Dsimple)](https://dev.azure.com/aikorsky/mysql%20Rust/_build/latest?definitionId=1)
 
 # {{crate}}
 

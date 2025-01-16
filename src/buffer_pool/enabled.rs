@@ -1,6 +1,6 @@
 #![cfg(feature = "buffer-pool")]
 
-use crossbeam::queue::ArrayQueue;
+use crossbeam_queue::ArrayQueue;
 
 use std::{
     mem::take,
