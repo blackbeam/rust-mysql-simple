@@ -96,23 +96,27 @@ impl fmt::Debug for LocalInfileHandler {
 /// See [LocalInfileHandler](struct.LocalInfileHandler.html) documentation for example.
 #[derive(Debug)]
 pub struct LocalInfile<'a> {
-    buffer: io::Cursor<Box<[u8]>>,
+    buffer: io::Cursor<&'a mut [u8]>,
     conn: &'a mut Conn,
 }
 
 impl<'a> LocalInfile<'a> {
-    pub(crate) fn new(buffer: io::Cursor<Box<[u8]>>, conn: &'a mut Conn) -> Self {
-        Self { buffer, conn }
+    pub(crate) const BUFFER_SIZE: usize = 4096;
+
+    pub(crate) fn new(buffer: &'a mut [u8; LocalInfile::BUFFER_SIZE], conn: &'a mut Conn) -> Self {
+        Self {
+            buffer: io::Cursor::new(buffer),
+            conn,
+        }
     }
 }
 
-impl<'a> io::Write for LocalInfile<'a> {
+impl io::Write for LocalInfile<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let result = self.buffer.write(buf);
-        if result.is_ok() && self.buffer.position() as usize >= self.buffer.get_ref().len() {
+        if self.buffer.position() == Self::BUFFER_SIZE as u64 {
             self.flush()?;
         }
-        result
+        self.buffer.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {

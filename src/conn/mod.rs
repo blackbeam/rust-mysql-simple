@@ -30,7 +30,6 @@ use mysql_common::{
 
 use std::{
     borrow::{Borrow, Cow},
-    cmp,
     collections::HashMap,
     convert::TryFrom,
     io::{self, Write as _},
@@ -1018,17 +1017,13 @@ impl Conn {
 
     fn send_local_infile(&mut self, file_name: &[u8]) -> Result<OkPacket<'static>> {
         {
-            let buffer_size = cmp::min(
-                MAX_PAYLOAD_LEN - 4,
-                self.stream_ref().codec().max_allowed_packet - 4,
-            );
-            let chunk = vec![0u8; buffer_size].into_boxed_slice();
+            let mut buffer = [0_u8; LocalInfile::BUFFER_SIZE];
             let maybe_handler = self
                 .0
                 .local_infile_handler
                 .clone()
                 .or_else(|| self.0.opts.get_local_infile_handler().cloned());
-            let mut local_infile = LocalInfile::new(io::Cursor::new(chunk), self);
+            let mut local_infile = LocalInfile::new(&mut buffer, self);
             if let Some(handler) = maybe_handler {
                 // Unwrap won't panic because we have exclusive access to `self` and this
                 // method is not re-entrant, because `LocalInfile` does not expose the
