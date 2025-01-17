@@ -1646,7 +1646,7 @@ mod test {
                     from_value::<String>(row1.0.clone()),
                     from_value::<i32>(row1.1.clone()),
                     from_value::<u32>(row1.2.clone()),
-                    from_value::<PrimitiveDateTime>(row1.3.clone()),
+                    from_value::<time::PrimitiveDateTime>(row1.3.clone()),
                     from_value::<f32>(row1.4.clone()),
                 ),
             )
@@ -1850,7 +1850,11 @@ mod test {
 
             let plugins: &[&str] =
                 if conn.0.mariadb_server_version.is_none() && conn.server_version() >= (5, 8, 0) {
-                    &["mysql_native_password", "caching_sha2_password"]
+                    if conn.server_version() >= (8, 4, 0) {
+                        &["caching_sha2_password"]
+                    } else {
+                        &["mysql_native_password", "caching_sha2_password"]
+                    }
                 } else {
                     &["mysql_native_password"]
                 };
@@ -2299,6 +2303,7 @@ mod test {
         #[test]
         fn should_handle_json_columns() {
             use crate::{Deserialized, Serialized};
+            use serde::{Deserialize, Serialize};
             use serde_json::Value as Json;
             use std::str::FromStr;
 

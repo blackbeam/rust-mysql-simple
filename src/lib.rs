@@ -112,45 +112,44 @@
 //!
 //! * feature sets:
 //!
-//!     *   **default** – includes default `mysql_common` features, `native-tls`, `buffer-pool`,
-//!         `flate2/zlib` and `derive`
-//!     *   **default-rustls** - same as `default` but with `rustls-tls` instead of `native-tls`
-//!         and `flate2/rust_backend` instead of `flate2/zlib`
-//!     *   **minimal** - includes `flate2/zlib`
+//!     *   **default** – includes `buffer-pool` `flate2/zlib` and `derive`
+//!     *   **default-rust** - same as `default` but with `flate2/rust_backend` instead of `flate2/zlib`
+//!     *   **minimal** - includes `flate2/zlib` only
+//!     *   **minimal-rust** - includes `flate2/rust_backend` only
 //!
-//! * crate's features:
-//!
-//!     *   **native-tls** (enabled by default) – specifies `native-tls` as the TLS backend
-//!         (see the [SSL Support](#ssl-support) section)
-//!     *   **rustls-tls** (disabled by default) – specifies `rustls` as the TLS backend
-//!         (see the [SSL Support](#ssl-support) section)
-//!     *   **buffer-pool** (enabled by default) – enables buffer pooling
+//! * features:
+//!     *   **buffer-pool** – enables buffer pooling
 //!         (see the [Buffer Pool](#buffer-pool) section)
-//!     *   **derive** (enabled by default) – reexports derive macros under `prelude`
+//!     *   **derive** – reexports derive macros under `prelude`
+//!         (see [corresponding section][derive_docs] in the `mysql_common` documentation)
 //!
-//! * external features enabled by default:
+//! * TLS/SSL related features:
 //!
-//!     * for the `flate2` crate (please consult `flate2` crate documentation for available features):
+//!     *   **native-tls** – specifies `native-tls` as the TLS backend
+//!         (see the [SSL Support](#ssl-support) section)
+//!     *   **rustls-tls** – specifies `rustls` as the TLS backend using `aws-lc-rs` crypto provider
+//!         (see the [SSL Support](#ssl-support) section)
+//!     *   **rustls-tls-ring** – specifies `rustls` as the TLS backend using `ring` crypto provider
+//!         (see the [SSL Support](#ssl-support) section)
+//!     *   **rustls** - specifies `rustls` as the TLS backend without crypto provider
+//!         (see the [SSL Support](#ssl-support) section)
 //!
-//!         *   **flate2/zlib** (necessary) – `zlib` backend is chosen by default.
+//! * features proxied from `mysql_common`:
 //!
-//!     * for the `mysql_common` crate (please consult `mysql_common` crate documentation for available features):
-//!
-//!         *   **mysql_common/bigdecimal03** – the `bigdecimal03` is enabled by default
-//!         *   **mysql_common/rust_decimal** – the `rust_decimal` is enabled by default
-//!         *   **mysql_common/time03** – the `time03` is enabled by default
-//!         *   **mysql_common/uuid** – the `uuid` is enabled by default
-//!         *   **mysql_common/frunk** – the `frunk` is enabled by default
+//!     * **derive** - see [this table][common_features].
+//!     * **chrono** - see [this table][common_features].
+//!     * **time** - see [this table][common_features].
+//!     * **bigdecimal** - see [this table][common_features].
+//!     * **rust_decimal** - see [this table][common_features].
+//!     * **frunk** - see [this table][common_features].
+//!     * **binlog** - see [this table][common_features].
 //!
 //! Please note, that you'll need to reenable required features if you are using `default-features = false`:
 //!
 //! ```toml
 //! [dependencies]
-//! # Lets say that we want to use the `rustls-tls` feature:
-//! mysql = { version = "*", default-features = false, features = ["minimal", "rustls-tls"] }
-//! # Previous line disables default mysql features,
-//! # so now we need to choose desired mysql_common features:
-//! mysql_common = { version = "*", default-features = false, features = ["bigdecimal03", "time03", "uuid"]}
+//! # Lets say that we want to use only the `rustls-tls` feature:
+//! mysql = { version = "*", default-features = false, features = ["minimal-rust", "rustls-tls"] }
 //! ```
 //!
 //! ## API Documentation
@@ -520,10 +519,10 @@
 //! or when you need to parse JSON cell as a struct.
 //!
 //! ```rust
-//! # #[macro_use] extern crate serde_derive;
 //! # mysql::doctest_wrapper!(__result, {
 //! use mysql::*;
 //! use mysql::prelude::*;
+//! use serde::{Deserialize, Serialize};
 //!
 //! /// Serializable structure.
 //! #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -553,7 +552,6 @@
 //! is fully consumed (please also look at [`QueryResult::iter`] docs).
 //!
 //! ```rust
-//! # #[macro_use] extern crate serde_derive;
 //! # mysql::doctest_wrapper!(__result, {
 //! use mysql::*;
 //! use mysql::prelude::*;
@@ -862,10 +860,17 @@
 //!
 //! SSL support comes in two flavors:
 //!
-//! 1.  Based on **native-tls** – this is the default option, that usually works without pitfalls
-//!     (see the `native-tls` crate feature).
-//! 2.  Based on **rustls** – TLS backend written in Rust. Please use the `rustls-tls` crate feature
-//!     to enable it (see the [Crate Features](#crate-features) section).
+//! 1.  Based on the `native-tls` crate – native TLS backend.
+//!
+//!     This uses the native OS SSL/TLS provider. Enabled by the **rustls-tls** feature.
+//!
+//! 2.  Based on the `rustls` – TLS backend written in Rust. You have three options here:
+//!
+//!     1.  **rustls-tls** feature enables `rustls` backend with `aws-lc-rs` crypto provider
+//!     2.  **rustls-tls-ring** feature enables `rustls` backend with `ring` crypto provider
+//!     3.  **rustls** feature enables `rustls` backend without crypto provider — you have to
+//!         install your own provider to avoid "no process-level CryptoProvider available" error
+//!         (see relevant section of the [`rustls` crate docs](https://docs.rs/rustls))
 //!
 //!     Please also note a few things about **rustls**:
 //!
@@ -876,7 +881,8 @@
 //! [crate docs]: https://docs.rs/mysql
 //! [mysql_common docs]: https://docs.rs/mysql_common
 //! [max_prepared_stmt_count]: https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_max_prepared_stmt_count
-//!
+//! [derive_docs]: https://docs.rs/mysql_common/latest/mysql_common/#derive-macros
+//! [common_features]: https://docs.rs/mysql_common/latest/mysql_common/#crate-features
 
 #![cfg_attr(feature = "nightly", feature(test))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -884,11 +890,6 @@
 extern crate test;
 
 use mysql_common as myc;
-pub extern crate serde;
-pub extern crate serde_json;
-#[cfg(test)]
-#[macro_use]
-extern crate serde_derive;
 
 mod buffer_pool;
 mod conn;
@@ -914,7 +915,7 @@ pub mod binlog {
     pub use crate::myc::binlog::{events, jsonb, jsondiff, row, value};
 }
 
-#[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+#[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[doc(inline)]
 pub use crate::conn::opts::ClientIdentity;
 

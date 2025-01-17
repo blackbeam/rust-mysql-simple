@@ -28,13 +28,13 @@ pub mod pool_opts;
 #[cfg(feature = "native-tls")]
 pub use native_tls_opts::ClientIdentity;
 
-#[cfg(feature = "rustls-tls")]
+#[cfg(feature = "rustls")]
 pub use rustls_opts::ClientIdentity;
 
 /// Ssl Options.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
 pub struct SslOpts {
-    #[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+    #[cfg(any(feature = "native-tls", feature = "rustls"))]
     client_identity: Option<ClientIdentity>,
     root_cert_path: Option<Cow<'static, Path>>,
     skip_domain_validation: bool,
@@ -43,7 +43,7 @@ pub struct SslOpts {
 
 impl SslOpts {
     /// Sets the client identity.
-    #[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+    #[cfg(any(feature = "native-tls", feature = "rustls"))]
     pub fn with_client_identity(mut self, identity: Option<ClientIdentity>) -> Self {
         self.client_identity = identity;
         self
@@ -75,7 +75,7 @@ impl SslOpts {
         self
     }
 
-    #[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+    #[cfg(any(feature = "native-tls", feature = "rustls"))]
     pub fn client_identity(&self) -> Option<&ClientIdentity> {
         self.client_identity.as_ref()
     }

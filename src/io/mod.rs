@@ -147,7 +147,7 @@ impl Stream {
     pub fn make_secure(self, _host: url::Host, _ssl_opts: crate::SslOpts) -> MyResult<Stream> {
         panic!(
             "Client had asked for TLS connection but TLS support is disabled. \
-            Please enable one of the following features: [\"native-tls\", \"rustls\"]"
+            Please enable one of the following features: \"native-tls\", \"rustls-tls\", \"rustls-tls-ring\""
         )
     }
 }

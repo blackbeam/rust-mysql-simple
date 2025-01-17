@@ -35,7 +35,7 @@ jobs:
         displayName: lint
       - bash: |
           cargo check
-          cargo check --no-default-features --features default-rustls
+          cargo check --no-default-features --features default-rust
           cargo check --no-default-features --features minimal
         displayName: Run check
 
@@ -53,7 +53,7 @@ jobs:
         displayName: Install rust (MacOs)
       - bash: |
           cargo check
-          cargo check --no-default-features --features default-rustls
+          cargo check --no-default-features --features default-rust
           cargo check --no-default-features --features minimal
         displayName: Run check
 
@@ -94,12 +94,12 @@ jobs:
         displayName: Install Rust (Windows)
       - bash: |
           SSL=false COMPRESS=false cargo test
-          SSL=true COMPRESS=false cargo test
+          SSL=true COMPRESS=false cargo test --features native-tls
           SSL=false COMPRESS=true cargo test
-          SSL=true COMPRESS=true cargo test
+          SSL=true COMPRESS=true cargo test --features native-tls
 
           SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
-          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog
+          SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls-ring,minimal-rust,time,frunk,binlog
 
           SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog
           SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog
@@ -175,11 +175,11 @@ jobs:
           if [[ "5.6" != "$(DB_VERSION)" ]]; then SSL=true; else DATABASE_URL="mysql://root2:password@localhost/mysql?secure_auth=false"; fi
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL cargo test --features native-tls"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=$SSL COMPRESS=true cargo test --features native-tls"
 
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls-ring,minimal-rust,time,frunk,binlog"
 
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog"
@@ -245,11 +245,11 @@ jobs:
       - bash: |
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test --features native-tls"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --features native-tls"
 
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls-ring,minimal-rust,time,frunk,binlog"
 
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog"
           docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog"
