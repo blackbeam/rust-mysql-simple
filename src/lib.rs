@@ -916,6 +916,14 @@ pub mod binlog {
 }
 
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(
+        feature = "native-tls",
+        feature = "rustls-tls",
+        feature = "rustls-tls-ring"
+    )))
+)]
 #[doc(inline)]
 pub use crate::conn::opts::ClientIdentity;
 

@@ -44,6 +44,14 @@ pub struct SslOpts {
 impl SslOpts {
     /// Sets the client identity.
     #[cfg(any(feature = "native-tls", feature = "rustls"))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(
+            feature = "native-tls",
+            feature = "rustls-tls",
+            feature = "rustls-tls-ring"
+        )))
+    )]
     pub fn with_client_identity(mut self, identity: Option<ClientIdentity>) -> Self {
         self.client_identity = identity;
         self
@@ -76,6 +84,14 @@ impl SslOpts {
     }
 
     #[cfg(any(feature = "native-tls", feature = "rustls"))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(
+            feature = "native-tls",
+            feature = "rustls-tls",
+            feature = "rustls-tls-ring"
+        )))
+    )]
     pub fn client_identity(&self) -> Option<&ClientIdentity> {
         self.client_identity.as_ref()
     }
@@ -141,13 +157,13 @@ pub(crate) struct InnerOpts {
     /// TCP keep alive interval between subsequent probe for mysql connection.
     ///
     /// Can be defined using `tcp_keepalive_probe_interval_secs` connection url parameter.
-    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     tcp_keepalive_probe_interval_secs: Option<u32>,
 
     /// TCP keep alive probe count for mysql connection.
     ///
     /// Can be defined using `tcp_keepalive_probe_count` connection url parameter.
-    #[cfg(any(target_os = "linux", target_os = "macos",))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     tcp_keepalive_probe_count: Option<u32>,
 
     /// TCP_USER_TIMEOUT time for mysql connection.

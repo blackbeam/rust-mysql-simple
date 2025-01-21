@@ -64,6 +64,14 @@ pub enum Error {
     DriverError(DriverError),
     UrlError(UrlError),
     #[cfg(any(feature = "native-tls", feature = "rustls"))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(
+            feature = "native-tls",
+            feature = "rustls-tls",
+            feature = "rustls-tls-ring"
+        )))
+    )]
     TlsError(tls::TlsError),
     FromValueError(Value),
     FromRowError(Row),
