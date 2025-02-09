@@ -189,7 +189,6 @@ impl PoolConstraints {
     pub const fn new_const<const MIN: usize, const MAX: usize>() -> PoolConstraints {
         gte::<MIN, MAX>();
 
-        assert!(MIN > 0);
         assert!(MAX > 0);
 
         PoolConstraints { min: MIN, max: MAX }
