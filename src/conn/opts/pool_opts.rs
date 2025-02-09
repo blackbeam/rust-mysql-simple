@@ -169,10 +169,10 @@ impl PoolConstraints {
     /// # Ok(()) }
     /// ```
     pub fn new(min: usize, max: usize) -> Option<PoolConstraints> {
-        if min <= max {
-            Some(PoolConstraints { min, max })
-        } else {
-            None
+        match (min, max) {
+            (0, 0) => None,
+            (min, max) if min <= max => Some(PoolConstraints { min, max }),
+            _ => None,
         }
     }
 
