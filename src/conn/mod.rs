@@ -634,6 +634,9 @@ impl Conn {
 
                 x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
             }
+            ref x @ AuthPlugin::Ed25519 => {
+                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
+            }
             AuthPlugin::Other(_) => None,
         };
 
@@ -826,6 +829,10 @@ impl Conn {
                 self.continue_mysql_native_password_auth(auth_switched)?;
                 Ok(())
             }
+            AuthPlugin::Ed25519 => {
+                self.continue_ed25519_auth(auth_switched)?;
+                Ok(())
+            }
             AuthPlugin::Other(ref name) => {
                 let plugin_name = String::from_utf8_lossy(name).into();
                 Err(DriverError(UnknownAuthPlugin(plugin_name)))
@@ -891,6 +898,19 @@ impl Conn {
                 }
                 _ => Err(DriverError(UnexpectedPacket)),
             },
+            0xfe if !auth_switched => {
+                let auth_switch_request = ParseBuf(&payload).parse(())?;
+                self.perform_auth_switch(auth_switch_request)
+            }
+            _ => Err(DriverError(UnexpectedPacket)),
+        }
+    }
+
+    fn continue_ed25519_auth(&mut self, auth_switched: bool) -> Result<()> {
+        let payload = self.read_packet()?;
+        match payload[0] {
+            // ok packet for empty password
+            0x00 => Ok(()),
             0xfe if !auth_switched => {
                 let auth_switch_request = ParseBuf(&payload).parse(())?;
                 self.perform_auth_switch(auth_switch_request)
