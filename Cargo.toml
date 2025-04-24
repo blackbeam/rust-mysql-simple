@@ -1,6 +1,6 @@
 [package]
 name = "mysql"
-version = "26.0.0"
+version = "27.0.0"
 authors = ["blackbeam"]
 description = "Mysql client library implemented in rust"
 license = "MIT/Apache-2.0"
@@ -64,7 +64,7 @@ frunk = ["mysql_common/frunk"]
 binlog = ["mysql_common/binlog"]
 
 [dev-dependencies]
-mysql_common = { version = "0.34", features = ["time", "frunk"] }
+mysql_common = { version = "0.35", features = ["time", "frunk", "binlog"] }
 rand = "0.8.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -78,7 +78,7 @@ crossbeam-queue = "0.3.12"
 flate2 = { version = "1.0", default-features = false }
 io-enum = "1.0.0"
 lru = { version = "0.12", default-features = false }
-mysql_common = { version = "0.34", default-features = false }
+mysql_common = { version = "0.35", default-features = false }
 native-tls = { version = "0.2.3", optional = true }
 pem = "3"
 percent-encoding = "2.1.0"
