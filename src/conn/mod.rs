@@ -1963,7 +1963,7 @@ mod test {
                     let result = conn
                         // (M)!50700 IF EXISTS: 5.7.0 (also on MariaDB) is minimum version that sees this clause
                         .query_drop(
-                            "DROP USER /*!50700 IF EXISTS */ /*M!50700 IF EXISTS */ __mats"
+                            "DROP USER /*!50700 IF EXISTS */ /*M!50700 IF EXISTS */ __mats",
                         );
 
                     if matches!(version, (5, m, _) if m < 7) && i == 0 {
