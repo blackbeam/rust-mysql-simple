@@ -1961,11 +1961,11 @@ mod test {
                     let pass = random_pass();
 
                     let result = conn
-                        // !50700 IF EXISTS: 5.7.0 is minimum version that sees this clause
-                        .query_drop("DROP USER /*!50700 IF EXISTS */ __mats");
+                        // (M)!50700 IF EXISTS: 5.7.0 (also on MariaDB) is minimum version that sees this clause
+                        .query_drop("DROP USER /*!50700 IF EXISTS */ /*M!50700 IF EXISTS */ __mats");
 
-                    if matches!(version, (5, 6, _)) && i == 0 {
-                        // IF EXISTS is not supported on 5.6 so the query will fail on the first iteration
+                    if matches!(version, (5, m, _) if m < 7) && i == 0 {
+                        // IF EXISTS is not supported before 5.7 so the query will fail on the first iteration
                         drop(result);
                     } else {
                         result.unwrap();
