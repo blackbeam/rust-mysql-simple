@@ -1952,7 +1952,7 @@ mod test {
                 Value::NULL
             );
 
-            for (plugin, should_run, create_statements) in TEST_MATRIX {
+            for (i, (plugin, should_run, create_statements)) in TEST_MATRIX.iter().enumerate() {
                 dbg!(plugin);
                 let is_mariadb = conn.0.mariadb_server_version.is_some();
                 let version = conn.server_version();
@@ -1964,7 +1964,12 @@ mod test {
                         // !50700 IF EXISTS: 5.7.0 is minimum version that sees this clause
                         .query_drop("DROP USER /*!50700 IF EXISTS */ __mats");
 
-                    result.unwrap();
+                    if matches!(version, (5, 6, _)) && i == 0 {
+                        // IF EXISTS is not supported on 5.6 so the query will fail on the first iteration
+                        drop(result);
+                    } else {
+                        result.unwrap();
+                    }
 
                     for statement in create_statements(is_mariadb, version, &pass) {
                         conn.query_drop(dbg!(statement)).unwrap();
