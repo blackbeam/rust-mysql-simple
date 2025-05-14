@@ -1884,10 +1884,9 @@ mod test {
                             ]
                         } else if version < (8, 0, 0) {
                             vec![
-                                format!(
-                                    "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_native_password"
-                                ),
-                                format!("SET old_passwords = 0"),
+                                "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_native_password"
+                                    .into(),
+                                "SET old_passwords = 0".into(),
                                 format!("SET PASSWORD FOR '__mats'@'%' = PASSWORD('{pass}')"),
                             ]
                         } else {
@@ -1908,11 +1907,11 @@ mod test {
                 ),
                 (
                     "client_ed25519",
-                    |is_mariadb, version| is_mariadb && version >= (11, 6, 2),
+                    |is_mariadb, version| is_mariadb && version >= (10, 4, 0),
                     |_is_mariadb, _version, pass| {
-                        vec![format!(
-                            "CREATE USER '__mats'@'%' IDENTIFIED WITH ed25519 AS PASSWORD('{pass}')"
-                        )]
+                        vec![
+                            format!("CREATE USER '__mats'@'%' IDENTIFIED WITH ed25519 AS PASSWORD('{pass}')")
+                        ]
                     },
                 ),
             ];
@@ -1962,9 +1961,9 @@ mod test {
 
                     let result = conn
                         // (M)!50700 IF EXISTS: 5.7.0 (also on MariaDB) is minimum version that sees this clause
-                        .query_drop(
-                            "DROP USER /*!50700 IF EXISTS */ /*M!50700 IF EXISTS */ __mats",
-                        );
+                        .query_drop(dbg!(
+                            "DROP USER /*!50700 IF EXISTS */ /*M!50700 IF EXISTS */ ''"
+                        ));
 
                     if matches!(version, (5, m, _) if m < 7) && i == 0 {
                         // IF EXISTS is not supported before 5.7 so the query will fail on the first iteration
