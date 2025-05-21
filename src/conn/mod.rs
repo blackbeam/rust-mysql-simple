@@ -929,7 +929,7 @@ impl Conn {
         let mut buf = get_buffer();
         cmd.serialize(buf.as_mut());
         self.reset_seq_id();
-        debug_assert!(buf.len() > 0);
+        debug_assert!(!buf.is_empty());
         self.0.last_command = buf[0];
         self.write_packet(&mut &*buf)
     }
@@ -1336,7 +1336,7 @@ mod test {
         use std::{
             collections::HashMap,
             io::Write,
-            iter, process,
+            process,
             sync::mpsc::{channel, sync_channel},
             thread::spawn,
             time::Duration,
@@ -1349,6 +1349,7 @@ mod test {
         use time::PrimitiveDateTime;
 
         use crate::{
+            conn::ConnInner,
             from_row, from_value, params,
             prelude::*,
             test_misc::get_opts,
@@ -1631,7 +1632,10 @@ mod test {
                 .query_first("SELECT REPEAT('A', 20000000)")
                 .unwrap()
                 .unwrap();
-            assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
+            assert_eq!(
+                value,
+                Bytes(std::iter::repeat_n(b'A', 20_000_000).collect())
+            );
         }
 
         #[test]
@@ -1692,7 +1696,10 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             let stmt = conn.prep("SELECT REPEAT('A', 20000000)").unwrap();
             let value: Value = conn.exec_first(&stmt, ()).unwrap().unwrap();
-            assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
+            assert_eq!(
+                value,
+                Bytes(std::iter::repeat_n(b'A', 20_000_000).collect())
+            );
         }
 
         #[test]
@@ -1969,11 +1976,6 @@ mod test {
                         conn.query_drop(dbg!(statement)).unwrap();
                     }
 
-                    // (M)!50700 IF EXISTS: 5.7.0 (also on MariaDB) is minimum version that sees this clause
-                    let statement = "DROP USER /*!50700 IF EXISTS */ /*M!50700 IF EXISTS */ ''";
-                    // No IF EXISTS before 5.7 so the query may fail otherwise
-                    _ = conn.query_drop(dbg!(statement));
-
                     let mut conn2 = Conn::new(get_opts().secure_auth(false)).unwrap();
                     conn2
                         .change_user(
@@ -1991,109 +1993,6 @@ mod test {
                     assert_eq!(db, None);
                     assert!(user.starts_with("__mats"));
                 }
-            }
-
-            Ok(())
-        }
-
-        #[test]
-        fn should_change_user_old() -> crate::Result<()> {
-            let mut conn = Conn::new(get_opts()).unwrap();
-            assert_eq!(
-                conn.query_first::<Value, _>("SELECT @foo")
-                    .unwrap()
-                    .unwrap(),
-                Value::NULL
-            );
-
-            conn.query_drop("SET @foo = 'foo'").unwrap();
-
-            assert_eq!(
-                conn.query_first::<String, _>("SELECT @foo")
-                    .unwrap()
-                    .unwrap(),
-                "foo",
-            );
-
-            conn.change_user(Default::default()).unwrap();
-            assert_eq!(
-                conn.query_first::<Value, _>("SELECT @foo")
-                    .unwrap()
-                    .unwrap(),
-                Value::NULL
-            );
-
-            let plugins: &[&str] =
-                if conn.0.mariadb_server_version.is_none() && conn.server_version() >= (5, 8, 0) {
-                    if conn.server_version() >= (8, 4, 0) {
-                        &["caching_sha2_password"]
-                    } else {
-                        &["mysql_native_password", "caching_sha2_password"]
-                    }
-                } else {
-                    &["mysql_native_password"]
-                };
-
-            for plugin in plugins {
-                let mut rng = rand::thread_rng();
-                let mut pass = [0u8; 10];
-                pass.try_fill(&mut rng).unwrap();
-                let pass: String = IntoIterator::into_iter(pass)
-                    .map(|x| ((x % (123 - 97)) + 97) as char)
-                    .collect();
-
-                conn.query_drop(dbg!("DELETE FROM mysql.user WHERE user = '__mats'"))
-                    .unwrap();
-                conn.query_drop(dbg!("FLUSH PRIVILEGES")).unwrap();
-
-                if conn.0.mariadb_server_version.is_some() || conn.server_version() < (5, 7, 0) {
-                    if matches!(conn.server_version(), (5, 6, _)) {
-                        conn.query_drop(
-                            "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_old_password",
-                        )
-                        .unwrap();
-                        conn.query_drop(format!(
-                            "SET PASSWORD FOR '__mats'@'%' = OLD_PASSWORD({})",
-                            Value::from(pass.clone()).as_sql(false)
-                        ))
-                        .unwrap();
-                    } else {
-                        conn.query_drop(dbg!("CREATE USER '__mats'@'%'")).unwrap();
-                        conn.query_drop(format!(
-                            "SET PASSWORD FOR '__mats'@'%' = PASSWORD({})",
-                            Value::from(pass.clone()).as_sql(false)
-                        ))
-                        .unwrap();
-                    }
-                } else {
-                    conn.query_drop(dbg!(format!(
-                        "CREATE USER '__mats'@'%' IDENTIFIED WITH {} BY {}",
-                        plugin,
-                        Value::from(pass.clone()).as_sql(false)
-                    )))
-                    .unwrap();
-                };
-
-                conn.query_drop("DELETE FROM mysql.user WHERE user = ''")
-                    .unwrap();
-                let _ = conn.query_drop("SET GLOBAL secure_auth = 0");
-                conn.query_drop("FLUSH PRIVILEGES").unwrap();
-
-                let mut conn2 = Conn::new(get_opts().secure_auth(false)).unwrap();
-                conn2
-                    .change_user(
-                        crate::ChangeUserOpts::default()
-                            .with_db_name(None)
-                            .with_user(Some("__mats".into()))
-                            .with_pass(Some(pass)),
-                    )
-                    .unwrap();
-                let (db, user) = conn2
-                    .query_first::<(Option<String>, String), _>("SELECT DATABASE(), USER();")
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(db, None);
-                assert!(user.starts_with("__mats"));
             }
 
             Ok(())
@@ -2120,18 +2019,52 @@ mod test {
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
             let opts = OptsBuilder::from_opts(get_opts());
-            let conn = Conn::new(opts).unwrap();
+            let mut conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
-                assert!(conn.is_socket());
+                assert!(
+                    conn.is_socket(),
+                    "Did not reconnect via socket {:?}",
+                    (
+                        conn.0.opts.get_prefer_socket(),
+                        conn.0.opts.addr_is_loopback(),
+                        conn.can_improved().and_then(|opts| {
+                            opts.map(|opts| {
+                                let mut new = crate::conn::Conn(Box::new(ConnInner::empty(opts)));
+                                new.connect_stream().and_then(|_| {
+                                    new.connect()?;
+                                    Ok(new)
+                                })
+                            })
+                            .transpose()
+                        }),
+                    )
+                );
             }
         }
 
         #[test]
         fn should_connect_via_socket_localhost() {
             let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
-            let conn = Conn::new(opts).unwrap();
+            let mut conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
-                assert!(conn.is_socket());
+                assert!(
+                    conn.is_socket(),
+                    "Did not reconnect via socket {:?}",
+                    (
+                        conn.0.opts.get_prefer_socket(),
+                        conn.0.opts.addr_is_loopback(),
+                        conn.can_improved().and_then(|opts| {
+                            opts.map(|opts| {
+                                let mut new = crate::conn::Conn(Box::new(ConnInner::empty(opts)));
+                                new.connect_stream().and_then(|_| {
+                                    new.connect()?;
+                                    Ok(new)
+                                })
+                            })
+                            .transpose()
+                        }),
+                    )
+                );
             }
         }
 
