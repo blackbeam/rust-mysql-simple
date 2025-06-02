@@ -634,6 +634,7 @@ impl Conn {
 
                 x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
             }
+            ref x @ AuthPlugin::Ed25519 => x.gen_data(self.0.opts.get_pass(), &self.0.nonce),
             AuthPlugin::Other(_) => None,
         };
 
@@ -826,6 +827,10 @@ impl Conn {
                 self.continue_mysql_native_password_auth(auth_switched)?;
                 Ok(())
             }
+            AuthPlugin::Ed25519 => {
+                self.continue_ed25519_auth(auth_switched)?;
+                Ok(())
+            }
             AuthPlugin::Other(ref name) => {
                 let plugin_name = String::from_utf8_lossy(name).into();
                 Err(DriverError(UnknownAuthPlugin(plugin_name)))
@@ -899,6 +904,19 @@ impl Conn {
         }
     }
 
+    fn continue_ed25519_auth(&mut self, auth_switched: bool) -> Result<()> {
+        let payload = self.read_packet()?;
+        match payload[0] {
+            // ok packet for empty password
+            0x00 => Ok(()),
+            0xfe if !auth_switched => {
+                let auth_switch_request = ParseBuf(&payload).parse(())?;
+                self.perform_auth_switch(auth_switch_request)
+            }
+            _ => Err(DriverError(UnexpectedPacket)),
+        }
+    }
+
     fn reset_seq_id(&mut self) {
         self.stream_mut().codec_mut().reset_seq_id();
     }
@@ -911,7 +929,7 @@ impl Conn {
         let mut buf = get_buffer();
         cmd.serialize(buf.as_mut());
         self.reset_seq_id();
-        debug_assert!(buf.len() > 0);
+        debug_assert!(!buf.is_empty());
         self.0.last_command = buf[0];
         self.write_packet(&mut &*buf)
     }
@@ -1318,7 +1336,7 @@ mod test {
         use std::{
             collections::HashMap,
             io::Write,
-            iter, process,
+            process,
             sync::mpsc::{channel, sync_channel},
             thread::spawn,
             time::Duration,
@@ -1331,6 +1349,7 @@ mod test {
         use time::PrimitiveDateTime;
 
         use crate::{
+            conn::ConnInner,
             from_row, from_value, params,
             prelude::*,
             test_misc::get_opts,
@@ -1613,7 +1632,10 @@ mod test {
                 .query_first("SELECT REPEAT('A', 20000000)")
                 .unwrap()
                 .unwrap();
-            assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
+            assert_eq!(
+                value,
+                Bytes(std::iter::repeat_n(b'A', 20_000_000).collect())
+            );
         }
 
         #[test]
@@ -1674,7 +1696,10 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             let stmt = conn.prep("SELECT REPEAT('A', 20000000)").unwrap();
             let value: Value = conn.exec_first(&stmt, ()).unwrap().unwrap();
-            assert_eq!(value, Bytes(iter::repeat(b'A').take(20_000_000).collect()));
+            assert_eq!(
+                value,
+                Bytes(std::iter::repeat_n(b'A', 20_000_000).collect())
+            );
         }
 
         #[test]
@@ -1823,7 +1848,92 @@ mod test {
 
         #[test]
         fn should_change_user() -> crate::Result<()> {
+            /// Whether particular authentication plugin should be tested on the current database.
+            type ShouldRunFn = fn(bool, (u16, u16, u16)) -> bool;
+            /// Generates `CREATE USER` and `SET PASSWORD` statements
+            type CreateUserFn = fn(bool, (u16, u16, u16), &str) -> Vec<String>;
+
+            #[allow(clippy::type_complexity)]
+            const TEST_MATRIX: [(&str, ShouldRunFn, CreateUserFn); 4] = [
+                (
+                    "mysql_old_password",
+                    |is_mariadb, version| is_mariadb || version < (5, 7, 0),
+                    |is_mariadb, version, pass| {
+                        if is_mariadb {
+                            vec![
+                                "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_old_password"
+                                    .into(),
+                                "SET old_passwords=1".into(),
+                                format!("ALTER USER '__mats'@'%' IDENTIFIED BY '{pass}'"),
+                                "SET old_passwords=0".into(),
+                            ]
+                        } else if matches!(version, (5, 6, _)) {
+                            vec![
+                                "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_old_password"
+                                    .into(),
+                                format!("SET PASSWORD FOR '__mats'@'%' = OLD_PASSWORD('{pass}')"),
+                            ]
+                        } else {
+                            vec![
+                                "CREATE USER '__mats'@'%'".into(),
+                                format!("SET PASSWORD FOR '__mats'@'%' = PASSWORD('{pass}')"),
+                            ]
+                        }
+                    },
+                ),
+                (
+                    "mysql_native_password",
+                    |is_mariadb, version| is_mariadb || version < (8, 4, 0),
+                    |is_mariadb, version, pass| {
+                        if is_mariadb {
+                            vec![
+                                format!("CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_native_password AS PASSWORD('{pass}')")
+                            ]
+                        } else if version < (8, 0, 0) {
+                            vec![
+                                "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_native_password"
+                                    .into(),
+                                "SET old_passwords = 0".into(),
+                                format!("SET PASSWORD FOR '__mats'@'%' = PASSWORD('{pass}')"),
+                            ]
+                        } else {
+                            vec![
+                                format!("CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_native_password BY '{pass}'")
+                            ]
+                        }
+                    },
+                ),
+                (
+                    "caching_sha2_password",
+                    |is_mariadb, version| !is_mariadb && version >= (5, 8, 0),
+                    |_is_mariadb, _version, pass| {
+                        vec![
+                            format!("CREATE USER '__mats'@'%' IDENTIFIED WITH caching_sha2_password BY '{pass}'")
+                        ]
+                    },
+                ),
+                (
+                    "client_ed25519",
+                    |is_mariadb, version| is_mariadb && version >= (10, 4, 0),
+                    |_is_mariadb, _version, pass| {
+                        vec![
+                            format!("CREATE USER '__mats'@'%' IDENTIFIED WITH ed25519 AS PASSWORD('{pass}')")
+                        ]
+                    },
+                ),
+            ];
+
+            fn random_pass() -> String {
+                let mut rng = rand::thread_rng();
+                let mut pass = [0u8; 10];
+                pass.try_fill(&mut rng).unwrap();
+                IntoIterator::into_iter(pass)
+                    .map(|x| ((x % (123 - 97)) + 97) as char)
+                    .collect()
+            }
+
             let mut conn = Conn::new(get_opts()).unwrap();
+
             assert_eq!(
                 conn.query_first::<Value, _>("SELECT @foo")
                     .unwrap()
@@ -1848,77 +1958,41 @@ mod test {
                 Value::NULL
             );
 
-            let plugins: &[&str] =
-                if conn.0.mariadb_server_version.is_none() && conn.server_version() >= (5, 8, 0) {
-                    if conn.server_version() >= (8, 4, 0) {
-                        &["caching_sha2_password"]
-                    } else {
-                        &["mysql_native_password", "caching_sha2_password"]
+            for (plugin, should_run, create_statements) in TEST_MATRIX {
+                dbg!(plugin);
+                let is_mariadb = conn.0.mariadb_server_version.is_some();
+                let version = conn.server_version();
+
+                if should_run(is_mariadb, version) {
+                    let pass = random_pass();
+
+                    // (M)!50700 IF EXISTS: 5.7.0 (also on MariaDB) is minimum version that sees this clause
+                    let statement =
+                        "DROP USER /*!50700 IF EXISTS */ /*M!50700 IF EXISTS */ '__mats'";
+                    // No IF EXISTS before 5.7 so the query may fail otherwise
+                    _ = conn.query_drop(dbg!(statement));
+
+                    for statement in create_statements(is_mariadb, version, &pass) {
+                        conn.query_drop(dbg!(statement)).unwrap();
                     }
-                } else {
-                    &["mysql_native_password"]
-                };
 
-            for plugin in plugins {
-                let mut rng = rand::thread_rng();
-                let mut pass = [0u8; 10];
-                pass.try_fill(&mut rng).unwrap();
-                let pass: String = IntoIterator::into_iter(pass)
-                    .map(|x| ((x % (123 - 97)) + 97) as char)
-                    .collect();
-
-                conn.query_drop("DELETE FROM mysql.user WHERE user = '__mats'")
-                    .unwrap();
-                conn.query_drop("FLUSH PRIVILEGES").unwrap();
-
-                if conn.0.mariadb_server_version.is_some() || conn.server_version() < (5, 7, 0) {
-                    if matches!(conn.server_version(), (5, 6, _)) {
-                        conn.query_drop(
-                            "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_old_password",
+                    let mut conn2 = Conn::new(get_opts().secure_auth(false)).unwrap();
+                    conn2
+                        .change_user(
+                            crate::ChangeUserOpts::default()
+                                .with_db_name(None)
+                                .with_user(Some("__mats".into()))
+                                .with_pass(Some(pass)),
                         )
                         .unwrap();
-                        conn.query_drop(format!(
-                            "SET PASSWORD FOR '__mats'@'%' = OLD_PASSWORD({})",
-                            Value::from(pass.clone()).as_sql(false)
-                        ))
-                        .unwrap();
-                    } else {
-                        conn.query_drop("CREATE USER '__mats'@'%'").unwrap();
-                        conn.query_drop(format!(
-                            "SET PASSWORD FOR '__mats'@'%' = PASSWORD({})",
-                            Value::from(pass.clone()).as_sql(false)
-                        ))
-                        .unwrap();
-                    }
-                } else {
-                    conn.query_drop(format!(
-                        "CREATE USER '__mats'@'%' IDENTIFIED WITH {} BY {}",
-                        plugin,
-                        Value::from(pass.clone()).as_sql(false)
-                    ))
-                    .unwrap();
-                };
 
-                conn.query_drop("DELETE FROM mysql.user WHERE user = ''")
-                    .unwrap();
-                let _ = conn.query_drop("SET GLOBAL secure_auth = 0");
-                conn.query_drop("FLUSH PRIVILEGES").unwrap();
-
-                let mut conn2 = Conn::new(get_opts().secure_auth(false)).unwrap();
-                conn2
-                    .change_user(
-                        crate::ChangeUserOpts::default()
-                            .with_db_name(None)
-                            .with_user(Some("__mats".into()))
-                            .with_pass(Some(pass)),
-                    )
-                    .unwrap();
-                let (db, user) = conn2
-                    .query_first::<(Option<String>, String), _>("SELECT DATABASE(), USER();")
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(db, None);
-                assert!(user.starts_with("__mats"));
+                    let (db, user) = conn2
+                        .query_first::<(Option<String>, String), _>("SELECT DATABASE(), USER();")
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(db, None);
+                    assert!(user.starts_with("__mats"));
+                }
             }
 
             Ok(())
@@ -1945,18 +2019,52 @@ mod test {
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
             let opts = OptsBuilder::from_opts(get_opts());
-            let conn = Conn::new(opts).unwrap();
+            let mut conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
-                assert!(conn.is_socket());
+                assert!(
+                    conn.is_socket(),
+                    "Did not reconnect via socket {:?}",
+                    (
+                        conn.0.opts.get_prefer_socket(),
+                        conn.0.opts.addr_is_loopback(),
+                        conn.can_improved().and_then(|opts| {
+                            opts.map(|opts| {
+                                let mut new = crate::conn::Conn(Box::new(ConnInner::empty(opts)));
+                                new.connect_stream().and_then(|_| {
+                                    new.connect()?;
+                                    Ok(new)
+                                })
+                            })
+                            .transpose()
+                        }),
+                    )
+                );
             }
         }
 
         #[test]
         fn should_connect_via_socket_localhost() {
             let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
-            let conn = Conn::new(opts).unwrap();
+            let mut conn = Conn::new(opts).unwrap();
             if conn.is_insecure() {
-                assert!(conn.is_socket());
+                assert!(
+                    conn.is_socket(),
+                    "Did not reconnect via socket {:?}",
+                    (
+                        conn.0.opts.get_prefer_socket(),
+                        conn.0.opts.addr_is_loopback(),
+                        conn.can_improved().and_then(|opts| {
+                            opts.map(|opts| {
+                                let mut new = crate::conn::Conn(Box::new(ConnInner::empty(opts)));
+                                new.connect_stream().and_then(|_| {
+                                    new.connect()?;
+                                    Ok(new)
+                                })
+                            })
+                            .transpose()
+                        }),
+                    )
+                );
             }
         }
 
