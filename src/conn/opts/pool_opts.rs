@@ -140,6 +140,16 @@ const_assert!(
     PoolConstraints::DEFAULT.min <= PoolConstraints::DEFAULT.max,
 );
 
+const_assert!(
+    _POOL_CONSTRAINTS_MIN_IS_NONZERO,
+    PoolConstraints::DEFAULT.min > 0
+);
+
+const_assert!(
+    _POOL_CONSTRAINTS_MAX_IS_NONZERO,
+    PoolConstraints::DEFAULT.max > 0
+);
+
 pub struct Assert<const L: usize, const R: usize>;
 impl<const L: usize, const R: usize> Assert<L, R> {
     pub const LEQ: usize = R - L;
@@ -169,15 +179,18 @@ impl PoolConstraints {
     /// # Ok(()) }
     /// ```
     pub fn new(min: usize, max: usize) -> Option<PoolConstraints> {
-        if min <= max {
-            Some(PoolConstraints { min, max })
-        } else {
-            None
+        match (min, max) {
+            (0, 0) => None,
+            (min, max) if min <= max => Some(PoolConstraints { min, max }),
+            _ => None,
         }
     }
 
     pub const fn new_const<const MIN: usize, const MAX: usize>() -> PoolConstraints {
         gte::<MIN, MAX>();
+
+        assert!(MAX > 0);
+
         PoolConstraints { min: MIN, max: MAX }
     }
 
