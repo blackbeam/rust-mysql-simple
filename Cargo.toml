@@ -96,3 +96,7 @@ named_pipe = "~0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[patch.crates-io]
+mysql_common = { git = "https://github.com/lawrinn/rust_mysql_common", branch = "master" }
+#mysql_common = { path = "../mysql-common" }

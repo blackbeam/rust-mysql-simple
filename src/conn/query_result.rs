@@ -142,6 +142,14 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
         Self::from_state(conn, meta.into())
     }
 
+    pub(crate) fn new_from_cached_metadata(
+        conn: ConnMut<'c, 't, 'tc>,
+        columns: &[Column],
+    ) -> QueryResult<'c, 't, 'tc, T> {
+        let owned_vec = columns.to_vec();
+        let meta: Or<Vec<Column>, OkPacket<'static>> = Or::A(owned_vec);
+        Self::from_state(conn, meta.into())
+    }
     /// Updates state with the next result set, if any.
     ///
     /// Returns `false` if there is no next result set.
