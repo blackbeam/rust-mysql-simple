@@ -2665,7 +2665,12 @@ mod test {
             assert_eq!(metadata_from_exec.len(), 1);
             assert_eq!(metadata_from_prep.len(), 1);
             assert_eq!(metadata_from_prep[0].0, "?");
-            assert_eq!(metadata_from_prep[0].1, ColumnType::MYSQL_TYPE_NULL);
+            assert!(
+                metadata_from_prep[0].1 == ColumnType::MYSQL_TYPE_NULL
+                    || metadata_from_prep[0].1 == ColumnType::MYSQL_TYPE_VAR_STRING,
+                "Expected MYSQL_TYPE_NULL(MariaDB) or MYSQL_TYPE_VAR_STRING(MySQL), got {:?}",
+                metadata_from_prep[0].1
+            );
             assert_eq!(metadata_from_exec[0].0, "?");
             assert_eq!(metadata_from_exec[0].1, ColumnType::MYSQL_TYPE_LONGLONG);
 
