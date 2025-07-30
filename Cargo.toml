@@ -76,6 +76,7 @@ frunk = "0.4"
 bufstream = "~0.1"
 bytes = "1.0.1"
 crossbeam-queue = "0.3.12"
+crossbeam-utils = "0.8.21"
 flate2 = { version = "1.0", default-features = false }
 io-enum = "1.0.0"
 lru = { version = "0.12", default-features = false }
@@ -98,5 +99,5 @@ named_pipe = "~0.4"
 libc = "0.2"
 
 [patch.crates-io]
-mysql_common = { git = "https://github.com/lawrinn/rust_mysql_common", branch = "master" }
+mysql_common = { git = "https://github.com/blackbeam/rust_mysql_common", branch = "master" }
 #mysql_common = { path = "../mysql-common" }
