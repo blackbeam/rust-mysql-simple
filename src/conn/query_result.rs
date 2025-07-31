@@ -14,12 +14,6 @@ use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
 use crate::{conn::ConnMut, Column, Conn, Error, Result, Row};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Or<A, B> {
-    A(A),
-    B(B),
-}
-
 /// Result set kind.
 pub trait Protocol: 'static + Send + Sync {
     fn next(conn: &mut Conn, columns: Arc<[Column]>) -> Result<Option<Row>>;
@@ -82,9 +76,9 @@ impl SetIteratorState {
     }
 }
 
-impl From<Vec<Column>> for SetIteratorState {
-    fn from(columns: Vec<Column>) -> Self {
-        Self::InSet(columns.into())
+impl From<Arc<[Column]>> for SetIteratorState {
+    fn from(columns: Arc<[Column]>) -> Self {
+        Self::InSet(columns)
     }
 }
 
@@ -100,13 +94,18 @@ impl From<Error> for SetIteratorState {
     }
 }
 
-impl From<Or<Vec<Column>, OkPacket<'static>>> for SetIteratorState {
-    fn from(or: Or<Vec<Column>, OkPacket<'static>>) -> Self {
-        match or {
-            Or::A(cols) => Self::from(cols),
-            Or::B(ok) => Self::from(ok),
+impl From<ResultSetMeta> for SetIteratorState {
+    fn from(value: ResultSetMeta) -> Self {
+        match value {
+            ResultSetMeta::Empty(ok_packet) => Self::from(ok_packet),
+            ResultSetMeta::NonEmptyWithMeta(column) => Self::from(column),
         }
     }
+}
+
+pub(crate) enum ResultSetMeta {
+    Empty(OkPacket<'static>),
+    NonEmptyWithMeta(Arc<[Column]>),
 }
 
 /// Response to a query or statement execution.
@@ -137,7 +136,7 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
 
     pub(crate) fn new(
         conn: ConnMut<'c, 't, 'tc>,
-        meta: Or<Vec<Column>, OkPacket<'static>>,
+        meta: ResultSetMeta,
     ) -> QueryResult<'c, 't, 'tc, T> {
         Self::from_state(conn, meta.into())
     }
@@ -155,7 +154,7 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
 
         if self.conn.more_results_exists() {
             match self.conn.handle_result_set() {
-                Ok(meta) => self.state = meta.into(),
+                Ok(info) => self.state = info.into_query_meta().into(),
                 Err(err) => self.state = err.into(),
             }
             self.set_index += 1;

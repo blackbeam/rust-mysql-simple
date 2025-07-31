@@ -47,12 +47,12 @@ use crate::{
     conn::{
         local_infile::LocalInfile,
         pool::{Pool, PooledConn},
-        query_result::{Binary, Or, Text},
+        query_result::{Binary, ResultSetMeta, Text},
         stmt::{InnerStmt, Statement},
         stmt_cache::StmtCache,
         transaction::{AccessMode, TxOpts},
     },
-    consts::{CapabilityFlags, Command, StatusFlags, MAX_PAYLOAD_LEN},
+    consts::{CapabilityFlags, Command, MariadbCapabilities, StatusFlags, MAX_PAYLOAD_LEN},
     from_value, from_value_opt,
     io::Stream,
     prelude::*,
@@ -156,6 +156,45 @@ impl DerefMut for ConnMut<'_, '_, '_> {
     }
 }
 
+pub(crate) enum ResultSetInfo {
+    Empty(OkPacket<'static>),
+    NonEmptyWithMeta(Vec<Column>),
+    // For MariaDB via MARIADB_CLIENT_CACHE_METADATA
+    NonEmptySkipMeta,
+}
+
+impl ResultSetInfo {
+    pub(crate) fn into_query_meta(self) -> ResultSetMeta {
+        match self {
+            ResultSetInfo::Empty(ok_packet) => ResultSetMeta::Empty(ok_packet),
+            ResultSetInfo::NonEmptyWithMeta(columns) => {
+                ResultSetMeta::NonEmptyWithMeta(columns.into())
+            }
+            ResultSetInfo::NonEmptySkipMeta => {
+                // TODO: Server misbehavior — emit runtime error
+                ResultSetMeta::NonEmptyWithMeta(Default::default())
+            }
+        }
+    }
+
+    pub(crate) fn into_statement_meta(self, conn: &Conn, stmt: &Statement) -> ResultSetMeta {
+        match self {
+            ResultSetInfo::Empty(ok_packet) => ResultSetMeta::Empty(ok_packet),
+            ResultSetInfo::NonEmptyWithMeta(columns) => {
+                stmt.update_columns_metadata(columns);
+                ResultSetMeta::NonEmptyWithMeta(stmt.columns())
+            }
+            ResultSetInfo::NonEmptySkipMeta => {
+                assert!(
+                    conn.has_mariadb_capability(MariadbCapabilities::MARIADB_CLIENT_CACHE_METADATA),
+                    "metadata skipped but no MARIADB_CLIENT_CACHE_METADATA capability negotiated"
+                );
+                ResultSetMeta::NonEmptyWithMeta(stmt.columns())
+            }
+        }
+    }
+}
+
 /// Connection internals.
 #[derive(Debug)]
 struct ConnInner {
@@ -170,6 +209,7 @@ struct ConnInner {
     /// Last Ok packet, if any.
     ok_packet: Option<OkPacket<'static>>,
     capability_flags: CapabilityFlags,
+    mariadb_ext_capabilities: MariadbCapabilities,
     connection_id: u32,
     status_flags: StatusFlags,
     character_set: u8,
@@ -200,6 +240,7 @@ impl ConnInner {
             has_results: false,
             server_version: None,
             mariadb_server_version: None,
+            mariadb_ext_capabilities: MariadbCapabilities::empty(),
             local_infile_handler: None,
             auth_plugin: AuthPlugin::MysqlNativePassword,
             nonce: Vec::new(),
@@ -218,6 +259,11 @@ impl Conn {
     /// Must not be called before handle_handshake.
     const fn has_capability(&self, flag: CapabilityFlags) -> bool {
         self.0.capability_flags.contains(flag)
+    }
+
+    /// Must not be called before handle_handshake.
+    const fn has_mariadb_capability(&self, flag: MariadbCapabilities) -> bool {
+        self.0.mariadb_ext_capabilities.contains(flag)
     }
 
     /// Returns version number reported by the server.
@@ -567,6 +613,17 @@ impl Conn {
         self.0.character_set = hp.default_collation();
         self.0.server_version = hp.server_version_parsed();
         self.0.mariadb_server_version = hp.maria_db_server_version_parsed();
+        // If we have a MariaDB server version, we are using mariadb extended capbilities from the handshake packet.
+        // MariaDB does not set 1 standard capability flag bit to indicate that it supports extended capabilities.
+        if self.0.mariadb_server_version.is_some()
+            && !self
+                .0
+                .capability_flags
+                .contains(CapabilityFlags::CLIENT_LONG_PASSWORD)
+        {
+            self.0.mariadb_ext_capabilities =
+                hp.mariadb_ext_capabilities() & self.get_mariadb_client_flags();
+        }
     }
 
     fn handle_ok<'a, T: OkPacketKind>(
@@ -739,6 +796,10 @@ impl Conn {
         client_flags | self.0.opts.get_additional_capabilities()
     }
 
+    fn get_mariadb_client_flags(&self) -> MariadbCapabilities {
+        MariadbCapabilities::MARIADB_CLIENT_CACHE_METADATA
+    }
+
     fn connect_attrs(&self) -> Option<HashMap<String, String>> {
         if let Some(attrs) = self.0.opts.get_connect_attrs() {
             let program_name = match attrs.get("program_name") {
@@ -803,7 +864,8 @@ impl Conn {
                 .opts
                 .get_max_allowed_packet()
                 .unwrap_or(DEFAULT_MAX_ALLOWED_PACKET) as u32,
-        );
+        )
+        .with_mariadb_ext_capabilities(self.0.mariadb_ext_capabilities);
 
         let mut buf = get_buffer();
         handshake_response.serialize(buf.as_mut());
@@ -963,11 +1025,7 @@ impl Conn {
         Ok(())
     }
 
-    fn _execute(
-        &mut self,
-        stmt: &Statement,
-        params: Params,
-    ) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
+    fn _execute(&mut self, stmt: &Statement, params: Params) -> Result<ResultSetInfo> {
         let exec_request = match &params {
             Params::Empty => {
                 if stmt.num_params() != 0 {
@@ -1057,7 +1115,7 @@ impl Conn {
         Ok(ok.into_owned())
     }
 
-    fn handle_result_set(&mut self) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
+    fn handle_result_set(&mut self) -> Result<ResultSetInfo> {
         if self.more_results_exists() {
             self.sync_seq_id();
         }
@@ -1066,32 +1124,49 @@ impl Conn {
         match pld[0] {
             0x00 => {
                 let ok = self.handle_ok::<CommonOkPacket>(&pld)?;
-                Ok(Or::B(ok.into_owned()))
+                Ok(ResultSetInfo::Empty(ok.into_owned()))
             }
             0xfb => match self.send_local_infile(&pld[1..]) {
-                Ok(ok) => Ok(Or::B(ok)),
+                Ok(ok) => Ok(ResultSetInfo::Empty(ok)),
                 Err(err) => Err(err),
             },
             _ => {
                 let mut reader = &pld[..];
                 let column_count = reader.read_lenenc_int()?;
-                let mut columns: Vec<Column> = Vec::with_capacity(column_count as usize);
-                for _ in 0..column_count {
-                    let pld = self.read_packet()?;
-                    let column = ParseBuf(&pld).parse(())?;
-                    columns.push(column);
-                }
+
+                let mut columns: Vec<Column> = Vec::new();
+
+                // https://jira.mariadb.org/browse/MDEV-19237
+                let output = if !(self
+                    .has_mariadb_capability(MariadbCapabilities::MARIADB_CLIENT_CACHE_METADATA)
+                    && reader.first().copied() == Some(0x00))
+                {
+                    columns.reserve(column_count as usize);
+                    for _ in 0..column_count {
+                        let pld = self.read_packet()?;
+                        let column = ParseBuf(&pld).parse(())?;
+                        columns.push(column);
+                    }
+
+                    ResultSetInfo::NonEmptyWithMeta(columns)
+                } else {
+                    ResultSetInfo::NonEmptySkipMeta
+                };
+
                 // skip eof packet
                 self.drop_packet()?;
                 self.0.has_results = column_count > 0;
-                Ok(Or::A(columns))
+
+                Ok(output)
             }
         }
     }
 
-    fn _query(&mut self, query: &str) -> Result<Or<Vec<Column>, OkPacket<'static>>> {
+    fn _query(&mut self, query: &str) -> Result<ResultSetMeta> {
         self.write_command(Command::COM_QUERY, query.as_bytes())?;
-        self.handle_result_set()
+        let info = self.handle_result_set()?;
+        let meta = info.into_query_meta();
+        Ok(meta)
     }
 
     /// Executes [`COM_PING`](https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_ping.html)
@@ -1310,7 +1385,8 @@ impl Queryable for Conn {
         P: Into<Params>,
     {
         let statement = stmt.as_statement(self)?;
-        let meta = self._execute(&statement, params.into())?;
+        let info = self._execute(&statement, params.into())?;
+        let meta = info.into_statement_meta(&*self, &statement);
         Ok(QueryResult::new(ConnMut::Mut(self), meta))
     }
 }
@@ -2529,6 +2605,152 @@ mod test {
                 expected_values.push(("program_name", "my program name"));
                 assert_connect_attrs(&mut conn, &expected_values);
             }
+        }
+
+        // This test verifies that the metadata is correct with or without metadata caching, and that protocol
+        // is not broken afterwards and data is read correctly. It doesn't test that the metadata is really cached
+        // (if that is possible) and not received twice.
+        #[test]
+        fn test_metadata_caching() {
+            use crate::consts::ColumnType;
+            let mut conn = Conn::new(get_opts()).unwrap();
+            if conn.0.mariadb_server_version.is_none() {
+                return;
+            }
+
+            conn.query_drop(
+                r"CREATE TEMPORARY TABLE t_metadata_caching (
+                    id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                    val VARCHAR(32) NOT NULL)",
+            )
+            .unwrap();
+
+            // Populating table with some data to verify that data still fetched correctly with cached metadata use
+            let insert_stmt = conn
+                .prep("INSERT INTO t_metadata_caching (val) VALUES (?)")
+                .unwrap();
+            let _ = conn.exec_drop(&insert_stmt, ("AAA",));
+            let _ = conn.exec_drop(&insert_stmt, ("BB",));
+            let mut ps = conn.prep("SELECT id, val FROM t_metadata_caching").unwrap();
+
+            let mut columns_from_prep = ps.columns();
+            let mut metadata_from_prep: Vec<(String, ColumnType)> = columns_from_prep
+                .iter()
+                .map(|column| (column.name_str().to_string(), column.column_type()))
+                .collect();
+
+            let mut query_result = conn.exec_iter(&ps, ()).unwrap();
+            let mut columns_from_exec1 = query_result.columns();
+            let mut metadata_from_exec1: Vec<(String, ColumnType)> = columns_from_exec1
+                .as_ref()
+                .iter()
+                .map(|column| (column.name_str().to_string(), column.column_type()))
+                .collect();
+
+            // Comparing and verifying metadata.
+            assert_eq!(metadata_from_prep, metadata_from_exec1);
+            assert_eq!(metadata_from_prep.len(), 2);
+            assert_eq!(metadata_from_prep[0].0, "id");
+            assert_eq!(metadata_from_prep[0].1, ColumnType::MYSQL_TYPE_LONG);
+            assert_eq!(metadata_from_prep[1].0, "val");
+            assert_eq!(metadata_from_prep[1].1, ColumnType::MYSQL_TYPE_VAR_STRING);
+
+            let fetched_rows: Vec<(i32, String)> = query_result
+                .map(|row_result| crate::from_row(row_result.unwrap()))
+                .collect();
+
+            let expected_rows = [(1, "AAA".to_string()), (2, "BB".to_string())];
+            assert_eq!(fetched_rows.len(), expected_rows.len());
+
+            for (fetched, expected) in fetched_rows.iter().zip(expected_rows.iter()) {
+                assert_eq!(fetched, expected);
+            }
+
+            // Doing the same for exec_first. Technically it's internally the same as exec_iter,
+            // but the test isn't supposed to know that and to test it
+            ps = conn
+                .prep("SELECT val FROM t_metadata_caching WHERE id = ?")
+                .unwrap();
+            columns_from_prep = ps.columns();
+            metadata_from_prep = columns_from_prep
+                .iter()
+                .map(|column| (column.name_str().to_string(), column.column_type()))
+                .collect();
+            let single_row: Option<String> = conn.exec_first(&ps, (1,)).unwrap();
+            if let Some(val) = single_row {
+                assert_eq!(metadata_from_prep.len(), 1);
+                assert_eq!(metadata_from_prep[0].0, "val");
+                assert_eq!(metadata_from_prep[0].1, ColumnType::MYSQL_TYPE_VAR_STRING);
+
+                assert_eq!(val, "AAA".to_string());
+            }
+            // Testing the case when metadata is changed after execution
+            ps = conn.prep("SELECT ?").unwrap();
+
+            columns_from_prep = ps.columns();
+            metadata_from_prep = columns_from_prep
+                .iter()
+                .map(|column| (column.name_str().to_string(), column.column_type()))
+                .collect();
+
+            // First query — server sends metadata because the type has changed
+            query_result = conn.exec_iter(&ps, (12,)).unwrap();
+            columns_from_exec1 = query_result.columns();
+            metadata_from_exec1 = columns_from_exec1
+                .as_ref()
+                .iter()
+                .map(|column| (column.name_str().to_string(), column.column_type()))
+                .collect();
+            let fetched_rows: Vec<i32> = query_result
+                .map(|row_result| crate::from_row(row_result.unwrap()))
+                .collect();
+
+            // Second query — server skips metadata packets
+            query_result = conn.exec_iter(&ps, (42,)).unwrap();
+            let columns_from_exec2 = query_result.columns();
+            let metadata_from_exec2 = columns_from_exec2
+                .as_ref()
+                .iter()
+                .map(|column| (column.name_str().to_string(), column.column_type()))
+                .collect::<Vec<_>>();
+            let fetched_rows2: Vec<i32> = query_result
+                .map(|row_result| crate::from_row(row_result.unwrap()))
+                .collect();
+
+            // Third query — server sends metadata because the type has changed
+            query_result = conn.exec_iter(&ps, ("foo",)).unwrap();
+            let columns_from_exec3 = query_result.columns();
+            let metadata_from_exec3 = columns_from_exec3
+                .as_ref()
+                .iter()
+                .map(|column| (column.name_str().to_string(), column.column_type()))
+                .collect::<Vec<_>>();
+            let fetched_rows3: Vec<String> = query_result
+                .map(|row_result| crate::from_row(row_result.unwrap()))
+                .collect();
+
+            // Comparing and verifying metadata.
+            assert_eq!(metadata_from_exec1.len(), 1);
+            assert_eq!(metadata_from_exec2.len(), 1);
+            assert_eq!(metadata_from_exec3.len(), 1);
+            assert_eq!(metadata_from_prep.len(), 1);
+            assert_eq!(metadata_from_prep[0].0, "?");
+            assert!(
+                metadata_from_prep[0].1 == ColumnType::MYSQL_TYPE_NULL
+                    || metadata_from_prep[0].1 == ColumnType::MYSQL_TYPE_VAR_STRING,
+                "Expected MYSQL_TYPE_NULL(MariaDB) or MYSQL_TYPE_VAR_STRING(MySQL), got {:?}",
+                metadata_from_prep[0].1
+            );
+            assert_eq!(metadata_from_exec1[0].0, "?");
+            assert_eq!(metadata_from_exec1[0].1, ColumnType::MYSQL_TYPE_LONGLONG);
+            assert_eq!(metadata_from_exec2[0].0, "?");
+            assert_eq!(metadata_from_exec2[0].1, ColumnType::MYSQL_TYPE_LONGLONG);
+            assert_eq!(metadata_from_exec3[0].0, "?");
+            assert_eq!(metadata_from_exec3[0].1, ColumnType::MYSQL_TYPE_VAR_STRING);
+
+            assert_eq!(fetched_rows[0], 12);
+            assert_eq!(fetched_rows2[0], 42);
+            assert_eq!(fetched_rows3[0], "foo".to_owned());
         }
 
         #[test]
