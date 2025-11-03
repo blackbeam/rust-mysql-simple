@@ -15,10 +15,11 @@ use mysql_common::{
     io::{ParseBuf, ReadMysqlExt},
     named_params::ParsedNamedParams,
     packets::{
-        AuthPlugin, AuthSwitchRequest, Column, ComChangeUser, ComChangeUserMoreData, ComStmtClose,
-        ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
-        HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
-        OldAuthSwitchRequest, OldEofPacket, ResultSetTerminator, SessionStateInfo,
+        AuthPlugin, AuthSwitchRequest, Column, ComChangeUser, ComChangeUserMoreData,
+        ComStmtBulkExecuteRequestBuilder, ComStmtClose, ComStmtExecuteRequestBuilder,
+        ComStmtSendLongData, CommonOkPacket, ErrPacket, HandshakePacket, HandshakeResponse,
+        OkPacket, OkPacketDeserializer, OkPacketKind, OldAuthSwitchRequest, OldEofPacket,
+        ResultSetTerminator, SessionStateInfo,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
 };
@@ -796,8 +797,10 @@ impl Conn {
         client_flags | self.0.opts.get_additional_capabilities()
     }
 
+    // Get MariaDB client capabilities. This function has to be enhanced if client supports more MariaDB features.
     fn get_mariadb_client_flags(&self) -> MariadbCapabilities {
         MariadbCapabilities::MARIADB_CLIENT_CACHE_METADATA
+            | MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS
     }
 
     fn connect_attrs(&self) -> Option<HashMap<String, String>> {
@@ -1062,6 +1065,63 @@ impl Conn {
         };
         self.write_command_raw(&exec_request)?;
         self.handle_result_set()
+    }
+
+    fn _execute_bulk<P, I>(&mut self, stmt: &Statement, params: I) -> Result<ResultSetInfo>
+    where
+        I: IntoIterator<Item = P>,
+        P: Into<Params>,
+    {
+        let mut builder = ComStmtBulkExecuteRequestBuilder::new(
+            stmt.id(),
+            self.0
+                .opts
+                .get_max_allowed_packet()
+                .unwrap_or(DEFAULT_MAX_ALLOWED_PACKET)
+                - 4,
+        );
+        let mut result: Result<ResultSetInfo> = Err(DriverError(MismatchedStmtParams(0, 0)));
+
+        for p in params {
+            let p = p.into();
+            let row: Vec<Value> = match p {
+                Params::Empty => {
+                    // It should be run only when stmt.num_params() > 0. Better if > 1
+                    return Err(DriverError(MismatchedStmtParams(stmt.num_params(), 0)));
+                }
+                Params::Positional(v) => v,
+                Params::Named(map) => {
+                    if let Some(named_params) = stmt.named_params.as_ref() {
+                        match Params::Named(map).into_positional(named_params)? {
+                            Params::Positional(v) => v,
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        return Err(DriverError(NamedParamsForPositionalQuery));
+                    }
+                }
+            };
+            let ps: &[Value] = &row;
+            if stmt.num_params() != ps.len() as u16 {
+                return Err(DriverError(MismatchedStmtParams(
+                    stmt.num_params(),
+                    ps.len(),
+                )));
+            }
+            if builder.add_row(ps) {
+                self.write_command_raw(&builder.build())?;
+                result = self.handle_result_set();
+                if result.is_err() {
+                    return result;
+                }
+                builder.next();
+            }
+        }
+        if builder.has_rows() {
+            self.write_command_raw(&builder.build())?;
+            result = self.handle_result_set();
+        }
+        result
     }
 
     fn _start_transaction(&mut self, tx_opts: TxOpts) -> Result<()> {
@@ -1388,6 +1448,26 @@ impl Queryable for Conn {
         let info = self._execute(&statement, params.into())?;
         let meta = info.into_statement_meta(&*self, &statement);
         Ok(QueryResult::new(ConnMut::Mut(self), meta))
+    }
+
+    fn exec_batch<S, P, I>(&mut self, stmt: S, params: I) -> Result<()>
+    where
+        Self: Sized,
+        S: AsStatement,
+        P: Into<Params>,
+        I: IntoIterator<Item = P>,
+    {
+        let stmt = stmt.as_statement(self)?;
+        if self.has_mariadb_capability(MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS)
+            && stmt.num_params() > 0
+        {
+            self._execute_bulk(&stmt, params)?;
+        } else {
+            for params in params {
+                self.exec_drop(stmt.as_ref(), params)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -2751,6 +2831,39 @@ mod test {
             assert_eq!(fetched_rows[0], 12);
             assert_eq!(fetched_rows2[0], 42);
             assert_eq!(fetched_rows3[0], "foo".to_owned());
+        }
+
+        // Test for exec_batch method.
+        #[test]
+        fn test_exec_batch() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+
+            conn.query_drop(
+                r"CREATE TEMPORARY TABLE t_exec_batch (
+                    id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                    val VARCHAR(32))",
+            )
+            .unwrap();
+
+            // Populating table with some data to verify that data still fetched correctly with cached metadata use
+            let insert_stmt = "INSERT INTO t_exec_batch (val) VALUES (?)";
+
+            let params = vec![(Some("First"),), (None,), (Some("Third"),)];
+
+            conn.exec_batch(insert_stmt, params.iter().map(|par| *par))
+                .unwrap();
+
+            let fetched_rows: Vec<(i32, Option<String>)> = conn
+                .query_iter("SELECT id, val FROM t_exec_batch")
+                .unwrap()
+                .map(|row_result| crate::from_row(row_result.unwrap()))
+                .collect();
+            let expected_rows: Vec<(i32, Option<String>)> = vec![
+                (1, Some("First".to_string())),
+                (2, None),
+                (3, Some("Third".to_string())),
+            ];
+            assert_eq!(fetched_rows, expected_rows);
         }
 
         #[test]

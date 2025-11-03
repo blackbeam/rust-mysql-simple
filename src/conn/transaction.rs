@@ -189,6 +189,16 @@ impl<'a> Queryable for Transaction<'a> {
     {
         self.conn.exec_iter(stmt, params)
     }
+
+    fn exec_batch<S, P, I>(&mut self, stmt: S, params: I) -> Result<()>
+    where
+        Self: Sized,
+        S: AsStatement,
+        P: Into<Params>,
+        I: IntoIterator<Item = P>,
+    {
+        self.conn.exec_batch(stmt, params)
+    }
 }
 
 impl<'a> Drop for Transaction<'a> {

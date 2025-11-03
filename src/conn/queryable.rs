@@ -148,15 +148,7 @@ pub trait Queryable {
         Self: Sized,
         S: AsStatement,
         P: Into<Params>,
-        I: IntoIterator<Item = P>,
-    {
-        let stmt = stmt.as_statement(self)?;
-        for params in params {
-            self.exec_drop(stmt.as_ref(), params)?;
-        }
-
-        Ok(())
-    }
+        I: IntoIterator<Item = P>;
 
     /// Executes the given `stmt` and collects the first result set.
     fn exec<T, S, P>(&mut self, stmt: S, params: P) -> Result<Vec<T>>
