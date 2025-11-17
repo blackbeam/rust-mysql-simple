@@ -1074,13 +1074,8 @@ impl Conn {
     {
         let mut builder = ComStmtBulkExecuteRequestBuilder::new(
             stmt.id(),
-            self.0
-                .opts
-                .get_max_allowed_packet()
-                .unwrap_or(DEFAULT_MAX_ALLOWED_PACKET)
-                - 4,
+            self.stream_ref().codec().max_allowed_packet - 4,
         );
-        let mut result: Result<ResultSetInfo> = Err(DriverError(MismatchedStmtParams(0, 0)));
 
         for p in params {
             let p = p.into();
@@ -1101,27 +1096,30 @@ impl Conn {
                     }
                 }
             };
-            let ps: &[Value] = &row;
-            if stmt.num_params() != ps.len() as u16 {
+            if stmt.num_params() != row.len() as u16 {
                 return Err(DriverError(MismatchedStmtParams(
                     stmt.num_params(),
-                    ps.len(),
+                    row.len(),
                 )));
             }
-            if builder.add_row(ps) {
+            if builder.add_row(&row) {
                 self.write_command_raw(&builder.build())?;
-                result = self.handle_result_set();
+                let result = self.handle_result_set();
                 if result.is_err() {
+                    // We're not going the rest of params if an error occurred
                     return result;
                 }
-                builder.next();
+                // The current row has not been added, starting building next command and adding
+                // there current row
+                builder.next(&row);
             }
         }
         if builder.has_rows() {
             self.write_command_raw(&builder.build())?;
-            result = self.handle_result_set();
+            return self.handle_result_set();
         }
-        result
+        // If params is empty, letting traditional execute flow to decide what to do
+        self._execute(stmt, Params::Empty)
     }
 
     fn _start_transaction(&mut self, tx_opts: TxOpts) -> Result<()> {
@@ -2864,6 +2862,77 @@ mod test {
                 (3, Some("Third".to_string())),
             ];
             assert_eq!(fetched_rows, expected_rows);
+        }
+
+        #[test]
+        fn test_exec_batch_large() {
+            const CLIENT_MAX_PACKET_SIZE: usize = 1024; // 1K
+            let opts = get_opts().max_allowed_packet(Some(CLIENT_MAX_PACKET_SIZE));
+            let mut conn = Conn::new(opts).unwrap();
+            conn.query_drop(
+                "CREATE TEMPORARY TABLE t_large_batch (id BIGINT NOT NULL PRIMARY KEY,
+                val VARCHAR(1024) NOT NULL)",
+            )
+            .unwrap();
+
+            // Calculate a row size that will make the total packet size > max_allowed_packet
+            // Packet will have 4 byte header and 7 bytes COM_STMT_BULK_EXECUTE fields + 4 bytes for parameter types
+            // 8 bytes per row for id + 2 bytes for indicators + 3 bytes for lenngth encoding of val.
+            let num_rows = 3;
+            let row_chunk_size = CLIENT_MAX_PACKET_SIZE / num_rows;
+            let mut row_data_1 = "a".repeat(row_chunk_size);
+            let row_data_2 = "b".repeat(row_chunk_size);
+            let row_data_3 = "c".repeat(row_chunk_size);
+
+            let evaluated_packet_len = 4 + 7 + 4 + (1 + 8 + 1 + 3 + row_chunk_size * num_rows);
+
+            assert!(
+                evaluated_packet_len > CLIENT_MAX_PACKET_SIZE,
+                "Data size must be greater than max packet size"
+            );
+
+            let params: Vec<(u64, &str)> = vec![
+                (1, &row_data_1[..]),
+                (7, &row_data_2[..]),
+                (22, &row_data_3[..]),
+            ];
+
+            let query = "INSERT INTO t_large_batch (id, val) VALUES (?,?)";
+            conn.exec_batch(query, params.into_iter())
+                .expect("Batch execution should succeed");
+
+            let inserted_rows: Vec<(u64, String)> = conn
+                .query("SELECT id, val FROM t_large_batch ORDER BY id") // Order by data to get a predictable "a", "b", "c" order
+                .unwrap();
+
+            assert_eq!(
+                inserted_rows.len(),
+                num_rows,
+                "The number of inserted rows ({}) does not match the expected number ({})",
+                inserted_rows.len(),
+                num_rows
+            );
+
+            assert_eq!(inserted_rows[0], (1, row_data_1));
+            assert_eq!(inserted_rows[1], (7, row_data_2));
+            assert_eq!(inserted_rows[2], (22, row_data_3));
+
+            // Some corner cases: single row exceeding max_allowed_packet and
+            // empty batch
+            row_data_1 = "x".repeat(CLIENT_MAX_PACKET_SIZE);
+            let params: Vec<(u64, &str)> = vec![(33, &row_data_1[..])];
+            let result = conn.exec_batch(query, params.into_iter());
+            assert!(
+                result.is_err(),
+                "Batch execution should fail due to packet size exceeding max_allowed_packet"
+            );
+
+            let params: Vec<(u64, &str)> = vec![];
+            let result = conn.exec_batch(query, params.into_iter());
+            assert!(
+                result.is_err(),
+                "Still should be error as the statement expects parameters"
+            );
         }
 
         #[test]
