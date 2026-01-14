@@ -164,7 +164,7 @@ impl Transaction<'_> {
     /// Will be empty if not defined.
     ///
     /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
-    pub fn info_str(&self) -> Cow<str> {
+    pub fn info_str(&self) -> Cow<'_, str> {
         self.conn.info_str()
     }
 }

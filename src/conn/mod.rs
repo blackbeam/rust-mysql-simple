@@ -328,7 +328,7 @@ impl Conn {
     /// Will be empty if not defined.
     ///
     /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
-    pub fn info_str(&self) -> Cow<str> {
+    pub fn info_str(&self) -> Cow<'_, str> {
         self.0
             .ok_packet
             .as_ref()
@@ -615,7 +615,7 @@ impl Conn {
         self.0.character_set = hp.default_collation();
         self.0.server_version = hp.server_version_parsed();
         self.0.mariadb_server_version = hp.maria_db_server_version_parsed();
-        // If we have a MariaDB server version, we are using mariadb extended capbilities from the handshake packet.
+        // If we have a MariaDB server version, we are using mariadb extended capabilities from the handshake packet.
         // MariaDB does not set 1 standard capability flag bit to indicate that it supports extended capabilities.
         if self.0.mariadb_server_version.is_some()
             && !self
@@ -1199,7 +1199,7 @@ impl Conn {
 
     /// Starts new transaction with provided options.
     /// `readonly` is only available since MySQL 5.6.5.
-    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction> {
+    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction<'_>> {
         self._start_transaction(tx_opts)?;
         Ok(Transaction::new(self.into()))
     }
@@ -2838,7 +2838,7 @@ mod test {
 
             // Calculate a row size that will make the total packet size > max_allowed_packet
             // Packet will have 4 byte header and 7 bytes COM_STMT_BULK_EXECUTE fields + 4 bytes for parameter types
-            // 8 bytes per row for id + 2 bytes for indicators + 3 bytes for lenngth encoding of val.
+            // 8 bytes per row for id + 2 bytes for indicators + 3 bytes for length encoding of val.
             let num_rows = 3;
             let row_chunk_size = CLIENT_MAX_PACKET_SIZE / num_rows;
             let mut row_data_1 = "a".repeat(row_chunk_size);

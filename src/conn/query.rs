@@ -384,7 +384,7 @@ where
         for params in self.params {
             let params = params.into();
             let info = conn._execute(&statement, params)?;
-            let meta = info.into_statement_meta(&*conn, &statement);
+            let meta = info.into_statement_meta(&conn, &statement);
             let mut query_result = QueryResult::<Binary>::new((&mut *conn).into(), meta);
             while let Some(result_set) = query_result.iter() {
                 for row in result_set {

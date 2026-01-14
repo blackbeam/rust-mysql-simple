@@ -254,7 +254,7 @@ impl Drop for PooledConn {
 impl PooledConn {
     /// Redirects to
     /// [`Conn#start_transaction`](struct.Conn.html#method.start_transaction)
-    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction> {
+    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction<'_>> {
         self.conn.as_mut().unwrap().start_transaction(tx_opts)
     }
 
