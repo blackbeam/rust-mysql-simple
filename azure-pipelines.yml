@@ -41,7 +41,7 @@ jobs:
 
   - job: "TestBasicMacOs"
     pool:
-      vmImage: "macOS-13"
+      vmImage: "macOS-latest"
     strategy:
       maxParallel: 10
       matrix:
@@ -59,7 +59,7 @@ jobs:
 
   - job: "TestBasicWindows"
     pool:
-      vmImage: "windows-2019"
+      vmImage: "windows-latest"
     strategy:
       maxParallel: 10
       matrix:
