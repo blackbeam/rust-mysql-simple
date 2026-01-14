@@ -103,6 +103,7 @@ impl From<ResultSetMeta> for SetIteratorState {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ResultSetMeta {
     Empty(OkPacket<'static>),
     NonEmptyWithMeta(Arc<[Column]>),

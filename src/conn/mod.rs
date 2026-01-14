@@ -59,9 +59,9 @@ use crate::{
     prelude::*,
     ChangeUserOpts,
     DriverError::{
-        CleartextPluginDisabled, MismatchedStmtParams, NamedParamsForPositionalQuery,
-        OldMysqlPasswordDisabled, Protocol41NotSet, ReadOnlyTransNotSupported, SetupError,
-        UnexpectedPacket, UnknownAuthPlugin, UnsupportedProtocol,
+        CleartextPluginDisabled, MismatchedStmtParams, OldMysqlPasswordDisabled, Protocol41NotSet,
+        ReadOnlyTransNotSupported, SetupError, UnexpectedPacket, UnknownAuthPlugin,
+        UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
     LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Transaction,
@@ -157,6 +157,7 @@ impl DerefMut for ConnMut<'_, '_, '_> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ResultSetInfo {
     Empty(OkPacket<'static>),
     NonEmptyWithMeta(Vec<Column>),
@@ -797,7 +798,9 @@ impl Conn {
         client_flags | self.0.opts.get_additional_capabilities()
     }
 
-    // Get MariaDB client capabilities. This function has to be enhanced if client supports more MariaDB features.
+    /// Get MariaDB client capabilities.
+    ///
+    /// This function has to be enhanced if client supports more MariaDB features.
     fn get_mariadb_client_flags(&self) -> MariadbCapabilities {
         MariadbCapabilities::MARIADB_CLIENT_CACHE_METADATA
             | MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS
@@ -1029,97 +1032,50 @@ impl Conn {
     }
 
     fn _execute(&mut self, stmt: &Statement, params: Params) -> Result<ResultSetInfo> {
-        let exec_request = match &params {
-            Params::Empty => {
-                if stmt.num_params() != 0 {
-                    return Err(DriverError(MismatchedStmtParams(stmt.num_params(), 0)));
-                }
+        let params = params
+            .into_values(stmt.named_params.as_deref())
+            .map_err(crate::DriverError::from)?;
 
-                let (body, _) = ComStmtExecuteRequestBuilder::new(stmt.id()).build(&[]);
-                body
-            }
-            Params::Positional(params) => {
-                if stmt.num_params() != params.len() as u16 {
-                    return Err(DriverError(MismatchedStmtParams(
-                        stmt.num_params(),
-                        params.len(),
-                    )));
-                }
+        if usize::from(stmt.num_params()) != params.len() {
+            return Err(DriverError(MismatchedStmtParams(
+                stmt.num_params(),
+                params.len(),
+            )));
+        }
 
-                let (body, as_long_data) =
-                    ComStmtExecuteRequestBuilder::new(stmt.id()).build(params);
+        let (exec_request, as_long_data) =
+            ComStmtExecuteRequestBuilder::new(stmt.id()).build(&params);
 
-                if as_long_data {
-                    self.send_long_data(stmt.id(), params)?;
-                }
+        if as_long_data {
+            self.send_long_data(stmt.id(), &params)?;
+        }
 
-                body
-            }
-            Params::Named(_) => {
-                if let Some(named_params) = stmt.named_params.as_ref() {
-                    return self._execute(stmt, params.into_positional(named_params)?);
-                } else {
-                    return Err(DriverError(NamedParamsForPositionalQuery));
-                }
-            }
-        };
         self.write_command_raw(&exec_request)?;
         self.handle_result_set()
     }
 
-    fn _execute_bulk<P, I>(&mut self, stmt: &Statement, params: I) -> Result<ResultSetInfo>
+    /// Bulk-executes the given statement. Query results will be ignored.
+    fn _execute_bulk<P, I>(&mut self, stmt: &Statement, params: I) -> Result<()>
     where
         I: IntoIterator<Item = P>,
         P: Into<Params>,
     {
         let mut builder = ComStmtBulkExecuteRequestBuilder::new(
             stmt.id(),
-            self.stream_ref().codec().max_allowed_packet - 4,
-        );
+            self.stream_ref().codec().max_allowed_packet,
+        )
+        .with_named_params(stmt.named_params.as_deref());
 
-        for p in params {
-            let p = p.into();
-            let row: Vec<Value> = match p {
-                Params::Empty => {
-                    // It should be run only when stmt.num_params() > 0. Better if > 1
-                    return Err(DriverError(MismatchedStmtParams(stmt.num_params(), 0)));
-                }
-                Params::Positional(v) => v,
-                Params::Named(map) => {
-                    if let Some(named_params) = stmt.named_params.as_ref() {
-                        match Params::Named(map).into_positional(named_params)? {
-                            Params::Positional(v) => v,
-                            _ => unreachable!(),
-                        }
-                    } else {
-                        return Err(DriverError(NamedParamsForPositionalQuery));
-                    }
-                }
-            };
-            if stmt.num_params() != row.len() as u16 {
-                return Err(DriverError(MismatchedStmtParams(
-                    stmt.num_params(),
-                    row.len(),
-                )));
-            }
-            if builder.add_row(&row) {
-                self.write_command_raw(&builder.build())?;
-                let result = self.handle_result_set();
-                if result.is_err() {
-                    // We're not going the rest of params if an error occurred
-                    return result;
-                }
-                // The current row has not been added, starting building next command and adding
-                // there current row
-                builder.next(&row);
-            }
+        for command in builder.build_params_iter(params) {
+            let command = dbg!(command.map_err(crate::DriverError::from)?);
+            self.write_command_raw(&command)?;
+            let meta = dbg!(self.handle_result_set()?);
+            let meta = dbg!(meta.into_statement_meta(self, stmt));
+            // drop query result
+            let _ = QueryResult::<'_, '_, '_, Binary>::new(ConnMut::Mut(self), meta);
         }
-        if builder.has_rows() {
-            self.write_command_raw(&builder.build())?;
-            return self.handle_result_set();
-        }
-        // If params is empty, letting traditional execute flow to decide what to do
-        self._execute(stmt, Params::Empty)
+
+        Ok(())
     }
 
     fn _start_transaction(&mut self, tx_opts: TxOpts) -> Result<()> {
@@ -1496,6 +1452,7 @@ mod test {
             time::Duration,
         };
 
+        use mysql_common::params::{MissingNamedParameterError, ParamsConfusionError, ParamsError};
         #[cfg(feature = "binlog")]
         use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
         use rand::Fill;
@@ -1508,7 +1465,6 @@ mod test {
             prelude::*,
             test_misc::get_opts,
             Conn,
-            DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
             LocalInfileHandler, Opts, OptsBuilder, Pool, TxOpts,
             Value::{self, Bytes, Date, Float, Int, NULL},
@@ -2420,8 +2376,11 @@ mod test {
             let result =
                 conn.exec_first::<crate::Row, _, _>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
-                Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
-                _ => panic!("MissingNamedParameter error expected"),
+                Err(DriverError(crate::DriverError::Params(ParamsError::Missing(
+                    MissingNamedParameterError(x),
+                )))) if x == b"d" => (),
+                Err(e) => panic!("MissingNamedParameter error expected, got {e}"),
+                Ok(_) => panic!("MissingNamedParameter error expected, got Ok"),
             }
         }
 
@@ -2431,7 +2390,9 @@ mod test {
             let stmt = conn.prep("SELECT ?, ?, ?, ?, ?").unwrap();
             let result = conn.exec_drop(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
-                Err(DriverError(NamedParamsForPositionalQuery)) => (),
+                Err(DriverError(crate::DriverError::Params(ParamsError::Confusion(
+                    ParamsConfusionError::NamedParamsForPositionalQuery,
+                )))) => (),
                 _ => panic!("NamedParamsForPositionalQuery error expected"),
             }
         }
@@ -2846,9 +2807,9 @@ mod test {
             // Populating table with some data to verify that data still fetched correctly with cached metadata use
             let insert_stmt = "INSERT INTO t_exec_batch (val) VALUES (?)";
 
-            let params = vec![(Some("First"),), (None,), (Some("Third"),)];
+            let params = [(Some("First"),), (None,), (Some("Third"),)];
 
-            conn.exec_batch(insert_stmt, params.iter().map(|par| *par))
+            conn.exec_batch(insert_stmt, params.iter().copied())
                 .unwrap();
 
             let fetched_rows: Vec<(i32, Option<String>)> = conn
@@ -2898,7 +2859,7 @@ mod test {
             ];
 
             let query = "INSERT INTO t_large_batch (id, val) VALUES (?,?)";
-            conn.exec_batch(query, params.into_iter())
+            conn.exec_batch(query, params)
                 .expect("Batch execution should succeed");
 
             let inserted_rows: Vec<(u64, String)> = conn
@@ -2921,18 +2882,27 @@ mod test {
             // empty batch
             row_data_1 = "x".repeat(CLIENT_MAX_PACKET_SIZE);
             let params: Vec<(u64, &str)> = vec![(33, &row_data_1[..])];
-            let result = conn.exec_batch(query, params.into_iter());
+            let result = conn.exec_batch(query, params);
             assert!(
                 result.is_err(),
                 "Batch execution should fail due to packet size exceeding max_allowed_packet"
             );
+        }
 
-            let params: Vec<(u64, &str)> = vec![];
-            let result = conn.exec_batch(query, params.into_iter());
-            assert!(
-                result.is_err(),
-                "Still should be error as the statement expects parameters"
-            );
+        #[test]
+        fn test_exec_batch_no_params() -> crate::Result<()> {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            conn.query_drop("CREATE TEMPORARY TABLE t_counter (counter INTEGER NOT NULL)")
+                .unwrap();
+            conn.query_drop("INSERT INTO t_counter (counter) VALUES (0)")
+                .unwrap();
+
+            const COUNT: usize = 10;
+            conn.exec_batch("UPDATE t_counter SET counter = counter+1", vec![(); COUNT])
+                .expect("Batch execution should succeed");
+            let rows: Vec<(usize,)> = conn.query("SELECT counter FROM t_counter").unwrap();
+            assert_eq!(rows, vec![(COUNT,)]);
+            Ok(())
         }
 
         #[test]
