@@ -2040,9 +2040,9 @@ mod test {
             ];
 
             fn random_pass() -> String {
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let mut pass = [0u8; 10];
-                pass.try_fill(&mut rng).unwrap();
+                pass.fill(&mut rng);
                 IntoIterator::into_iter(pass)
                     .map(|x| ((x % (123 - 97)) + 97) as char)
                     .collect()

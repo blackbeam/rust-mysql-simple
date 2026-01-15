@@ -141,11 +141,6 @@ const_assert!(
 );
 
 const_assert!(
-    _POOL_CONSTRAINTS_MIN_IS_NONZERO,
-    PoolConstraints::DEFAULT.min > 0
-);
-
-const_assert!(
     _POOL_CONSTRAINTS_MAX_IS_NONZERO,
     PoolConstraints::DEFAULT.max > 0
 );

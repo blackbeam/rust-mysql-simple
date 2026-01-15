@@ -237,7 +237,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
                 }
             }
         }
-        socket.set_nodelay(nodelay)?;
+        socket.set_tcp_nodelay(nodelay)?;
         Ok(TcpStream::from(socket))
     }
 }

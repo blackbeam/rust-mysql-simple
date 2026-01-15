@@ -66,7 +66,7 @@ client_ed25519 = ["mysql_common/client_ed25519"]
 
 [dev-dependencies]
 mysql_common = { version = "0.36.2", features = ["time", "frunk"] }
-rand = "0.8.2"
+rand = "0.9.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 time = "0.3"
@@ -79,18 +79,18 @@ crossbeam-queue = "0.3.12"
 crossbeam-utils = "0.8.21"
 flate2 = { version = "1.0", default-features = false }
 io-enum = "1.0.0"
-lru = { version = "0.12", default-features = false }
+lru = { version = "0.16.3", default-features = false }
 mysql_common = { version = "0.36.2", default-features = false }
 native-tls = { version = "0.2.3", optional = true }
 pem = "3"
 percent-encoding = "2.1.0"
 rustls = { version = "0.23", optional = true, default-features = false }
 rustls-pemfile = { version = "2.1", optional = true }
-socket2 = "0.5.2"
+socket2 = "0.6.1"
 twox-hash = { version = "2", default-features = false, features = ["xxhash64"] }
 url = "2.1"
 webpki = { version = "0.22", features = ["std"], optional = true }
-webpki-roots = { version = "0.26", optional = true }
+webpki-roots = { version = "1.0.5", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 named_pipe = "~0.4"
