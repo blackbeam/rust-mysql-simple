@@ -804,6 +804,7 @@ impl Conn {
     fn get_mariadb_client_flags(&self) -> MariadbCapabilities {
         MariadbCapabilities::MARIADB_CLIENT_CACHE_METADATA
             | MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS
+            | MariadbCapabilities::MARIADB_CLIENT_BULK_UNIT_RESULTS
     }
 
     fn connect_attrs(&self) -> Option<HashMap<String, String>> {
@@ -1060,6 +1061,8 @@ impl Conn {
         I: IntoIterator<Item = P>,
         P: Into<Params>,
     {
+        // TODO: MariadbCapabilities::MARIADB_CLIENT_BULK_UNIT_RESULTS
+
         let mut builder = ComStmtBulkExecuteRequestBuilder::new(
             stmt.id(),
             self.stream_ref().codec().max_allowed_packet,
@@ -1067,10 +1070,10 @@ impl Conn {
         .with_named_params(stmt.named_params.as_deref());
 
         for command in builder.build_params_iter(params) {
-            let command = dbg!(command.map_err(crate::DriverError::from)?);
+            let command = command.map_err(crate::DriverError::from)?;
             self.write_command_raw(&command)?;
-            let meta = dbg!(self.handle_result_set()?);
-            let meta = dbg!(meta.into_statement_meta(self, stmt));
+            let meta = self.handle_result_set()?;
+            let meta = meta.into_statement_meta(self, stmt);
             // drop query result
             let _ = QueryResult::<'_, '_, '_, Binary>::new(ConnMut::Mut(self), meta);
         }
@@ -1452,9 +1455,12 @@ mod test {
             time::Duration,
         };
 
-        use mysql_common::params::{MissingNamedParameterError, ParamsConfusionError, ParamsError};
         #[cfg(feature = "binlog")]
         use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
+        use mysql_common::{
+            constants::MariadbCapabilities,
+            params::{MissingNamedParameterError, ParamsConfusionError, ParamsError},
+        };
         use rand::Fill;
         #[cfg(feature = "time")]
         use time::PrimitiveDateTime;
@@ -2798,31 +2804,49 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
 
             conn.query_drop(
-                r"CREATE TEMPORARY TABLE t_exec_batch (
-                    id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
-                    val VARCHAR(32))",
+                "CREATE TEMPORARY TABLE t_exec_batch (\
+                    id INT NOT NULL PRIMARY KEY,\
+                    val VARCHAR(32),\
+                    num BIGINT UNSIGNED)",
             )
             .unwrap();
 
             // Populating table with some data to verify that data still fetched correctly with cached metadata use
-            let insert_stmt = "INSERT INTO t_exec_batch (val) VALUES (?)";
+            let insert_stmt = "INSERT INTO t_exec_batch (id,val,num) VALUES (?,?,?)";
 
-            let params = [(Some("First"),), (None,), (Some("Third"),)];
+            let params = [
+                (1, Some("First"), None),
+                (3, None, Some(1)),
+                (4, Some("Third"), Some(u64::MAX)),
+            ];
 
             conn.exec_batch(insert_stmt, params.iter().copied())
                 .unwrap();
 
-            let fetched_rows: Vec<(i32, Option<String>)> = conn
-                .query_iter("SELECT id, val FROM t_exec_batch")
+            conn.exec_batch(insert_stmt, [(8, None::<String>, None::<u64>)])
+                .unwrap();
+
+            let fetched_rows: Vec<(i32, Option<String>, Option<u64>)> = conn
+                .query_iter("SELECT id, val, num FROM t_exec_batch")
                 .unwrap()
                 .map(|row_result| crate::from_row(row_result.unwrap()))
                 .collect();
-            let expected_rows: Vec<(i32, Option<String>)> = vec![
-                (1, Some("First".to_string())),
-                (2, None),
-                (3, Some("Third".to_string())),
+            let expected_rows: Vec<(i32, Option<String>, Option<u64>)> = vec![
+                (1, Some("First".to_string()), None),
+                (3, None, Some(1)),
+                (4, Some("Third".to_string()), Some(u64::MAX)),
+                (8, None, None),
             ];
             assert_eq!(fetched_rows, expected_rows);
+
+            if conn.has_mariadb_capability(MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS)
+            {
+                let select_stmt = "SELECT ?";
+                let err = conn
+                    .exec_batch(select_stmt, [(1_u64,), (2_u64,), (3_u64,)])
+                    .unwrap_err();
+                assert!(matches!(err, crate::Error::MySqlError(e) if e.code == 1295));
+            }
         }
 
         #[test]

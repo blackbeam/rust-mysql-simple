@@ -65,7 +65,7 @@ binlog = ["mysql_common/binlog"]
 client_ed25519 = ["mysql_common/client_ed25519"]
 
 [dev-dependencies]
-mysql_common = { version = "0.36.0", features = ["time", "frunk"] }
+mysql_common = { version = "0.36.2", features = ["time", "frunk"] }
 rand = "0.8.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -80,7 +80,7 @@ crossbeam-utils = "0.8.21"
 flate2 = { version = "1.0", default-features = false }
 io-enum = "1.0.0"
 lru = { version = "0.12", default-features = false }
-mysql_common = { version = "0.36.0", default-features = false }
+mysql_common = { version = "0.36.2", default-features = false }
 native-tls = { version = "0.2.3", optional = true }
 pem = "3"
 percent-encoding = "2.1.0"
