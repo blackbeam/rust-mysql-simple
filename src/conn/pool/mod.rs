@@ -509,6 +509,18 @@ mod test {
         }
 
         #[test]
+        fn should_be_none_if_pool_size_zero_zero() {
+            let pool_constraints = PoolConstraints::new(0, 0);
+            assert!(pool_constraints.is_none());
+        }
+
+        #[test]
+        #[should_panic]
+        fn should_panic_if_pool_size_zero_zero() {
+            PoolConstraints::new_const::<0, 0>();
+        }
+
+        #[test]
         fn should_execute_statements_on_PooledConn() {
             let pool = Pool::new(get_opts()).unwrap();
             let mut threads = Vec::new();
