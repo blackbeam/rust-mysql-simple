@@ -164,7 +164,7 @@ impl Transaction<'_> {
     /// Will be empty if not defined.
     ///
     /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
-    pub fn info_str(&self) -> Cow<str> {
+    pub fn info_str(&self) -> Cow<'_, str> {
         self.conn.info_str()
     }
 }
@@ -188,6 +188,16 @@ impl<'a> Queryable for Transaction<'a> {
         P: Into<Params>,
     {
         self.conn.exec_iter(stmt, params)
+    }
+
+    fn exec_batch<S, P, I>(&mut self, stmt: S, params: I) -> Result<()>
+    where
+        Self: Sized,
+        S: AsStatement,
+        P: Into<Params>,
+        I: IntoIterator<Item = P>,
+    {
+        self.conn.exec_batch(stmt, params)
     }
 }
 

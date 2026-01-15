@@ -331,7 +331,7 @@ impl Opts {
     }
 
     /// Address of mysql server (defaults to `127.0.0.1`). Host names should also work.
-    pub fn get_ip_or_hostname(&self) -> Cow<str> {
+    pub fn get_ip_or_hostname(&self) -> Cow<'_, str> {
         self.0.ip_or_hostname.to_string().into()
     }
     /// TCP port of mysql server (defaults to `3306`).

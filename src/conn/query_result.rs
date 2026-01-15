@@ -103,6 +103,7 @@ impl From<ResultSetMeta> for SetIteratorState {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ResultSetMeta {
     Empty(OkPacket<'static>),
     NonEmptyWithMeta(Arc<[Column]>),
@@ -284,7 +285,7 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     /// Will be empty if not defined.
     ///
     /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
-    pub fn info_str(&self) -> Cow<str> {
+    pub fn info_str(&self) -> Cow<'_, str> {
         self.state
             .ok_packet()
             .and_then(|ok| ok.info_str())
@@ -292,9 +293,9 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     }
 
     /// Returns columns of the current result rest.
-    pub fn columns(&self) -> SetColumns {
+    pub fn columns(&self) -> SetColumns<'_> {
         SetColumns {
-            inner: self.state.columns().map(Into::into),
+            inner: self.state.columns(),
         }
     }
 }

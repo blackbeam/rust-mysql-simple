@@ -254,7 +254,7 @@ impl Drop for PooledConn {
 impl PooledConn {
     /// Redirects to
     /// [`Conn#start_transaction`](struct.Conn.html#method.start_transaction)
-    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction> {
+    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction<'_>> {
         self.conn.as_mut().unwrap().start_transaction(tx_opts)
     }
 
@@ -337,6 +337,16 @@ impl Queryable for PooledConn {
         P: Into<Params>,
     {
         self.conn.as_mut().unwrap().exec_iter(stmt, params)
+    }
+
+    fn exec_batch<S, P, I>(&mut self, stmt: S, params: I) -> Result<()>
+    where
+        Self: Sized,
+        S: AsStatement,
+        P: Into<Params>,
+        I: IntoIterator<Item = P>,
+    {
+        self.conn.as_mut().unwrap().exec_batch(stmt, params)
     }
 }
 

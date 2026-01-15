@@ -143,20 +143,20 @@ pub trait Queryable {
         P: Into<Params>;
 
     /// Prepares the given statement, and executes it with each item in the given params iterator.
+    ///
+    /// # Note
+    ///
+    /// It will use `COM_STMT_BULK_EXECUTE` for MariaDb >= v10.2. Practically
+    /// this means that the function will error with code 1295 (`ER_UNSUPPORTED_PS`)
+    /// for _non-bulk execution safe_ operations, namely for all operations
+    /// except UPDATE, multi-UPDATE, INSERT, DELETE and REPLACE. Consider not
+    /// using exec batch for operations outside of this list.
     fn exec_batch<S, P, I>(&mut self, stmt: S, params: I) -> Result<()>
     where
         Self: Sized,
         S: AsStatement,
         P: Into<Params>,
-        I: IntoIterator<Item = P>,
-    {
-        let stmt = stmt.as_statement(self)?;
-        for params in params {
-            self.exec_drop(stmt.as_ref(), params)?;
-        }
-
-        Ok(())
-    }
+        I: IntoIterator<Item = P>;
 
     /// Executes the given `stmt` and collects the first result set.
     fn exec<T, S, P>(&mut self, stmt: S, params: P) -> Result<Vec<T>>

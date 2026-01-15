@@ -137,7 +137,7 @@ impl AsStatement for Statement {
     }
 }
 
-impl<'a> AsStatement for &'a Statement {
+impl AsStatement for &'_ Statement {
     fn as_statement<Q: Queryable>(&self, _queryable: &mut Q) -> Result<Cow<'_, Statement>> {
         Ok(Cow::Borrowed(self))
     }

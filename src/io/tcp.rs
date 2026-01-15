@@ -124,7 +124,7 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
         } else {
             "could not connect to any address with specified bind address"
         };
-        let err = io::Error::new(io::ErrorKind::Other, err_msg);
+        let err = io::Error::other(err_msg);
 
         let addrs = address.to_socket_addrs()?.collect::<Vec<_>>();
 

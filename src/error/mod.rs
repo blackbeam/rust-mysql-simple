@@ -7,8 +7,11 @@
 // modified, or distributed except according to those terms.
 
 use mysql_common::{
-    named_params::MixedParamsError, packets, params::MissingNamedParameterError,
-    proto::codec::error::PacketCodecError, row::convert::FromRowError,
+    named_params::MixedParamsError,
+    packets::{self, BulkExecuteRequestBuilderError, BulkExecuteRequestError},
+    params::ParamsError,
+    proto::codec::error::PacketCodecError,
+    row::convert::FromRowError,
     value::convert::FromValueError,
 };
 use url::ParseError;
@@ -126,14 +129,6 @@ impl From<FromRowError> for Error {
     }
 }
 
-impl From<MissingNamedParameterError> for Error {
-    fn from(MissingNamedParameterError(name): MissingNamedParameterError) -> Error {
-        Error::DriverError(DriverError::MissingNamedParameter(
-            String::from_utf8_lossy(&name).into_owned(),
-        ))
-    }
-}
-
 impl From<MixedParamsError> for Error {
     fn from(_: MixedParamsError) -> Error {
         Error::DriverError(DriverError::MixedParams)
@@ -204,7 +199,7 @@ impl fmt::Debug for Error {
     }
 }
 
-#[derive(Eq, PartialEq, Clone)]
+#[derive(PartialEq, Clone)]
 pub enum DriverError {
     ConnectTimeout,
     // (address, description)
@@ -222,12 +217,33 @@ pub enum DriverError {
     ReadOnlyTransNotSupported,
     PoisonedPoolMutex,
     Timeout,
-    MissingNamedParameter(String),
-    NamedParamsForPositionalQuery,
+    Params(ParamsError),
     MixedParams,
     UnknownAuthPlugin(String),
     OldMysqlPasswordDisabled,
     CleartextPluginDisabled,
+    BulkExecute(BulkExecuteRequestError),
+}
+
+impl From<BulkExecuteRequestBuilderError> for DriverError {
+    fn from(value: BulkExecuteRequestBuilderError) -> Self {
+        match value {
+            BulkExecuteRequestBuilderError::Request(x) => Self::from(x),
+            BulkExecuteRequestBuilderError::Params(x) => Self::from(x),
+        }
+    }
+}
+
+impl From<BulkExecuteRequestError> for DriverError {
+    fn from(value: BulkExecuteRequestError) -> Self {
+        Self::BulkExecute(value)
+    }
+}
+
+impl From<ParamsError> for DriverError {
+    fn from(value: ParamsError) -> Self {
+        Self::Params(value)
+    }
 }
 
 impl error::Error for DriverError {
@@ -238,7 +254,7 @@ impl error::Error for DriverError {
 
 impl fmt::Display for DriverError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
+        match self {
             DriverError::ConnectTimeout => write!(f, "Could not connect: connection timeout"),
             DriverError::CouldNotConnect(None) => {
                 write!(f, "Could not connect: address not specified")
@@ -272,12 +288,7 @@ impl fmt::Display for DriverError {
             ),
             DriverError::PoisonedPoolMutex => write!(f, "Poisoned pool mutex"),
             DriverError::Timeout => write!(f, "Operation timed out"),
-            DriverError::MissingNamedParameter(ref name) => {
-                write!(f, "Missing named parameter `{}' for statement", name)
-            }
-            DriverError::NamedParamsForPositionalQuery => {
-                write!(f, "Can not pass named parameters to positional query")
-            }
+            DriverError::Params(error) => error.fmt(f),
             DriverError::MixedParams => write!(
                 f,
                 "Can not mix named and positional parameters in one statement"
@@ -293,6 +304,9 @@ impl fmt::Display for DriverError {
             }
             DriverError::CleartextPluginDisabled => {
                 write!(f, "mysql_clear_password must be enabled on the client side")
+            }
+            DriverError::BulkExecute(e) => {
+                write!(f, "Bulk execute error: {e}")
             }
         }
     }

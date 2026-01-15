@@ -125,7 +125,7 @@ impl io::Write for LocalInfile<'_> {
             let mut range = &self.buffer.get_ref()[..n];
             self.conn
                 .write_packet(&mut range)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, Box::new(e)))?;
+                .map_err(io::Error::other)?;
         }
         self.buffer.set_position(0);
         Ok(())

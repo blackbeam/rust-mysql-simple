@@ -15,10 +15,11 @@ use mysql_common::{
     io::{ParseBuf, ReadMysqlExt},
     named_params::ParsedNamedParams,
     packets::{
-        AuthPlugin, AuthSwitchRequest, Column, ComChangeUser, ComChangeUserMoreData, ComStmtClose,
-        ComStmtExecuteRequestBuilder, ComStmtSendLongData, CommonOkPacket, ErrPacket,
-        HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer, OkPacketKind,
-        OldAuthSwitchRequest, OldEofPacket, ResultSetTerminator, SessionStateInfo,
+        AuthPlugin, AuthSwitchRequest, Column, ComChangeUser, ComChangeUserMoreData,
+        ComStmtBulkExecuteRequestBuilder, ComStmtClose, ComStmtExecuteRequestBuilder,
+        ComStmtSendLongData, CommonOkPacket, ErrPacket, HandshakePacket, HandshakeResponse,
+        OkPacket, OkPacketDeserializer, OkPacketKind, OldAuthSwitchRequest, OldEofPacket,
+        ResultSetTerminator, SessionStateInfo,
     },
     proto::{codec::Compression, sync_framed::MySyncFramed, MySerialize},
 };
@@ -58,9 +59,9 @@ use crate::{
     prelude::*,
     ChangeUserOpts,
     DriverError::{
-        CleartextPluginDisabled, MismatchedStmtParams, NamedParamsForPositionalQuery,
-        OldMysqlPasswordDisabled, Protocol41NotSet, ReadOnlyTransNotSupported, SetupError,
-        UnexpectedPacket, UnknownAuthPlugin, UnsupportedProtocol,
+        CleartextPluginDisabled, MismatchedStmtParams, OldMysqlPasswordDisabled, Protocol41NotSet,
+        ReadOnlyTransNotSupported, SetupError, UnexpectedPacket, UnknownAuthPlugin,
+        UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
     LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Transaction,
@@ -156,6 +157,7 @@ impl DerefMut for ConnMut<'_, '_, '_> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ResultSetInfo {
     Empty(OkPacket<'static>),
     NonEmptyWithMeta(Vec<Column>),
@@ -326,7 +328,7 @@ impl Conn {
     /// Will be empty if not defined.
     ///
     /// [Info]: http://dev.mysql.com/doc/internals/en/packet-OK_Packet.html
-    pub fn info_str(&self) -> Cow<str> {
+    pub fn info_str(&self) -> Cow<'_, str> {
         self.0
             .ok_packet
             .as_ref()
@@ -613,7 +615,7 @@ impl Conn {
         self.0.character_set = hp.default_collation();
         self.0.server_version = hp.server_version_parsed();
         self.0.mariadb_server_version = hp.maria_db_server_version_parsed();
-        // If we have a MariaDB server version, we are using mariadb extended capbilities from the handshake packet.
+        // If we have a MariaDB server version, we are using mariadb extended capabilities from the handshake packet.
         // MariaDB does not set 1 standard capability flag bit to indicate that it supports extended capabilities.
         if self.0.mariadb_server_version.is_some()
             && !self
@@ -796,8 +798,13 @@ impl Conn {
         client_flags | self.0.opts.get_additional_capabilities()
     }
 
+    /// Get MariaDB client capabilities.
+    ///
+    /// This function has to be enhanced if client supports more MariaDB features.
     fn get_mariadb_client_flags(&self) -> MariadbCapabilities {
         MariadbCapabilities::MARIADB_CLIENT_CACHE_METADATA
+            | MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS
+            | MariadbCapabilities::MARIADB_CLIENT_BULK_UNIT_RESULTS
     }
 
     fn connect_attrs(&self) -> Option<HashMap<String, String>> {
@@ -1026,42 +1033,52 @@ impl Conn {
     }
 
     fn _execute(&mut self, stmt: &Statement, params: Params) -> Result<ResultSetInfo> {
-        let exec_request = match &params {
-            Params::Empty => {
-                if stmt.num_params() != 0 {
-                    return Err(DriverError(MismatchedStmtParams(stmt.num_params(), 0)));
-                }
+        let params = params
+            .into_values(stmt.named_params.as_deref())
+            .map_err(crate::DriverError::from)?;
 
-                let (body, _) = ComStmtExecuteRequestBuilder::new(stmt.id()).build(&[]);
-                body
-            }
-            Params::Positional(params) => {
-                if stmt.num_params() != params.len() as u16 {
-                    return Err(DriverError(MismatchedStmtParams(
-                        stmt.num_params(),
-                        params.len(),
-                    )));
-                }
+        if usize::from(stmt.num_params()) != params.len() {
+            return Err(DriverError(MismatchedStmtParams(
+                stmt.num_params(),
+                params.len(),
+            )));
+        }
 
-                let (body, as_long_data) =
-                    ComStmtExecuteRequestBuilder::new(stmt.id()).build(params);
+        let (exec_request, as_long_data) =
+            ComStmtExecuteRequestBuilder::new(stmt.id()).build(&params);
 
-                if as_long_data {
-                    self.send_long_data(stmt.id(), params)?;
-                }
+        if as_long_data {
+            self.send_long_data(stmt.id(), &params)?;
+        }
 
-                body
-            }
-            Params::Named(_) => {
-                if let Some(named_params) = stmt.named_params.as_ref() {
-                    return self._execute(stmt, params.into_positional(named_params)?);
-                } else {
-                    return Err(DriverError(NamedParamsForPositionalQuery));
-                }
-            }
-        };
         self.write_command_raw(&exec_request)?;
         self.handle_result_set()
+    }
+
+    /// Bulk-executes the given statement. Query results will be ignored.
+    fn _execute_bulk<P, I>(&mut self, stmt: &Statement, params: I) -> Result<()>
+    where
+        I: IntoIterator<Item = P>,
+        P: Into<Params>,
+    {
+        // TODO: MariadbCapabilities::MARIADB_CLIENT_BULK_UNIT_RESULTS
+
+        let mut builder = ComStmtBulkExecuteRequestBuilder::new(
+            stmt.id(),
+            self.stream_ref().codec().max_allowed_packet,
+        )
+        .with_named_params(stmt.named_params.as_deref());
+
+        for command in builder.build_params_iter(params) {
+            let command = command.map_err(crate::DriverError::from)?;
+            self.write_command_raw(&command)?;
+            let meta = self.handle_result_set()?;
+            let meta = meta.into_statement_meta(self, stmt);
+            // drop query result
+            let _ = QueryResult::<'_, '_, '_, Binary>::new(ConnMut::Mut(self), meta);
+        }
+
+        Ok(())
     }
 
     fn _start_transaction(&mut self, tx_opts: TxOpts) -> Result<()> {
@@ -1185,7 +1202,7 @@ impl Conn {
 
     /// Starts new transaction with provided options.
     /// `readonly` is only available since MySQL 5.6.5.
-    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction> {
+    pub fn start_transaction(&mut self, tx_opts: TxOpts) -> Result<Transaction<'_>> {
         self._start_transaction(tx_opts)?;
         Ok(Transaction::new(self.into()))
     }
@@ -1389,6 +1406,26 @@ impl Queryable for Conn {
         let meta = info.into_statement_meta(&*self, &statement);
         Ok(QueryResult::new(ConnMut::Mut(self), meta))
     }
+
+    fn exec_batch<S, P, I>(&mut self, stmt: S, params: I) -> Result<()>
+    where
+        Self: Sized,
+        S: AsStatement,
+        P: Into<Params>,
+        I: IntoIterator<Item = P>,
+    {
+        let stmt = stmt.as_statement(self)?;
+        if self.has_mariadb_capability(MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS)
+            && stmt.num_params() > 0
+        {
+            self._execute_bulk(&stmt, params)?;
+        } else {
+            for params in params {
+                self.exec_drop(stmt.as_ref(), params)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Drop for Conn {
@@ -1420,6 +1457,10 @@ mod test {
 
         #[cfg(feature = "binlog")]
         use mysql_common::{binlog::events::EventData, packets::binlog_request::BinlogRequest};
+        use mysql_common::{
+            constants::MariadbCapabilities,
+            params::{MissingNamedParameterError, ParamsConfusionError, ParamsError},
+        };
         use rand::Fill;
         #[cfg(feature = "time")]
         use time::PrimitiveDateTime;
@@ -1430,7 +1471,6 @@ mod test {
             prelude::*,
             test_misc::get_opts,
             Conn,
-            DriverError::{MissingNamedParameter, NamedParamsForPositionalQuery},
             Error::DriverError,
             LocalInfileHandler, Opts, OptsBuilder, Pool, TxOpts,
             Value::{self, Bytes, Date, Float, Int, NULL},
@@ -2342,8 +2382,11 @@ mod test {
             let result =
                 conn.exec_first::<crate::Row, _, _>(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
-                Err(DriverError(MissingNamedParameter(ref x))) if x == "d" => (),
-                _ => panic!("MissingNamedParameter error expected"),
+                Err(DriverError(crate::DriverError::Params(ParamsError::Missing(
+                    MissingNamedParameterError(x),
+                )))) if x == b"d" => (),
+                Err(e) => panic!("MissingNamedParameter error expected, got {e}"),
+                Ok(_) => panic!("MissingNamedParameter error expected, got Ok"),
             }
         }
 
@@ -2353,7 +2396,9 @@ mod test {
             let stmt = conn.prep("SELECT ?, ?, ?, ?, ?").unwrap();
             let result = conn.exec_drop(&stmt, params! {"a" => 1, "b" => 2, "c" => 3,});
             match result {
-                Err(DriverError(NamedParamsForPositionalQuery)) => (),
+                Err(DriverError(crate::DriverError::Params(ParamsError::Confusion(
+                    ParamsConfusionError::NamedParamsForPositionalQuery,
+                )))) => (),
                 _ => panic!("NamedParamsForPositionalQuery error expected"),
             }
         }
@@ -2751,6 +2796,137 @@ mod test {
             assert_eq!(fetched_rows[0], 12);
             assert_eq!(fetched_rows2[0], 42);
             assert_eq!(fetched_rows3[0], "foo".to_owned());
+        }
+
+        // Test for exec_batch method.
+        #[test]
+        fn test_exec_batch() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+
+            conn.query_drop(
+                "CREATE TEMPORARY TABLE t_exec_batch (\
+                    id INT NOT NULL PRIMARY KEY,\
+                    val VARCHAR(32),\
+                    num BIGINT UNSIGNED)",
+            )
+            .unwrap();
+
+            // Populating table with some data to verify that data still fetched correctly with cached metadata use
+            let insert_stmt = "INSERT INTO t_exec_batch (id,val,num) VALUES (?,?,?)";
+
+            let params = [
+                (1, Some("First"), None),
+                (3, None, Some(1)),
+                (4, Some("Third"), Some(u64::MAX)),
+            ];
+
+            conn.exec_batch(insert_stmt, params.iter().copied())
+                .unwrap();
+
+            conn.exec_batch(insert_stmt, [(8, None::<String>, None::<u64>)])
+                .unwrap();
+
+            let fetched_rows: Vec<(i32, Option<String>, Option<u64>)> = conn
+                .query_iter("SELECT id, val, num FROM t_exec_batch")
+                .unwrap()
+                .map(|row_result| crate::from_row(row_result.unwrap()))
+                .collect();
+            let expected_rows: Vec<(i32, Option<String>, Option<u64>)> = vec![
+                (1, Some("First".to_string()), None),
+                (3, None, Some(1)),
+                (4, Some("Third".to_string()), Some(u64::MAX)),
+                (8, None, None),
+            ];
+            assert_eq!(fetched_rows, expected_rows);
+
+            if conn.has_mariadb_capability(MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS)
+            {
+                let select_stmt = "SELECT ?";
+                let err = conn
+                    .exec_batch(select_stmt, [(1_u64,), (2_u64,), (3_u64,)])
+                    .unwrap_err();
+                assert!(matches!(err, crate::Error::MySqlError(e) if e.code == 1295));
+            }
+        }
+
+        #[test]
+        fn test_exec_batch_large() {
+            const CLIENT_MAX_PACKET_SIZE: usize = 1024; // 1K
+            let opts = get_opts().max_allowed_packet(Some(CLIENT_MAX_PACKET_SIZE));
+            let mut conn = Conn::new(opts).unwrap();
+            conn.query_drop(
+                "CREATE TEMPORARY TABLE t_large_batch (id BIGINT NOT NULL PRIMARY KEY,
+                val VARCHAR(1024) NOT NULL)",
+            )
+            .unwrap();
+
+            // Calculate a row size that will make the total packet size > max_allowed_packet
+            // Packet will have 4 byte header and 7 bytes COM_STMT_BULK_EXECUTE fields + 4 bytes for parameter types
+            // 8 bytes per row for id + 2 bytes for indicators + 3 bytes for length encoding of val.
+            let num_rows = 3;
+            let row_chunk_size = CLIENT_MAX_PACKET_SIZE / num_rows;
+            let mut row_data_1 = "a".repeat(row_chunk_size);
+            let row_data_2 = "b".repeat(row_chunk_size);
+            let row_data_3 = "c".repeat(row_chunk_size);
+
+            let evaluated_packet_len = 4 + 7 + 4 + (1 + 8 + 1 + 3 + row_chunk_size * num_rows);
+
+            assert!(
+                evaluated_packet_len > CLIENT_MAX_PACKET_SIZE,
+                "Data size must be greater than max packet size"
+            );
+
+            let params: Vec<(u64, &str)> = vec![
+                (1, &row_data_1[..]),
+                (7, &row_data_2[..]),
+                (22, &row_data_3[..]),
+            ];
+
+            let query = "INSERT INTO t_large_batch (id, val) VALUES (?,?)";
+            conn.exec_batch(query, params)
+                .expect("Batch execution should succeed");
+
+            let inserted_rows: Vec<(u64, String)> = conn
+                .query("SELECT id, val FROM t_large_batch ORDER BY id") // Order by data to get a predictable "a", "b", "c" order
+                .unwrap();
+
+            assert_eq!(
+                inserted_rows.len(),
+                num_rows,
+                "The number of inserted rows ({}) does not match the expected number ({})",
+                inserted_rows.len(),
+                num_rows
+            );
+
+            assert_eq!(inserted_rows[0], (1, row_data_1));
+            assert_eq!(inserted_rows[1], (7, row_data_2));
+            assert_eq!(inserted_rows[2], (22, row_data_3));
+
+            // Some corner cases: single row exceeding max_allowed_packet and
+            // empty batch
+            row_data_1 = "x".repeat(CLIENT_MAX_PACKET_SIZE);
+            let params: Vec<(u64, &str)> = vec![(33, &row_data_1[..])];
+            let result = conn.exec_batch(query, params);
+            assert!(
+                result.is_err(),
+                "Batch execution should fail due to packet size exceeding max_allowed_packet"
+            );
+        }
+
+        #[test]
+        fn test_exec_batch_no_params() -> crate::Result<()> {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            conn.query_drop("CREATE TEMPORARY TABLE t_counter (counter INTEGER NOT NULL)")
+                .unwrap();
+            conn.query_drop("INSERT INTO t_counter (counter) VALUES (0)")
+                .unwrap();
+
+            const COUNT: usize = 10;
+            conn.exec_batch("UPDATE t_counter SET counter = counter+1", vec![(); COUNT])
+                .expect("Batch execution should succeed");
+            let rows: Vec<(usize,)> = conn.query("SELECT counter FROM t_counter").unwrap();
+            assert_eq!(rows, vec![(COUNT,)]);
+            Ok(())
         }
 
         #[test]
