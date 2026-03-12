@@ -1069,8 +1069,6 @@ macro_rules! doctest_wrapper {
 
 #[cfg(test)]
 mod test_misc {
-    use crate::{def_database_url, def_get_opts};
-
     #[allow(dead_code)]
     fn error_should_implement_send_and_sync() {
         fn _dummy<T: Send + Sync>(_: T) {}

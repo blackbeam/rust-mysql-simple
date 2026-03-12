@@ -223,6 +223,7 @@ pub enum DriverError {
     OldMysqlPasswordDisabled,
     CleartextPluginDisabled,
     BulkExecute(BulkExecuteRequestError),
+    InvalidParsecSalt,
 }
 
 impl From<BulkExecuteRequestBuilderError> for DriverError {
@@ -307,6 +308,9 @@ impl fmt::Display for DriverError {
             }
             DriverError::BulkExecute(e) => {
                 write!(f, "Bulk execute error: {e}")
+            }
+            DriverError::InvalidParsecSalt => {
+                write!(f, "Could not parse Parsec extended salt packet")
             }
         }
     }

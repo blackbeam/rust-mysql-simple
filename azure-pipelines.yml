@@ -219,16 +219,6 @@ jobs:
           CONTAINER: "quay.io/mariadb-foundation/mariadb-devel:latest"
         lts:
           CONTAINER: "mariadb:lts"
-        v1106:
-          CONTAINER: "mariadb:11.6"
-        v1105:
-          CONTAINER: "mariadb:11.5"
-        v1104:
-          CONTAINER: "mariadb:11.4"
-        v1103:
-          CONTAINER: "mariadb:11.3"
-        v1011:
-          CONTAINER: "mariadb:10.11.10"
     steps:
       - bash: |
           sudo apt-get update
@@ -254,6 +244,7 @@ jobs:
                   --ssl-cert=/root/tests/server.crt \
                   --ssl-key=/root/tests/server-key.pem \
                   --secure-auth=OFF \
+                  --plugin-load-add=auth_parsec \
                   --plugin-load-add=auth_ed25519 &
           while ! docker exec container healthcheck.sh --connect --innodb_initialized ; do sleep 1; echo waiting; done
           docker logs container
@@ -266,16 +257,16 @@ jobs:
           docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
         displayName: Install Rust in docker
       - bash: |
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test --features client_ed25519"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test --features client_ed25519"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test --features native-tls,client_ed25519"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --features native-tls,client_ed25519"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL cargo test --features client_ed25519,client_parsec"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL COMPRESS=true cargo test --features client_ed25519,client_parsec"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true cargo test --features native-tls,client_ed25519,client_parsec"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --features native-tls,client_ed25519,client_parsec"
 
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog,client_ed25519"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls-ring,minimal-rust,time,frunk,binlog,client_ed25519"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=false cargo test --no-default-features --features rustls-tls,minimal-rust,time,frunk,binlog,client_ed25519,client_parsec"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=true COMPRESS=true cargo test --no-default-features --features rustls-tls-ring,minimal-rust,time,frunk,binlog,client_ed25519,client_parsec"
 
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog,client_ed25519"
-          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog,client_ed25519"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog,client_ed25519,client_parsec"
+          docker exec container bash -l -c "cd \$HOME && DATABASE_URL=$DATABASE_URL SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog,client_ed25519,client_parsec"
         env:
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@localhost/mysql
