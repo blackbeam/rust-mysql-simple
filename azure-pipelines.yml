@@ -219,16 +219,6 @@ jobs:
           CONTAINER: "quay.io/mariadb-foundation/mariadb-devel:latest"
         lts:
           CONTAINER: "mariadb:lts"
-        v1106:
-          CONTAINER: "mariadb:11.6"
-        v1105:
-          CONTAINER: "mariadb:11.5"
-        v1104:
-          CONTAINER: "mariadb:11.4"
-        v1103:
-          CONTAINER: "mariadb:11.3"
-        v1011:
-          CONTAINER: "mariadb:10.11.10"
     steps:
       - bash: |
           sudo apt-get update
