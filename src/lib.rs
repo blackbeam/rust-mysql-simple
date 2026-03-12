@@ -897,7 +897,7 @@ pub mod error;
 mod io;
 
 #[cfg(feature = "derive")]
-extern crate mysql_common;
+pub extern crate mysql_common;
 
 #[doc(inline)]
 pub use crate::myc::constants as consts;

@@ -819,7 +819,7 @@ impl OptsBuilder {
         self
     }
 
-    /// Defines `max_allowed_packet` option. See [`Opts::max_allowed_packet`].
+    /// Defines `max_allowed_packet` option. See [`Opts::get_max_allowed_packet`].
     ///
     /// Note that it'll saturate to proper minimum and maximum values
     /// for this parameter (see MySql documentation).
