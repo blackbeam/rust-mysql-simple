@@ -2081,7 +2081,7 @@ mod test {
                 ),
                 (
                     "parsec",
-                    |is_mariadb, version| is_mariadb && version >= (11, 4, 1),
+                    |is_mariadb, version| is_mariadb && version >= (11, 6, 0),
                     |_is_mariadb, _version, pass| {
                         vec![format!(
                             "CREATE USER '__mats'@'%' IDENTIFIED WITH parsec AS PASSWORD('{pass}')"
@@ -2987,7 +2987,7 @@ mod test {
             let mut conn = Conn::new(get_opts()).unwrap();
             let is_mariadb = conn.0.mariadb_server_version.is_some();
             let version = conn.server_version();
-            if is_mariadb && version >= (11, 4, 1) {
+            if is_mariadb && version >= (11, 6, 0) {
                 // Creating random password so in case of test failure user won't have
                 // known password left behind.
                 let mut rng = rand::rng();
