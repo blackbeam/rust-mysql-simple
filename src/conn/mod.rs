@@ -1503,7 +1503,7 @@ mod test {
             constants::MariadbCapabilities,
             params::{MissingNamedParameterError, ParamsConfusionError, ParamsError},
         };
-        use rand::Fill;
+        use rand::Rng;
         #[cfg(feature = "time")]
         use time::PrimitiveDateTime;
 
@@ -2093,7 +2093,7 @@ mod test {
             fn random_pass() -> String {
                 let mut rng = rand::rng();
                 let mut pass = [0u8; 10];
-                pass.fill(&mut rng);
+                rng.fill_bytes(&mut pass);
                 IntoIterator::into_iter(pass)
                     .map(|x| ((x % (123 - 97)) + 97) as char)
                     .collect()
@@ -2992,7 +2992,7 @@ mod test {
                 // known password left behind.
                 let mut rng = rand::rng();
                 let mut pass_bytes = [0u8; 16];
-                pass_bytes.fill(&mut rng);
+                rng.fill_bytes(&mut pass_bytes);
                 pass_bytes.iter_mut().for_each(|b| {
                     *b = match *b % 3 {
                         0 => b'A' + (*b % 26),
