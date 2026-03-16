@@ -994,23 +994,23 @@ impl Conn {
 
     fn continue_parsec_auth(&mut self, auth_switched: bool) -> Result<()> {
         let packet = self.read_packet()?;
-        // Noramally we need to skip escaping 0x01 byte. But in first parsec implementations, server did not send it.
+        // Normally we need to skip escaping 0x01 byte. But in first parsec implementations, server did not send it.
         let mut payload = &packet[0..];
-        if packet.len() > 0 && packet[0] == 0x01 {
+        if !packet.is_empty() && packet[0] == 0x01 {
             payload = &packet[1..];
         }
         // At this point in future, when it will be possible for parsec to be default authentication method,
-        // we can have authentication switch request. The other possibele option here(and for now the only option) -
+        // we can have authentication switch request. The other possible option here(and for now the only option) -
         // ext-salt packet.
-        if payload.len() > 0 && payload[0] == 0xfe && !auth_switched {
-            let auth_switch_request = ParseBuf(&payload).parse(())?;
+        if !payload.is_empty() && payload[0] == 0xfe && !auth_switched {
+            let auth_switch_request = ParseBuf(payload).parse(())?;
             self.perform_auth_switch(auth_switch_request)
         } else {
             // Letting parser function decide if all is fine with the packet
             self.0
                 .auth_plugin
-                .read_add_data(&payload)
-                .ok_or_else(|| DriverError(crate::DriverError::InvalidParsecSalt))?;
+                .read_add_data(payload)
+                .ok_or(DriverError(crate::DriverError::InvalidParsecSalt))?;
             // Now generating response.
             let plugin_data = self
                 .0
