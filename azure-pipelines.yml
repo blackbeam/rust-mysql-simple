@@ -66,11 +66,29 @@ jobs:
         stable:
           RUST_TOOLCHAIN: stable
     steps:
+      - powershell: |
+          net stop MySQL
+          sc delete MySQL
+          winget uninstall Oracle.MySQL --accept-source-agreements
+
+          $paths = @(
+            "C:\Program Files\MySQL",
+            "C:\Program Files (x86)\MySQL",
+            "C:\ProgramData\MySQL",
+            "$env:AppData\MySQL"
+          )
+
+          foreach ($path in $paths) {
+            if (Test-Path $path) {
+              Remove-Item -Path $path -Recurse -Force
+              Write-Host "Удалено: $path"
+            }
+          }
       - script: |
           choco install 7zip
           mkdir C:\mysql
           CD /D C:\mysql
-          curl -fsS --retry 3 --retry-connrefused -o mysql.msi https://cdn.mysql.com//Downloads/MySQLInstaller/mysql-installer-community-8.0.42.0.msi
+          curl -fsS --retry 3 --retry-connrefused -o mysql.msi https://cdn.mysql.com//Downloads/MySQLInstaller/mysql-installer-community-8.0.45.0.msi
           msiexec /q /log install.txt /i mysql.msi datadir=C:\mysql installdir=C:\mysql
           call "C:\Program Files (x86)\MySQL\MySQL Installer for Windows\MySQLInstallerConsole.exe" community install server;8.0.42;x64:*:port=3306;enable_named_pipe=true;rootpasswd=password;servicename=MySQL -silent
           netsh advfirewall firewall add rule name="Allow mysql" dir=in action=allow edge=yes remoteip=any protocol=TCP localport=80,8080,3306
@@ -131,6 +149,7 @@ jobs:
       - bash: |
           curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
           source ~/.profile
+          source ~/.bash_profile
           tiup playground $(DB_VERSION) --db 1 --pd 1 --kv 1 &
           while ! nc -W 1 localhost 4000 | grep -q -P '.+'; do sleep 1; done
         displayName: Install and run TiDB
