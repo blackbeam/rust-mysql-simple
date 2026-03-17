@@ -994,23 +994,23 @@ impl Conn {
 
     fn continue_parsec_auth(&mut self, auth_switched: bool) -> Result<()> {
         let packet = self.read_packet()?;
-        // Noramally we need to skip escaping 0x01 byte. But in first parsec implementations, server did not send it.
+        // Normally we need to skip escaping 0x01 byte. But in first parsec implementations, server did not send it.
         let mut payload = &packet[0..];
-        if packet.len() > 0 && packet[0] == 0x01 {
+        if !packet.is_empty() && packet[0] == 0x01 {
             payload = &packet[1..];
         }
         // At this point in future, when it will be possible for parsec to be default authentication method,
-        // we can have authentication switch request. The other possibele option here(and for now the only option) -
+        // we can have authentication switch request. The other possible option here(and for now the only option) -
         // ext-salt packet.
-        if payload.len() > 0 && payload[0] == 0xfe && !auth_switched {
-            let auth_switch_request = ParseBuf(&payload).parse(())?;
+        if !payload.is_empty() && payload[0] == 0xfe && !auth_switched {
+            let auth_switch_request = ParseBuf(payload).parse(())?;
             self.perform_auth_switch(auth_switch_request)
         } else {
             // Letting parser function decide if all is fine with the packet
             self.0
                 .auth_plugin
-                .read_add_data(&payload)
-                .ok_or_else(|| DriverError(crate::DriverError::InvalidParsecSalt))?;
+                .read_add_data(payload)
+                .ok_or(DriverError(crate::DriverError::InvalidParsecSalt))?;
             // Now generating response.
             let plugin_data = self
                 .0
@@ -1503,7 +1503,7 @@ mod test {
             constants::MariadbCapabilities,
             params::{MissingNamedParameterError, ParamsConfusionError, ParamsError},
         };
-        use rand::Fill;
+        use rand::Rng;
         #[cfg(feature = "time")]
         use time::PrimitiveDateTime;
 
@@ -2093,7 +2093,7 @@ mod test {
             fn random_pass() -> String {
                 let mut rng = rand::rng();
                 let mut pass = [0u8; 10];
-                pass.fill(&mut rng);
+                rng.fill_bytes(&mut pass);
                 IntoIterator::into_iter(pass)
                     .map(|x| ((x % (123 - 97)) + 97) as char)
                     .collect()
@@ -2992,7 +2992,7 @@ mod test {
                 // known password left behind.
                 let mut rng = rand::rng();
                 let mut pass_bytes = [0u8; 16];
-                pass_bytes.fill(&mut rng);
+                rng.fill_bytes(&mut pass_bytes);
                 pass_bytes.iter_mut().for_each(|b| {
                     *b = match *b % 3 {
                         0 => b'A' + (*b % 26),
