@@ -3,7 +3,7 @@
 use std::{
     fs::File,
     io::{self, Read},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use bufstream::BufStream;
@@ -22,9 +22,16 @@ use crate::{
     io::{Stream, TcpStream},
     Result, SslOpts,
 };
+use mysql_common::crypto::MariaDbZeroConfigCheck;
+use sha2::{Digest, Sha256};
 
 impl Stream {
-    pub fn make_secure(self, host: url::Host, ssl_opts: SslOpts) -> Result<Stream> {
+    pub fn make_secure(
+        self,
+        host: url::Host,
+        ssl_opts: SslOpts,
+        zero_config_check: Option<Arc<Mutex<Option<MariaDbZeroConfigCheck>>>>,
+    ) -> Result<Stream> {
         if self.is_socket() {
             // won't secure socket connection
             return Ok(self);
@@ -78,6 +85,7 @@ impl Stream {
             ssl_opts.accept_invalid_certs(),
             ssl_opts.skip_domain_validation(),
             web_pki_verifier,
+            zero_config_check,
         );
         dangerous.set_certificate_verifier(Arc::new(dangerous_verifier));
 
@@ -102,11 +110,25 @@ impl Stream {
     }
 }
 
-#[derive(Debug)]
 struct DangerousVerifier {
     accept_invalid_certs: bool,
     skip_domain_validation: bool,
     verifier: Arc<WebPkiServerVerifier>,
+    zero_config_check: Option<Arc<Mutex<Option<MariaDbZeroConfigCheck>>>>,
+}
+
+impl std::fmt::Debug for DangerousVerifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DangerousVerifier")
+            .field("accept_invalid_certs", &self.accept_invalid_certs)
+            .field("skip_domain_validation", &self.skip_domain_validation)
+            .field("verifier", &self.verifier)
+            .field(
+                "zero_config_check",
+                &self.zero_config_check.as_ref().map(|_| "<hidden>"),
+            )
+            .finish()
+    }
 }
 
 impl DangerousVerifier {
@@ -114,11 +136,13 @@ impl DangerousVerifier {
         accept_invalid_certs: bool,
         skip_domain_validation: bool,
         verifier: Arc<WebPkiServerVerifier>,
+        zero_config_check: Option<Arc<Mutex<Option<MariaDbZeroConfigCheck>>>>,
     ) -> Self {
         Self {
             accept_invalid_certs,
             skip_domain_validation,
             verifier,
+            zero_config_check,
         }
     }
 }
@@ -146,6 +170,18 @@ impl ServerCertVerifier for DangerousVerifier {
                 Err(Error::InvalidCertificate(CertificateError::NotValidForName))
                     if self.skip_domain_validation =>
                 {
+                    Ok(ServerCertVerified::assertion())
+                }
+                Err(_e) if self.zero_config_check.is_some() => {
+                    if let Some(zero_config_check) = &self.zero_config_check {
+                        let mut hasher = Sha256::new();
+                        hasher.update(end_entity.as_ref());
+                        let fingerprint = hasher.finalize().to_vec();
+                        if let Ok(mut guard) = zero_config_check.lock() {
+                            *guard = Some(MariaDbZeroConfigCheck::new(Some(fingerprint)));
+                        }
+                    }
+
                     Ok(ServerCertVerified::assertion())
                 }
                 Err(e) => Err(e),

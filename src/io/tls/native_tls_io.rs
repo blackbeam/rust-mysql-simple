@@ -3,9 +3,11 @@
 use std::{
     fs::File,
     io::{self, Read},
+    sync::{Arc, Mutex},
 };
 
 use bufstream::BufStream;
+use mysql_common::crypto::MariaDbZeroConfigCheck;
 use native_tls::{Certificate, TlsConnector};
 
 use crate::{
@@ -14,7 +16,12 @@ use crate::{
 };
 
 impl Stream {
-    pub fn make_secure(self, host: url::Host, ssl_opts: SslOpts) -> Result<Stream> {
+    pub fn make_secure(
+        self,
+        host: url::Host,
+        ssl_opts: SslOpts,
+        _zero_config_check: Option<Arc<Mutex<Option<MariaDbZeroConfigCheck>>>>,
+    ) -> Result<Stream> {
         if self.is_socket() {
             // won't secure socket connection
             return Ok(self);

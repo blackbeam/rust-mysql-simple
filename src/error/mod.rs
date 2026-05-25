@@ -224,6 +224,7 @@ pub enum DriverError {
     CleartextPluginDisabled,
     BulkExecute(BulkExecuteRequestError),
     InvalidParsecSalt,
+    CertificateCannotBeValidated,
 }
 
 impl From<BulkExecuteRequestBuilderError> for DriverError {
@@ -311,6 +312,9 @@ impl fmt::Display for DriverError {
             }
             DriverError::InvalidParsecSalt => {
                 write!(f, "Could not parse Parsec extended salt packet")
+            }
+            DriverError::CertificateCannotBeValidated => {
+                write!(f, "Server certificate cannot be validated")
             }
         }
     }

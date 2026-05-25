@@ -11,7 +11,7 @@ use bytes::{Buf, BufMut};
 use mysql_common::packets::binlog_request::BinlogRequest;
 use mysql_common::{
     constants::UTF8MB4_GENERAL_CI,
-    crypto,
+    crypto::{self, MariaDbZeroConfigCheck},
     io::{ParseBuf, ReadMysqlExt},
     named_params::ParsedNamedParams,
     packets::{
@@ -37,7 +37,7 @@ use std::{
     mem,
     ops::{Deref, DerefMut},
     process,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 #[cfg(unix)]
@@ -59,9 +59,9 @@ use crate::{
     prelude::*,
     ChangeUserOpts,
     DriverError::{
-        CleartextPluginDisabled, MismatchedStmtParams, OldMysqlPasswordDisabled, Protocol41NotSet,
-        ReadOnlyTransNotSupported, SetupError, UnexpectedPacket, UnknownAuthPlugin,
-        UnsupportedProtocol,
+        CertificateCannotBeValidated, CleartextPluginDisabled, MismatchedStmtParams,
+        OldMysqlPasswordDisabled, Protocol41NotSet, ReadOnlyTransNotSupported, SetupError,
+        UnexpectedPacket, UnknownAuthPlugin, UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
     LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Transaction,
@@ -198,7 +198,6 @@ impl ResultSetInfo {
 }
 
 /// Connection internals.
-#[derive(Debug)]
 struct ConnInner {
     opts: Opts,
     stream: Option<MySyncFramed<Stream>>,
@@ -222,9 +221,41 @@ struct ConnInner {
 
     auth_plugin: AuthPlugin<'static>,
     nonce: Vec<u8>,
+    // To preserve scramble if it gets overwritten during auth switch, as it's needed for MariaDB "zero-config TLS" fallback validation.
+    scramble: Option<[u8; 20]>,
+    zero_config_check: Option<Arc<Mutex<Option<MariaDbZeroConfigCheck>>>>,
 
     /// This flag is to opt-in/opt-out from reset upon return to a pool.
     pub(crate) reset_upon_return: bool,
+}
+
+impl std::fmt::Debug for ConnInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnInner")
+            .field("opts", &self.opts)
+            .field("stream", &self.stream)
+            .field("stmt_cache", &self.stmt_cache)
+            .field("server_version", &self.server_version)
+            .field("mariadb_server_version", &self.mariadb_server_version)
+            .field("ok_packet", &self.ok_packet)
+            .field("capability_flags", &self.capability_flags)
+            .field("mariadb_ext_capabilities", &self.mariadb_ext_capabilities)
+            .field("connection_id", &self.connection_id)
+            .field("status_flags", &self.status_flags)
+            .field("character_set", &self.character_set)
+            .field("last_command", &self.last_command)
+            .field("connected", &self.connected)
+            .field("has_results", &self.has_results)
+            .field("local_infile_handler", &self.local_infile_handler)
+            .field("auth_plugin", &self.auth_plugin)
+            .field("nonce", &self.nonce)
+            .field(
+                "zero_config_check",
+                &self.zero_config_check.as_ref().map(|_| "<hidden>"),
+            )
+            .field("reset_upon_return", &self.reset_upon_return)
+            .finish()
+    }
 }
 
 impl ConnInner {
@@ -246,6 +277,8 @@ impl ConnInner {
             local_infile_handler: None,
             auth_plugin: AuthPlugin::MysqlNativePassword,
             nonce: Vec::new(),
+            scramble: None,
+            zero_config_check: None,
             reset_upon_return: opts.get_pool_opts().reset_connection(),
 
             opts,
@@ -258,6 +291,36 @@ impl ConnInner {
 pub struct Conn(Box<ConnInner>);
 
 impl Conn {
+    // Returns true if MariaDB zero-config fallback is currently pending (i.e., certificate validation is required).
+    fn zero_config_fallback_pending(&self) -> bool {
+        self.0
+            .zero_config_check
+            .as_ref()
+            .and_then(|zcc| zcc.lock().ok())
+            .and_then(|guard| {
+                guard
+                    .as_ref()
+                    .map(|check| check.requires_zeroconfig_fallback())
+            })
+            .unwrap_or(false)
+    }
+
+    // Returns the leaf certificate fingerprint if zero-config fallback is pending, or None otherwise.
+    fn zero_config_leaf_cert_fingerprint(&self) -> Option<Vec<u8>> {
+        self.0
+            .zero_config_check
+            .as_ref()
+            .and_then(|zcc| zcc.lock().ok())
+            .and_then(|guard| {
+                guard.as_ref().and_then(|check| {
+                    if check.requires_zeroconfig_fallback() {
+                        Some(check.leaf_cert_fingerprint().to_vec())
+                    } else {
+                        None
+                    }
+                })
+            })
+    }
     /// Must not be called before handle_handshake.
     const fn has_capability(&self, flag: CapabilityFlags) -> bool {
         self.0.capability_flags.contains(flag)
@@ -507,10 +570,26 @@ impl Conn {
         self.exec_com_change_user(opts)
     }
 
+    // Returns true if MariaDB fallback should be enabled for this connection.
+    fn mariadb_fallback_possible(&self) -> bool {
+        self.0
+            .mariadb_server_version
+            .map_or(false, |ver| ver > (11, 4, 0))
+            && self.0.opts.get_pass().map_or(false, |p| !p.is_empty())
+            && self.0.auth_plugin.supports_password_hash()
+    }
+
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
         let stream = self.0.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
-        let stream = stream.make_secure(self.0.opts.get_host(), ssl_opts)?;
+        self.0.zero_config_check = self
+            .mariadb_fallback_possible()
+            .then(|| Arc::new(Mutex::new(None)));
+        let stream = stream.make_secure(
+            self.0.opts.get_host(),
+            ssl_opts,
+            self.0.zero_config_check.clone(),
+        )?;
         let stream = MySyncFramed::construct(in_buf, out_buf, codec, stream);
         self.0.stream = Some(stream);
         Ok(())
@@ -669,22 +748,34 @@ impl Conn {
             return Err(DriverError(CleartextPluginDisabled));
         }
 
+        if self.zero_config_fallback_pending() {
+            if !auth_switch_request.auth_plugin().supports_password_hash() {
+                self.0.zero_config_check = None;
+                return Err(DriverError(CertificateCannotBeValidated));
+            } else {
+                // Storing scramble as it's used in "zero-config ssl" certificate validation.
+                if let Ok(scramble_arr) = self.0.nonce[..].try_into() {
+                    self.0.scramble = Some(scramble_arr);
+                }
+            }
+        }
+
         self.0.nonce = auth_switch_request.plugin_data().to_vec();
         self.0.auth_plugin = auth_switch_request.auth_plugin().into_owned();
         let plugin_data = match self.0.auth_plugin {
-            ref x @ AuthPlugin::MysqlOldPassword => {
+            ref mut x @ AuthPlugin::MysqlOldPassword => {
                 if self.0.opts.get_secure_auth() {
                     return Err(DriverError(OldMysqlPasswordDisabled));
                 }
                 x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
             }
-            ref x @ AuthPlugin::MysqlNativePassword => {
+            ref mut x @ AuthPlugin::MysqlNativePassword => {
                 x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
             }
-            ref x @ AuthPlugin::CachingSha2Password => {
+            ref mut x @ AuthPlugin::CachingSha2Password => {
                 x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
             }
-            ref x @ AuthPlugin::MysqlClearPassword => {
+            ref mut x @ AuthPlugin::MysqlClearPassword => {
                 if !self.0.opts.get_enable_cleartext_plugin() {
                     return Err(DriverError(UnknownAuthPlugin(
                         "mysql_clear_password".into(),
@@ -693,7 +784,7 @@ impl Conn {
 
                 x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
             }
-            ref x @ AuthPlugin::Ed25519 => x.gen_data(self.0.opts.get_pass(), &self.0.nonce),
+            ref mut x @ AuthPlugin::Ed25519 => x.gen_data(self.0.opts.get_pass(), &self.0.nonce),
             // For parsec at this point we need to send an empty packet first
             ref _x @ AuthPlugin::MariadbParsec { .. } => None,
             AuthPlugin::Other(_) => None,
@@ -882,7 +973,7 @@ impl Conn {
     }
 
     fn continue_auth(&mut self, auth_switched: bool) -> Result<()> {
-        match self.0.auth_plugin {
+        let auth_result = match self.0.auth_plugin {
             AuthPlugin::CachingSha2Password => {
                 self.continue_caching_sha2_password_auth(auth_switched)?;
                 Ok(())
@@ -910,7 +1001,48 @@ impl Conn {
                 let plugin_name = String::from_utf8_lossy(name).into();
                 Err(DriverError(UnknownAuthPlugin(plugin_name)))
             }
+        };
+
+        auth_result?;
+        self.validate_mariadb_certificate_if_needed()
+    }
+
+    fn validate_mariadb_certificate_if_needed(&mut self) -> Result<()> {
+        let leaf_cert_fingerprint = match self.zero_config_leaf_cert_fingerprint() {
+            Some(f) => f,
+            None => return Ok(()),
+        };
+
+        // Shared secret is stored in "info" field of OK packet that server sends after successful authentication. It's
+        // prepended with 0x01 byte and in hex string form. If we did not get it, we cannot validate certificate.
+        let shared_secret = self
+            .info_ref()
+            .strip_prefix(&[1_u8])
+            .ok_or(DriverError(CertificateCannotBeValidated))?;
+
+        let password_hash = self
+            .0
+            .auth_plugin
+            .hash_password(self.0.opts.get_pass())
+            .ok_or(DriverError(CertificateCannotBeValidated))?;
+        // Initially the scrable is stored in nonce field. If we had to perform authentication switch during handshake,
+        // we moved it to scramble field. So, if it's definde - we use scramble and nonce otherwise.
+        if !crypto::verify_mariadb_shared_secret(
+            shared_secret,
+            &password_hash,
+            if let Some(scramble) = &self.0.scramble {
+                scramble
+            } else {
+                &self.0.nonce
+            },
+            &leaf_cert_fingerprint,
+        ) {
+            self.0.zero_config_check = None;
+            return Err(DriverError(CertificateCannotBeValidated));
         }
+
+        self.0.zero_config_check = None;
+        Ok(())
     }
 
     fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> Result<()> {
@@ -983,7 +1115,7 @@ impl Conn {
         let payload = self.read_packet()?;
         match payload[0] {
             // ok packet for empty password
-            0x00 => Ok(()),
+            0x00 => self.handle_ok::<CommonOkPacket>(&payload).map(drop),
             0xfe if !auth_switched => {
                 let auth_switch_request = ParseBuf(&payload).parse(())?;
                 self.perform_auth_switch(auth_switch_request)
@@ -1526,6 +1658,15 @@ mod test {
                 .unwrap()
                 .unwrap()
                 .1
+        }
+
+        fn random_pass() -> String {
+            let mut rng = rand::rng();
+            let mut pass = [0u8; 10];
+            rng.fill_bytes(&mut pass);
+            IntoIterator::into_iter(pass)
+                .map(|x| ((x % (123 - 97)) + 97) as char)
+                .collect()
         }
 
         #[test]
@@ -2089,15 +2230,6 @@ mod test {
                     },
                 ),
             ];
-
-            fn random_pass() -> String {
-                let mut rng = rand::rng();
-                let mut pass = [0u8; 10];
-                rng.fill_bytes(&mut pass);
-                IntoIterator::into_iter(pass)
-                    .map(|x| ((x % (123 - 97)) + 97) as char)
-                    .collect()
-            }
 
             let mut conn = Conn::new(get_opts()).unwrap();
 
@@ -2984,23 +3116,13 @@ mod test {
         #[test]
         #[cfg(feature = "client_parsec")]
         fn parsec_connect() {
-            let mut conn = Conn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts().ssl_opts(None)).unwrap();
             let is_mariadb = conn.0.mariadb_server_version.is_some();
             let version = conn.server_version();
             if is_mariadb && version >= (11, 6, 0) {
                 // Creating random password so in case of test failure user won't have
                 // known password left behind.
-                let mut rng = rand::rng();
-                let mut pass_bytes = [0u8; 16];
-                rng.fill_bytes(&mut pass_bytes);
-                pass_bytes.iter_mut().for_each(|b| {
-                    *b = match *b % 3 {
-                        0 => b'A' + (*b % 26),
-                        1 => b'a' + (*b % 26),
-                        _ => b'0' + (*b % 10),
-                    }
-                });
-                let pass = String::from_utf8_lossy(&pass_bytes).to_string();
+                let pass = random_pass();
 
                 conn.query_drop("DROP USER IF EXISTS 'parsec_test_user'@'%'")
                     .unwrap();
@@ -3020,6 +3142,186 @@ mod test {
                 assert!(conn_parsec.ping().is_ok());
                 conn.query_drop("DROP USER 'parsec_test_user'@'%'").unwrap();
             }
+        }
+
+        #[cfg_attr(
+            docsrs,
+            doc(cfg(any(
+                feature = "rustls",
+                feature = "rustls-tls",
+                feature = "rustls-tls-ring"
+            )))
+        )]
+        #[test]
+        #[cfg(any(
+            feature = "rustls",
+            feature = "rustls-tls",
+            feature = "rustls-tls-ring"
+        ))]
+        fn mariadb_auto_tls() -> crate::Result<()> {
+            let aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
+            let is_mariadb = aux.0.mariadb_server_version.is_some();
+            let version = aux.server_version();
+            if is_mariadb && version > (11, 4, 0) {
+                let mut conn =
+                    Conn::new(get_opts().ssl_opts(
+                        crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                    ))
+                    .unwrap();
+
+                assert!(!conn.is_insecure());
+                assert!(conn.ping().is_ok());
+            }
+            Ok(())
+        }
+
+        #[cfg_attr(
+            docsrs,
+            doc(cfg(all(
+                any(
+                    feature = "rustls",
+                    feature = "rustls-tls",
+                    feature = "rustls-tls-ring"
+                ),
+                feature = "client_ed25519"
+            )))
+        )]
+        #[test]
+        #[cfg(all(
+            any(
+                feature = "rustls",
+                feature = "rustls-tls",
+                feature = "rustls-tls-ring"
+            ),
+            feature = "client_ed25519"
+        ))]
+        fn mariadb_auto_tls_ed25519() -> crate::Result<()> {
+            let mut aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
+            let is_mariadb = aux.0.mariadb_server_version.is_some();
+            let version = aux.server_version();
+            if is_mariadb && version > (11, 4, 0) {
+                let pass = random_pass();
+
+                aux.query_drop("DROP USER IF EXISTS 'ed25519_tls_test_user'@'%'")
+                    .unwrap();
+                let create_user_query = format!(
+                    "CREATE USER 'ed25519_tls_test_user'@'%' IDENTIFIED WITH ed25519 USING PASSWORD('{pass}')"
+                );
+                aux.query_drop(create_user_query).unwrap();
+
+                let mut conn = Conn::new(
+                    get_opts()
+                        .user(Some("ed25519_tls_test_user"))
+                        .pass(Some(pass))
+                        .db_name(None::<String>)
+                        .init(vec![] as Vec<String>)
+                        .ssl_opts(
+                            crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                        ),
+                )?;
+                assert!(!conn.is_insecure());
+                assert!(conn.ping().is_ok());
+
+                // Testing that we can't make secure connection with empty password.
+                // "Zero config SSL" does not work with empty password.
+                // This can fail if server has real certificate.
+                conn.query_drop("SET PASSWORD = PASSWORD('')")?;
+                drop(conn);
+
+                let conn = Conn::new(
+                    get_opts()
+                        .user(Some("ed25519_tls_test_user"))
+                        .pass(Some(""))
+                        .db_name(None::<String>)
+                        .init(vec![] as Vec<String>)
+                        .ssl_opts(
+                            crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                        ),
+                );
+                // We shouldn't have got secure connection with insesure plugins -
+                // connection should have failed.
+                assert!(conn.is_err());
+                aux.query_drop("DROP USER 'ed25519_tls_test_user'@'%'")?;
+            }
+            Ok(())
+        }
+
+        #[cfg_attr(
+            docsrs,
+            doc(cfg(all(
+                any(
+                    feature = "rustls",
+                    feature = "rustls-tls",
+                    feature = "rustls-tls-ring"
+                ),
+                feature = "client_parsec"
+            )))
+        )]
+        #[test]
+        #[cfg(all(
+            any(
+                feature = "rustls",
+                feature = "rustls-tls",
+                feature = "rustls-tls-ring"
+            ),
+            feature = "client_parsec"
+        ))]
+        fn mariadb_auto_tls_parsec() -> crate::Result<()> {
+            let mut aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
+            let is_mariadb = aux.0.mariadb_server_version.is_some();
+            let version = aux.server_version();
+            if is_mariadb && version >= (11, 6, 0) {
+                let pass = random_pass();
+                aux.query_drop("DROP USER IF EXISTS 'parsec_tls_test_user'@'%'")?;
+                let create_user_query = format!(
+                   "CREATE USER 'parsec_tls_test_user'@'%' IDENTIFIED VIA 'parsec' USING PASSWORD('{pass}')"
+                );
+                aux.query_drop(create_user_query)?;
+
+                let mut conn = Conn::new(
+                    get_opts()
+                        .user(Some("parsec_tls_test_user"))
+                        .pass(Some(pass.clone()))
+                        .db_name(None::<String>)
+                        .init(vec![] as Vec<String>)
+                        .ssl_opts(
+                            crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                        ),
+                )?;
+                assert!(!conn.is_insecure());
+                assert!(conn.ping().is_ok());
+                drop(conn);
+                aux.query_drop("DROP USER 'parsec_tls_test_user'@'%'")?;
+
+                // caching_sha2_password is not MitM-proof. "Zero config SSL" does not work with such authentication methods.
+                // This can fail if server has real certificate. Combining 2 tests to be sure for the 2nd test that "zero config SSL"
+                // works in general.
+                aux.query_drop("DROP USER IF EXISTS 'caching_sha2_tls_test_user'@'%'")?;
+                if aux
+                    .query_drop(
+                        "CREATE USER 'caching_sha2_tls_test_user'@'%'
+                IDENTIFIED WITH caching_sha2_password USING PASSWORD('{pass}')",
+                    )
+                    .is_ok()
+                {
+                    // Test makes sense only if the plugin is present and active. If we can't create user with such plugin, we can skip the test.
+                    let conn = Conn::new(
+                        get_opts()
+                            .user(Some("ed25519_tls_test_user"))
+                            .pass(Some(pass))
+                            .db_name(None::<String>)
+                            .init(vec![] as Vec<String>)
+                            .ssl_opts(
+                                crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                            ),
+                    );
+                    // We shouldn't have had secure connection with insecure plugins -
+                    // connection should have failed.
+                    assert!(conn.is_err());
+                    aux.query_drop("DROP USER 'caching_sha2_tls_test_user'@'%'")?;
+                }
+            }
+            Ok(())
         }
 
         #[test]
