@@ -223,6 +223,8 @@ struct ConnInner {
     nonce: Vec<u8>,
     // To preserve scramble if it gets overwritten during auth switch, as it's needed for MariaDB "zero-config TLS" fallback validation.
     scramble: Option<[u8; 20]>,
+    // This is passed to TLS certificate verifier as a flag if zero-config validation is possible for this connection.
+    // If so, the verifier will store the info required to complete the validation and this will be also the flag that such validation is pending.
     zero_config_check: Option<Arc<Mutex<Option<MariaDbZeroConfigCheck>>>>,
 
     /// This flag is to opt-in/opt-out from reset upon return to a pool.
@@ -748,6 +750,8 @@ impl Conn {
             return Err(DriverError(CleartextPluginDisabled));
         }
 
+        // If zero-config fallback is pending but auth plugin is not right for it - returning certificate validation error.
+        // Otherwise, storing scramble for later use in certificate validation.
         if self.zero_config_fallback_pending() {
             if !auth_switch_request.auth_plugin().supports_password_hash() {
                 self.0.zero_config_check = None;
@@ -1004,12 +1008,14 @@ impl Conn {
         };
 
         auth_result?;
+        // If authentication was successful, we have evertything to validate the certificate.
         self.validate_mariadb_certificate_if_needed()
     }
 
     fn validate_mariadb_certificate_if_needed(&mut self) -> Result<()> {
         let leaf_cert_fingerprint = match self.zero_config_leaf_cert_fingerprint() {
             Some(f) => f,
+            // Nothing to validate, so we can return early.
             None => return Ok(()),
         };
 
@@ -3158,6 +3164,9 @@ mod test {
             feature = "rustls-tls",
             feature = "rustls-tls-ring"
         ))]
+        // Test of MariaDB "Zero config SSL" with native authentication - one of three supported by the feature.
+        // First making connection to verify that this is MariaDB server and that it supports "Zero config SSL"
+        // (MariaDB >= 11.4.0) then trying to establish TLS connection making sure that certificate is validated.
         fn mariadb_auto_tls() -> crate::Result<()> {
             let aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
             let is_mariadb = aux.0.mariadb_server_version.is_some();
@@ -3195,6 +3204,7 @@ mod test {
             ),
             feature = "client_ed25519"
         ))]
+        // Test of MariaDB "Zero config SSL" with ed25519 authentication
         fn mariadb_auto_tls_ed25519() -> crate::Result<()> {
             let mut aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
             let is_mariadb = aux.0.mariadb_server_version.is_some();
@@ -3266,6 +3276,7 @@ mod test {
             ),
             feature = "client_parsec"
         ))]
+        // Test of MariaDB "Zero config SSL" with parsec authentication
         fn mariadb_auto_tls_parsec() -> crate::Result<()> {
             let mut aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
             let is_mariadb = aux.0.mariadb_server_version.is_some();

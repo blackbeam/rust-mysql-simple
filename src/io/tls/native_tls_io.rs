@@ -20,6 +20,7 @@ impl Stream {
         self,
         host: url::Host,
         ssl_opts: SslOpts,
+        // At the moment zero config validation is not possible with native-tls
         _zero_config_check: Option<Arc<Mutex<Option<MariaDbZeroConfigCheck>>>>,
     ) -> Result<Stream> {
         if self.is_socket() {
