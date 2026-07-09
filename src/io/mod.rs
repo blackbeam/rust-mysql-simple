@@ -135,6 +135,16 @@ impl Stream {
             })
     }
 
+    #[cfg(any(feature = "native-tls", feature = "rustls"))]
+    pub fn is_secure(&self) -> bool {
+        matches!(self, Stream::TcpStream(TcpStream::Secure(_)))
+    }
+
+    #[cfg(not(any(feature = "native-tls", feature = "rustls")))]
+    pub fn is_secure(&self) -> bool {
+        false
+    }
+
     pub fn is_insecure(&self) -> bool {
         matches!(self, Stream::TcpStream(TcpStream::Insecure(_)))
     }

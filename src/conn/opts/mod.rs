@@ -10,7 +10,13 @@ use percent_encoding::percent_decode;
 use url::Url;
 
 use std::{
-    borrow::Cow, collections::HashMap, fmt, hash::Hash, net::SocketAddr, path::Path, time::Duration,
+    borrow::Cow,
+    collections::HashMap,
+    fmt,
+    hash::Hash,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
 };
 
 use crate::{
@@ -248,6 +254,17 @@ pub(crate) struct InnerOpts {
     /// consider using TLS or encrypted tunnels for server connection.
     enable_cleartext_plugin: bool,
 
+    /// Returns server public key path (defaults to `None`).
+    ///
+    /// The path contains a client side copy of the server public key in PEM format.
+    ///
+    /// # Security Notes
+    ///
+    /// This is not a TLS option — this path is used only for caching_sha2_password plugin
+    /// to make it not vulnerable to MITM. If it is not given then the public key will be
+    /// requested from the server.
+    server_key_path: Option<PathBuf>,
+
     /// Client side `max_allowed_packet` value (defaults to `None`).
     ///
     /// By default `Conn` will query this value from the server. One can avoid this step
@@ -292,6 +309,7 @@ impl Default for InnerOpts {
             connect_attrs: Some(HashMap::new()),
             secure_auth: true,
             enable_cleartext_plugin: false,
+            server_key_path: None,
             #[cfg(test)]
             injected_socket: None,
         }
@@ -557,6 +575,19 @@ impl Opts {
     pub fn get_enable_cleartext_plugin(&self) -> bool {
         self.0.enable_cleartext_plugin
     }
+
+    /// Returns server public key path (defaults to `None`).
+    ///
+    /// The path contains a client side copy of the server public key in PEM format.
+    ///
+    /// # Security Notes
+    ///
+    /// This is not a TLS option — this path is used only for caching_sha2_password plugin
+    /// to make it not vulnerable to MITM. If it is not given then the public key will be
+    /// requested from the server.
+    pub fn get_server_key_path(&self) -> Option<&Path> {
+        self.0.server_key_path.as_deref()
+    }
 }
 
 /// Provides a way to build [`Opts`](struct.Opts.html).
@@ -677,6 +708,7 @@ impl OptsBuilder {
                         return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
                     }
                 },
+                "server_key_path" => self.opts.0.server_key_path = Some(PathBuf::from(value)),
                 "secure_auth" => match value.parse::<bool>() {
                     Ok(parsed) => self.opts.0.secure_auth = parsed,
                     Err(_) => {
@@ -1127,6 +1159,32 @@ impl OptsBuilder {
     /// ```
     pub fn enable_cleartext_plugin(mut self, enable_cleartext_plugin: bool) -> Self {
         self.opts.0.enable_cleartext_plugin = enable_cleartext_plugin;
+        self
+    }
+
+    /// Returns server public key path (defaults to `None`).
+    ///
+    /// The path contains a client side copy of the server public key in PEM format.
+    ///
+    /// # Security Notes
+    ///
+    /// This is not a TLS option — this path is used only for caching_sha2_password plugin
+    /// to make it not vulnerable to MITM. If it is not given then the public key will be
+    /// requested from the server.
+    ///
+    /// # Connection URL
+    ///
+    /// Use `enable_cleartext_plugin` URL parameter to set this value. E.g.
+    ///
+    /// ```
+    /// # use mysql::*;
+    /// # use std::path::Path;
+    /// # fn main() -> Result<()> {
+    /// let opts = Opts::from_url("mysql://localhost/db?server_key_path=/some/path/key.pem")?;
+    /// assert_eq!(opts.get_server_key_path(), Some(Path::new("/some/path/key.pem")));
+    /// # Ok(()) }
+    pub fn server_key_path(mut self, server_key_path: Option<PathBuf>) -> Self {
+        self.opts.0.server_key_path = server_key_path;
         self
     }
 }

@@ -7,6 +7,7 @@ use std::{
 };
 
 use bufstream::BufStream;
+use mysql_common::crypto::MariaDbZeroConfigCheck;
 use rustls::{
     client::{
         danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -16,14 +17,14 @@ use rustls::{
     CertificateError, ClientConfig, Error, RootCertStore, SignatureScheme,
 };
 use rustls_pemfile::certs;
+use sha2::{Digest, Sha256};
+use x509_parser::{asn1_rs::FromDer, certificate::X509Certificate};
 
 use crate::{
     error::tls::TlsError,
     io::{Stream, TcpStream},
     Result, SslOpts,
 };
-use mysql_common::crypto::MariaDbZeroConfigCheck;
-use sha2::{Digest, Sha256};
 
 impl Stream {
     pub fn make_secure(
@@ -172,14 +173,25 @@ impl ServerCertVerifier for DangerousVerifier {
                 {
                     Ok(ServerCertVerified::assertion())
                 }
-                Err(_e) if self.zero_config_check.is_some() => {
-                    if let Some(zero_config_check) = &self.zero_config_check {
-                        let mut hasher = Sha256::new();
-                        hasher.update(end_entity.as_ref());
-                        let fingerprint = hasher.finalize().to_vec();
-                        if let Ok(mut guard) = zero_config_check.lock() {
-                            *guard = Some(MariaDbZeroConfigCheck::new(Some(fingerprint)));
-                        }
+                // MariaDb zero-config TLS
+                Err(Error::InvalidCertificate(CertificateError::UnknownIssuer))
+                    if let Some(zero_config_check) = &self.zero_config_check =>
+                {
+                    // Let's check that it is a self-signed certificate
+                    let self_signed = X509Certificate::from_der(end_entity.as_ref())
+                        .map(|(_, cert)| cert.issuer() == cert.subject())
+                        .unwrap_or_default();
+
+                    if !self_signed {
+                        // MariaDb zero-config TLS is for self-signed ephimeral server certs only
+                        return Err(Error::InvalidCertificate(CertificateError::UnknownIssuer));
+                    }
+
+                    let mut hasher = Sha256::new();
+                    hasher.update(end_entity.as_ref());
+                    let fingerprint = hasher.finalize().to_vec();
+                    if let Ok(mut guard) = zero_config_check.lock() {
+                        *guard = Some(MariaDbZeroConfigCheck::new(Some(fingerprint)));
                     }
 
                     Ok(ServerCertVerified::assertion())

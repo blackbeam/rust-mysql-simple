@@ -161,22 +161,28 @@ impl<T: ToSocketAddrs> MyTcpBuilder<T> {
             }
         } else {
             // no bind address
-            addrs
-                .into_iter()
-                .try_fold(None, |prev, sock_addr| match prev {
-                    Some(x) => io::Result::Ok(Some(x)),
-                    None => {
-                        let domain = Domain::for_address(sock_addr);
-                        let socket = Socket::new(domain, Type::STREAM, None)?;
-                        if let Some(connect_timeout) = connect_timeout {
-                            socket.connect_timeout(&sock_addr.into(), connect_timeout)?;
-                        } else {
-                            socket.connect(&sock_addr.into())?;
-                        }
-                        Ok(Some(socket))
+            let mut last_result = None;
+            for sock_addr in addrs {
+                let domain = Domain::for_address(sock_addr);
+                let socket = Socket::new(domain, Type::STREAM, None)?;
+
+                let result = if let Some(connect_timeout) = connect_timeout {
+                    socket.connect_timeout(&sock_addr.into(), connect_timeout)
+                } else {
+                    socket.connect(&sock_addr.into())
+                };
+
+                last_result = Some(result.map(|_| socket));
+
+                match last_result.as_ref() {
+                    Some(Ok(_)) => break,
+                    Some(Err(e)) if e.kind() == io::ErrorKind::ConnectionRefused => {
+                        continue;
                     }
-                })?
-                .ok_or(err)
+                    _ => break,
+                }
+            }
+            last_result.unwrap_or(Err(err))
         }?;
 
         socket.set_read_timeout(read_timeout)?;
