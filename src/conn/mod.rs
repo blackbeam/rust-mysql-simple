@@ -533,6 +533,8 @@ impl Conn {
 
         let mut auth_proc = self.0.auth_plugin.init()?;
         let auth_ctx = self.auth_context()?;
+        #[cfg(test)]
+        eprintln!("{}:{} {auth_proc:?}\n{:?}", file!(), line!(), self.0.nonce);
         let response = auth_proc.run(&auth_ctx, &self.0.nonce)?;
 
         let com_change_user = ComChangeUser::new()
@@ -814,6 +816,13 @@ impl Conn {
 
         let auth_ctx = self.auth_context()?;
         let mut auth_proc = auth_switch_request.auth_plugin().init()?;
+        #[cfg(test)]
+        eprintln!(
+            "{}:{} {auth_proc:?}\n{:?}",
+            file!(),
+            line!(),
+            auth_switch_request.plugin_data()
+        );
         let response = auth_proc.run(&auth_ctx, auth_switch_request.plugin_data())?;
         if let Some(mut packet) = response.data() {
             self.write_packet(&mut packet)?;
@@ -864,6 +873,8 @@ impl Conn {
 
         let auth_ctx = self.auth_context()?;
         let mut auth_proc = self.0.auth_plugin.init()?;
+        #[cfg(test)]
+        eprintln!("{}:{} {auth_proc:?}\n{:?}", file!(), line!(), self.0.nonce);
         let response = auth_proc.run(&auth_ctx, &self.0.nonce)?;
 
         self.write_handshake_response(response.data())?;
@@ -1024,6 +1035,8 @@ impl Conn {
             match prev_response {
                 // plugin waits for another challenge
                 auth::plugins::Response::Next { .. } => {
+                    #[cfg(test)]
+                    eprintln!("{}:{} {auth_proc:?}\n{:?}", file!(), line!(), challenge);
                     let response = auth_proc.run(&auth_ctx, challenge)?;
                     if let Some(mut packet) = response.data() {
                         self.write_packet(&mut packet)?;

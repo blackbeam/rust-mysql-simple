@@ -191,6 +191,17 @@ jobs:
           while ! nc -W 1 localhost 3307 | grep -q -P '.+'; do sleep 1; done
         displayName: Run MySql in Docker
       - bash: |
+          docker exec container bash -l -c "echo 'deb http://archive.debian.org/debian buster main' > /etc/apt/sources.list"
+          docker exec container bash -l -c "echo 'deb http://archive.debian.org/debian buster-updates main' >> /etc/apt/sources.list"
+          docker exec container bash -l -c "echo 'deb http://archive.debian.org/debian-security buster/updates main contrib non-free' >> /etc/apt/sources.list"
+          docker exec container bash -l -c "echo 'Acquire::AllowInsecureRepositories \"true\";' > /etc/apt/apt.conf.d/99allow-insecure"
+          docker exec container bash -l -c "echo 'Acquire::AllowUnsignedRepositories \"true\";' >> /etc/apt/apt.conf.d/99allow-insecure"
+          docker exec container bash -l -c "echo 'Acquire::https::Verify-Peer \"false\";' > /etc/apt/apt.conf.d/99ignore-ssl"
+          docker exec container bash -l -c "echo 'Acquire::https::Verify-Host \"false\";' >> /etc/apt/apt.conf.d/99ignore-ssl"
+          docker exec container bash -l -c "echo 'Acquire::Check-Valid-Until \"false\";' >> /etc/apt/apt.conf.d/99ignore-ssl"
+          docker exec container bash -l -c "echo 'Acquire::Check-Valid-Until \"false\";' > /etc/apt/apt.conf.d/99no-check-valid-until"
+        condition: eq(variables['DB_VERSION'], '5.7-debian')
+      - bash: |
           docker exec container bash -l -c "mysql -uroot -ppassword -e \"SET old_passwords = 1; GRANT ALL PRIVILEGES ON *.* TO 'root2'@'%' IDENTIFIED WITH mysql_old_password AS 'password'; SET PASSWORD FOR 'root2'@'%' = OLD_PASSWORD('password')\"";
           docker exec container bash -l -c "echo 'deb [trusted=yes] http://archive.debian.org/debian/ stretch main non-free contrib' > /etc/apt/sources.list"
           docker exec container bash -l -c "echo 'deb-src [trusted=yes] http://archive.debian.org/debian/ stretch main non-free contrib ' >> /etc/apt/sources.list"
@@ -247,6 +258,7 @@ jobs:
           docker --version
         displayName: Install docker
       - bash: |
+          if [[ "mariadb:lts" == "$(CONTAINER)" ]]; then ARG="--ssl-ca=/root/tests/ca.crt --ssl-cert=/root/tests/server.crt --ssl-key=/root/tests/server-key.pem"; fi
           docker run --rm -d \
               --name container \
               -v `pwd`:/root \
@@ -259,9 +271,7 @@ jobs:
                   --log-bin=mysql-bin --gtid-domain-id=1 \
                   --server-id=1 \
                   --ssl \
-                  --ssl-ca=/root/tests/ca.crt \
-                  --ssl-cert=/root/tests/server.crt \
-                  --ssl-key=/root/tests/server-key.pem \
+                  $ARG \
                   --secure-auth=OFF \
                   --plugin-load-add=auth_parsec \
                   --plugin-load-add=auth_ed25519 &
