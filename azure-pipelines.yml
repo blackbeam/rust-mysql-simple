@@ -258,7 +258,6 @@ jobs:
           docker --version
         displayName: Install docker
       - bash: |
-          if [[ "mariadb:lts" == "$(CONTAINER)" ]]; then ARG="--ssl-ca=/root/tests/ca.crt --ssl-cert=/root/tests/server.crt --ssl-key=/root/tests/server-key.pem"; fi
           docker run --rm -d \
               --name container \
               -v `pwd`:/root \
@@ -271,7 +270,6 @@ jobs:
                   --log-bin=mysql-bin --gtid-domain-id=1 \
                   --server-id=1 \
                   --ssl \
-                  $ARG \
                   --secure-auth=OFF \
                   --plugin-load-add=auth_parsec \
                   --plugin-load-add=auth_ed25519 &
