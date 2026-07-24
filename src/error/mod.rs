@@ -7,6 +7,7 @@
 // modified, or distributed except according to those terms.
 
 use mysql_common::{
+    auth::{self, plugins::PluginInitError},
     named_params::MixedParamsError,
     packets::{self, BulkExecuteRequestBuilderError, BulkExecuteRequestError},
     params::ParamsError,
@@ -117,6 +118,34 @@ impl error::Error for Error {
     }
 }
 
+impl From<PluginInitError> for Error {
+    fn from(value: PluginInitError) -> Self {
+        Self::DriverError(DriverError::from(value))
+    }
+}
+
+impl From<PluginInitError> for DriverError {
+    fn from(value: PluginInitError) -> Self {
+        match value {
+            PluginInitError::UnsupportedPlugin(name) => {
+                DriverError::UnknownAuthPlugin(String::from_utf8_lossy(&name).into_owned())
+            }
+        }
+    }
+}
+
+impl From<auth::plugins::Error> for Error {
+    fn from(value: auth::plugins::Error) -> Self {
+        Self::DriverError(DriverError::from(value))
+    }
+}
+
+impl From<auth::plugins::Error> for DriverError {
+    fn from(value: auth::plugins::Error) -> Self {
+        DriverError::AuthPlugin(value)
+    }
+}
+
 impl From<FromValueError> for Error {
     fn from(FromValueError(value): FromValueError) -> Error {
         Error::FromValueError(value)
@@ -199,7 +228,7 @@ impl fmt::Debug for Error {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub enum DriverError {
     ConnectTimeout,
     // (address, description)
@@ -223,7 +252,8 @@ pub enum DriverError {
     OldMysqlPasswordDisabled,
     CleartextPluginDisabled,
     BulkExecute(BulkExecuteRequestError),
-    InvalidParsecSalt,
+    CertificateCannotBeValidated,
+    AuthPlugin(auth::plugins::Error),
 }
 
 impl From<BulkExecuteRequestBuilderError> for DriverError {
@@ -309,8 +339,11 @@ impl fmt::Display for DriverError {
             DriverError::BulkExecute(e) => {
                 write!(f, "Bulk execute error: {e}")
             }
-            DriverError::InvalidParsecSalt => {
-                write!(f, "Could not parse Parsec extended salt packet")
+            DriverError::CertificateCannotBeValidated => {
+                write!(f, "Server certificate cannot be validated")
+            }
+            DriverError::AuthPlugin(error) => {
+                write!(f, "Auth plugin error: {}", error)
             }
         }
     }

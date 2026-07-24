@@ -135,6 +135,16 @@ impl Stream {
             })
     }
 
+    #[cfg(any(feature = "native-tls", feature = "rustls"))]
+    pub fn is_secure(&self) -> bool {
+        matches!(self, Stream::TcpStream(TcpStream::Secure(_)))
+    }
+
+    #[cfg(not(any(feature = "native-tls", feature = "rustls")))]
+    pub fn is_secure(&self) -> bool {
+        false
+    }
+
     pub fn is_insecure(&self) -> bool {
         matches!(self, Stream::TcpStream(TcpStream::Insecure(_)))
     }
@@ -144,7 +154,14 @@ impl Stream {
     }
 
     #[cfg(all(not(feature = "native-tls"), not(feature = "rustls")))]
-    pub fn make_secure(self, _host: url::Host, _ssl_opts: crate::SslOpts) -> MyResult<Stream> {
+    pub fn make_secure(
+        self,
+        _host: url::Host,
+        _ssl_opts: crate::SslOpts,
+        _zero_config_check: Option<
+            std::sync::Arc<std::sync::Mutex<Option<mysql_common::crypto::MariaDbZeroConfigCheck>>>,
+        >,
+    ) -> MyResult<Stream> {
         panic!(
             "Client had asked for TLS connection but TLS support is disabled. \
             Please enable one of the following features: \"native-tls\", \"rustls-tls\", \"rustls-tls-ring\""

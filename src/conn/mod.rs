@@ -10,8 +10,9 @@ use bytes::{Buf, BufMut};
 #[cfg(feature = "binlog")]
 use mysql_common::packets::binlog_request::BinlogRequest;
 use mysql_common::{
+    auth::{self, plugins::ChallengeResponsePlugin as _},
     constants::UTF8MB4_GENERAL_CI,
-    crypto,
+    crypto::{self, MariaDbZeroConfigCheck},
     io::{ParseBuf, ReadMysqlExt},
     named_params::ParsedNamedParams,
     packets::{
@@ -33,11 +34,12 @@ use std::{
     borrow::{Borrow, Cow},
     collections::HashMap,
     convert::TryFrom,
-    io::{self, Write as _},
+    fs::File,
+    io::{self, Read as _, Write as _},
     mem,
     ops::{Deref, DerefMut},
     process,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 #[cfg(unix)]
@@ -59,9 +61,9 @@ use crate::{
     prelude::*,
     ChangeUserOpts,
     DriverError::{
-        CleartextPluginDisabled, MismatchedStmtParams, OldMysqlPasswordDisabled, Protocol41NotSet,
-        ReadOnlyTransNotSupported, SetupError, UnexpectedPacket, UnknownAuthPlugin,
-        UnsupportedProtocol,
+        CertificateCannotBeValidated, CleartextPluginDisabled, MismatchedStmtParams,
+        OldMysqlPasswordDisabled, Protocol41NotSet, ReadOnlyTransNotSupported, SetupError,
+        UnexpectedPacket, UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
     LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Transaction,
@@ -198,7 +200,6 @@ impl ResultSetInfo {
 }
 
 /// Connection internals.
-#[derive(Debug)]
 struct ConnInner {
     opts: Opts,
     stream: Option<MySyncFramed<Stream>>,
@@ -220,11 +221,47 @@ struct ConnInner {
     has_results: bool,
     local_infile_handler: Option<LocalInfileHandler>,
 
+    // Cached public server key used for RSA-based key exchange by the caching_sha2_password plugin.
+    server_key_pem: Option<Option<Vec<u8>>>,
+
     auth_plugin: AuthPlugin<'static>,
+    // Handshake packet nonce
     nonce: Vec<u8>,
+    // This is passed to TLS certificate verifier as a flag if zero-config validation is possible for this connection.
+    // If so, the verifier will store the info required to complete the validation and this will be also the flag that such validation is pending.
+    zero_config_check: Option<Arc<Mutex<Option<MariaDbZeroConfigCheck>>>>,
 
     /// This flag is to opt-in/opt-out from reset upon return to a pool.
     pub(crate) reset_upon_return: bool,
+}
+
+impl std::fmt::Debug for ConnInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnInner")
+            .field("opts", &self.opts)
+            .field("stream", &self.stream)
+            .field("stmt_cache", &self.stmt_cache)
+            .field("server_version", &self.server_version)
+            .field("mariadb_server_version", &self.mariadb_server_version)
+            .field("ok_packet", &self.ok_packet)
+            .field("capability_flags", &self.capability_flags)
+            .field("mariadb_ext_capabilities", &self.mariadb_ext_capabilities)
+            .field("connection_id", &self.connection_id)
+            .field("status_flags", &self.status_flags)
+            .field("character_set", &self.character_set)
+            .field("last_command", &self.last_command)
+            .field("connected", &self.connected)
+            .field("has_results", &self.has_results)
+            .field("local_infile_handler", &self.local_infile_handler)
+            .field("auth_plugin", &self.auth_plugin)
+            .field("nonce", &self.nonce)
+            .field(
+                "zero_config_check",
+                &self.zero_config_check.as_ref().map(|_| "<hidden>"),
+            )
+            .field("reset_upon_return", &self.reset_upon_return)
+            .finish()
+    }
 }
 
 impl ConnInner {
@@ -246,7 +283,9 @@ impl ConnInner {
             local_infile_handler: None,
             auth_plugin: AuthPlugin::MysqlNativePassword,
             nonce: Vec::new(),
+            zero_config_check: None,
             reset_upon_return: opts.get_pool_opts().reset_connection(),
+            server_key_pem: None,
 
             opts,
         }
@@ -258,6 +297,39 @@ impl ConnInner {
 pub struct Conn(Box<ConnInner>);
 
 impl Conn {
+    /// Returns true if MariaDB zero-config fallback is currently pending (i.e., certificate validation is required).
+    ///
+    /// This makes connection insecure even though the transport is TLS.
+    fn zero_config_fallback_pending(&self) -> bool {
+        self.0
+            .zero_config_check
+            .as_ref()
+            .and_then(|zcc| zcc.lock().ok())
+            .and_then(|guard| {
+                guard
+                    .as_ref()
+                    .map(|check| check.requires_zeroconfig_fallback())
+            })
+            .unwrap_or(false)
+    }
+
+    // Returns the leaf certificate fingerprint if zero-config fallback is pending, or None otherwise.
+    fn zero_config_leaf_cert_fingerprint(&self) -> Option<Vec<u8>> {
+        self.0
+            .zero_config_check
+            .as_ref()
+            .and_then(|zcc| zcc.lock().ok())
+            .and_then(|guard| {
+                guard.as_ref().and_then(|check| {
+                    if check.requires_zeroconfig_fallback() {
+                        Some(check.leaf_cert_fingerprint().to_vec())
+                    } else {
+                        None
+                    }
+                })
+            })
+    }
+
     /// Must not be called before handle_handshake.
     const fn has_capability(&self, flag: CapabilityFlags) -> bool {
         self.0.capability_flags.contains(flag)
@@ -353,12 +425,16 @@ impl Conn {
         self.0.stream.as_mut().expect("incomplete connection")
     }
 
-    fn is_insecure(&self) -> bool {
-        self.stream_ref().get_ref().is_insecure()
+    fn is_tls_connection(&self) -> bool {
+        self.stream_ref().get_ref().is_secure() && !self.zero_config_fallback_pending()
     }
 
-    fn is_socket(&self) -> bool {
+    fn is_socket_connection(&self) -> bool {
         self.stream_ref().get_ref().is_socket()
+    }
+
+    fn is_cleartext_connection(&self) -> bool {
+        self.stream_ref().get_ref().is_insecure()
     }
 
     /// Check the connection can be improved.
@@ -424,17 +500,47 @@ impl Conn {
         Ok(())
     }
 
+    fn auth_context(&mut self) -> Result<AuthContext> {
+        // cache server key
+        if self.0.server_key_pem.is_none() {
+            if let Some(server_key_path) = self.0.opts.get_server_key_path() {
+                let mut server_key_data = vec![];
+                let mut server_key_file = File::open(server_key_path)?;
+                server_key_file.read_to_end(&mut server_key_data)?;
+                self.0.server_key_pem = Some(Some(server_key_data));
+            } else {
+                self.0.server_key_pem = Some(None);
+            }
+        }
+
+        Ok(AuthContext {
+            pass: self
+                .0
+                .opts
+                .get_pass()
+                .clone()
+                .map(|x| x.into())
+                .unwrap_or_default(),
+            is_tls_transport: self.is_tls_connection(),
+            is_ipc_transport: self.is_socket_connection(),
+            scramble: self.0.nonce.clone(),
+            server_key_pem: self.0.server_key_pem.as_ref().and_then(|x| x.clone()),
+        })
+    }
+
     fn exec_com_change_user(&mut self, opts: ChangeUserOpts) -> Result<()> {
         opts.update_opts(&mut self.0.opts);
+
+        let mut auth_proc = self.0.auth_plugin.init()?;
+        let auth_ctx = self.auth_context()?;
+        #[cfg(test)]
+        eprintln!("{}:{} {auth_proc:?}\n{:?}", file!(), line!(), self.0.nonce);
+        let response = auth_proc.run(&auth_ctx, &self.0.nonce)?;
+
         let com_change_user = ComChangeUser::new()
             .with_user(self.0.opts.get_user().map(|x| x.as_bytes()))
             .with_database(self.0.opts.get_db_name().map(|x| x.as_bytes()))
-            .with_auth_plugin_data(
-                self.0
-                    .auth_plugin
-                    .gen_data(self.0.opts.get_pass(), &self.0.nonce)
-                    .as_deref(),
-            )
+            .with_auth_plugin_data(response.data())
             .with_more_data(Some(
                 ComChangeUserMoreData::new(if self.server_version() >= (5, 5, 3) {
                     UTF8MB4_GENERAL_CI
@@ -448,7 +554,10 @@ impl Conn {
         self.write_command_raw(&com_change_user)?;
         self.0.last_command = 0;
         self.0.stmt_cache.clear();
-        self.continue_auth(false)
+
+        self.continue_auth(false, auth_ctx, auth_proc, response)?;
+
+        Ok(())
     }
 
     /// Tries to reset the connection.
@@ -507,10 +616,33 @@ impl Conn {
         self.exec_com_change_user(opts)
     }
 
+    // Returns true if MariaDB fallback should be enabled for this connection.
+    fn mariadb_fallback_possible(&self) -> bool {
+        self.0
+            .mariadb_server_version
+            .map_or(false, |ver| ver > (11, 4, 0))
+            && self.0.opts.get_pass().map_or(false, |p| !p.is_empty())
+            && self.0.auth_plugin.supports_password_hash()
+            // MariaDb denies specifying CA for "zero-config TLS"
+            && self
+                .0
+                .opts
+                .get_ssl_opts()
+                .map(|ssl_opts| ssl_opts.root_cert_path().is_none())
+                .unwrap_or_default()
+    }
+
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
         let stream = self.0.stream.take().expect("incomplete conn");
         let (in_buf, out_buf, codec, stream) = stream.destruct();
-        let stream = stream.make_secure(self.0.opts.get_host(), ssl_opts)?;
+        self.0.zero_config_check = self
+            .mariadb_fallback_possible()
+            .then(|| Arc::new(Mutex::new(None)));
+        let stream = stream.make_secure(
+            self.0.opts.get_host(),
+            ssl_opts,
+            self.0.zero_config_check.clone(),
+        )?;
         let stream = MySyncFramed::construct(in_buf, out_buf, codec, stream);
         self.0.stream = Some(stream);
         Ok(())
@@ -652,7 +784,10 @@ impl Conn {
             .contains(StatusFlags::SERVER_MORE_RESULTS_EXISTS)
     }
 
-    fn perform_auth_switch(&mut self, auth_switch_request: AuthSwitchRequest<'_>) -> Result<()> {
+    fn perform_auth_switch(
+        &mut self,
+        auth_switch_request: AuthSwitchRequest<'_>,
+    ) -> Result<auth::plugins::AuthProc> {
         if matches!(
             auth_switch_request.auth_plugin(),
             AuthPlugin::MysqlOldPassword
@@ -669,43 +804,31 @@ impl Conn {
             return Err(DriverError(CleartextPluginDisabled));
         }
 
-        self.0.nonce = auth_switch_request.plugin_data().to_vec();
-        self.0.auth_plugin = auth_switch_request.auth_plugin().into_owned();
-        let plugin_data = match self.0.auth_plugin {
-            ref x @ AuthPlugin::MysqlOldPassword => {
-                if self.0.opts.get_secure_auth() {
-                    return Err(DriverError(OldMysqlPasswordDisabled));
-                }
-                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
-            }
-            ref x @ AuthPlugin::MysqlNativePassword => {
-                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
-            }
-            ref x @ AuthPlugin::CachingSha2Password => {
-                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
-            }
-            ref x @ AuthPlugin::MysqlClearPassword => {
-                if !self.0.opts.get_enable_cleartext_plugin() {
-                    return Err(DriverError(UnknownAuthPlugin(
-                        "mysql_clear_password".into(),
-                    )));
-                }
-
-                x.gen_data(self.0.opts.get_pass(), &self.0.nonce)
-            }
-            ref x @ AuthPlugin::Ed25519 => x.gen_data(self.0.opts.get_pass(), &self.0.nonce),
-            // For parsec at this point we need to send an empty packet first
-            ref _x @ AuthPlugin::MariadbParsec { .. } => None,
-            AuthPlugin::Other(_) => None,
-        };
-
-        if let Some(plugin_data) = plugin_data {
-            self.write_struct(&plugin_data.into_owned())?;
-        } else {
-            self.write_packet(&mut &[0_u8; 0][..])?;
+        // If MariaDb "zero-config TLS" is in progress, then only supported plugins are allowed
+        #[cfg(feature = "rustls")]
+        if self.zero_config_fallback_pending()
+            && !auth_switch_request.auth_plugin().supports_password_hash()
+        {
+            return Err(
+                rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer).into(),
+            );
         }
 
-        self.continue_auth(true)
+        let auth_ctx = self.auth_context()?;
+        let mut auth_proc = auth_switch_request.auth_plugin().init()?;
+        #[cfg(test)]
+        eprintln!(
+            "{}:{} {auth_proc:?}\n{:?}",
+            file!(),
+            line!(),
+            auth_switch_request.plugin_data()
+        );
+        let response = auth_proc.run(&auth_ctx, auth_switch_request.plugin_data())?;
+        if let Some(mut packet) = response.data() {
+            self.write_packet(&mut packet)?;
+        }
+
+        self.continue_auth(true, auth_ctx, auth_proc, response)
     }
 
     fn do_handshake(&mut self) -> Result<()> {
@@ -727,7 +850,7 @@ impl Conn {
 
         self.handle_handshake(&handshake);
 
-        if self.is_insecure() {
+        if !self.is_socket_connection() {
             if let Some(ssl_opts) = self.0.opts.get_ssl_opts().cloned() {
                 if !self.has_capability(CapabilityFlags::CLIENT_SSL) {
                     return Err(DriverError(TlsNotSupported));
@@ -738,15 +861,7 @@ impl Conn {
             }
         }
 
-        // Handshake scramble is always 21 bytes length (20 + zero terminator)
-        self.0.nonce = {
-            let mut nonce = Vec::from(handshake.scramble_1_ref());
-            nonce.extend_from_slice(handshake.scramble_2_ref().unwrap_or(&[][..]));
-            // Trim zero terminator. Fill with zeroes if nonce
-            // is somehow smaller than 20 bytes (this matches the server behavior).
-            nonce.resize(20, 0);
-            nonce
-        };
+        self.0.nonce = handshake.nonce();
 
         // Allow only CachingSha2Password and MysqlNativePassword here
         // because sha256_password is deprecated and other plugins won't
@@ -756,8 +871,17 @@ impl Conn {
             _ => AuthPlugin::MysqlNativePassword,
         };
 
-        self.write_handshake_response()?;
-        self.continue_auth(false)?;
+        let auth_ctx = self.auth_context()?;
+        let mut auth_proc = self.0.auth_plugin.init()?;
+        #[cfg(test)]
+        eprintln!("{}:{} {auth_proc:?}\n{:?}", file!(), line!(), self.0.nonce);
+        let response = auth_proc.run(&auth_ctx, &self.0.nonce)?;
+
+        self.write_handshake_response(response.data())?;
+        let auth_proc = self.continue_auth(false, auth_ctx, auth_proc, response)?;
+
+        // If authentication was successful, we have evertything to validate the certificate.
+        self.validate_mariadb_certificate_if_needed(auth_proc)?;
 
         if self.has_capability(CapabilityFlags::CLIENT_COMPRESS) {
             self.switch_to_compressed();
@@ -794,7 +918,7 @@ impl Conn {
                 client_flags.insert(CapabilityFlags::CLIENT_CONNECT_WITH_DB);
             }
         }
-        if self.is_insecure() && self.0.opts.get_ssl_opts().is_some() {
+        if self.is_cleartext_connection() && self.0.opts.get_ssl_opts().is_some() {
             client_flags.insert(CapabilityFlags::CLIENT_SSL);
         }
         client_flags | self.0.opts.get_additional_capabilities()
@@ -847,22 +971,17 @@ impl Conn {
         };
 
         let ssl_request = SslRequest::new(
-            self.get_client_flags(),
+            self.0.capability_flags,
             DEFAULT_MAX_ALLOWED_PACKET as u32,
             charset as u8,
-        );
+        )
+        .with_mariadb_capabilities(self.0.mariadb_ext_capabilities);
         self.write_struct(&ssl_request)
     }
 
-    fn write_handshake_response(&mut self) -> Result<()> {
-        let auth_data = self
-            .0
-            .auth_plugin
-            .gen_data(self.0.opts.get_pass(), &self.0.nonce)
-            .map(|x| x.into_owned());
-
+    fn write_handshake_response(&mut self, plugin_response: Option<&[u8]>) -> Result<()> {
         let handshake_response = HandshakeResponse::new(
-            auth_data.as_deref(),
+            plugin_response,
             self.0.server_version.unwrap_or((0, 0, 0)),
             self.0.opts.get_user().map(str::as_bytes),
             self.0.opts.get_db_name().map(str::as_bytes),
@@ -874,158 +993,107 @@ impl Conn {
                 .get_max_allowed_packet()
                 .unwrap_or(DEFAULT_MAX_ALLOWED_PACKET) as u32,
         )
-        .with_mariadb_ext_capabilities(self.0.mariadb_ext_capabilities);
+        .with_mariadb_ext_capabilities(self.get_mariadb_client_flags());
 
         let mut buf = get_buffer();
         handshake_response.serialize(buf.as_mut());
         self.write_packet(&mut &*buf)
     }
 
-    fn continue_auth(&mut self, auth_switched: bool) -> Result<()> {
-        match self.0.auth_plugin {
-            AuthPlugin::CachingSha2Password => {
-                self.continue_caching_sha2_password_auth(auth_switched)?;
-                Ok(())
-            }
-            AuthPlugin::MysqlNativePassword | AuthPlugin::MysqlOldPassword => {
-                self.continue_mysql_native_password_auth(auth_switched)?;
-                Ok(())
-            }
-            AuthPlugin::MysqlClearPassword => {
-                if !self.0.opts.get_enable_cleartext_plugin() {
-                    return Err(DriverError(CleartextPluginDisabled));
-                }
-                self.continue_mysql_native_password_auth(auth_switched)?;
-                Ok(())
-            }
-            AuthPlugin::Ed25519 => {
-                self.continue_ed25519_auth(auth_switched)?;
-                Ok(())
-            }
-            AuthPlugin::MariadbParsec { .. } => {
-                self.continue_parsec_auth(auth_switched)?;
-                Ok(())
-            }
-            AuthPlugin::Other(ref name) => {
-                let plugin_name = String::from_utf8_lossy(name).into();
-                Err(DriverError(UnknownAuthPlugin(plugin_name)))
-            }
-        }
-    }
+    /// Returns the completed `AuthProc`.
+    fn continue_auth(
+        &mut self,
+        auth_switched: bool,
+        auth_ctx: AuthContext,
+        mut auth_proc: auth::plugins::AuthProc,
+        mut prev_response: auth::plugins::Response,
+    ) -> Result<auth::plugins::AuthProc> {
+        loop {
+            // read next challenge
+            let packet = self.read_packet()?;
 
-    fn continue_mysql_native_password_auth(&mut self, auth_switched: bool) -> Result<()> {
-        let payload = self.read_packet()?;
-
-        match payload[0] {
-            // auth ok
-            0x00 => self.handle_ok::<CommonOkPacket>(&payload).map(drop),
-            // auth switch
-            0xfe if !auth_switched => {
-                let auth_switch = if payload.len() > 1 {
-                    ParseBuf(&payload).parse(())?
+            // check for auth-switch
+            if packet[0] == 0xFE && !auth_switched {
+                let auth_switch = if packet.len() > 1 {
+                    ParseBuf(&packet).parse(())?
                 } else {
-                    let _ = ParseBuf(&payload).parse::<OldAuthSwitchRequest>(())?;
+                    let _ = ParseBuf(&packet).parse::<OldAuthSwitchRequest>(())?;
                     // we'll map OldAuthSwitchRequest to an AuthSwitchRequest with mysql_old_password plugin.
                     AuthSwitchRequest::new("mysql_old_password".as_bytes(), &*self.0.nonce)
                         .into_owned()
                 };
-                self.perform_auth_switch(auth_switch)
+                return self.perform_auth_switch(auth_switch);
             }
-            _ => Err(DriverError(UnexpectedPacket)),
-        }
-    }
 
-    fn continue_caching_sha2_password_auth(&mut self, auth_switched: bool) -> Result<()> {
-        let payload = self.read_packet()?;
+            // check for escaping byte
+            let challenge = if packet[0] == 0x01 {
+                &packet[1..]
+            } else {
+                packet.as_ref()
+            };
 
-        match payload[0] {
-            0x00 => {
-                // ok packet for empty password
-                Ok(())
-            }
-            0x01 => match payload[1] {
-                0x03 => {
-                    let payload = self.read_packet()?;
-                    self.handle_ok::<CommonOkPacket>(&payload).map(drop)
-                }
-                0x04 => {
-                    if !self.is_insecure() || self.is_socket() {
-                        let mut pass = self.0.opts.get_pass().map(Vec::from).unwrap_or_default();
-                        pass.push(0);
-                        self.write_packet(&mut pass.as_slice())?;
-                    } else {
-                        self.write_packet(&mut &[0x02][..])?;
-                        let payload = self.read_packet()?;
-                        let key = &payload[1..];
-                        let mut pass = self.0.opts.get_pass().map(Vec::from).unwrap_or_default();
-                        pass.push(0);
-                        for (i, c) in pass.iter_mut().enumerate() {
-                            *(c) ^= self.0.nonce[i % self.0.nonce.len()];
-                        }
-                        let encrypted_pass = crypto::encrypt(&pass, key);
-                        self.write_packet(&mut encrypted_pass.as_slice())?;
+            match prev_response {
+                // plugin waits for another challenge
+                auth::plugins::Response::Next { .. } => {
+                    #[cfg(test)]
+                    eprintln!("{}:{} {auth_proc:?}\n{:?}", file!(), line!(), challenge);
+                    let response = auth_proc.run(&auth_ctx, challenge)?;
+                    if let Some(mut packet) = response.data() {
+                        self.write_packet(&mut packet)?;
                     }
-
-                    let payload = self.read_packet()?;
-                    self.handle_ok::<CommonOkPacket>(&payload).map(drop)
+                    prev_response = response;
                 }
-                _ => Err(DriverError(UnexpectedPacket)),
-            },
-            0xfe if !auth_switched => {
-                let auth_switch_request = ParseBuf(&payload).parse(())?;
-                self.perform_auth_switch(auth_switch_request)
+                // previous response was the last response for the plugin
+                // OK packet must follow
+                auth::plugins::Response::Last { .. } => {
+                    if packet[0] == 0x00 {
+                        self.handle_ok::<CommonOkPacket>(&packet)?;
+                        break;
+                    } else {
+                        return Err(DriverError(UnexpectedPacket));
+                    }
+                }
             }
-            _ => Err(DriverError(UnexpectedPacket)),
         }
+
+        Ok(auth_proc)
     }
 
-    fn continue_ed25519_auth(&mut self, auth_switched: bool) -> Result<()> {
-        let payload = self.read_packet()?;
-        match payload[0] {
-            // ok packet for empty password
-            0x00 => Ok(()),
-            0xfe if !auth_switched => {
-                let auth_switch_request = ParseBuf(&payload).parse(())?;
-                self.perform_auth_switch(auth_switch_request)
-            }
-            _ => Err(DriverError(UnexpectedPacket)),
-        }
-    }
+    fn validate_mariadb_certificate_if_needed(
+        &mut self,
+        auth_proc: auth::plugins::AuthProc,
+    ) -> Result<()> {
+        let leaf_cert_fingerprint = match self.zero_config_leaf_cert_fingerprint() {
+            Some(f) => f,
+            // Nothing to validate, so we can return early.
+            None => return Ok(()),
+        };
 
-    fn continue_parsec_auth(&mut self, auth_switched: bool) -> Result<()> {
-        let packet = self.read_packet()?;
-        // Normally we need to skip escaping 0x01 byte. But in first parsec implementations, server did not send it.
-        let mut payload = &packet[0..];
-        if !packet.is_empty() && packet[0] == 0x01 {
-            payload = &packet[1..];
-        }
-        // At this point in future, when it will be possible for parsec to be default authentication method,
-        // we can have authentication switch request. The other possible option here(and for now the only option) -
-        // ext-salt packet.
-        if !payload.is_empty() && payload[0] == 0xfe && !auth_switched {
-            let auth_switch_request = ParseBuf(payload).parse(())?;
-            self.perform_auth_switch(auth_switch_request)
-        } else {
-            // Letting parser function decide if all is fine with the packet
-            self.0
-                .auth_plugin
-                .read_add_data(payload)
-                .ok_or(DriverError(crate::DriverError::InvalidParsecSalt))?;
-            // Now generating response.
-            let plugin_data = self
-                .0
-                .auth_plugin
-                .gen_data(self.0.opts.get_pass(), &self.0.nonce)
-                .unwrap();
+        let auth_context = self.auth_context()?;
+        // Shared secret is stored in "info" field of OK packet that server sends after successful authentication. It's
+        // prepended with 0x01 byte and in hex string form. If we did not get it, we cannot validate certificate.
+        let shared_secret = self
+            .info_ref()
+            .strip_prefix(&[1_u8])
+            .ok_or(DriverError(CertificateCannotBeValidated))?;
 
-            self.write_struct(&plugin_data.into_owned())?;
-            // After client response, server will send either ok or error.
-            let payload = self.read_packet()?;
-            match payload[0] {
-                0x00 => self.handle_ok::<CommonOkPacket>(&payload).map(drop),
-                _ => Err(DriverError(UnexpectedPacket)),
-            }
+        let password_hash = auth_proc
+            .password_hash(&auth_context)
+            .ok_or(DriverError(CertificateCannotBeValidated))?;
+        // Initially the scrable is stored in nonce field. If we had to perform authentication switch during handshake,
+        // we moved it to scramble field. So, if it's definde - we use scramble and nonce otherwise.
+        if !crypto::verify_mariadb_shared_secret(
+            shared_secret,
+            &password_hash,
+            &self.0.nonce,
+            &leaf_cert_fingerprint,
+        ) {
+            self.0.zero_config_check = None;
+            return Err(DriverError(CertificateCannotBeValidated));
         }
+
+        self.0.zero_config_check = None;
+        Ok(())
     }
 
     fn reset_seq_id(&mut self) {
@@ -1470,6 +1538,36 @@ impl Queryable for Conn {
     }
 }
 
+struct AuthContext {
+    pass: Vec<u8>,
+    is_ipc_transport: bool,
+    is_tls_transport: bool,
+    scramble: Vec<u8>,
+    server_key_pem: Option<Vec<u8>>,
+}
+
+impl auth::plugins::Context for &'_ AuthContext {
+    fn pass(&self) -> &[u8] {
+        &self.pass
+    }
+
+    fn is_tls_transport(&self) -> bool {
+        self.is_tls_transport
+    }
+
+    fn is_ipc_transport(&self) -> bool {
+        self.is_ipc_transport
+    }
+
+    fn scramble(&self) -> &[u8] {
+        &self.scramble
+    }
+
+    fn server_key_pem(&self) -> Option<&[u8]> {
+        self.server_key_pem.as_deref()
+    }
+}
+
 impl Drop for Conn {
     fn drop(&mut self) {
         let stmt_cache = mem::replace(&mut self.0.stmt_cache, StmtCache::new(0));
@@ -1504,8 +1602,6 @@ mod test {
             params::{MissingNamedParameterError, ParamsConfusionError, ParamsError},
         };
         use rand::Rng;
-        #[cfg(feature = "time")]
-        use time::PrimitiveDateTime;
 
         use crate::{
             conn::ConnInner,
@@ -1528,6 +1624,15 @@ mod test {
                 .1
         }
 
+        fn random_pass() -> String {
+            let mut rng = rand::rng();
+            let mut pass = [0u8; 10];
+            rng.fill_bytes(&mut pass);
+            IntoIterator::into_iter(pass)
+                .map(|x| ((x % (123 - 97)) + 97) as char)
+                .collect()
+        }
+
         #[test]
         fn should_connect() {
             let mut conn = Conn::new(get_opts()).unwrap();
@@ -1544,7 +1649,7 @@ mod test {
             }
 
             if crate::test_misc::test_ssl() {
-                assert!(!conn.is_insecure());
+                assert!(conn.is_tls_connection());
             }
         }
 
@@ -2012,9 +2117,10 @@ mod test {
             type CreateUserFn = fn(bool, (u16, u16, u16), &str) -> Vec<String>;
 
             #[allow(clippy::type_complexity)]
-            const TEST_MATRIX: [(&str, ShouldRunFn, CreateUserFn); 5] = [
+            const TEST_MATRIX: [(&str, bool, ShouldRunFn, CreateUserFn); 12] = [
                 (
                     "mysql_old_password",
+                    true,
                     |is_mariadb, version| is_mariadb || version < (5, 7, 0),
                     |is_mariadb, version, pass| {
                         if is_mariadb {
@@ -2040,7 +2146,35 @@ mod test {
                     },
                 ),
                 (
+                    "mysql_old_password empty-pass",
+                    false,
+                    |is_mariadb, version| is_mariadb || version < (5, 7, 0),
+                    |is_mariadb, version, _pass| {
+                        if is_mariadb {
+                            vec![
+                                "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_old_password"
+                                    .into(),
+                                "SET old_passwords=1".into(),
+                                format!("ALTER USER '__mats'@'%' IDENTIFIED BY ''"),
+                                "SET old_passwords=0".into(),
+                            ]
+                        } else if matches!(version, (5, 6, _)) {
+                            vec![
+                                "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_old_password"
+                                    .into(),
+                                format!("SET PASSWORD FOR '__mats'@'%' = OLD_PASSWORD('')"),
+                            ]
+                        } else {
+                            vec![
+                                "CREATE USER '__mats'@'%'".into(),
+                                format!("SET PASSWORD FOR '__mats'@'%' = PASSWORD('')"),
+                            ]
+                        }
+                    },
+                ),
+                (
                     "mysql_native_password",
+                    true,
                     |is_mariadb, version| is_mariadb || version < (8, 4, 0),
                     |is_mariadb, version, pass| {
                         if is_mariadb {
@@ -2062,7 +2196,31 @@ mod test {
                     },
                 ),
                 (
+                    "mysql_native_password empty-pass",
+                    false,
+                    |is_mariadb, version| is_mariadb || version < (8, 4, 0),
+                    |is_mariadb, version, _pass| {
+                        if is_mariadb {
+                            vec![
+                                format!("CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_native_password AS PASSWORD('')")
+                            ]
+                        } else if version < (8, 0, 0) {
+                            vec![
+                                "CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_native_password"
+                                    .into(),
+                                "SET old_passwords = 0".into(),
+                                format!("SET PASSWORD FOR '__mats'@'%' = PASSWORD('')"),
+                            ]
+                        } else {
+                            vec![
+                                format!("CREATE USER '__mats'@'%' IDENTIFIED WITH mysql_native_password BY ''")
+                            ]
+                        }
+                    },
+                ),
+                (
                     "caching_sha2_password",
+                    true,
                     |is_mariadb, version| !is_mariadb && version >= (5, 8, 0),
                     |_is_mariadb, _version, pass| {
                         vec![
@@ -2071,7 +2229,38 @@ mod test {
                     },
                 ),
                 (
+                    "caching_sha2_password empty-pass",
+                    false,
+                    |is_mariadb, version| !is_mariadb && version >= (5, 8, 0),
+                    |_is_mariadb, _version, _pass| {
+                        vec![format!(
+                            "CREATE USER '__mats'@'%' IDENTIFIED WITH caching_sha2_password BY ''"
+                        )]
+                    },
+                ),
+                (
+                    "sha256_password",
+                    true,
+                    |is_mariadb, version| !is_mariadb && version >= (5, 8, 0),
+                    |_is_mariadb, _version, pass| {
+                        vec![format!(
+                            "CREATE USER '__mats'@'%' IDENTIFIED WITH sha256_password BY '{pass}'"
+                        )]
+                    },
+                ),
+                (
+                    "sha256_password empty-pass",
+                    false,
+                    |is_mariadb, version| !is_mariadb && version >= (5, 8, 0),
+                    |_is_mariadb, _version, _pass| {
+                        vec![format!(
+                            "CREATE USER '__mats'@'%' IDENTIFIED WITH sha256_password BY ''"
+                        )]
+                    },
+                ),
+                (
                     "client_ed25519",
+                    true,
                     |is_mariadb, version| is_mariadb && version >= (10, 4, 0),
                     |_is_mariadb, _version, pass| {
                         vec![
@@ -2080,7 +2269,18 @@ mod test {
                     },
                 ),
                 (
+                    "client_ed25519 empty-pass",
+                    false,
+                    |is_mariadb, version| is_mariadb && version >= (10, 4, 0),
+                    |_is_mariadb, _version, _pass| {
+                        vec![format!(
+                            "CREATE USER '__mats'@'%' IDENTIFIED WITH ed25519 AS PASSWORD('')"
+                        )]
+                    },
+                ),
+                (
                     "parsec",
+                    true,
                     |is_mariadb, version| is_mariadb && version >= (11, 6, 0),
                     |_is_mariadb, _version, pass| {
                         vec![format!(
@@ -2088,16 +2288,17 @@ mod test {
                         )]
                     },
                 ),
+                (
+                    "parsec empty-pass",
+                    false,
+                    |is_mariadb, version| is_mariadb && version >= (11, 6, 0),
+                    |_is_mariadb, _version, _pass| {
+                        vec![format!(
+                            "CREATE USER '__mats'@'%' IDENTIFIED WITH parsec AS PASSWORD('')"
+                        )]
+                    },
+                ),
             ];
-
-            fn random_pass() -> String {
-                let mut rng = rand::rng();
-                let mut pass = [0u8; 10];
-                rng.fill_bytes(&mut pass);
-                IntoIterator::into_iter(pass)
-                    .map(|x| ((x % (123 - 97)) + 97) as char)
-                    .collect()
-            }
 
             let mut conn = Conn::new(get_opts()).unwrap();
 
@@ -2125,7 +2326,7 @@ mod test {
                 Value::NULL
             );
 
-            for (plugin, should_run, create_statements) in TEST_MATRIX {
+            for (plugin, use_password, should_run, create_statements) in TEST_MATRIX {
                 dbg!(plugin);
                 let is_mariadb = conn.0.mariadb_server_version.is_some();
                 let version = conn.server_version();
@@ -2143,13 +2344,32 @@ mod test {
                         conn.query_drop(dbg!(statement)).unwrap();
                     }
 
+                    let mut conn3 = Conn::new(
+                        get_opts()
+                            .secure_auth(false)
+                            .user(Some("__mats"))
+                            .pass(use_password.then_some(pass.clone()))
+                            .db_name(None::<String>)
+                            .max_allowed_packet(Some(1024 * 1024 * 4))
+                            .prefer_socket(false)
+                            .init(Vec::<String>::new()),
+                    )
+                    .unwrap();
+
+                    let (db, user) = conn3
+                        .query_first::<(Option<String>, String), _>("SELECT DATABASE(), USER();")
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(db, None);
+                    assert!(user.starts_with("__mats"));
+
                     let mut conn2 = Conn::new(get_opts().secure_auth(false)).unwrap();
                     conn2
                         .change_user(
                             crate::ChangeUserOpts::default()
                                 .with_db_name(None)
                                 .with_user(Some("__mats".into()))
-                                .with_pass(Some(pass)),
+                                .with_pass(use_password.then_some(pass)),
                         )
                         .unwrap();
 
@@ -2185,54 +2405,52 @@ mod test {
 
         #[test]
         fn should_connect_via_socket_for_127_0_0_1() {
-            let opts = OptsBuilder::from_opts(get_opts());
+            let opts = OptsBuilder::from_opts(get_opts().prefer_socket(true));
             let mut conn = Conn::new(opts).unwrap();
-            if conn.is_insecure() {
-                assert!(
-                    conn.is_socket(),
-                    "Did not reconnect via socket {:?}",
-                    (
-                        conn.0.opts.get_prefer_socket(),
-                        conn.0.opts.addr_is_loopback(),
-                        conn.can_improved().and_then(|opts| {
-                            opts.map(|opts| {
-                                let mut new = crate::conn::Conn(Box::new(ConnInner::empty(opts)));
-                                new.connect_stream().and_then(|_| {
-                                    new.connect()?;
-                                    Ok(new)
-                                })
+            assert!(
+                conn.is_socket_connection(),
+                "Did not reconnect via socket {:?}",
+                (
+                    conn.0.opts.get_prefer_socket(),
+                    conn.0.opts.addr_is_loopback(),
+                    conn.can_improved().and_then(|opts| {
+                        opts.map(|opts| {
+                            let mut new = crate::conn::Conn(Box::new(ConnInner::empty(opts)));
+                            new.connect_stream().and_then(|_| {
+                                new.connect()?;
+                                Ok(new)
                             })
-                            .transpose()
-                        }),
-                    )
-                );
-            }
+                        })
+                        .transpose()
+                    }),
+                )
+            );
         }
 
         #[test]
         fn should_connect_via_socket_localhost() {
-            let opts = OptsBuilder::from_opts(get_opts()).ip_or_hostname(Some("localhost"));
+            let opts = get_opts()
+                .prefer_socket(true)
+                .ip_or_hostname(Some("localhost"));
             let mut conn = Conn::new(opts).unwrap();
-            if conn.is_insecure() {
-                assert!(
-                    conn.is_socket(),
-                    "Did not reconnect via socket {:?}",
-                    (
-                        conn.0.opts.get_prefer_socket(),
-                        conn.0.opts.addr_is_loopback(),
-                        conn.can_improved().and_then(|opts| {
-                            opts.map(|opts| {
-                                let mut new = crate::conn::Conn(Box::new(ConnInner::empty(opts)));
-                                new.connect_stream().and_then(|_| {
-                                    new.connect()?;
-                                    Ok(new)
-                                })
+            assert!(
+                conn.is_socket_connection(),
+                "Did not reconnect via socket {:?}",
+                (
+                    conn.0.opts.get_prefer_socket(),
+                    conn.0.opts.addr_is_loopback(),
+                    conn.can_improved().and_then(|opts| {
+                        opts.map(|opts| {
+                            let mut new = crate::conn::Conn(Box::new(ConnInner::empty(opts)));
+                            new.connect_stream().and_then(|_| {
+                                new.connect()?;
+                                Ok(new)
                             })
-                            .transpose()
-                        }),
-                    )
-                );
-            }
+                        })
+                        .transpose()
+                    }),
+                )
+            );
         }
 
         /// QueryResult::drop hangs on connectivity errors (see [blackbeam/rust-mysql-simple#306][1]).
@@ -2937,9 +3155,21 @@ mod test {
             conn.exec_batch(query, params)
                 .expect("Batch execution should succeed");
 
-            let inserted_rows: Vec<(u64, String)> = conn
-                .query("SELECT id, val FROM t_large_batch ORDER BY id") // Order by data to get a predictable "a", "b", "c" order
-                .unwrap();
+            // MySql compression does not respect max_allowed_packet, so we're going to query
+            // one by one
+            let mut inserted_rows: Vec<(u64, String)> = vec![];
+            inserted_rows.extend(
+                conn.query("SELECT id, val FROM t_large_batch ORDER BY id LIMIT 1 OFFSET 0")
+                    .unwrap(),
+            );
+            inserted_rows.extend(
+                conn.query("SELECT id, val FROM t_large_batch ORDER BY id LIMIT 1 OFFSET 1")
+                    .unwrap(),
+            );
+            inserted_rows.extend(
+                conn.query("SELECT id, val FROM t_large_batch ORDER BY id LIMIT 65536 OFFSET 2")
+                    .unwrap(),
+            );
 
             assert_eq!(
                 inserted_rows.len(),
@@ -2980,27 +3210,16 @@ mod test {
             Ok(())
         }
 
-        #[cfg_attr(docsrs, doc(cfg(feature = "client_parsec")))]
         #[test]
         #[cfg(feature = "client_parsec")]
         fn parsec_connect() {
-            let mut conn = Conn::new(get_opts()).unwrap();
+            let mut conn = Conn::new(get_opts().ssl_opts(None)).unwrap();
             let is_mariadb = conn.0.mariadb_server_version.is_some();
             let version = conn.server_version();
             if is_mariadb && version >= (11, 6, 0) {
                 // Creating random password so in case of test failure user won't have
                 // known password left behind.
-                let mut rng = rand::rng();
-                let mut pass_bytes = [0u8; 16];
-                rng.fill_bytes(&mut pass_bytes);
-                pass_bytes.iter_mut().for_each(|b| {
-                    *b = match *b % 3 {
-                        0 => b'A' + (*b % 26),
-                        1 => b'a' + (*b % 26),
-                        _ => b'0' + (*b % 10),
-                    }
-                });
-                let pass = String::from_utf8_lossy(&pass_bytes).to_string();
+                let pass = random_pass();
 
                 conn.query_drop("DROP USER IF EXISTS 'parsec_test_user'@'%'")
                     .unwrap();
@@ -3020,6 +3239,191 @@ mod test {
                 assert!(conn_parsec.ping().is_ok());
                 conn.query_drop("DROP USER 'parsec_test_user'@'%'").unwrap();
             }
+        }
+
+        #[cfg_attr(
+            docsrs,
+            doc(cfg(any(
+                feature = "rustls",
+                feature = "rustls-tls",
+                feature = "rustls-tls-ring"
+            )))
+        )]
+        #[test]
+        #[cfg(any(
+            feature = "rustls",
+            feature = "rustls-tls",
+            feature = "rustls-tls-ring"
+        ))]
+        // Test of MariaDB "Zero config SSL" with native authentication - one of three supported by the feature.
+        // First making connection to verify that this is MariaDB server and that it supports "Zero config SSL"
+        // (MariaDB >= 11.4.0) then trying to establish TLS connection making sure that certificate is validated.
+        fn mariadb_auto_tls() -> crate::Result<()> {
+            let aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
+            let is_mariadb = aux.0.mariadb_server_version.is_some();
+            let version = aux.server_version();
+            if is_mariadb && version > (11, 4, 0) {
+                let mut conn =
+                    Conn::new(get_opts().ssl_opts(
+                        crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                    ))
+                    .unwrap();
+
+                assert!(conn.is_tls_connection());
+                assert!(conn.ping().is_ok());
+            }
+            Ok(())
+        }
+
+        #[cfg_attr(
+            docsrs,
+            doc(cfg(all(
+                any(
+                    feature = "rustls",
+                    feature = "rustls-tls",
+                    feature = "rustls-tls-ring"
+                ),
+                feature = "client_ed25519"
+            )))
+        )]
+        #[test]
+        #[cfg(all(
+            any(
+                feature = "rustls",
+                feature = "rustls-tls",
+                feature = "rustls-tls-ring"
+            ),
+            feature = "client_ed25519"
+        ))]
+        // Test of MariaDB "Zero config SSL" with ed25519 authentication
+        fn mariadb_auto_tls_ed25519() -> crate::Result<()> {
+            let mut aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
+            let is_mariadb = aux.0.mariadb_server_version.is_some();
+            let version = aux.server_version();
+            if is_mariadb && version > (11, 4, 0) {
+                let pass = random_pass();
+
+                aux.query_drop("DROP USER IF EXISTS 'ed25519_tls_test_user'@'%'")
+                    .unwrap();
+                let create_user_query = format!(
+                    "CREATE USER 'ed25519_tls_test_user'@'%' IDENTIFIED WITH ed25519 USING PASSWORD('{pass}')"
+                );
+                aux.query_drop(create_user_query).unwrap();
+
+                let mut conn = Conn::new(
+                    get_opts()
+                        .user(Some("ed25519_tls_test_user"))
+                        .pass(Some(pass))
+                        .db_name(None::<String>)
+                        .init(vec![] as Vec<String>)
+                        .ssl_opts(
+                            crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                        ),
+                )?;
+                assert!(conn.is_tls_connection());
+                assert!(conn.ping().is_ok());
+
+                // Testing that we can't make secure connection with empty password.
+                // "Zero config SSL" does not work with empty password.
+                // This can fail if server has real certificate.
+                conn.query_drop("SET PASSWORD = PASSWORD('')")?;
+                drop(conn);
+
+                let conn = Conn::new(
+                    get_opts()
+                        .user(Some("ed25519_tls_test_user"))
+                        .pass(Some(""))
+                        .db_name(None::<String>)
+                        .init(vec![] as Vec<String>)
+                        .ssl_opts(
+                            crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                        ),
+                );
+                // We shouldn't have got secure connection with insesure plugins -
+                // connection should have failed.
+                assert!(conn.is_err());
+                aux.query_drop("DROP USER 'ed25519_tls_test_user'@'%'")?;
+            }
+            Ok(())
+        }
+
+        #[cfg_attr(
+            docsrs,
+            doc(cfg(all(
+                any(
+                    feature = "rustls",
+                    feature = "rustls-tls",
+                    feature = "rustls-tls-ring"
+                ),
+                feature = "client_parsec"
+            )))
+        )]
+        #[test]
+        #[cfg(all(
+            any(
+                feature = "rustls",
+                feature = "rustls-tls",
+                feature = "rustls-tls-ring"
+            ),
+            feature = "client_parsec"
+        ))]
+        // Test of MariaDB "Zero config SSL" with parsec authentication
+        fn mariadb_auto_tls_parsec() -> crate::Result<()> {
+            let mut aux = Conn::new(get_opts().ssl_opts(None)).unwrap();
+            let is_mariadb = aux.0.mariadb_server_version.is_some();
+            let version = aux.server_version();
+            if is_mariadb && version >= (11, 6, 0) {
+                let pass = random_pass();
+                aux.query_drop("DROP USER IF EXISTS 'parsec_tls_test_user'@'%'")?;
+                let create_user_query = format!(
+                   "CREATE USER 'parsec_tls_test_user'@'%' IDENTIFIED VIA 'parsec' USING PASSWORD('{pass}')"
+                );
+                aux.query_drop(create_user_query)?;
+
+                let mut conn = Conn::new(
+                    get_opts()
+                        .user(Some("parsec_tls_test_user"))
+                        .pass(Some(pass.clone()))
+                        .db_name(None::<String>)
+                        .init(vec![] as Vec<String>)
+                        .ssl_opts(
+                            crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                        ),
+                )?;
+                assert!(conn.is_tls_connection());
+                assert!(conn.ping().is_ok());
+                drop(conn);
+                aux.query_drop("DROP USER 'parsec_tls_test_user'@'%'")?;
+
+                // caching_sha2_password is not MitM-proof. "Zero config SSL" does not work with such authentication methods.
+                // This can fail if server has real certificate. Combining 2 tests to be sure for the 2nd test that "zero config SSL"
+                // works in general.
+                aux.query_drop("DROP USER IF EXISTS 'caching_sha2_tls_test_user'@'%'")?;
+                if aux
+                    .query_drop(
+                        "CREATE USER 'caching_sha2_tls_test_user'@'%'
+                IDENTIFIED WITH caching_sha2_password USING PASSWORD('{pass}')",
+                    )
+                    .is_ok()
+                {
+                    // Test makes sense only if the plugin is present and active. If we can't create user with such plugin, we can skip the test.
+                    let conn = Conn::new(
+                        get_opts()
+                            .user(Some("ed25519_tls_test_user"))
+                            .pass(Some(pass))
+                            .db_name(None::<String>)
+                            .init(vec![] as Vec<String>)
+                            .ssl_opts(
+                                crate::SslOpts::default().with_danger_skip_domain_validation(false),
+                            ),
+                    );
+                    // We shouldn't have had secure connection with insecure plugins -
+                    // connection should have failed.
+                    assert!(conn.is_err());
+                    aux.query_drop("DROP USER 'caching_sha2_tls_test_user'@'%'")?;
+                }
+            }
+            Ok(())
         }
 
         #[test]
