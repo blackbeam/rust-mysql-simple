@@ -74,6 +74,7 @@ time = "0.3"
 frunk = "0.4"
 
 [dependencies]
+arc-swap = "1.9.2"
 bufstream = "~0.1"
 bytes = "1.0.1"
 crossbeam-queue = "0.3.12"
