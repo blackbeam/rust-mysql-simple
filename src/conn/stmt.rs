@@ -6,10 +6,10 @@
 // option. All files in the project carrying such notice may not be copied,
 // modified, or distributed except according to those terms.
 
-use crossbeam_utils::atomic::AtomicCell;
+use arc_swap::ArcSwapOption;
 use mysql_common::{io::ParseBuf, packets::StmtPacket, proto::MyDeserialize};
 
-use std::{borrow::Cow, fmt, io, ptr::NonNull, sync::Arc};
+use std::{borrow::Cow, fmt, io, sync::Arc};
 
 use crate::{prelude::*, Column, Result};
 
@@ -150,66 +150,24 @@ impl<T: AsRef<str>> AsStatement for T {
     }
 }
 
-/// This is to make raw Arc pointer Send and Sync
-///
-/// This splits fat `*const [Column]` pointer to its components
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(transparent)]
-struct ColumnsArcPtr((NonNull<Column>, usize));
-
-impl ColumnsArcPtr {
-    fn from_arc(arc: Arc<[Column]>) -> Self {
-        let len = arc.len();
-        let ptr = Arc::into_raw(arc);
-        // SAFETY: the `Arc` structure itself contains NonNull so this is either safe
-        // or someone created a broken `Arc` using unsafe code.
-        let ptr = unsafe { NonNull::new_unchecked(ptr as *const Column as *mut Column) };
-        Self((ptr, len))
-    }
-
-    fn to_arc(self) -> Arc<[Column]> {
-        let columns = self.into_arc();
-        let clone = columns.clone();
-        // ignore the pointer because it is already stored in self
-        let _ = Arc::into_raw(columns);
-        clone
-    }
-
-    fn into_arc(self) -> Arc<[Column]> {
-        let fat_pointer = NonNull::slice_from_raw_parts(self.0 .0, self.0 .1);
-        // SAFETY: non-null pointer always points to a valid Arc
-        unsafe { Arc::from_raw(fat_pointer.as_ptr()) }
-    }
-}
-
-unsafe impl Send for ColumnsArcPtr {}
-unsafe impl Sync for ColumnsArcPtr {}
-
 struct ColumnCache {
-    columns: AtomicCell<Option<ColumnsArcPtr>>,
+    columns: ArcSwapOption<Arc<[Column]>>,
 }
 
 impl ColumnCache {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
-            columns: AtomicCell::new(None),
+            columns: ArcSwapOption::const_empty(),
         }
     }
 
     fn get_columns(&self) -> Option<Arc<[Column]>> {
-        self.columns.load().map(|x| x.to_arc())
+        self.columns.load_full().map(|x| (*x).clone())
     }
 
     fn set_columns(&self, new_columns: Vec<Column>) {
         let new_columns: Arc<[Column]> = new_columns.into();
-        let new_ptr = ColumnsArcPtr::from_arc(new_columns);
-
-        let Some(old_ptr) = self.columns.swap(Some(new_ptr)) else {
-            return;
-        };
-
-        // drop the old `Arc`
-        old_ptr.into_arc();
+        self.columns.store(Some(Arc::new(new_columns)));
     }
 }
 
@@ -229,9 +187,55 @@ impl PartialEq for ColumnCache {
 
 impl Eq for ColumnCache {}
 
-impl Drop for ColumnCache {
-    fn drop(&mut self) {
-        // drop `Arc` if any
-        self.columns.load().map(|x| x.into_arc());
+#[cfg(test)]
+mod tests {
+    use super::ColumnCache;
+    use crate::Column;
+    use mysql_common::constants::ColumnType;
+    use std::{sync::Arc, thread};
+
+    const ROUNDS: usize = if cfg!(miri) { 8 } else { 10_000 };
+
+    fn columns(table: &str, len: usize) -> Vec<Column> {
+        (0..len)
+            .map(|_| Column::new(ColumnType::MYSQL_TYPE_LONG).with_table(table.as_bytes()))
+            .collect()
+    }
+
+    #[test]
+    fn reader_keeps_columns_alive_while_writer_replaces_them() {
+        let cache = Arc::new(ColumnCache::new());
+        cache.set_columns(columns("t", 42));
+
+        let writer = {
+            let cache = Arc::clone(&cache);
+            thread::spawn(move || {
+                for _ in 0..ROUNDS {
+                    cache.set_columns(columns("t", 46));
+                    cache.set_columns(columns("t", 42));
+                }
+            })
+        };
+
+        let readers: Vec<_> = (0..4)
+            .map(|_| {
+                let cache = Arc::clone(&cache);
+                thread::spawn(move || {
+                    for _ in 0..ROUNDS {
+                        let Some(columns) = cache.get_columns() else {
+                            continue;
+                        };
+                        for column in columns.iter() {
+                            assert_eq!(column.table_str(), "t");
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        writer.join().unwrap();
+        for reader in readers {
+            reader.join().unwrap();
+        }
     }
 }
