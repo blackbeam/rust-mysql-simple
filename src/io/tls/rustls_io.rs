@@ -143,11 +143,10 @@ impl ServerCertVerifier for DangerousVerifier {
                 now,
             ) {
                 Ok(assertion) => Ok(assertion),
-                Err(Error::InvalidCertificate(CertificateError::NotValidForName))
-                    if self.skip_domain_validation =>
-                {
-                    Ok(ServerCertVerified::assertion())
-                }
+                Err(Error::InvalidCertificate(
+                    CertificateError::NotValidForName
+                    | CertificateError::NotValidForNameContext { .. },
+                )) if self.skip_domain_validation => Ok(ServerCertVerified::assertion()),
                 Err(e) => Err(e),
             }
         }
@@ -173,5 +172,58 @@ impl ServerCertVerifier for DangerousVerifier {
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.verifier.supported_verify_schemes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rustls::pki_types::UnixTime;
+
+    use super::*;
+
+    fn verify(
+        skip_domain_validation: bool,
+        name: &str,
+        server_cert_path: &str,
+    ) -> Result<ServerCertVerified, Error> {
+        let ca = std::fs::read("tests/ca.crt").unwrap();
+        let mut root_store = RootCertStore::empty();
+        root_store
+            .add(certs(&mut &*ca).next().unwrap().unwrap())
+            .unwrap();
+        let verifier = WebPkiServerVerifier::builder(Arc::new(root_store))
+            .build()
+            .unwrap();
+        let dangerous_verifier = DangerousVerifier::new(false, skip_domain_validation, verifier);
+
+        let server_cert = std::fs::read(server_cert_path).unwrap();
+        let end_entity = certs(&mut &*server_cert).next().unwrap().unwrap();
+        let server_name = ServerName::try_from(name).unwrap();
+
+        dangerous_verifier.verify_server_cert(&end_entity, &[], &server_name, &[], UnixTime::now())
+    }
+
+    // tests/server.crt SANs are 127.0.0.1 and localhost, so any other name is a mismatch
+    // while still chaining to the trusted CA.
+    #[test]
+    fn skip_domain_validation_ignores_hostname_mismatch() {
+        assert!(verify(true, "wrong.example", "tests/server.crt").is_ok());
+    }
+
+    #[test]
+    fn hostname_mismatch_fails_without_skip_domain_validation() {
+        assert!(verify(false, "wrong.example", "tests/server.crt").is_err());
+    }
+
+    #[test]
+    fn skip_domain_validation_does_not_affect_matching_hostname() {
+        assert!(verify(true, "localhost", "tests/server.crt").is_ok());
+    }
+
+    // tests/other-server.crt is signed by tests/other-ca.crt, not tests/ca.crt, so it
+    // must still be rejected even with a matching name and skip_domain_validation set.
+    #[test]
+    fn skip_domain_validation_does_not_bypass_unknown_issuer() {
+        assert!(verify(true, "localhost", "tests/other-server.crt").is_err());
     }
 }
