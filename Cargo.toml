@@ -83,7 +83,7 @@ crossbeam-queue = "0.3.12"
 crossbeam-utils = "0.8.21"
 flate2 = { version = "1.0", default-features = false }
 io-enum = "1.0.0"
-lru = { version = "0.16.3", default-features = false }
+lru = { version = "0.18.2", default-features = false }
 mysql_common = { version = "0.38.2", default-features = false }
 native-tls = { version = "0.2.3", optional = true }
 pem = "3"
