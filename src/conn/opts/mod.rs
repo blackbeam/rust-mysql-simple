@@ -10,7 +10,13 @@ use percent_encoding::percent_decode;
 use url::Url;
 
 use std::{
-    borrow::Cow, collections::HashMap, fmt, hash::Hash, net::SocketAddr, path::Path, time::Duration,
+    borrow::Cow,
+    collections::HashMap,
+    fmt,
+    hash::Hash,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
 };
 
 use crate::{
@@ -638,27 +644,13 @@ impl OptsBuilder {
     }
 
     /// Use a HashMap for creating an OptsBuilder instance:
+    ///
+    /// See "URL-based connection string" section in the crate-level
+    /// docs for the list of supported keys.
+    ///
     /// ```ignore
     /// OptsBuilder::new().from_hash_map(client);
     /// ```
-    /// `HashMap` key,value pairs:
-    /// - pool_min = upper bound for [`PoolConstraints`]
-    /// - pool_max = lower bound for [`PoolConstraints`]
-    /// - user = Username
-    /// - password = Password
-    /// - host = Host name or ip address
-    /// - port = Port, default is 3306
-    /// - socket = Unix socket or pipe name(on windows) defaults to `None`
-    /// - db_name = Database name (defaults to `None`).
-    /// - prefer_socket = Prefer socket connection (defaults to `true`)
-    /// - tcp_keepalive_time_ms = TCP keep alive time for mysql connection (defaults to `None`)
-    /// - tcp_keepalive_probe_interval_secs = TCP keep alive interval between probes for mysql connection (defaults to `None`)
-    /// - tcp_keepalive_probe_count = TCP keep alive probe count for mysql connection (defaults to `None`)
-    /// - tcp_user_timeout_ms = TCP_USER_TIMEOUT time for mysql connection (defaults to `None`)
-    /// - compress = Compression level(defaults to `None`)
-    /// - tcp_connect_timeout_ms = Tcp connect timeout (defaults to `None`)
-    /// - stmt_cache_size = Number of prepared statements cached on the client side (per connection)
-    /// - secure_auth = Disable `mysql_old_password` auth plugin
     ///
     /// Login .cnf file parsing lib <https://github.com/rjcortese/myloginrs> returns a HashMap for client configs
     ///
@@ -666,7 +658,21 @@ impl OptsBuilder {
     pub fn from_hash_map(mut self, client: &HashMap<String, String>) -> Result<Self, UrlError> {
         let mut pool_min = PoolConstraints::DEFAULT.min();
         let mut pool_max = PoolConstraints::DEFAULT.max();
+
+        // [`SslOpts`] url parameters
+        #[cfg_attr(not(feature = "rustls"), expect(unused_mut, unused_variables))]
         let mut cipher_suites: Option<Vec<String>> = None;
+        let mut root_cert_path: Option<PathBuf> = None;
+        let mut skip_domain_validation: Option<bool> = None;
+        let mut accept_invalid_certs: Option<bool> = None;
+        #[cfg_attr(not(feature = "rustls"), expect(unused_mut, unused_variables))]
+        let mut cert_chain_path: Option<PathBuf> = None;
+        #[cfg_attr(not(feature = "rustls"), expect(unused_mut, unused_variables))]
+        let mut priv_key_path: Option<PathBuf> = None;
+        #[cfg_attr(not(feature = "native-tls"), expect(unused_mut, unused_variables))]
+        let mut pkcs12_path: Option<PathBuf> = None;
+        #[cfg_attr(not(feature = "native-tls"), expect(unused_mut, unused_variables))]
+        let mut pkcs12_pass: Option<String> = None;
 
         for (key, value) in client.iter() {
             match key.as_str() {
@@ -855,9 +861,66 @@ impl OptsBuilder {
                     }
                     #[cfg(not(feature = "rustls"))]
                     return Err(UrlError::FeatureRequired(
-                        "rustls-tls | rustls-tls-ring".to_owned(),
+                        "rustls | rustls-tls | rustls-tls-ring".to_owned(),
                         key.as_str().to_owned(),
                     ));
+                }
+                "cert_chain_path" => {
+                    #[cfg(feature = "rustls")]
+                    {
+                        cert_chain_path = Some(PathBuf::from(value));
+                    }
+                    #[cfg(not(feature = "rustls"))]
+                    return Err(UrlError::FeatureRequired(
+                        "rustls | rustls-tls | rustls-tls-ring".to_owned(),
+                        key.as_str().to_owned(),
+                    ));
+                }
+                "priv_key_path" => {
+                    #[cfg(feature = "rustls")]
+                    {
+                        priv_key_path = Some(PathBuf::from(value));
+                    }
+                    #[cfg(not(feature = "rustls"))]
+                    return Err(UrlError::FeatureRequired(
+                        "rustls | rustls-tls | rustls-tls-ring".to_owned(),
+                        key.as_str().to_owned(),
+                    ));
+                }
+                "pkcs12_path" => {
+                    #[cfg(feature = "native-tls")]
+                    {
+                        pkcs12_path = Some(PathBuf::from(value));
+                    }
+                    #[cfg(not(feature = "native-tls"))]
+                    return Err(UrlError::FeatureRequired(
+                        "native-tls".to_owned(),
+                        key.as_str().to_owned(),
+                    ));
+                }
+                "pkcs12_pass" => {
+                    #[cfg(feature = "native-tls")]
+                    {
+                        pkcs12_pass = Some(value.clone());
+                    }
+                    #[cfg(not(feature = "native-tls"))]
+                    return Err(UrlError::FeatureRequired(
+                        "native-tls".to_owned(),
+                        key.as_str().to_owned(),
+                    ));
+                }
+                "root_cert_path" => root_cert_path = Some(PathBuf::from(value)),
+                "danger_skip_domain_validation" => {
+                    skip_domain_validation =
+                        Some(value.parse::<bool>().map_err(|_| {
+                            UrlError::InvalidValue(key.to_string(), value.to_string())
+                        })?)
+                }
+                "danger_accept_invalid_certs" => {
+                    accept_invalid_certs =
+                        Some(value.parse::<bool>().map_err(|_| {
+                            UrlError::InvalidValue(key.to_string(), value.to_string())
+                        })?)
                 }
                 _ => {
                     //throw an error if there is an unrecognized param
@@ -881,6 +944,52 @@ impl OptsBuilder {
         if let Some(cipher_suites) = cipher_suites {
             let ssl_opts: &mut SslOpts = ssl_opts.get_or_insert_default();
             ssl_opts.cipher_suites = Some(cipher_suites);
+        }
+
+        #[cfg(feature = "rustls")]
+        match (cert_chain_path, priv_key_path) {
+            (Some(cert_chain_path), Some(priv_key_path)) => {
+                let ssl_opts: &mut SslOpts = ssl_opts.get_or_insert_default();
+                ssl_opts.client_identity = Some(ClientIdentity::new(cert_chain_path, priv_key_path))
+            }
+            (Some(_), None) => {
+                return Err(UrlError::InvalidValue(
+                    "priv_key_path".to_owned(),
+                    "<MISSING>".to_owned(),
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(UrlError::InvalidValue(
+                    "cert_chain_path".to_owned(),
+                    "<MISSING>".to_owned(),
+                ));
+            }
+            _ => (),
+        }
+
+        #[cfg(feature = "native-tls")]
+        if let Some(pkcs12_path) = pkcs12_path {
+            let ssl_opts: &mut SslOpts = ssl_opts.get_or_insert_default();
+            let mut identity = ClientIdentity::new(pkcs12_path);
+            if let Some(pkcs12_pass) = pkcs12_pass {
+                identity = identity.with_password(pkcs12_pass);
+            }
+            ssl_opts.client_identity = Some(identity);
+        }
+
+        if let Some(root_cert_path) = root_cert_path {
+            let ssl_opts: &mut SslOpts = ssl_opts.get_or_insert_default();
+            ssl_opts.root_cert_path = Some(Cow::Owned(root_cert_path));
+        }
+
+        if let Some(skip_domain_validation) = skip_domain_validation {
+            let ssl_opts: &mut SslOpts = ssl_opts.get_or_insert_default();
+            ssl_opts.skip_domain_validation = skip_domain_validation;
+        }
+
+        if let Some(accept_invalid_certs) = accept_invalid_certs {
+            let ssl_opts: &mut SslOpts = ssl_opts.get_or_insert_default();
+            ssl_opts.accept_invalid_certs = accept_invalid_certs;
         }
 
         if let Some(ssl_opts) = ssl_opts {
@@ -1429,7 +1538,7 @@ impl fmt::Debug for ChangeUserOpts {
 #[cfg(test)]
 mod test {
     use mysql_common::proto::codec::Compression;
-    use std::time::Duration;
+    use std::{path::Path, time::Duration};
 
     use super::{InnerOpts, Opts, OptsBuilder};
 
@@ -1666,6 +1775,117 @@ mod test {
             UrlError::InvalidValue(
                 "cipher_suites".to_owned(),
                 "TLS_NULL_WITH_NULL_NULL".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "rustls")]
+    fn rustls_identity() {
+        let opts =
+            Opts::from_url("mysql://localhost/?cert_chain_path=foo&priv_key_path=bar").unwrap();
+        assert_eq!(
+            opts.get_ssl_opts().unwrap().client_identity(),
+            Some(&super::ClientIdentity::new(
+                Path::new("foo"),
+                Path::new("bar")
+            ))
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "rustls")]
+    fn rustls_identity_key_path_required() {
+        use super::UrlError;
+
+        let err = Opts::from_url("mysql://localhost/?cert_chain_path=foo").unwrap_err();
+        assert_eq!(
+            err,
+            UrlError::InvalidValue("priv_key_path".to_owned(), "<MISSING>".to_owned()),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "rustls")]
+    fn rustls_identity_chain_path_required() {
+        use super::UrlError;
+
+        let err = Opts::from_url("mysql://localhost/?priv_key_path=foo").unwrap_err();
+        assert_eq!(
+            err,
+            UrlError::InvalidValue("cert_chain_path".to_owned(), "<MISSING>".to_owned()),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "native-tls")]
+    fn pkcs12_path() {
+        let opts = Opts::from_url("mysql://localhost/?pkcs12_path=foo").unwrap();
+        assert_eq!(
+            opts.get_ssl_opts().unwrap().client_identity(),
+            Some(&super::ClientIdentity::new(Path::new("foo"))),
+        );
+
+        let opts = Opts::from_url("mysql://localhost/?pkcs12_path=foo&pkcs12_pass=bar").unwrap();
+        assert_eq!(
+            opts.get_ssl_opts().unwrap().client_identity(),
+            Some(&super::ClientIdentity::new(Path::new("foo")).with_password("bar")),
+        );
+
+        let opts = Opts::from_url("mysql://localhost/?pkcs12_pass=bar").unwrap();
+        assert!(opts.get_ssl_opts().is_none());
+    }
+
+    #[test]
+    fn root_cert_path() {
+        let opts = Opts::from_url("mysql://localhost/?root_cert_path=foo").unwrap();
+        assert_eq!(
+            opts.get_ssl_opts().unwrap().root_cert_path(),
+            Some(Path::new("foo"))
+        );
+    }
+
+    #[test]
+    fn danger_skip_domain_validation() {
+        let opts = Opts::from_url("mysql://localhost/?danger_skip_domain_validation=true").unwrap();
+        assert!(opts.get_ssl_opts().unwrap().skip_domain_validation());
+        let opts =
+            Opts::from_url("mysql://localhost/?danger_skip_domain_validation=false").unwrap();
+        assert!(!opts.get_ssl_opts().unwrap().skip_domain_validation());
+    }
+
+    #[test]
+    fn danger_skip_domain_validation_invalid_value() {
+        let err =
+            Opts::from_url("mysql://localhost/?danger_skip_domain_validation=funny_third_option")
+                .unwrap_err();
+        assert_eq!(
+            err,
+            super::UrlError::InvalidValue(
+                "danger_skip_domain_validation".to_owned(),
+                "funny_third_option".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn danger_accept_invalid_certs() {
+        let opts = Opts::from_url("mysql://localhost/?danger_accept_invalid_certs=true").unwrap();
+        assert!(opts.get_ssl_opts().unwrap().accept_invalid_certs());
+        let opts = Opts::from_url("mysql://localhost/?danger_accept_invalid_certs=false").unwrap();
+        assert!(!opts.get_ssl_opts().unwrap().accept_invalid_certs());
+    }
+
+    #[test]
+    fn danger_accept_invalid_certs_invalid_value() {
+        let err =
+            Opts::from_url("mysql://localhost/?danger_accept_invalid_certs=funny_third_option")
+                .unwrap_err();
+        assert_eq!(
+            err,
+            super::UrlError::InvalidValue(
+                "danger_accept_invalid_certs".to_owned(),
+                "funny_third_option".to_owned()
             )
         );
     }
