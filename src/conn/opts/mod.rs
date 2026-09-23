@@ -39,6 +39,8 @@ pub struct SslOpts {
     root_cert_path: Option<Cow<'static, Path>>,
     skip_domain_validation: bool,
     accept_invalid_certs: bool,
+    #[cfg(feature = "rustls")]
+    cipher_suites: Option<Vec<String>>,
 }
 
 impl SslOpts {
@@ -83,6 +85,29 @@ impl SslOpts {
         self
     }
 
+    /// List of TLS cipher suites to use (provider defaults are used by default).
+    ///
+    /// Expects a list of cipher suite names (see [`rustls::CipherSuite`]).
+    /// Empty vec will reset to default. Provider-incompatible suites will be filtered out.
+    #[cfg(feature = "rustls")]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(feature = "rustls-tls", feature = "rustls-tls-ring")))
+    )]
+    pub fn with_cipher_suites(mut self, cipher_suites: &[rustls::SupportedCipherSuite]) -> Self {
+        if cipher_suites.is_empty() {
+            self.cipher_suites = None;
+        } else {
+            self.cipher_suites = Some(
+                cipher_suites
+                    .iter()
+                    .filter_map(|x| x.suite().as_str().map(|x| x.to_owned()))
+                    .collect(),
+            );
+        }
+        self
+    }
+
     #[cfg(any(feature = "native-tls", feature = "rustls"))]
     #[cfg_attr(
         docsrs,
@@ -106,6 +131,15 @@ impl SslOpts {
 
     pub fn accept_invalid_certs(&self) -> bool {
         self.accept_invalid_certs
+    }
+
+    #[cfg(feature = "rustls")]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(feature = "rustls-tls", feature = "rustls-tls-ring")))
+    )]
+    pub fn cipher_suites(&self) -> Option<&[String]> {
+        self.cipher_suites.as_deref()
     }
 }
 
@@ -632,6 +666,7 @@ impl OptsBuilder {
     pub fn from_hash_map(mut self, client: &HashMap<String, String>) -> Result<Self, UrlError> {
         let mut pool_min = PoolConstraints::DEFAULT.min();
         let mut pool_max = PoolConstraints::DEFAULT.max();
+        let mut cipher_suites: Option<Vec<String>> = None;
 
         for (key, value) in client.iter() {
             match key.as_str() {
@@ -774,6 +809,56 @@ impl OptsBuilder {
                         return Err(UrlError::InvalidValue(key.to_string(), value.to_string()))
                     }
                 },
+                "cipher_suites" => {
+                    #[cfg(feature = "rustls")]
+                    {
+                        let supported_suites = rustls::ClientConfig::builder()
+                            .crypto_provider()
+                            .cipher_suites
+                            .clone();
+
+                        let mut selected_suites = Vec::new();
+                        for name in value.split(",") {
+                            if name.is_empty() {
+                                continue;
+                            }
+
+                            if supported_suites
+                                .iter()
+                                .any(|y| y.suite().as_str() == Some(name))
+                            {
+                                selected_suites.push(name.to_owned());
+                            } else {
+                                return Err(UrlError::InvalidValue(
+                                    key.to_string(),
+                                    name.to_owned(),
+                                ));
+                            }
+                        }
+
+                        let selected_suites = value
+                            .split(",")
+                            .filter(|x| !x.is_empty())
+                            .filter(|x| {
+                                supported_suites
+                                    .iter()
+                                    .any(|y| y.suite().as_str() == Some(*x))
+                            })
+                            .map(|x| x.to_owned())
+                            .collect::<Vec<_>>();
+
+                        if selected_suites.is_empty() {
+                            return Err(UrlError::InvalidValue(key.to_string(), value.to_string()));
+                        }
+
+                        cipher_suites = Some(selected_suites);
+                    }
+                    #[cfg(not(feature = "rustls"))]
+                    return Err(UrlError::FeatureRequired(
+                        "rustls-tls | rustls-tls-ring".to_owned(),
+                        key.as_str().to_owned(),
+                    ));
+                }
                 _ => {
                     //throw an error if there is an unrecognized param
                     return Err(UrlError::UnknownParameter(key.to_string()));
@@ -788,6 +873,18 @@ impl OptsBuilder {
                 min: pool_min,
                 max: pool_max,
             });
+        }
+
+        let mut ssl_opts: Option<SslOpts> = None;
+
+        #[cfg(feature = "rustls")]
+        if let Some(cipher_suites) = cipher_suites {
+            let ssl_opts: &mut SslOpts = ssl_opts.get_or_insert_default();
+            ssl_opts.cipher_suites = Some(cipher_suites);
+        }
+
+        if let Some(ssl_opts) = ssl_opts {
+            self.opts.0.ssl_opts = Some(ssl_opts.clone());
         }
 
         Ok(self)
@@ -1519,6 +1616,57 @@ mod test {
                 "port".to_string(),
                 "NOTAPORT".to_string()
             ))
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "rustls")]
+    fn cipher_suites_override() {
+        let opt = Opts::from_url("mysql://localhost/?cipher_suites=TLS13_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256").unwrap();
+        assert_eq!(
+            opt.get_ssl_opts().and_then(|x| x.cipher_suites()),
+            Some(
+                &[
+                    "TLS13_AES_128_GCM_SHA256".to_owned(),
+                    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256".to_owned(),
+                ][..]
+            ),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "rustls")]
+    fn cipher_suites_empty_list_emits_error() {
+        use crate::UrlError;
+
+        let err = Opts::from_url("mysql://localhost/?cipher_suites=").unwrap_err();
+        assert_eq!(
+            err,
+            UrlError::InvalidValue("cipher_suites".to_owned(), String::default())
+        );
+
+        let err = Opts::from_url("mysql://localhost/?cipher_suites=,,").unwrap_err();
+        assert_eq!(
+            err,
+            UrlError::InvalidValue("cipher_suites".to_owned(), ",,".to_owned())
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "rustls")]
+    fn cipher_suites_unsupported_suite_emits_error() {
+        use crate::UrlError;
+
+        let err = Opts::from_url(
+            "mysql://localhost/?cipher_suites=TLS13_AES_128_GCM_SHA256,TLS_NULL_WITH_NULL_NULL",
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            UrlError::InvalidValue(
+                "cipher_suites".to_owned(),
+                "TLS_NULL_WITH_NULL_NULL".to_owned()
+            )
         );
     }
 }

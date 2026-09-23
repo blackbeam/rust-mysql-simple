@@ -58,7 +58,18 @@ impl Stream {
             }
         }
 
-        let config_builder = ClientConfig::builder().with_root_certificates(root_store.clone());
+        let mut provider = (**ClientConfig::builder().crypto_provider()).clone();
+        if let Some(cipher_suites) = ssl_opts.cipher_suites() {
+            provider.cipher_suites.retain(|x| {
+                x.suite()
+                    .as_str()
+                    .map(|name| cipher_suites.iter().any(|x| x == name))
+                    .unwrap_or_default()
+            })
+        }
+        let config_builder = ClientConfig::builder_with_provider(Arc::new(provider))
+            .with_safe_default_protocol_versions()?
+            .with_root_certificates(root_store.clone());
 
         let mut config = if let Some(identity) = ssl_opts.client_identity() {
             let (cert_chain, priv_key) = identity.load()?;
