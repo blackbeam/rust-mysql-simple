@@ -84,7 +84,7 @@ io-enum = "1.0.0"
 lru = { version = "0.18.2", default-features = false }
 mysql_common = { version = "0.37.0", default-features = false }
 native-tls = { version = "0.2.3", optional = true }
-pem = "3"
+pem = "4"
 percent-encoding = "2.1.0"
 rustls = { version = "0.23", optional = true, default-features = false }
 rustls-pemfile = { version = "2.1", optional = true }
