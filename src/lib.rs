@@ -213,6 +213,13 @@
 //!     *  `best` - enables compression with "best" compression level;
 //!     *  `1`..`9` - enables compression with the given compression level.
 //! *   `socket` - socket path on UNIX, or pipe name on Windows.
+//! *   `cipher_suites` - non-empty comma-separated list of TLS cipher suites supported by `rustls`.
+//!     (see [`rustls::CipherSuite`]).
+//!     Errors:
+//!     *   empty list will error early with [`crate::UrlError::InvalidValue`].
+//!     *   unsupported cipher suite will trigger [`crate::UrlError::InvalidValue`]
+//!         (see [`rustls::crypto::aws_lc_rs::DEFAULT_CIPHER_SUITES`] and
+//!         [`rustls::crypto::ring::DEFAULT_CIPHER_SUITES`])
 //!
 //! ### `OptsBuilder`
 //!
