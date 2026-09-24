@@ -84,7 +84,12 @@ jobs:
               Write-Host "Удалено: $path"
             }
           }
+      - powershell: |
+          vcpkg integrate install
+          vcpkg install openssl:x64-windows
+        displayName: 'Install OpenSSL via vcpkg'
       - script: |
+          dir "C:\Program Files\OpenSSL"
           choco install 7zip
           mkdir C:\mysql
           CD /D C:\mysql
@@ -128,6 +133,7 @@ jobs:
           SSL=false COMPRESS=true cargo test --no-default-features --features minimal,time,frunk,binlog
           SSL=false COMPRESS=false cargo test --no-default-features --features minimal,time,frunk,binlog
         env:
+          OPENSSL_DIR: C:\vcpkg\installed\x64-windows
           RUST_BACKTRACE: 1
           DATABASE_URL: mysql://root:password@localhost/mysql
         displayName: Run tests
