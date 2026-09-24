@@ -206,6 +206,7 @@ jobs:
       - bash: |
           docker exec container bash -l -c "microdnf install dnf"
           docker exec container bash -l -c "dnf group install \"Development Tools\""
+          docker exec container bash -l -c "dnf install openssl-devel"
           docker exec container bash -l -c "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable"
         displayName: Install Rust in docker (RedHat)
         condition: not(or(eq(variables['DB_VERSION'], '5.6'), eq(variables['DB_VERSION'], '5.7-debian'), eq(variables['DB_VERSION'], '8.0-debian')))

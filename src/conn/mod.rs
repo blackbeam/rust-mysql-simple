@@ -1504,8 +1504,6 @@ mod test {
             params::{MissingNamedParameterError, ParamsConfusionError, ParamsError},
         };
         use rand::Rng;
-        #[cfg(feature = "time")]
-        use time::PrimitiveDateTime;
 
         use crate::{
             conn::ConnInner,
