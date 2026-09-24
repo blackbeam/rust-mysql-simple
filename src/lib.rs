@@ -213,13 +213,23 @@
 //!     *  `best` - enables compression with "best" compression level;
 //!     *  `1`..`9` - enables compression with the given compression level.
 //! *   `socket` - socket path on UNIX, or pipe name on Windows.
-//! *   `cipher_suites` - non-empty comma-separated list of TLS cipher suites supported by `rustls`.
-//!     (see [`rustls::CipherSuite`]).
-//!     Errors:
-//!     *   empty list will error early with [`crate::UrlError::InvalidValue`].
-//!     *   unsupported cipher suite will trigger [`crate::UrlError::InvalidValue`]
-//!         (see [`rustls::crypto::aws_lc_rs::DEFAULT_CIPHER_SUITES`] and
-//!         [`rustls::crypto::ring::DEFAULT_CIPHER_SUITES`])
+//!
+//! * [`SslOpts`] URL parameters (having any of these in your URL will enforce TLS connection):
+//!     *   `cipher_suites` - non-empty comma-separated list of TLS cipher suite names supported by `rustls`.
+//!         (see [`rustls::CipherSuite`]).
+//!         Errors:
+//!         *   empty list will error early with [`crate::UrlError::InvalidValue`].
+//!         *   unsupported cipher suite will trigger [`crate::UrlError::InvalidValue`]
+//!             (see [`rustls::crypto::aws_lc_rs::DEFAULT_CIPHER_SUITES`] and
+//!             [`rustls::crypto::ring::DEFAULT_CIPHER_SUITES`])
+//!     *   `root_cert_path` - path to a certificate file (`PEM` or `DER`). `PEM` supports multiple
+//!         certificates in a file.
+//!     *   `danger_skip_domain_validation` - either `true` or `false`
+//!     *   `danger_accept_invalid_certs` - either `true` or `false`
+//!     *   `cert_chain_path` - (`rustls`-only) path to client's certificate chain (requires `priv_key_path`)
+//!     *   `priv_key_path` - (`rustls`-only) path to client's private key (requires `cert_chain_path`)
+//!     *   `pkcs12_path` - (`native-tls`-only) path to client's pkcs12 container
+//!     *   `pkcs12_pass` - (`native-tls`-only) pass for client's pkcs12 container (ignored if `pkcs12_path` not given)
 //!
 //! ### `OptsBuilder`
 //!
