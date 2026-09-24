@@ -132,6 +132,11 @@ impl DangerousVerifier {
             verifier,
         }
     }
+
+    fn invalid_signature_assertion(&self) -> Option<HandshakeSignatureValid> {
+        self.accept_invalid_certs
+            .then(HandshakeSignatureValid::assertion)
+    }
 }
 
 impl ServerCertVerifier for DangerousVerifier {
@@ -169,7 +174,10 @@ impl ServerCertVerifier for DangerousVerifier {
         cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        self.verifier.verify_tls12_signature(message, cert, dss)
+        match self.invalid_signature_assertion() {
+            Some(assertion) => Ok(assertion),
+            None => self.verifier.verify_tls12_signature(message, cert, dss),
+        }
     }
 
     fn verify_tls13_signature(
@@ -178,16 +186,56 @@ impl ServerCertVerifier for DangerousVerifier {
         cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        self.verifier.verify_tls13_signature(message, cert, dss)
+        match self.invalid_signature_assertion() {
+            Some(assertion) => Ok(assertion),
+            None => self.verifier.verify_tls13_signature(message, cert, dss),
+        }
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.verifier.supported_verify_schemes()
+        if self.accept_invalid_certs {
+            vec![
+                SignatureScheme::RSA_PKCS1_SHA1,
+                SignatureScheme::ECDSA_SHA1_Legacy,
+                SignatureScheme::RSA_PKCS1_SHA256,
+                SignatureScheme::ECDSA_NISTP256_SHA256,
+                SignatureScheme::RSA_PKCS1_SHA384,
+                SignatureScheme::ECDSA_NISTP384_SHA384,
+                SignatureScheme::RSA_PKCS1_SHA512,
+                SignatureScheme::ECDSA_NISTP521_SHA512,
+                SignatureScheme::RSA_PSS_SHA256,
+                SignatureScheme::RSA_PSS_SHA384,
+                SignatureScheme::RSA_PSS_SHA512,
+                SignatureScheme::ED25519,
+                SignatureScheme::ED448,
+                SignatureScheme::ML_DSA_44,
+                SignatureScheme::ML_DSA_65,
+                SignatureScheme::ML_DSA_87,
+                SignatureScheme::Unknown(0x0809), // rsa_pss_pss_sha256
+                SignatureScheme::Unknown(0x080A), // rsa_pss_pss_sha384
+                SignatureScheme::Unknown(0x080B), // rsa_pss_pss_sha512
+                SignatureScheme::Unknown(0x0202), // dsa_sha1
+                SignatureScheme::Unknown(0x0402), // dsa_sha256
+                SignatureScheme::Unknown(0x0502), // dsa_sha384
+                SignatureScheme::Unknown(0x0602), // dsa_sha512
+                SignatureScheme::Unknown(0x0420), // rsa_pkcs1_sha256_legacy
+                SignatureScheme::Unknown(0x0520), // rsa_pkcs1_sha384_legacy
+                SignatureScheme::Unknown(0x0620), // rsa_pkcs1_sha512_legacy
+                SignatureScheme::Unknown(0x0701), // Russian GOST 2012 - 256 bit
+                SignatureScheme::Unknown(0x0702), // Russian GOST 2012 - 512 bit
+                SignatureScheme::Unknown(0x0810), // Chinese National Standard
+            ]
+        } else {
+            self.verifier.supported_verify_schemes()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{io::Write as _, net::TcpListener, thread, time::Duration};
+
+    use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
     use rustls::pki_types::UnixTime;
 
     use super::*;
@@ -236,5 +284,124 @@ mod tests {
     #[test]
     fn skip_domain_validation_does_not_bypass_unknown_issuer() {
         assert!(verify(true, "localhost", "tests/other-server.crt").is_err());
+    }
+
+    fn verifier(accept_invalid_certs: bool) -> DangerousVerifier {
+        let mut roots = RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let verifier = WebPkiServerVerifier::builder(Arc::new(roots))
+            .build()
+            .unwrap();
+        DangerousVerifier::new(accept_invalid_certs, false, verifier)
+    }
+
+    #[test]
+    fn invalid_x509_v1_is_only_fully_accepted_in_dangerous_mode() {
+        let certificate =
+            CertificateDer::from(include_bytes!("../../../tests/fixtures/x509-v1.der").as_slice());
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let dangerous = verifier(true);
+        let strict = verifier(false);
+
+        assert!(dangerous
+            .verify_server_cert(
+                &certificate,
+                &[],
+                &server_name,
+                &[],
+                rustls::pki_types::UnixTime::now()
+            )
+            .is_ok());
+        assert!(dangerous.invalid_signature_assertion().is_some());
+        assert!(strict
+            .verify_server_cert(
+                &certificate,
+                &[],
+                &server_name,
+                &[],
+                rustls::pki_types::UnixTime::now()
+            )
+            .is_err());
+        assert!(strict.invalid_signature_assertion().is_none());
+    }
+
+    fn start_openssl_server(addr: &'static str) {
+        // OpenSSL handles X.509 v1 without rejecting its structure outright
+        let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+
+        // Replace these paths with your specific local v1 certificate files
+        acceptor
+            .set_private_key_file("tests/fixtures/rsa_private.key", SslFiletype::PEM)
+            .expect("Failed to load server private key");
+        acceptor
+            .set_certificate_chain_file("tests/fixtures/cert.pem")
+            .expect("Failed to load server v1 certificate");
+
+        let acceptor = Arc::new(acceptor.build());
+        let listener = TcpListener::bind(addr).unwrap();
+
+        thread::spawn(move || {
+            // Accept exactly one connection for our integration test
+            if let Some(Ok(stream)) = listener.incoming().next() {
+                let acceptor = acceptor.clone();
+                if let Ok(mut ssl_stream) = acceptor.accept(stream) {
+                    // Read client payload
+                    let mut buf = [0u8; 12];
+                    if ssl_stream.read_exact(&mut buf).is_ok() {
+                        // Send an echo response back to the rustls client
+                        let _ = ssl_stream.write_all(b"HELLO-RUSTLS");
+                        let _ = ssl_stream.flush();
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn test_invalid_cert_handshake() {
+        // Define an ephemeral port/address for testing
+        let test_addr = "127.0.0.1:28443";
+
+        // Install default crypto provider for rustls (required in rustls 0.23+)
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        // 1. Spin up the permissive OpenSSL server in the background
+        start_openssl_server(test_addr);
+
+        // Give the background thread a brief moment to bind the TCP port
+        thread::sleep(Duration::from_millis(100));
+
+        // 2. Configure the Rustls Client to use our permissive verifier
+        let client_config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier(true)))
+            .with_no_client_auth();
+        let client_config = Arc::new(client_config);
+
+        // Connect via standard TCP loopback
+        let mut tcp_stream = std::net::TcpStream::connect(test_addr)
+            .expect("Failed to connect to OpenSSL TCP server");
+
+        let server_name = "localhost".try_into().unwrap();
+        let mut client_tls = rustls::ClientConnection::new(client_config, server_name).unwrap();
+
+        // 3. Complete the TLS Handshake and communicate via Stream wrapper
+        // Using rustls::Stream helper simplifies the read/write network coordination loop.
+        let mut tls_stream = rustls::Stream::new(&mut client_tls, &mut tcp_stream);
+
+        // Send data to OpenSSL server
+        tls_stream
+            .write_all(b"HELLO-OPENSSL")
+            .expect("Failed writing to server");
+        tls_stream.flush().unwrap();
+
+        // Read the response from OpenSSL server
+        let mut response_buf = [0u8; 12];
+        tls_stream
+            .read_exact(&mut response_buf)
+            .expect("Failed reading from server");
+
+        // 4. Assert correctness
+        assert_eq!(&response_buf, b"HELLO-RUSTLS");
     }
 }
