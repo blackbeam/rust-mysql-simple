@@ -1640,6 +1640,7 @@ mod test {
             };
         );
 
+        #[allow(unused_mut)]
         let mut cnf_map = map! {
             "user".to_string() => "test".to_string(),
             "password".to_string() => "password".to_string(),

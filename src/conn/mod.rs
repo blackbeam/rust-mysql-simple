@@ -2937,9 +2937,21 @@ mod test {
             conn.exec_batch(query, params)
                 .expect("Batch execution should succeed");
 
-            let inserted_rows: Vec<(u64, String)> = conn
-                .query("SELECT id, val FROM t_large_batch ORDER BY id") // Order by data to get a predictable "a", "b", "c" order
-                .unwrap();
+            // MySql compression does not respect max_allowed_packet, so we're going to query
+            // one by one
+            let mut inserted_rows: Vec<(u64, String)> = vec![];
+            inserted_rows.extend(
+                conn.query("SELECT id, val FROM t_large_batch ORDER BY id LIMIT 1 OFFSET 0")
+                    .unwrap(),
+            );
+            inserted_rows.extend(
+                conn.query("SELECT id, val FROM t_large_batch ORDER BY id LIMIT 1 OFFSET 1")
+                    .unwrap(),
+            );
+            inserted_rows.extend(
+                conn.query("SELECT id, val FROM t_large_batch ORDER BY id LIMIT 65536 OFFSET 2")
+                    .unwrap(),
+            );
 
             assert_eq!(
                 inserted_rows.len(),
