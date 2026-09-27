@@ -363,7 +363,9 @@ mod tests {
         let test_addr = "127.0.0.1:28443";
 
         // Install default crypto provider for rustls (required in rustls 0.23+)
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let _ = (**ClientConfig::builder().crypto_provider())
+            .clone()
+            .install_default();
 
         // 1. Spin up the permissive OpenSSL server in the background
         start_openssl_server(test_addr);
