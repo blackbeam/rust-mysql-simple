@@ -196,6 +196,8 @@ structure in the create API docs):
     of the `tcp_user_timeout` field in the `Opts` structure;
 *   `stmt_cache_size: u32` - defines the value of the same field in the `Opts` structure;
 *   `enable_cleartext_plugin` – see [`Opts::get_enable_cleartext_plugin`];
+*   `server_key_path` - client-side PEM file containing the server RSA public key for
+    full `caching_sha2_password` authentication over non-TLS TCP. See [`OptsBuilder::server_key_path`].
 *   `secure_auth` – see [`Opts::get_secure_auth`];
 *   `reset_connection` – see [`PoolOpts::reset_connection`];
 *   `check_health` – see [`PoolOpts::check_health`];

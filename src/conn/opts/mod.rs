@@ -218,6 +218,9 @@ pub(crate) struct InnerOpts {
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
     ssl_opts: Option<SslOpts>,
 
+    /// Client-side copy of the server RSA public key for caching_sha2_password.
+    server_key_path: Option<PathBuf>,
+
     /// Connection pool options (defaults to [`PoolOpts::default`]).
     pool_opts: PoolOpts,
 
@@ -314,6 +317,7 @@ impl Default for InnerOpts {
             prefer_socket: true,
             init: vec![],
             ssl_opts: None,
+            server_key_path: None,
             pool_opts: PoolOpts::default(),
             tcp_keepalive_time: None,
             #[cfg(any(target_os = "linux", target_os = "macos",))]
@@ -432,6 +436,11 @@ impl Opts {
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
     pub fn get_ssl_opts(&self) -> Option<&SslOpts> {
         self.0.ssl_opts.as_ref()
+    }
+
+    /// Returns the configured server RSA public-key path (defaults to `None`).
+    pub fn get_server_key_path(&self) -> Option<&Path> {
+        self.0.server_key_path.as_deref()
     }
 
     /// Connection pool options (defaults to [`Default::default`]).
@@ -702,6 +711,7 @@ impl OptsBuilder {
                     }
                 },
                 "socket" => self.opts.0.socket = Some(value.to_string()),
+                "server_key_path" => self.opts.0.server_key_path = Some(PathBuf::from(value)),
                 "db_name" => self.opts.0.db_name = Some(value.to_string()),
                 "prefer_socket" => {
                     //default to true like standard opts builder method
@@ -1144,6 +1154,28 @@ impl OptsBuilder {
     /// Driver will require SSL connection if this option isn't `None` (default to `None`).
     pub fn ssl_opts<T: Into<Option<SslOpts>>>(mut self, ssl_opts: T) -> Self {
         self.opts.0.ssl_opts = ssl_opts.into();
+        self
+    }
+
+    /// Sets a client-side copy of the server RSA public key in PEM format.
+    ///
+    /// Used only by full `caching_sha2_password` authentication over non-TLS TCP.
+    /// When set, the key is read from this file instead of requested from the server.
+    /// File-read errors are returned without falling back to server key retrieval.
+    /// TLS, local sockets and cached authentication do not read this file.
+    /// Defaults to `None`, retaining automatic server key retrieval.
+    ///
+    /// Also available as the `server_key_path` connection URL parameter.
+    ///
+    /// ```
+    /// # use mysql::{Opts, OptsBuilder};
+    /// # use std::path::PathBuf;
+    /// let path = PathBuf::from("/path/to/server-public-key.pem");
+    /// let opts = Opts::from(OptsBuilder::new().server_key_path(Some(path.clone())));
+    /// assert_eq!(opts.get_server_key_path(), Some(path.as_path()));
+    /// ```
+    pub fn server_key_path(mut self, server_key_path: Option<PathBuf>) -> Self {
+        self.opts.0.server_key_path = server_key_path;
         self
     }
 
