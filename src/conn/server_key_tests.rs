@@ -80,7 +80,7 @@ impl Drop for ServerKeyFixture {
 /// Valid, wrong and missing keys exercise full auth; no option retains key retrieval.
 #[test]
 fn server_key_path_full_authentication() -> Result<(), Box<dyn std::error::Error>> {
-    let mut admin = Conn::new(live_opts())?;
+    let mut admin = Conn::new(live_opts().ssl_opts(None))?;
     if admin.0.mariadb_server_version.is_some() || admin.server_version() < (8, 0, 5) {
         return Ok(());
     }
