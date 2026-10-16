@@ -82,6 +82,8 @@ pub mod pool;
 pub mod query;
 pub mod query_result;
 pub mod queryable;
+#[cfg(test)]
+mod server_key_tests;
 pub mod stmt;
 mod stmt_cache;
 pub mod transaction;
@@ -954,9 +956,20 @@ impl Conn {
                         pass.push(0);
                         self.write_packet(&mut pass.as_slice())?;
                     } else {
-                        self.write_packet(&mut &[0x02][..])?;
-                        let payload = self.read_packet()?;
-                        let key = &payload[1..];
+                        let configured_key = self
+                            .0
+                            .opts
+                            .get_server_key_path()
+                            .map(std::fs::read)
+                            .transpose()?;
+                        let server_payload;
+                        let key = if let Some(key) = configured_key.as_deref() {
+                            key
+                        } else {
+                            self.write_packet(&mut &[0x02][..])?;
+                            server_payload = self.read_packet()?;
+                            &server_payload[1..]
+                        };
                         let mut pass = self.0.opts.get_pass().map(Vec::from).unwrap_or_default();
                         pass.push(0);
                         for (i, c) in pass.iter_mut().enumerate() {
