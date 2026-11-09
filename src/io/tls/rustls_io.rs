@@ -76,7 +76,7 @@ impl Stream {
         };
 
         let server_name = ServerName::try_from(domain.as_str())
-            .map_err(|_| webpki::InvalidDnsNameError)?
+            .map_err(|_| rustls::pki_types::InvalidDnsNameError)?
             .to_owned();
         let mut dangerous = config.dangerous();
         let web_pki_verifier = WebPkiServerVerifier::builder(Arc::new(root_store))
