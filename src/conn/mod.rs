@@ -84,6 +84,8 @@ pub mod query_result;
 pub mod queryable;
 #[cfg(test)]
 mod server_key_tests;
+#[cfg(test)]
+mod sha256_password_tests;
 pub mod stmt;
 mod stmt_cache;
 pub mod transaction;
@@ -673,6 +675,12 @@ impl Conn {
 
         self.0.nonce = auth_switch_request.plugin_data().to_vec();
         self.0.auth_plugin = auth_switch_request.auth_plugin().into_owned();
+
+        if matches!(self.0.auth_plugin, AuthPlugin::Other(ref name) if name.as_ref() == b"sha256_password")
+        {
+            return self.perform_sha256_password_auth();
+        }
+
         let plugin_data = match self.0.auth_plugin {
             ref x @ AuthPlugin::MysqlOldPassword => {
                 if self.0.opts.get_secure_auth() {
@@ -990,6 +998,49 @@ impl Conn {
             }
             _ => Err(DriverError(UnexpectedPacket)),
         }
+    }
+
+    /// Answers an auth switch to `sha256_password`.
+    ///
+    /// The plugin has no fast path: the password goes as is over TLS, and encrypted with
+    /// the server's RSA key otherwise. Unlike `caching_sha2_password`, the server does not
+    /// treat a local socket as a secure transport here.
+    fn perform_sha256_password_auth(&mut self) -> Result<()> {
+        let mut pass = self.0.opts.get_pass().map(Vec::from).unwrap_or_default();
+        pass.push(0);
+
+        if pass.len() == 1 || !self.is_insecure() {
+            self.write_packet(&mut pass.as_slice())?;
+        } else {
+            if self.0.nonce.is_empty() {
+                return Err(DriverError(UnexpectedPacket));
+            }
+            let configured_key = self
+                .0
+                .opts
+                .get_server_key_path()
+                .map(std::fs::read)
+                .transpose()?;
+            let server_payload;
+            let key = if let Some(key) = configured_key.as_deref() {
+                key
+            } else {
+                self.write_packet(&mut &[0x01][..])?;
+                server_payload = self.read_packet()?;
+                match server_payload.split_first() {
+                    Some((0x01, key)) => key,
+                    _ => return Err(DriverError(UnexpectedPacket)),
+                }
+            };
+            for (i, c) in pass.iter_mut().enumerate() {
+                *(c) ^= self.0.nonce[i % self.0.nonce.len()];
+            }
+            let encrypted_pass = crypto::encrypt(&pass, key);
+            self.write_packet(&mut encrypted_pass.as_slice())?;
+        }
+
+        let payload = self.read_packet()?;
+        self.handle_ok::<CommonOkPacket>(&payload).map(drop)
     }
 
     fn continue_ed25519_auth(&mut self, auth_switched: bool) -> Result<()> {

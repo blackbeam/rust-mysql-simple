@@ -27,6 +27,7 @@ Features:
 *   support of auth plugins:
     *   **mysql_native_password** - for MySql prior to v8;
     *   **caching_sha2_password** - for MySql v8 and higher;
+    *   **sha256_password** - deprecated, for MySql v8.0.5 through v8.4;
     *   **mysql_clear_password** - opt-in (see [`Opts::get_enable_cleartext_plugin`].
 
 ### Installation
