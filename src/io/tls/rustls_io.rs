@@ -297,13 +297,9 @@ mod tests {
     fn skip_domain_validation_does_not_bypass_unknown_issuer() {
         assert!(verify(true, "localhost", "tests/other-server.crt").is_err());
     }
-}
-
-#[cfg(all(test, any(feature = "rustls-tls-ring", feature = "rustls-tls")))]
-mod tests {
-    use super::*;
 
     /// Checks that the options restrict the actual builder and an empty slice resets it.
+    #[cfg(any(feature = "rustls-tls-ring", feature = "rustls-tls"))]
     #[test]
     fn should_restrict_the_rustls_cipher_suites() {
         #[cfg(feature = "rustls-tls-ring")]
