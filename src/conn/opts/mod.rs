@@ -45,6 +45,8 @@ pub struct SslOpts {
     root_cert_path: Option<Cow<'static, Path>>,
     skip_domain_validation: bool,
     accept_invalid_certs: bool,
+    #[cfg(feature = "rustls")]
+    cipher_suites: Option<Vec<String>>,
 }
 
 impl SslOpts {
@@ -112,6 +114,35 @@ impl SslOpts {
 
     pub fn accept_invalid_certs(&self) -> bool {
         self.accept_invalid_certs
+    }
+
+    /// Restricts the rustls provider to the supplied cipher suites.
+    ///
+    /// An empty slice restores the provider defaults. Configured suites not
+    /// supported by the chosen provider are filtered out before connecting.
+    #[cfg(feature = "rustls")]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(feature = "rustls-tls", feature = "rustls-tls-ring")))
+    )]
+    pub fn with_cipher_suites(mut self, cipher_suites: &[rustls::SupportedCipherSuite]) -> Self {
+        self.cipher_suites = (!cipher_suites.is_empty()).then(|| {
+            cipher_suites
+                .iter()
+                .filter_map(|suite| suite.suite().as_str().map(str::to_owned))
+                .collect()
+        });
+        self
+    }
+
+    /// Returns the configured rustls cipher suite names, if set.
+    #[cfg(feature = "rustls")]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(feature = "rustls-tls", feature = "rustls-tls-ring")))
+    )]
+    pub fn cipher_suites(&self) -> Option<&[String]> {
+        self.cipher_suites.as_deref()
     }
 }
 

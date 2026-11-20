@@ -14,7 +14,8 @@ use rustls::{
         WebPkiServerVerifier,
     },
     pki_types::{CertificateDer, ServerName, UnixTime},
-    CertificateError, ClientConfig, Error, RootCertStore, SignatureScheme,
+    CertificateError, ClientConfig, ConfigBuilder, Error, RootCertStore, SignatureScheme,
+    WantsVerifier,
 };
 use rustls_pemfile::certs;
 use sha2::{Digest, Sha256};
@@ -25,6 +26,24 @@ use crate::{
     io::{Stream, TcpStream},
     Result, SslOpts,
 };
+
+/// Applies the optional suite restriction to the default rustls provider.
+fn client_config_builder(ssl_opts: &SslOpts) -> Result<ConfigBuilder<ClientConfig, WantsVerifier>> {
+    let builder = ClientConfig::builder();
+    let Some(suites) = ssl_opts.cipher_suites() else {
+        return Ok(builder);
+    };
+
+    let mut provider = (**builder.crypto_provider()).clone();
+    provider.cipher_suites.retain(|suite| {
+        suite
+            .suite()
+            .as_str()
+            .is_some_and(|name| suites.iter().any(|requested| requested == name))
+    });
+    Ok(ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_safe_default_protocol_versions()?)
+}
 
 impl Stream {
     pub fn make_secure(
@@ -66,7 +85,8 @@ impl Stream {
             }
         }
 
-        let config_builder = ClientConfig::builder().with_root_certificates(root_store.clone());
+        let config_builder =
+            client_config_builder(&ssl_opts)?.with_root_certificates(root_store.clone());
 
         let mut config = if let Some(identity) = ssl_opts.client_identity() {
             let (cert_chain, priv_key) = identity.load()?;
@@ -276,5 +296,25 @@ mod tests {
     #[test]
     fn skip_domain_validation_does_not_bypass_unknown_issuer() {
         assert!(verify(true, "localhost", "tests/other-server.crt").is_err());
+    }
+
+    /// Checks that the options restrict the actual builder and an empty slice resets it.
+    #[cfg(any(feature = "rustls-tls-ring", feature = "rustls-tls"))]
+    #[test]
+    fn should_restrict_the_rustls_cipher_suites() {
+        #[cfg(feature = "rustls-tls-ring")]
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        #[cfg(all(feature = "rustls-tls", not(feature = "rustls-tls-ring")))]
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let default_builder = ClientConfig::builder();
+        let default_suites = &default_builder.crypto_provider().cipher_suites;
+        let suite = default_suites[0];
+        let opts = SslOpts::default().with_cipher_suites(&[suite]);
+        let configured = client_config_builder(&opts).unwrap();
+        assert_eq!(configured.crypto_provider().cipher_suites, [suite]);
+
+        let configured = client_config_builder(&opts.with_cipher_suites(&[])).unwrap();
+        assert_eq!(configured.crypto_provider().cipher_suites, *default_suites);
     }
 }
