@@ -529,6 +529,13 @@ impl Conn {
     }
 
     fn exec_com_change_user(&mut self, opts: ChangeUserOpts) -> Result<()> {
+        let collation = opts.collation().unwrap_or_else(|| {
+            if self.server_version() >= (5, 5, 3) {
+                UTF8MB4_GENERAL_CI
+            } else {
+                UTF8_GENERAL_CI
+            }
+        });
         opts.update_opts(&mut self.0.opts);
 
         let mut auth_proc = self.0.auth_plugin.init()?;
@@ -542,11 +549,7 @@ impl Conn {
             .with_database(self.0.opts.get_db_name().map(|x| x.as_bytes()))
             .with_auth_plugin_data(response.data())
             .with_more_data(Some(
-                ComChangeUserMoreData::new(if self.server_version() >= (5, 5, 3) {
-                    UTF8MB4_GENERAL_CI
-                } else {
-                    UTF8_GENERAL_CI
-                })
+                ComChangeUserMoreData::new(collation)
                 .with_auth_plugin(Some(self.0.auth_plugin.clone()))
                 .with_connect_attributes(self.0.opts.get_connect_attrs().cloned()),
             ))
@@ -1977,6 +1980,21 @@ mod test {
             conn.close(stmt).unwrap();
             let stmt = conn.prep("SELECT 2").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
+        }
+
+        /// Uses the requested client collation in the change-user packet.
+        #[test]
+        fn should_change_user_with_explicit_collation() {
+            const LATIN1_SWEDISH_CI: u16 = 8;
+            let mut conn = Conn::new(get_opts()).unwrap();
+            conn.change_user(crate::ChangeUserOpts::new().with_collation(LATIN1_SWEDISH_CI))
+                .unwrap();
+            assert_eq!(
+                conn.query_first::<String, _>("SELECT @@collation_connection")
+                    .unwrap()
+                    .as_deref(),
+                Some("latin1_swedish_ci")
+            );
         }
 
         #[test]

@@ -1282,6 +1282,7 @@ pub struct ChangeUserOpts {
     user: Option<Option<String>>,
     pass: Option<Option<String>>,
     db_name: Option<Option<String>>,
+    collation: Option<u16>,
 }
 
 impl ChangeUserOpts {
@@ -1289,6 +1290,7 @@ impl ChangeUserOpts {
         user: None,
         pass: None,
         db_name: None,
+        collation: None,
     };
 
     pub(crate) fn update_opts(self, opts: &mut Opts) {
@@ -1315,11 +1317,20 @@ impl ChangeUserOpts {
 
     /// Creates change user options that'll reuse connection options.
     pub fn new() -> Self {
-        Self {
-            user: None,
-            pass: None,
-            db_name: None,
-        }
+        Self::DEFAULT
+    }
+
+    /// Sends the given collation ID with `COM_CHANGE_USER`.
+    ///
+    /// Without an override, the driver chooses its usual collation for the server version.
+    pub fn with_collation(mut self, collation: u16) -> Self {
+        self.collation = Some(collation);
+        self
+    }
+
+    /// Returns the collation ID to send, if explicitly configured.
+    pub fn collation(&self) -> Option<u16> {
+        self.collation
     }
 
     /// Set [`Opts::get_user`] to the given value.
