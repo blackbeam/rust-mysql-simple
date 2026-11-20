@@ -55,7 +55,9 @@ use crate::{
         stmt_cache::StmtCache,
         transaction::{AccessMode, TxOpts},
     },
-    consts::{CapabilityFlags, Command, MariadbCapabilities, StatusFlags, MAX_PAYLOAD_LEN},
+    consts::{
+        CapabilityFlags, Command, CursorType, MariadbCapabilities, StatusFlags, MAX_PAYLOAD_LEN,
+    },
     from_value, from_value_opt,
     io::Stream,
     prelude::*,
@@ -66,7 +68,7 @@ use crate::{
         UnexpectedPacket, UnsupportedProtocol,
     },
     Error::{self, DriverError, MySqlError},
-    LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Transaction,
+    LocalInfileHandler, Opts, OptsBuilder, Params, QueryResult, Result, Row, Transaction,
     Value::{self, Bytes, NULL},
 };
 
@@ -289,6 +291,30 @@ impl ConnInner {
 
             opts,
         }
+    }
+}
+
+/// Result of executing a prepared statement with a requested server-side cursor.
+#[derive(Debug)]
+pub enum CursorResult<'a> {
+    /// The server opened a cursor. Read it with [`Conn::fetch_cursor`].
+    Cursor(ServerCursor),
+    /// The server returned a regular result instead.
+    Rows(QueryResult<'a, 'a, 'a, Binary>),
+}
+
+/// Handle for a prepared statement's read-only server-side cursor.
+#[derive(Debug)]
+pub struct ServerCursor {
+    connection_id: u32,
+    statement_id: u32,
+    columns: Arc<[Column]>,
+}
+
+impl ServerCursor {
+    /// Returns the cursor's column definitions.
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
     }
 }
 
@@ -1143,6 +1169,15 @@ impl Conn {
     }
 
     fn _execute(&mut self, stmt: &Statement, params: Params) -> Result<ResultSetInfo> {
+        self.execute_with_cursor_option(stmt, params, false)
+    }
+
+    fn execute_with_cursor_option(
+        &mut self,
+        stmt: &Statement,
+        params: Params,
+        request_cursor: bool,
+    ) -> Result<ResultSetInfo> {
         let params = params
             .into_values(stmt.named_params.as_deref())
             .map_err(crate::DriverError::from)?;
@@ -1161,8 +1196,84 @@ impl Conn {
             self.send_long_data(stmt.id(), &params)?;
         }
 
-        self.write_command_raw(&exec_request)?;
-        self.handle_result_set()
+        if request_cursor {
+            let mut request = get_buffer();
+            exec_request.serialize(request.as_mut());
+            // The execute builder emits NO_CURSOR. The flags byte follows
+            // the command byte and the four-byte statement ID.
+            request.as_mut()[5] = CursorType::CURSOR_TYPE_READ_ONLY.bits();
+            self.reset_seq_id();
+            self.0.last_command = Command::COM_STMT_EXECUTE as u8;
+            self.write_packet(&mut &*request)?;
+        } else {
+            self.write_command_raw(&exec_request)?;
+        }
+        self.handle_result_set_with_cursor(request_cursor)
+    }
+
+    /// Executes a statement requesting a read-only server cursor.
+    ///
+    /// The server may return ordinary rows, which borrow the connection until the
+    /// result is consumed or dropped. A granted cursor allows other commands between fetches.
+    pub fn exec_cursor<P>(&mut self, statement: &Statement, params: P) -> Result<CursorResult<'_>>
+    where
+        P: Into<Params>,
+    {
+        if statement.connection_id() != self.connection_id() {
+            return Err(DriverError(UnexpectedPacket));
+        }
+        let info = self.execute_with_cursor_option(statement, params.into(), true)?;
+        let metadata = info.into_statement_meta(self, statement);
+        if self
+            .0
+            .status_flags
+            .contains(StatusFlags::SERVER_STATUS_CURSOR_EXISTS)
+        {
+            let ResultSetMeta::NonEmptyWithMeta(columns) = metadata else {
+                return Err(DriverError(UnexpectedPacket));
+            };
+            return Ok(CursorResult::Cursor(ServerCursor {
+                connection_id: self.connection_id(),
+                statement_id: statement.id(),
+                columns,
+            }));
+        }
+        Ok(CursorResult::Rows(QueryResult::new(
+            ConnMut::Mut(self),
+            metadata,
+        )))
+    }
+
+    /// Fetches up to `count` rows and reports whether the server cursor is exhausted.
+    ///
+    /// Resetting, closing, or executing the statement again invalidates its cursor.
+    pub fn fetch_cursor(&mut self, cursor: &ServerCursor, count: u32) -> Result<(Vec<Row>, bool)> {
+        if cursor.connection_id != self.connection_id() {
+            return Err(DriverError(UnexpectedPacket));
+        }
+        let mut arguments = [0_u8; 8];
+        arguments[..4].copy_from_slice(&cursor.statement_id.to_le_bytes());
+        arguments[4..].copy_from_slice(&count.to_le_bytes());
+        self.write_command(Command::COM_STMT_FETCH, &arguments)?;
+
+        let mut rows = Vec::new();
+        loop {
+            let packet = self.read_packet()?;
+            if packet.first() == Some(&0xfe) && packet.len() < 8 {
+                self.handle_ok::<OldEofPacket>(&packet)?;
+                break;
+            }
+            let row = ParseBuf(&packet).parse::<mysql_common::row::RowDeserializer<
+                mysql_common::value::ServerSide,
+                Binary,
+            >>(cursor.columns.clone())?;
+            rows.push(row.into());
+        }
+        let exhausted = self
+            .0
+            .status_flags
+            .contains(StatusFlags::SERVER_STATUS_LAST_ROW_SENT);
+        Ok((rows, exhausted))
     }
 
     /// Bulk-executes the given statement. Query results will be ignored.
@@ -1243,6 +1354,10 @@ impl Conn {
     }
 
     fn handle_result_set(&mut self) -> Result<ResultSetInfo> {
+        self.handle_result_set_with_cursor(false)
+    }
+
+    fn handle_result_set_with_cursor(&mut self, request_cursor: bool) -> Result<ResultSetInfo> {
         if self.more_results_exists() {
             self.sync_seq_id();
         }
@@ -1280,8 +1395,21 @@ impl Conn {
                     ResultSetInfo::NonEmptySkipMeta
                 };
 
-                // skip eof packet
-                self.drop_packet()?;
+                if request_cursor {
+                    let eof = self.read_packet()?;
+                    self.handle_ok::<OldEofPacket>(&eof)?;
+                    // A granted cursor has no rows following the metadata packet.
+                    if self
+                        .0
+                        .status_flags
+                        .contains(StatusFlags::SERVER_STATUS_CURSOR_EXISTS)
+                    {
+                        self.0.has_results = false;
+                        return Ok(output);
+                    }
+                } else {
+                    self.drop_packet()?;
+                }
                 self.0.has_results = column_count > 0;
 
                 Ok(output)
@@ -1977,6 +2105,32 @@ mod test {
             conn.close(stmt).unwrap();
             let stmt = conn.prep("SELECT 2").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
+        }
+
+        /// Fetches rows in batches with a normal query between fetches.
+        #[test]
+        fn should_fetch_a_server_side_cursor() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            let statement = conn.prep("SELECT 1 AS value UNION ALL SELECT 2").unwrap();
+            let cursor = match conn.exec_cursor(&statement, ()).unwrap() {
+                crate::CursorResult::Cursor(cursor) => cursor,
+                crate::CursorResult::Rows(_) => panic!("expected a server-side cursor"),
+            };
+            assert_eq!(cursor.columns()[0].name_ref(), b"value");
+            let (rows, exhausted) = conn.fetch_cursor(&cursor, 1).unwrap();
+            assert_eq!(
+                rows.into_iter().map(from_row::<u32>).collect::<Vec<_>>(),
+                [1]
+            );
+            assert!(!exhausted);
+            assert_eq!(conn.query_first::<u32, _>("SELECT 42").unwrap(), Some(42));
+            let (rows, exhausted) = conn.fetch_cursor(&cursor, 10).unwrap();
+            assert_eq!(
+                rows.into_iter().map(from_row::<u32>).collect::<Vec<_>>(),
+                [2]
+            );
+            assert!(exhausted);
+            conn.close(statement).unwrap();
         }
 
         #[test]
