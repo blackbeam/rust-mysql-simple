@@ -353,6 +353,14 @@ impl Conn {
         self.0.connection_id
     }
 
+    /// Returns the current server status flags recorded by the connection.
+    ///
+    /// The handshake and successful OK or EOF responses update the flags.
+    /// A server error clears them.
+    pub fn status_flags(&self) -> StatusFlags {
+        self.0.status_flags
+    }
+
     /// Returns number of rows affected by the last query.
     pub fn affected_rows(&self) -> u64 {
         self.0
@@ -1977,6 +1985,22 @@ mod test {
             conn.close(stmt).unwrap();
             let stmt = conn.prep("SELECT 2").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
+        }
+
+        /// Tracks the server's transaction status across successful commands.
+        #[test]
+        fn should_report_server_status_flags() {
+            use mysql_common::constants::StatusFlags;
+
+            let mut conn = Conn::new(get_opts()).unwrap();
+            conn.query_drop("START TRANSACTION").unwrap();
+            assert!(conn
+                .status_flags()
+                .contains(StatusFlags::SERVER_STATUS_IN_TRANS));
+            conn.query_drop("ROLLBACK").unwrap();
+            assert!(!conn
+                .status_flags()
+                .contains(StatusFlags::SERVER_STATUS_IN_TRANS));
         }
 
         #[test]
