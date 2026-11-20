@@ -32,7 +32,7 @@ use mysql_common::{
 
 use std::{
     borrow::{Borrow, Cow},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::TryFrom,
     fs::File,
     io::{self, Read as _, Write as _},
@@ -55,7 +55,9 @@ use crate::{
         stmt_cache::StmtCache,
         transaction::{AccessMode, TxOpts},
     },
-    consts::{CapabilityFlags, Command, MariadbCapabilities, StatusFlags, MAX_PAYLOAD_LEN},
+    consts::{
+        CapabilityFlags, ColumnType, Command, MariadbCapabilities, StatusFlags, MAX_PAYLOAD_LEN,
+    },
     from_value, from_value_opt,
     io::Stream,
     prelude::*,
@@ -204,6 +206,7 @@ struct ConnInner {
     opts: Opts,
     stream: Option<MySyncFramed<Stream>>,
     stmt_cache: StmtCache,
+    long_data: HashMap<u32, HashSet<u16>>,
 
     // TODO: clean this up
     server_version: Option<(u16, u16, u16)>,
@@ -268,6 +271,7 @@ impl ConnInner {
     fn empty(opts: Opts) -> Self {
         ConnInner {
             stmt_cache: StmtCache::new(opts.get_stmt_cache_size()),
+            long_data: HashMap::new(),
             stream: None,
             capability_flags: CapabilityFlags::empty(),
             status_flags: StatusFlags::empty(),
@@ -497,6 +501,7 @@ impl Conn {
         self.handle_ok::<CommonOkPacket>(&packet)?;
         self.0.last_command = 0;
         self.0.stmt_cache.clear();
+        self.0.long_data.clear();
         Ok(())
     }
 
@@ -554,6 +559,7 @@ impl Conn {
         self.write_command_raw(&com_change_user)?;
         self.0.last_command = 0;
         self.0.stmt_cache.clear();
+        self.0.long_data.clear();
 
         self.continue_auth(false, auth_ctx, auth_proc, response)?;
 
@@ -1107,10 +1113,14 @@ impl Conn {
     fn write_command_raw<T: MySerialize>(&mut self, cmd: &T) -> Result<()> {
         let mut buf = get_buffer();
         cmd.serialize(buf.as_mut());
+        self.write_command_bytes(&buf)
+    }
+
+    fn write_command_bytes(&mut self, mut command: &[u8]) -> Result<()> {
         self.reset_seq_id();
-        debug_assert!(!buf.is_empty());
-        self.0.last_command = buf[0];
-        self.write_packet(&mut &*buf)
+        debug_assert!(!command.is_empty());
+        self.0.last_command = command[0];
+        self.write_packet(&mut command)
     }
 
     fn write_command(&mut self, cmd: Command, data: &[u8]) -> Result<()> {
@@ -1121,6 +1131,59 @@ impl Conn {
         self.reset_seq_id();
         self.0.last_command = buf[0];
         self.write_packet(&mut &*buf)
+    }
+
+    /// Appends one chunk of a prepared statement parameter using `COM_STMT_SEND_LONG_DATA`.
+    ///
+    /// The next execution uses the server's accumulated bytes in place of the
+    /// supplied value for that parameter. The statement must belong to this connection.
+    pub fn send_statement_long_data(
+        &mut self,
+        statement: &Statement,
+        parameter: u16,
+        chunk: &[u8],
+    ) -> Result<()> {
+        if statement.connection_id() != self.connection_id() {
+            return Err(DriverError(UnexpectedPacket));
+        }
+        if parameter >= statement.num_params() {
+            return Err(DriverError(MismatchedStmtParams(
+                statement.num_params(),
+                usize::from(parameter) + 1,
+            )));
+        }
+
+        // The command, statement ID and parameter index take seven bytes.
+        let packet_limit = self
+            .stream_ref()
+            .codec()
+            .max_allowed_packet
+            .min(MAX_PAYLOAD_LEN);
+        if chunk.len() > packet_limit.saturating_sub(7) {
+            return Err(DriverError(crate::DriverError::PacketTooLarge));
+        }
+        let command = ComStmtSendLongData::new(statement.id(), parameter, Cow::Borrowed(chunk));
+        self.write_command_raw(&command)?;
+        self.0
+            .long_data
+            .entry(statement.id())
+            .or_default()
+            .insert(parameter);
+        Ok(())
+    }
+
+    /// Resets a prepared statement using `COM_STMT_RESET`, discarding its pending long data.
+    ///
+    /// The statement remains prepared and can be executed again.
+    pub fn reset_statement(&mut self, statement: &Statement) -> Result<()> {
+        if statement.connection_id() != self.connection_id() {
+            return Err(DriverError(UnexpectedPacket));
+        }
+        self.write_command(Command::COM_STMT_RESET, &statement.id().to_le_bytes())?;
+        let packet = self.read_packet()?;
+        self.handle_ok::<CommonOkPacket>(&packet)?;
+        self.0.long_data.remove(&statement.id());
+        Ok(())
     }
 
     fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> Result<()> {
@@ -1143,7 +1206,7 @@ impl Conn {
     }
 
     fn _execute(&mut self, stmt: &Statement, params: Params) -> Result<ResultSetInfo> {
-        let params = params
+        let mut params = params
             .into_values(stmt.named_params.as_deref())
             .map_err(crate::DriverError::from)?;
 
@@ -1154,14 +1217,40 @@ impl Conn {
             )));
         }
 
+        let sent = self.0.long_data.get(&stmt.id());
+        if let Some(sent) = sent {
+            // NULL placeholders let the existing packet builder omit the streamed values.
+            for &index in sent {
+                params[usize::from(index)] = NULL;
+            }
+        }
         let (exec_request, as_long_data) =
             ComStmtExecuteRequestBuilder::new(stmt.id()).build(&params);
+
+        let mut streamed_request = None;
+        if let Some(sent) = sent {
+            let mut payload = get_buffer();
+            exec_request.serialize(payload.as_mut());
+            let bitmap = ComStmtExecuteRequestBuilder::NULL_BITMAP_OFFSET;
+            let types = bitmap + params.len().div_ceil(8) + 1;
+            for &index in sent {
+                let index = usize::from(index);
+                // The value is already on the server. Mark the parameter as a non-null BLOB.
+                payload.as_mut()[bitmap + index / 8] &= !(1 << (index % 8));
+                payload.as_mut()[types + index * 2] = ColumnType::MYSQL_TYPE_LONG_BLOB as u8;
+            }
+            streamed_request = Some(payload);
+        }
 
         if as_long_data {
             self.send_long_data(stmt.id(), &params)?;
         }
-
-        self.write_command_raw(&exec_request)?;
+        if let Some(payload) = streamed_request {
+            self.write_command_bytes(&payload)?;
+            self.0.long_data.remove(&stmt.id());
+        } else {
+            self.write_command_raw(&exec_request)?;
+        }
         self.handle_result_set()
     }
 
@@ -1503,7 +1592,9 @@ impl Queryable for Conn {
     fn close(&mut self, stmt: Statement) -> Result<()> {
         self.0.stmt_cache.remove(stmt.id());
         let cmd = ComStmtClose::new(stmt.id());
-        self.write_command_raw(&cmd)
+        self.write_command_raw(&cmd)?;
+        self.0.long_data.remove(&stmt.id());
+        Ok(())
     }
 
     fn exec_iter<S, P>(&mut self, stmt: S, params: P) -> Result<QueryResult<'_, '_, '_, Binary>>
@@ -1527,6 +1618,7 @@ impl Queryable for Conn {
         let stmt = stmt.as_statement(self)?;
         if self.has_mariadb_capability(MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS)
             && stmt.num_params() > 0
+            && !self.0.long_data.contains_key(&stmt.id())
         {
             self._execute_bulk(&stmt, params)?;
         } else {
@@ -1977,6 +2069,25 @@ mod test {
             conn.close(stmt).unwrap();
             let stmt = conn.prep("SELECT 2").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
+        }
+
+        /// Checks chunk ordering and that both execute and reset discard pending data.
+        #[test]
+        fn should_stream_prepared_parameters_and_reset_the_statement() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            let statement = conn.prep("SELECT CONCAT(?, ?)").unwrap();
+            conn.send_statement_long_data(&statement, 0, b"ab").unwrap();
+            conn.send_statement_long_data(&statement, 0, b"cd").unwrap();
+            let value: Option<Vec<u8>> = conn.exec_first(&statement, ("ignored", "ef")).unwrap();
+            assert_eq!(value.as_deref(), Some(&b"abcdef"[..]));
+            let value: Option<String> = conn.exec_first(&statement, ("fresh", "!")).unwrap();
+            assert_eq!(value.as_deref(), Some("fresh!"));
+
+            conn.send_statement_long_data(&statement, 0, b"stale")
+                .unwrap();
+            conn.reset_statement(&statement).unwrap();
+            let value: Option<String> = conn.exec_first(&statement, ("reset", "!")).unwrap();
+            assert_eq!(value.as_deref(), Some("reset!"));
         }
 
         #[test]
