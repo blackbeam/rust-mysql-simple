@@ -234,6 +234,8 @@ pub(crate) struct InnerOpts {
     /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
     /// pointless or may broke the connection, so this option should be used with caution.
     additional_capabilities: CapabilityFlags,
+    multi_statements: bool,
+    mariadb_extensions: bool,
 
     /// Connect attributes
     connect_attrs: Option<HashMap<String, String>>,
@@ -306,6 +308,8 @@ impl Default for InnerOpts {
             stmt_cache_size: DEFAULT_STMT_CACHE_SIZE,
             compress: None,
             additional_capabilities: CapabilityFlags::empty(),
+            multi_statements: true,
+            mariadb_extensions: true,
             connect_attrs: Some(HashMap::new()),
             secure_auth: true,
             enable_cleartext_plugin: false,
@@ -498,6 +502,16 @@ impl Opts {
     /// pointless or may broke the connection, so this option should be used with caution.
     pub fn get_additional_capabilities(&self) -> CapabilityFlags {
         self.0.additional_capabilities
+    }
+
+    /// Whether the initial handshake requests multi-statement queries.
+    pub fn get_multi_statements(&self) -> bool {
+        self.0.multi_statements
+    }
+
+    /// Whether the driver requests MariaDB's extended protocol capabilities.
+    pub fn get_mariadb_extensions(&self) -> bool {
+        self.0.mariadb_extensions
     }
 
     /// Connect attributes (the default connect attributes are sent by default).
@@ -1066,6 +1080,22 @@ impl OptsBuilder {
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS;
 
         self.opts.0.additional_capabilities = additional_capabilities & !forbidden_flags;
+        self
+    }
+
+    /// Whether to request multiple statements in one text query (default: true).
+    ///
+    /// Multiple result sets from a single statement remain enabled independently.
+    pub fn multi_statements(mut self, enabled: bool) -> Self {
+        self.opts.0.multi_statements = enabled;
+        self
+    }
+
+    /// Whether to negotiate MariaDB's extended protocol capabilities (default: true).
+    ///
+    /// Turning this off disables extensions such as prepared-statement metadata caching.
+    pub fn mariadb_extensions(mut self, enabled: bool) -> Self {
+        self.opts.0.mariadb_extensions = enabled;
         self
     }
 

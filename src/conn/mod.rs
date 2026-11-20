@@ -907,6 +907,9 @@ impl Conn {
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
             | CapabilityFlags::CLIENT_PLUGIN_AUTH
             | (self.0.capability_flags & CapabilityFlags::CLIENT_LONG_FLAG);
+        if !self.0.opts.get_multi_statements() {
+            client_flags.remove(CapabilityFlags::CLIENT_MULTI_STATEMENTS);
+        }
         if self.0.opts.get_compress().is_some() {
             client_flags.insert(CapabilityFlags::CLIENT_COMPRESS);
         }
@@ -928,6 +931,9 @@ impl Conn {
     ///
     /// This function has to be enhanced if client supports more MariaDB features.
     fn get_mariadb_client_flags(&self) -> MariadbCapabilities {
+        if !self.0.opts.get_mariadb_extensions() {
+            return MariadbCapabilities::empty();
+        }
         MariadbCapabilities::MARIADB_CLIENT_CACHE_METADATA
             | MariadbCapabilities::MARIADB_CLIENT_STMT_BULK_OPERATIONS
             | MariadbCapabilities::MARIADB_CLIENT_BULK_UNIT_RESULTS
@@ -1977,6 +1983,23 @@ mod test {
             conn.close(stmt).unwrap();
             let stmt = conn.prep("SELECT 2").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
+        }
+
+        /// Allows opting out of extensions while leaving normal queries usable.
+        #[test]
+        fn should_honor_handshake_capability_options() {
+            let defaults = crate::Opts::default();
+            assert!(defaults.get_multi_statements());
+            assert!(defaults.get_mariadb_extensions());
+
+            let mut conn =
+                Conn::new(get_opts().multi_statements(false).mariadb_extensions(false)).unwrap();
+            assert!(conn.get_mariadb_client_flags().is_empty());
+            assert!(matches!(
+                conn.query_drop("SELECT 1; SELECT 2"),
+                Err(crate::Error::MySqlError(_))
+            ));
+            assert_eq!(conn.query_first::<u32, _>("SELECT 3").unwrap(), Some(3));
         }
 
         #[test]
