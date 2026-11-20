@@ -54,6 +54,8 @@ enum SetIteratorState {
     Errored(Error),
     /// Next result set isn't handled.
     OnBoundary,
+    /// The server has another result set whose header has not been read.
+    NextPending,
     /// No more result sets.
     Done,
 }
@@ -119,6 +121,7 @@ pub struct QueryResult<'c, 't, 'tc, T: crate::prelude::Protocol> {
     conn: ConnMut<'c, 't, 'tc>,
     state: SetIteratorState,
     set_index: usize,
+    defer_next_result: bool,
     protocol: PhantomData<T>,
 }
 
@@ -131,6 +134,7 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
             conn,
             state,
             set_index: 0,
+            defer_next_result: false,
             protocol: PhantomData,
         }
     }
@@ -140,6 +144,32 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
         meta: ResultSetMeta,
     ) -> QueryResult<'c, 't, 'tc, T> {
         Self::from_state(conn, meta.into())
+    }
+
+    /// Defer reading the next result set until the next call to [`Self::iter`].
+    ///
+    /// Consuming the current set can return as soon as its final packet is read,
+    /// even if the server is still working on a later statement. Dropping the
+    /// entire query result still drains any unread sets.
+    pub fn with_deferred_results(mut self) -> Self {
+        self.defer_next_result = true;
+        self
+    }
+
+    /// Reports whether the header of the current set is a server or I/O error.
+    ///
+    /// Iterating the set returns that error as its first item.
+    pub fn is_errored(&self) -> bool {
+        matches!(self.state, SetIteratorState::Errored(_))
+    }
+
+    /// Retains the boundary when the caller opted in to deferred result sets.
+    fn finish_set(&mut self) {
+        if self.defer_next_result && self.conn.more_results_exists() {
+            self.state = SetIteratorState::NextPending;
+        } else {
+            self.handle_next();
+        }
     }
 
     /// Updates state with the next result set, if any.
@@ -173,8 +203,9 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     /// Returns an iterator over the current result set.
     ///
     /// The returned iterator will be consumed either by the caller
-    /// or implicitly by the `ResultSet::drop`. This operation
-    /// will advance `self` to the next result set (if any).
+    /// or implicitly by the `ResultSet::drop`. By default this advances `self`
+    /// to the next result set (if any). With [`Self::with_deferred_results`],
+    /// the next call to this method reads that result's header.
     ///
     /// The following code describes the behavior:
     ///
@@ -228,6 +259,11 @@ impl<'c, 't, 'tc, T: crate::prelude::Protocol> QueryResult<'c, 't, 'tc, T> {
     /// ```
     pub fn iter<'d>(&'d mut self) -> Option<ResultSet<'c, 't, 'tc, 'd, T>> {
         use SetIteratorState::*;
+
+        if matches!(self.state, NextPending) {
+            self.state = OnBoundary;
+            self.handle_next();
+        }
 
         if let OnBoundary | Done = &self.state {
             debug_assert!(
@@ -347,7 +383,7 @@ impl<T: crate::prelude::Protocol> Iterator for QueryResult<'_, '_, '_, T> {
                     Some(Ok(row))
                 }
                 Ok(None) => {
-                    self.handle_next();
+                    self.finish_set();
                     None
                 }
                 Err(e) => {
@@ -356,7 +392,7 @@ impl<T: crate::prelude::Protocol> Iterator for QueryResult<'_, '_, '_, T> {
                 }
             },
             InEmptySet(_) => {
-                self.handle_next();
+                self.finish_set();
                 None
             }
             Errored(err) => {
@@ -364,6 +400,10 @@ impl<T: crate::prelude::Protocol> Iterator for QueryResult<'_, '_, '_, T> {
                 Some(Err(err))
             }
             OnBoundary => None,
+            NextPending => {
+                self.state = NextPending;
+                None
+            }
             Done => {
                 self.state = Done;
                 None
@@ -375,6 +415,38 @@ impl<T: crate::prelude::Protocol> Iterator for QueryResult<'_, '_, '_, T> {
 impl<T: crate::prelude::Protocol> Drop for ResultSet<'_, '_, '_, '_, T> {
     fn drop(&mut self) {
         while self.next().is_some() {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{prelude::Queryable, test_misc::get_opts};
+
+    /// Keeps the boundary unconsumed until the next set is requested.
+    #[test]
+    fn should_defer_reading_the_next_result_header() {
+        let mut conn = Conn::new(get_opts()).unwrap();
+        let mut result = conn
+            .query_iter("SELECT 1; DO 2; SELECT * FROM mysql.no_such_deferred_result_table")
+            .unwrap()
+            .with_deferred_results();
+
+        let first = result.iter().unwrap().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(crate::from_row::<u8>(first.into_iter().next().unwrap()), 1);
+        assert!(matches!(result.state, SetIteratorState::NextPending));
+
+        let second = result.iter().unwrap();
+        assert!(!second.is_errored());
+        drop(second);
+        assert!(matches!(result.state, SetIteratorState::NextPending));
+
+        let mut third = result.iter().unwrap();
+        assert!(third.is_errored());
+        assert!(matches!(third.next(), Some(Err(Error::MySqlError(_)))));
+        drop(third);
+        drop(result);
+        conn.ping().unwrap();
     }
 }
 
