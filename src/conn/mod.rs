@@ -81,12 +81,16 @@ pub mod binlog_stream;
 pub mod local_infile;
 pub mod opts;
 pub mod pool;
+mod protocol_observer;
 pub mod query;
 pub mod query_result;
 pub mod queryable;
 pub mod stmt;
 mod stmt_cache;
 pub mod transaction;
+
+use protocol_observer::ObservedStream;
+pub use protocol_observer::{ProtocolConnectionId, ProtocolEvent, ProtocolObserver};
 
 /// Mutable connection.
 #[derive(Debug)]
@@ -202,7 +206,7 @@ impl ResultSetInfo {
 /// Connection internals.
 struct ConnInner {
     opts: Opts,
-    stream: Option<MySyncFramed<Stream>>,
+    stream: Option<MySyncFramed<ObservedStream>>,
     stmt_cache: StmtCache,
 
     // TODO: clean this up
@@ -417,11 +421,11 @@ impl Conn {
             .map(Option::unwrap_or_default)
     }
 
-    fn stream_ref(&self) -> &MySyncFramed<Stream> {
+    fn stream_ref(&self) -> &MySyncFramed<ObservedStream> {
         self.0.stream.as_ref().expect("incomplete connection")
     }
 
-    fn stream_mut(&mut self) -> &mut MySyncFramed<Stream> {
+    fn stream_mut(&mut self) -> &mut MySyncFramed<ObservedStream> {
         self.0.stream.as_mut().expect("incomplete connection")
     }
 
@@ -634,11 +638,11 @@ impl Conn {
 
     fn switch_to_ssl(&mut self, ssl_opts: SslOpts) -> Result<()> {
         let stream = self.0.stream.take().expect("incomplete conn");
-        let (in_buf, out_buf, codec, stream) = stream.destruct();
+        let (in_buf, out_buf, codec, mut stream) = stream.destruct();
         self.0.zero_config_check = self
             .mariadb_fallback_possible()
             .then(|| Arc::new(Mutex::new(None)));
-        let stream = stream.make_secure(
+        stream.inner = stream.inner.make_secure(
             self.0.opts.get_host(),
             ssl_opts,
             self.0.zero_config_check.clone(),
@@ -688,14 +692,25 @@ impl Conn {
                 bind_address,
             )?
         };
+        let stream = ObservedStream::new(stream, self.0.opts.protocol_observer());
         self.0.stream = Some(MySyncFramed::new(stream));
         Ok(())
+    }
+
+    /// Returns the ID supplied in protocol events for this physical connection.
+    pub fn protocol_connection_id(&self) -> Option<ProtocolConnectionId> {
+        self.stream_ref().get_ref().observer_id()
+    }
+
+    fn observe_protocol(&self, event: ProtocolEvent<'_>) {
+        self.stream_ref().get_ref().observe(event);
     }
 
     fn raw_read_packet(&mut self, buffer: &mut Vec<u8>) -> Result<()> {
         if !self.stream_mut().next_packet(buffer)? {
             Err(Error::server_disconnected())
         } else {
+            self.observe_protocol(ProtocolEvent::PacketReceived(buffer));
             Ok(())
         }
     }
@@ -736,7 +751,9 @@ impl Conn {
     }
 
     fn write_packet<T: Buf>(&mut self, data: &mut T) -> Result<()> {
+        let payload_len = data.remaining();
         self.stream_mut().send(data)?;
+        self.observe_protocol(ProtocolEvent::PacketSent { payload_len });
         Ok(())
     }
 
@@ -894,6 +911,7 @@ impl Conn {
         self.stream_mut()
             .codec_mut()
             .compress(Compression::default());
+        self.stream_mut().get_mut().enable_compression();
     }
 
     fn get_client_flags(&self) -> CapabilityFlags {
@@ -1109,7 +1127,9 @@ impl Conn {
         cmd.serialize(buf.as_mut());
         self.reset_seq_id();
         debug_assert!(!buf.is_empty());
-        self.0.last_command = buf[0];
+        let command = buf[0];
+        self.0.last_command = command;
+        self.observe_protocol(ProtocolEvent::CommandStarted(command));
         self.write_packet(&mut &*buf)
     }
 
@@ -1119,7 +1139,9 @@ impl Conn {
         buf.as_mut().extend_from_slice(data);
 
         self.reset_seq_id();
-        self.0.last_command = buf[0];
+        let command = buf[0];
+        self.0.last_command = command;
+        self.observe_protocol(ProtocolEvent::CommandStarted(command));
         self.write_packet(&mut &*buf)
     }
 
@@ -1977,6 +1999,51 @@ mod test {
             conn.close(stmt).unwrap();
             let stmt = conn.prep("SELECT 2").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
+        }
+
+        /// Observes the handshake, logical packets, commands and compressed frames.
+        #[test]
+        fn should_observe_protocol_packets_and_compressed_frames() {
+            use crate::{ProtocolConnectionId, ProtocolEvent, ProtocolObserver};
+            use std::sync::{Arc, Mutex};
+
+            #[derive(Default)]
+            struct Recorder(Mutex<Vec<(ProtocolConnectionId, &'static str)>>);
+
+            impl ProtocolObserver for Recorder {
+                fn observe(&self, id: ProtocolConnectionId, event: ProtocolEvent<'_>) {
+                    let kind = match event {
+                        ProtocolEvent::PacketReceived(_) => "receive",
+                        ProtocolEvent::PacketSent { .. } => "send",
+                        ProtocolEvent::CommandStarted(3) => "query",
+                        ProtocolEvent::CompressionEnabled => "compression",
+                        ProtocolEvent::CompressedFrameStarted { wire_len } if wire_len > 7 => {
+                            "compressed frame"
+                        }
+                        _ => return,
+                    };
+                    self.0.lock().unwrap().push((id, kind));
+                }
+            }
+
+            let recorder = Arc::new(Recorder::default());
+            let opts = get_opts()
+                .prefer_socket(false)
+                .compress(Some(Default::default()))
+                .protocol_observer(Some(recorder.clone()));
+            let mut conn = Conn::new(opts).unwrap();
+            assert_eq!(conn.query_first::<u32, _>("SELECT 42").unwrap(), Some(42));
+            let id = conn.protocol_connection_id().unwrap();
+            let received = recorder.0.lock().unwrap();
+            for kind in [
+                "receive",
+                "send",
+                "query",
+                "compression",
+                "compressed frame",
+            ] {
+                assert!(received.contains(&(id, kind)), "missing event {kind}");
+            }
         }
 
         #[test]

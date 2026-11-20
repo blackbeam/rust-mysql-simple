@@ -953,7 +953,7 @@ pub use crate::conn::stmt::Statement;
 #[doc(inline)]
 pub use crate::conn::transaction::{AccessMode, IsolationLevel, Transaction, TxOpts};
 #[doc(inline)]
-pub use crate::conn::Conn;
+pub use crate::conn::{Conn, ProtocolConnectionId, ProtocolEvent, ProtocolObserver};
 #[doc(inline)]
 pub use crate::error::{DriverError, Error, MySqlError, Result, ServerError, UrlError};
 #[doc(inline)]
