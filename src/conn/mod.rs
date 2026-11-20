@@ -1303,6 +1303,47 @@ impl Conn {
         self.drop_packet()
     }
 
+    /// Requests the server's human-readable statistics using `COM_STATISTICS`.
+    pub fn statistics(&mut self) -> Result<String> {
+        self.write_command(Command::COM_STATISTICS, &[])?;
+        let packet = self.read_packet()?;
+        Ok(String::from_utf8_lossy(&packet).into_owned())
+    }
+
+    /// Toggles multiple statements in text-protocol queries using `COM_SET_OPTION`.
+    pub fn set_multi_statements(&mut self, enabled: bool) -> Result<()> {
+        let option = if enabled { 0_u16 } else { 1_u16 };
+        self.write_command(Command::COM_SET_OPTION, &option.to_le_bytes())?;
+        self.drop_packet()
+    }
+
+    /// Requests a server debug dump using `COM_DEBUG`.
+    pub fn dump_debug_info(&mut self) -> Result<()> {
+        self.write_command(Command::COM_DEBUG, &[])?;
+        self.drop_packet()
+    }
+
+    /// Requests a server refresh using `COM_REFRESH` and its one-byte option mask.
+    ///
+    /// Servers that no longer implement this command return their usual server error.
+    pub fn refresh(&mut self, options: u8) -> Result<()> {
+        self.write_command(Command::COM_REFRESH, &[options])?;
+        self.drop_packet()
+    }
+
+    /// Terminates a server connection using `COM_PROCESS_KILL`.
+    ///
+    /// When the target is this connection, the server closes it and this method
+    /// returns the outcome of writing the request without waiting for a reply.
+    pub fn kill_connection(&mut self, connection_id: u32) -> Result<()> {
+        self.write_command(Command::COM_PROCESS_KILL, &connection_id.to_le_bytes())?;
+        if connection_id == self.connection_id() {
+            Ok(())
+        } else {
+            self.drop_packet()
+        }
+    }
+
     /// Executes [`COM_INIT_DB`](https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_init_db.html)
     /// on `Conn`.
     pub fn select_db(&mut self, schema: &str) -> Result<(), Error> {
@@ -1977,6 +2018,25 @@ mod test {
             conn.close(stmt).unwrap();
             let stmt = conn.prep("SELECT 2").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
+        }
+
+        /// Exercises the statistics response and multi-statement option on one connection.
+        #[test]
+        fn should_execute_connection_commands() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            assert!(conn.statistics().unwrap().contains("Uptime:"));
+            conn.set_multi_statements(false).unwrap();
+            assert!(matches!(
+                conn.query_drop("SELECT 1; SELECT 2"),
+                Err(crate::Error::MySqlError(_))
+            ));
+            conn.set_multi_statements(true).unwrap();
+            conn.query_drop("SELECT 1; SELECT 2").unwrap();
+
+            let mut target = Conn::new(get_opts()).unwrap();
+            conn.kill_connection(target.connection_id()).unwrap();
+            assert!(target.ping().is_err());
+            conn.ping().unwrap();
         }
 
         #[test]
