@@ -1129,9 +1129,8 @@ impl Conn {
         debug_assert!(!buf.is_empty());
         let command = buf[0];
         self.0.last_command = command;
-        self.write_packet(&mut &*buf)?;
-        self.observe_protocol(ProtocolEvent::CommandSent(command));
-        Ok(())
+        self.observe_protocol(ProtocolEvent::CommandStarted(command));
+        self.write_packet(&mut &*buf)
     }
 
     fn write_command(&mut self, cmd: Command, data: &[u8]) -> Result<()> {
@@ -1142,9 +1141,8 @@ impl Conn {
         self.reset_seq_id();
         let command = buf[0];
         self.0.last_command = command;
-        self.write_packet(&mut &*buf)?;
-        self.observe_protocol(ProtocolEvent::CommandSent(command));
-        Ok(())
+        self.observe_protocol(ProtocolEvent::CommandStarted(command));
+        self.write_packet(&mut &*buf)
     }
 
     fn send_long_data(&mut self, stmt_id: u32, params: &[Value]) -> Result<()> {
@@ -2017,7 +2015,7 @@ mod test {
                     let kind = match event {
                         ProtocolEvent::PacketReceived(_) => "receive",
                         ProtocolEvent::PacketSent { .. } => "send",
-                        ProtocolEvent::CommandSent(3) => "query",
+                        ProtocolEvent::CommandStarted(3) => "query",
                         ProtocolEvent::CompressionEnabled => "compression",
                         ProtocolEvent::CompressedFrameStarted { wire_len } if wire_len > 7 => {
                             "compressed frame"

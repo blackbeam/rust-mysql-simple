@@ -28,8 +28,8 @@ pub enum ProtocolEvent<'a> {
     ///
     /// The payload can contain authentication or application data.
     PacketReceived(&'a [u8]),
-    /// The first byte of a successfully sent command packet.
-    CommandSent(u8),
+    /// The first byte of a command, recorded before the driver attempts to send it.
+    CommandStarted(u8),
     /// The connection has negotiated protocol compression.
     CompressionEnabled,
     /// The compressed frame header was read. The size includes the seven-byte header.
