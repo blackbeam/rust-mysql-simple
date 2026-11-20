@@ -219,6 +219,7 @@ struct ConnInner {
     last_command: u8,
     connected: bool,
     has_results: bool,
+    pending_text_query: bool,
     local_infile_handler: Option<LocalInfileHandler>,
 
     // Cached public server key used for RSA-based key exchange by the caching_sha2_password plugin.
@@ -277,6 +278,7 @@ impl ConnInner {
             last_command: 0u8,
             connected: false,
             has_results: false,
+            pending_text_query: false,
             server_version: None,
             mariadb_server_version: None,
             mariadb_ext_capabilities: MariadbCapabilities::empty(),
@@ -529,6 +531,7 @@ impl Conn {
     }
 
     fn exec_com_change_user(&mut self, opts: ChangeUserOpts) -> Result<()> {
+        self.check_no_pending_text_query()?;
         opts.update_opts(&mut self.0.opts);
 
         let mut auth_proc = self.0.auth_plugin.init()?;
@@ -1104,7 +1107,15 @@ impl Conn {
         self.stream_mut().codec_mut().sync_seq_id();
     }
 
+    fn check_no_pending_text_query(&self) -> Result<()> {
+        if self.0.pending_text_query {
+            return Err(DriverError(crate::DriverError::PacketOutOfSync));
+        }
+        Ok(())
+    }
+
     fn write_command_raw<T: MySerialize>(&mut self, cmd: &T) -> Result<()> {
+        self.check_no_pending_text_query()?;
         let mut buf = get_buffer();
         cmd.serialize(buf.as_mut());
         self.reset_seq_id();
@@ -1114,6 +1125,7 @@ impl Conn {
     }
 
     fn write_command(&mut self, cmd: Command, data: &[u8]) -> Result<()> {
+        self.check_no_pending_text_query()?;
         let mut buf = get_buffer();
         buf.as_mut().put_u8(cmd as u8);
         buf.as_mut().extend_from_slice(data);
@@ -1296,6 +1308,28 @@ impl Conn {
         Ok(meta)
     }
 
+    /// Sends a text query without waiting for the server's response.
+    ///
+    /// Call [`Self::read_query_result`] to read the response before sending
+    /// another command. The connection can be moved to a worker thread in between.
+    pub fn send_query(&mut self, query: &str) -> Result<()> {
+        self.write_command(Command::COM_QUERY, query.as_bytes())?;
+        self.0.pending_text_query = true;
+        Ok(())
+    }
+
+    /// Reads the result of a query sent with [`Self::send_query`].
+    ///
+    /// Returns [`crate::DriverError::PacketOutOfSync`] if no response is pending.
+    pub fn read_query_result(&mut self) -> Result<QueryResult<'_, '_, '_, Text>> {
+        if !self.0.pending_text_query {
+            return Err(DriverError(crate::DriverError::PacketOutOfSync));
+        }
+        self.0.pending_text_query = false;
+        let meta = self.handle_result_set()?.into_query_meta();
+        Ok(QueryResult::new(ConnMut::Mut(self), meta))
+    }
+
     /// Executes [`COM_PING`](https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_ping.html)
     /// on `Conn`. Return `true` on success or `false` on error.
     pub fn ping(&mut self) -> Result<(), Error> {
@@ -1462,6 +1496,7 @@ impl Conn {
     }
 
     fn cleanup_for_pool(&mut self) -> Result<()> {
+        self.check_no_pending_text_query()?;
         self.set_local_infile_handler(None);
         if self.0.reset_upon_return {
             self.reset()?;
@@ -1501,6 +1536,7 @@ impl Queryable for Conn {
     }
 
     fn close(&mut self, stmt: Statement) -> Result<()> {
+        self.check_no_pending_text_query()?;
         self.0.stmt_cache.remove(stmt.id());
         let cmd = ComStmtClose::new(stmt.id());
         self.write_command_raw(&cmd)
@@ -1570,6 +1606,11 @@ impl auth::plugins::Context for &'_ AuthContext {
 
 impl Drop for Conn {
     fn drop(&mut self) {
+        if self.0.pending_text_query {
+            // Let the transport close without sending commands into the unread response.
+            return;
+        }
+
         let stmt_cache = mem::replace(&mut self.0.stmt_cache, StmtCache::new(0));
 
         for (_, entry) in stmt_cache.into_iter() {
@@ -1977,6 +2018,35 @@ mod test {
             conn.close(stmt).unwrap();
             let stmt = conn.prep("SELECT 2").unwrap();
             conn.exec_drop(&stmt, ()).unwrap();
+        }
+
+        /// Allows sending and reading on different threads without mixing commands.
+        #[test]
+        fn should_send_and_read_a_text_query_separately() {
+            let mut conn = Conn::new(get_opts()).unwrap();
+            conn.send_query("SELECT 42").unwrap();
+            assert!(matches!(
+                conn.ping(),
+                Err(crate::Error::DriverError(
+                    crate::DriverError::PacketOutOfSync
+                ))
+            ));
+
+            std::thread::spawn(move || {
+                let mut result = conn.read_query_result().unwrap();
+                let row = result.next().unwrap().unwrap();
+                assert_eq!(from_row::<u32>(row), 42);
+                drop(result);
+                conn.ping().unwrap();
+                assert!(matches!(
+                    conn.read_query_result(),
+                    Err(crate::Error::DriverError(
+                        crate::DriverError::PacketOutOfSync
+                    ))
+                ));
+            })
+            .join()
+            .unwrap();
         }
 
         #[test]
