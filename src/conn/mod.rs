@@ -1333,11 +1333,13 @@ impl Conn {
 
     /// Terminates a server connection using `COM_PROCESS_KILL`.
     ///
-    /// When the target is this connection, the server closes it and this method
-    /// returns the outcome of writing the request without waiting for a reply.
+    /// On servers that support this command, killing this connection closes the link
+    /// without a reply. MySQL 8.3 and newer return their usual unknown-command error.
     pub fn kill_connection(&mut self, connection_id: u32) -> Result<()> {
         self.write_command(Command::COM_PROCESS_KILL, &connection_id.to_le_bytes())?;
-        if connection_id == self.connection_id() {
+        let command_removed = self.0.mariadb_server_version.is_none()
+            && self.0.server_version.is_some_and(|version| version >= (8, 3, 0));
+        if connection_id == self.connection_id() && !command_removed {
             Ok(())
         } else {
             self.drop_packet()
@@ -2034,8 +2036,14 @@ mod test {
             conn.query_drop("SELECT 1; SELECT 2").unwrap();
 
             let mut target = Conn::new(get_opts()).unwrap();
-            conn.kill_connection(target.connection_id()).unwrap();
-            assert!(target.ping().is_err());
+            match conn.kill_connection(target.connection_id()) {
+                Ok(()) => assert!(target.ping().is_err()),
+                Err(crate::Error::MySqlError(error)) if error.code == 1047 => {
+                    // MySQL 8.3 removed COM_PROCESS_KILL.
+                    target.ping().unwrap();
+                }
+                Err(error) => panic!("unexpected kill response: {error}"),
+            }
             conn.ping().unwrap();
         }
 
