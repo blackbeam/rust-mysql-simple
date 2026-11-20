@@ -234,6 +234,7 @@ pub(crate) struct InnerOpts {
     /// `CLIENT_SSL` or `CLIENT_COMPRESS`). Also note that some capabilities are reserved,
     /// pointless or may broke the connection, so this option should be used with caution.
     additional_capabilities: CapabilityFlags,
+    protocol_observer: Option<super::protocol_observer::ObserverHandle>,
 
     /// Connect attributes
     connect_attrs: Option<HashMap<String, String>>,
@@ -306,6 +307,7 @@ impl Default for InnerOpts {
             stmt_cache_size: DEFAULT_STMT_CACHE_SIZE,
             compress: None,
             additional_capabilities: CapabilityFlags::empty(),
+            protocol_observer: None,
             connect_attrs: Some(HashMap::new()),
             secure_auth: true,
             enable_cleartext_plugin: false,
@@ -498,6 +500,10 @@ impl Opts {
     /// pointless or may broke the connection, so this option should be used with caution.
     pub fn get_additional_capabilities(&self) -> CapabilityFlags {
         self.0.additional_capabilities
+    }
+
+    pub(crate) fn protocol_observer(&self) -> Option<&super::protocol_observer::ObserverHandle> {
+        self.0.protocol_observer.as_ref()
     }
 
     /// Connect attributes (the default connect attributes are sent by default).
@@ -1066,6 +1072,17 @@ impl OptsBuilder {
             | CapabilityFlags::CLIENT_PS_MULTI_RESULTS;
 
         self.opts.0.additional_capabilities = additional_capabilities & !forbidden_flags;
+        self
+    }
+
+    /// Installs an observer for physical connections made from these options.
+    ///
+    /// Observers shared by connections receive an ID identifying the source of each event.
+    pub fn protocol_observer(
+        mut self,
+        observer: Option<std::sync::Arc<dyn crate::ProtocolObserver>>,
+    ) -> Self {
+        self.opts.0.protocol_observer = observer.map(super::protocol_observer::ObserverHandle);
         self
     }
 
